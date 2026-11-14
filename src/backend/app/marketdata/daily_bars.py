@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Final, Protocol
 
-from sqlalchemy import insert, select, tuple_
+from sqlalchemy import column, func, insert, select, tuple_, update, values
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 
@@ -653,3 +653,45 @@ def daily_bars_fetch_task(
                 error=type(exc).__name__,
             )
         raise
+
+
+_BIND_BATCH: Final[int] = 5000
+_BIND_KEYS: Final[tuple[str, ...]] = ("code", "trade_date", "adj_type")
+
+
+def update_mairui_source_licence_id(
+    conn: Connection,
+    keys: Sequence[tuple[str, dt.date, str]],
+    *,
+    match: uuid.UUID | None,
+    value: uuid.UUID | None,
+    apply: bool,
+) -> int:
+    """T-B141：只改 mairui 行的 source_licence_id（绑定、改绑或回滚）。"""
+    count = 0
+    bars = daily_bars.c
+    for offset in range(0, len(keys), _BIND_BATCH):
+        batch = values(
+            *(column(name, daily_bars.c[name].type) for name in _BIND_KEYS),
+            name="manifest_keys",
+        ).data(keys[offset : offset + _BIND_BATCH])
+        conditions = (
+            bars.code == batch.c.code,
+            bars.trade_date == batch.c.trade_date,
+            bars.adj_type == batch.c.adj_type,
+            bars.source == "mairui",
+            (
+                bars.source_licence_id == match
+                if match is not None
+                else bars.source_licence_id.is_(None)
+            ),
+        )
+        if apply:
+            count += conn.execute(
+                update(daily_bars).where(*conditions).values(source_licence_id=value)
+            ).rowcount
+        else:
+            count += conn.execute(
+                select(func.count()).select_from(daily_bars, batch).where(*conditions)
+            ).scalar_one()
+    return count

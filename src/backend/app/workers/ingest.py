@@ -18,6 +18,7 @@ T-B114：启动时正式接线 ``set_ingest_core(IngestCore(..., engine=...))``�
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import sys
@@ -152,8 +153,14 @@ def write_heartbeat(settings: Settings) -> None:
         core = get_ingest_core()
         shared_engine = core.engine if core is not None else None
         if not client.exists(settings.ingest_paused_key):
+            from app.ingest.verify_licence import tick as tick_verify
+
             if shared_engine is not None:
                 tick(shared_engine, client, pause=heartbeat_wait)
+                try:
+                    tick_verify(shared_engine, client)
+                except Exception:  # noqa: BLE001 - keep heartbeat running
+                    logging.warning("verify_licence tick failed")
                 if getattr(settings, "daily_bars_source", "off") == "mairui":
                     tick_bars(shared_engine)
                     wake_delayed(shared_engine, client)
@@ -161,6 +168,10 @@ def write_heartbeat(settings: Settings) -> None:
                 engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
                 try:
                     tick(engine, client, pause=heartbeat_wait)
+                    try:
+                        tick_verify(engine, client)
+                    except Exception:  # noqa: BLE001 - keep heartbeat running
+                        logging.warning("verify_licence tick failed")
                     if getattr(settings, "daily_bars_source", "off") == "mairui":
                         tick_bars(engine)
                         wake_delayed(engine, client)
