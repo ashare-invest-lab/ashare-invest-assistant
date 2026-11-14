@@ -23,8 +23,19 @@ from app.db.tables.market import daily_bars
 from daily_bars_t70_support import _open_temp_db
 
 
+
+def _skip_docker_lookup_off_o61(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI 非本机 o61 缺省时不要 docker ps：pytest 进程若已 netguard.install 会拦 subprocess。"""
+    import pg_o61
+
+    host, port, _user, _password = pg_o61.resolve_libpq_params()
+    if not pg_o61.is_local_o61_default(host, port):
+        monkeypatch.setattr(pg_o61, "lookup_tcp_owner", lambda _h, _p: (None, "ci-skip-docker"))
+
+
 @pytest.fixture
-def world() -> Iterator[SimpleNamespace]:
+def world(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    _skip_docker_lookup_off_o61(monkeypatch)
     gen = _open_temp_db()
     ctx = next(gen)
     try:

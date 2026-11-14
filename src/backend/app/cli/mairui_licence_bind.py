@@ -15,15 +15,15 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import column, create_engine, func, select, update, values
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Connection
 
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import daily_bars
+from app.marketdata.daily_bars import update_mairui_source_licence_id
 
 Key = tuple[str, dt.date, str]
 HEADER = ["code", "trade_date", "adj_type"]
-BATCH_SIZE = 5000
 
 
 @dataclass
@@ -38,34 +38,9 @@ def _process(
     conn: Connection, keys: list[Key], licence_id: uuid.UUID, *, apply: bool, undo: bool,
     source_licence: uuid.UUID | None = None, restore_to: uuid.UUID | None = None,
 ) -> int:
-    count = 0
-    bars = daily_bars.c
-    for offset in range(0, len(keys), BATCH_SIZE):
-        batch = values(
-            *(column(name, daily_bars.c[name].type) for name in HEADER), name="manifest_keys"
-        ).data(keys[offset : offset + BATCH_SIZE])
-        conditions = (
-            bars.code == batch.c.code,
-            bars.trade_date == batch.c.trade_date,
-            bars.adj_type == batch.c.adj_type,
-            bars.source == "mairui",
-            bars.source_licence_id == licence_id if undo else (
-                bars.source_licence_id == source_licence
-                if source_licence is not None else bars.source_licence_id.is_(None)
-            ),
-        )
-        if apply:
-            result = conn.execute(
-                update(daily_bars)
-                .where(*conditions)
-                .values(source_licence_id=restore_to if undo else licence_id)
-            )
-            count += result.rowcount
-        else:
-            count += conn.execute(
-                select(func.count()).select_from(daily_bars, batch).where(*conditions)
-            ).scalar_one()
-    return count
+    match = licence_id if undo else source_licence
+    value = restore_to if undo else licence_id
+    return update_mairui_source_licence_id(conn, keys, match=match, value=value, apply=apply)
 
 
 def bind(

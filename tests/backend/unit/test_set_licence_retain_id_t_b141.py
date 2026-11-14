@@ -28,8 +28,19 @@ from daily_bars_t70_support import ROOT, _open_temp_db
 FAKE = "tb141-fake-licence-a-not-a-real-key"
 
 
+
+def _skip_docker_lookup_off_o61(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI 非本机 o61 缺省时不要 docker ps：pytest 进程若已 netguard.install 会拦 subprocess。"""
+    import pg_o61
+
+    host, port, _user, _password = pg_o61.resolve_libpq_params()
+    if not pg_o61.is_local_o61_default(host, port):
+        monkeypatch.setattr(pg_o61, "lookup_tcp_owner", lambda _h, _p: (None, "ci-skip-docker"))
+
+
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
+    _skip_docker_lookup_off_o61(monkeypatch)
     # Settings 不接触宿主环境里的证书或主密钥。
     monkeypatch.setattr(Settings, "settings_customise_sources", classmethod(
         lambda cls, settings_cls, init_settings, **kwargs: (init_settings,)
