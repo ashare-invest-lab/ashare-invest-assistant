@@ -172,13 +172,21 @@ def process_verify_intent(
             reason = "secret_unavailable"
         else:
             try:
+                ingest_core = core if core is not None else get_ingest_core()
+                now = clock()
+                if (
+                    current == DataLicenceStatus.PENDING_VERIFICATION.value
+                    and ingest_core is not None
+                    and lid in ingest_core.licences
+                ):
+                    ingest_core.user_reset(lid, now)
                 result = mairui_get(
                     lease=lease,
-                    core=core if core is not None else get_ingest_core(),
+                    core=ingest_core,
                     engine=engine,
                     licence_id=lid,
                     user_id=row.user_id,
-                    path=light_path(clock()),
+                    path=light_path(now),
                     secret=secret,
                     priority=intent.priority,
                     clock=clock,

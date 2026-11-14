@@ -27,6 +27,7 @@ from app.ingest.intents import VerifyIntent
 from app.ingest.state import Priority
 from app.ingest.upstream import Signal
 from app.licences.service import INGEST_REQUESTS_STREAM
+from app.schemas.enums import DataLicenceStatus, DataLicenceTier
 from daily_bars_t70_support import ROOT, _open_temp_db
 
 NOW = dt.datetime(2026, 11, 13, 10, 0, tzinfo=dt.UTC)
@@ -326,6 +327,29 @@ def _tick(world: SimpleNamespace, rds: FakeRedis) -> int:
 def _verify_msg(world: SimpleNamespace, mid: bytes) -> tuple[bytes, dict[bytes, bytes]]:
     return mid, {b"kind": b"verify_licence", b"licence_id": str(world.lid).encode(),
                  b"verification_id": str(uuid.uuid4()).encode()}
+
+
+def test_tick_same_licence_reput_resets_invalid_memory(world: SimpleNamespace) -> None:
+    lid = world.lid
+    world.core.upsert(
+        lid, user_id=world.u1, tier=DataLicenceTier.ANNUAL,
+        status=DataLicenceStatus.INVALID, now=NOW,
+    )
+    _set_status(world, "invalid")
+    # world uses a fake ciphertext, so model the same-certificate PUT by updating this row.
+    _set_status(world, PENDING)
+    before = _row(world)
+    assert before.id == lid and before.status == PENDING
+    assert world.core.state(lid).status == DataLicenceStatus.INVALID
+    _stub(world, 200, CALENDAR_OK)
+    rds = FakeRedis([_verify_msg(world, b"1-0")], group_exists=True)
+
+    assert _tick(world, rds) == 1
+    assert rds.acked == [b"1-0"]
+    after = _row(world)
+    assert (len(world.calls), after.status) == (1, ACTIVE)
+    assert world.calls == ["/tcalendar/list/2026/"]
+    assert after.id == lid
 
 
 def test_tick_consumes_one_verify_ack_first(world: SimpleNamespace) -> None:
