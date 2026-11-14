@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Final, Protocol
 
-from sqlalchemy import insert, select, tuple_
+from sqlalchemy import column, func, insert, select, tuple_, update, values
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 
@@ -64,10 +64,21 @@ class BarGap:
 
 
 @dataclass(frozen=True)
+class HistoryConfirmation:
+    """Explicit adapter evidence; absent until the source confirms no earlier history."""
+
+    code: str
+    window: tuple[dt.date, dt.date]
+    first: dt.date
+    no_earlier: bool
+
+
+@dataclass(frozen=True)
 class DailyBarsResult:
     bars: Sequence[DailyBar] = ()
     gaps: Sequence[BarGap] = ()
     halted: str | None = None
+    history_confirmation: HistoryConfirmation | None = None
 
 
 FetchResult = DailyBarsResult
@@ -601,6 +612,8 @@ def daily_bars_fetch_task(
     trade_date: str,
     user_id: str | None = None,
     window_trading_days: int | None = None,
+    batch_kind: str = "daily",
+    batch_seq: int = 0,
 ) -> int:
     from app.workers.jobs import _engine
 
@@ -613,22 +626,13 @@ def daily_bars_fetch_task(
                 _record_run(conn, day, uid, window_trading_days, status="skipped", stats=stats)
                 return 0
             if settings.daily_bars_source == "mairui":
-                from app.ingest.daily_bars import (
-                    DAILY_BARS_HTTP_LIMIT,
-                    daily_bars_http_budget,
-                )
+                from app.marketdata.daily_bars_outbox import enqueue
 
-                budget = daily_bars_http_budget(DAILY_BARS_HTTP_LIMIT)
-                if budget.kind == "unset":
-                    stats = _empty_stats(
-                        uid, window_trading_days, issues=["daily_bars_http_budget_unset"]
-                    )
-                    _record_run(
-                        conn, day, uid, window_trading_days, status="skipped", stats=stats
-                    )
-                    return 0
-                # Worker must not go online. Ingest fetch is the C entry; outbox
-                # tick wiring is left unset (no new table / migration in this ticket).
+                enqueue(
+                    conn, trade_date=day, user_id=uid, window_trading_days=window_trading_days,
+                    batch_kind=batch_kind, batch_seq=batch_seq,
+                )
+                # The worker schedules only; inserted bars remain zero until ingest consumes.
                 return 0
             return fetch_and_record(
                 conn,
@@ -649,3 +653,45 @@ def daily_bars_fetch_task(
                 error=type(exc).__name__,
             )
         raise
+
+
+_BIND_BATCH: Final[int] = 5000
+_BIND_KEYS: Final[tuple[str, ...]] = ("code", "trade_date", "adj_type")
+
+
+def update_mairui_source_licence_id(
+    conn: Connection,
+    keys: Sequence[tuple[str, dt.date, str]],
+    *,
+    match: uuid.UUID | None,
+    value: uuid.UUID | None,
+    apply: bool,
+) -> int:
+    """T-B141：只改 mairui 行的 source_licence_id（绑定、改绑或回滚）。"""
+    count = 0
+    bars = daily_bars.c
+    for offset in range(0, len(keys), _BIND_BATCH):
+        batch = values(
+            *(column(name, daily_bars.c[name].type) for name in _BIND_KEYS),
+            name="manifest_keys",
+        ).data(keys[offset : offset + _BIND_BATCH])
+        conditions = (
+            bars.code == batch.c.code,
+            bars.trade_date == batch.c.trade_date,
+            bars.adj_type == batch.c.adj_type,
+            bars.source == "mairui",
+            (
+                bars.source_licence_id == match
+                if match is not None
+                else bars.source_licence_id.is_(None)
+            ),
+        )
+        if apply:
+            count += conn.execute(
+                update(daily_bars).where(*conditions).values(source_licence_id=value)
+            ).rowcount
+        else:
+            count += conn.execute(
+                select(func.count()).select_from(daily_bars, batch).where(*conditions)
+            ).scalar_one()
+    return count

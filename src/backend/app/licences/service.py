@@ -5,13 +5,13 @@
   ``ingest:requests`` 的 ``verify_licence`` 意图只带 ``licence_id``。
 - 读状态只走视图 ``app.user_data_licence_status``（无密文、无 HMAC）。
 - 每次状态或绑定变化写 ``ops.data_licence_events``（只追加，不含证书值）。
-- 替换（PUT 已有证书）：旧行软删除（密文、HMAC 置 NULL），插入新行（新 ``id`` 进 AAD）。
+- 换不同证书：旧行软删除（密文、HMAC 置 NULL），插入新行（新 ``id`` 进 AAD）。
 - 管理员暂停按**用户**记录（``app.user_data_licence_holds``，契约 v0.2.8 #12、T-B03d /
   review M1）：暂停中的用户 PUT（含 DELETE 后再 PUT）→ 202、``paused_by_admin``、不投递验证；
   DELETE 后 GET 仍为 ``paused_by_admin``；只有管理员 resume 解除。
 - 重复 PUT **同一证书**（HMAC 相同，契约 v0.2.8 #13 / review M2）：``paused_until`` 未到期或
   状态为 ``quota_exceeded`` / ``ip_limited`` → 原行原状态（``licence_id`` 不变），只更新
-  ``tier``/``has_quant_pro``/``expires_on``，不投递验证。其余情况换新行进入
+  ``tier``/``has_quant_pro``/``expires_on``，不投递验证。其余同证书情况原地进入
   ``pending_verification``。
 """
 
@@ -343,7 +343,8 @@ def set_licence(
     expires_on: dt.date | None,
 ) -> SetResult:
     """设置或替换。调用方在事务里调用；``IntegrityError`` 由调用方映射
-    （见 :func:`map_integrity`）。"""
+    （见 :func:`map_integrity`）。同一证书原地保留 id；换证改绑走
+    ``mairui-licence-bind --from-licence``。"""
     version, public_key = current_public_key(settings)
     digest = licence_hmac(settings, licence)
     if hmac_in_use_by_other(conn, user_id, digest):
@@ -377,7 +378,32 @@ def set_licence(
                 user_data_licence_cooldowns.c.user_id == user_id
             )
         )
-    # 新证书（或同一证书但无须保留状态）：换新行。暂停按用户记录（#12），新行仍为
+    if old is not None and same:
+        values = {
+            "ciphertext": seal_licence(
+                public_key, licence, user_id=user_id, row_id=old.id, key_version=version
+            ),
+            "seal_key_version": version,
+            "licence_hmac": digest,
+            "tier": tier,
+            "has_quant_pro": has_quant_pro,
+            "expires_on": expires_on,
+            "updated_at": now,
+            "status": S.PENDING_VERIFICATION.value,
+            "last_error_code": None,
+            "last_error_at": None,
+        }
+        if old.status != S.PENDING_VERIFICATION:
+            values["status_changed_at"] = now
+        conn.execute(update(udl).where(udl.c.id == old.id).values(**values))
+        record_event(
+            conn, licence_id=old.id, user_id=user_id, event="set", actor="user",
+            from_status=old.status, to_status=S.PENDING_VERIFICATION.value,
+        )
+        row = live_row(conn, user_id)
+        assert row is not None  # noqa: S101
+        return SetResult(row=row, verification_id=uuid.uuid4())
+    # 新证书：换新行。暂停按用户记录（#12），新行仍为
     # paused_by_admin、不验证；DELETE 后再 PUT 同样如此
     status_value = S.PAUSED_BY_ADMIN.value if held else S.PENDING_VERIFICATION.value
     if restored is not None and not held:

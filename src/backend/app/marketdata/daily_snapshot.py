@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Connection, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.db.tables.licences import user_data_licence_holds as licence_holds
+from app.db.tables.licences import user_data_licence_status as licence_status
 from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.reviews import data_snapshots
@@ -231,8 +233,35 @@ def _snapshot_id(owner: uuid.UUID, trade_date: dt.date, digest: str) -> uuid.UUI
     return uuid.uuid5(uuid.NAMESPACE_URL, key)
 
 
+def active_licence_id(conn: Connection, owner: uuid.UUID, now: dt.datetime) -> uuid.UUID | None:
+    """``owner``'s currently usable active licence (also used by owned daily reads)."""
+    v = licence_status.c
+    return conn.execute(
+        select(v.id)
+        .select_from(licence_status.outerjoin(licence_holds, licence_holds.c.user_id == v.user_id))
+        .where(
+            v.user_id == owner,
+            v.deleted_at.is_(None),
+            v.status == "active",
+            licence_holds.c.user_id.is_(None),
+            or_(v.paused_until.is_(None), v.paused_until <= now),
+            or_(v.expires_on.is_(None), v.expires_on >= now.astimezone(BEIJING).date()),
+        )
+    ).scalar_one_or_none()
+
+
+def _mairui_unbound(row: object, active: uuid.UUID | None) -> bool:
+    """T-B141: a mairui bar counts only when bound to the owner's current active licence.
+
+    NULL ``source_licence_id``, another licence, or no active licence stay unbound.
+    """
+    if _col(row, "source") != "mairui":
+        return False
+    return active is None or _col(row, "source_licence_id") != active
+
+
 def build_owned_snapshot(
-    conn: Connection, owner: uuid.UUID, trade_date: dt.date
+    conn: Connection, owner: uuid.UUID, trade_date: dt.date, *, now: dt.datetime | None = None
 ) -> tuple[uuid.UUID | None, tuple[str, ...]]:
     is_open = covered(conn, trade_date)
     if not is_open:
@@ -248,6 +277,9 @@ def build_owned_snapshot(
     instruments: list[dict[str, Any]] = []
     omitted: list[dict[str, str]] = []
     included_dates: list[dt.date] = []
+    if now is None:
+        now = dt.datetime.now(dt.UTC)
+    active = active_licence_id(conn, owner, now)
 
     for code in codes:
         board = boards.get(code)
@@ -259,8 +291,10 @@ def build_owned_snapshot(
         if today is None:
             omitted.append({"security_code": code, "issue": f"daily_bars_missing:{code}"})
             continue
-        if _col(today, "source") == "mairui" or any(
-            _col(row, "source") == "mairui" and _include_historical(row, as_of) for row in rows
+        # T-B141: mairui 行仅当 source_licence_id 等于当前 active 证书才计入；
+        # 其它未绑定（NULL / 别的 licence / 无 active 证书）仍标 unbound。
+        if _mairui_unbound(today, active) or any(
+            _mairui_unbound(row, active) and _include_historical(row, as_of) for row in rows
         ):
             omitted.append(
                 {"security_code": code, "issue": f"owned_snapshot_licence_unbound:{code}"}

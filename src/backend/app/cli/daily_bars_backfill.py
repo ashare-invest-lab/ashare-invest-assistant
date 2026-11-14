@@ -16,6 +16,7 @@ from app.common.errors import AppError
 from app.config import Settings
 from app.db.tables.market import trading_calendar
 from app.db.tables.users import users
+from app.ingest.daily_bars_plan import BACKFILL_LATEST_START, backfill_start_blocked
 from app.marketdata.daily_bars import (
     DAILY_BARS_FETCH,
     UPSERT_BATCH_ROWS,
@@ -97,6 +98,9 @@ def main(
         print("now must be timezone-aware")
         return 1
     bj = stamp.astimezone(BEIJING)
+    if args.apply and backfill_start_blocked(stamp):
+        print(f"refused: 北京时间最晚启动守卫 {BACKFILL_LATEST_START.strftime("%H:%M")}")
+        return 1
 
     engine = jobs_mod._engine(cfg)
     with engine.connect() as conn:
@@ -125,7 +129,7 @@ def main(
         if args.apply and _is_open(conn, bj.date()):
             lock_start = dt.datetime.combine(bj.date(), _APPLY_LOCK_START, bj.tzinfo)
             lock_end = dt.datetime.combine(bj.date(), _APPLY_LOCK_END, bj.tzinfo)
-            if lock_start <= bj <= lock_end:
+            if lock_start <= bj < lock_end:
                 print("refused: open-day 17:00-17:45 Beijing lock window")
                 return 1
 
@@ -156,7 +160,11 @@ def main(
         jobs_mod._push(
             client,
             DAILY_BARS_FETCH,
-            {"trade_date": day.isoformat(), "window_trading_days": window},
+            {
+                "trade_date": day.isoformat(),
+                "window_trading_days": window,
+                "batch_kind": "backfill",
+            },
         )
     finally:
         if redis_client is None:
