@@ -56,7 +56,7 @@ def upgrade() -> None:
         sa.CheckConstraint("source IN ('hf_1min', 'tdx_local')", name="source"),
         sa.CheckConstraint("kind IN ('1m', '5m')", name="kind"),
         sa.CheckConstraint(
-            "splice_segment IN ('hf', 'vipdoc_single', 'vipdoc_main')", name="splice_segment"
+            "splice_segment IN ('hf_1m', 'vipdoc_1m', 'lc5')", name="splice_segment"
         ),
         sa.CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_hex"),
         sa.CheckConstraint("row_count >= 0", name="row_count_nonnegative"),

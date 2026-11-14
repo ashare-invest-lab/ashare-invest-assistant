@@ -7,13 +7,14 @@ import hashlib
 import io
 import json
 import random
+import re
 import socket
 import struct
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import ModuleType
 from zipfile import ZipFile
 
@@ -36,12 +37,15 @@ from app.ingest.gbbq import (
     ref_price,
 )
 from app.ingest.minute_catalog import (
+    check_overlap,
+    effective_range,
     hf_entries_from_manifest,
+    lc_entry,
     resolve,
     validate_rel_path,
 )
 from app.ingest.tdx_history import DayRefusal, iter_day_zip
-from app.ingest.tdx_local import DAY_LAYOUT, ParseResult
+from app.ingest.tdx_local import DAY_LAYOUT, LC_LAYOUT, ParseResult, encode_lc_date
 from probes import tb143_export
 
 # 完全虚构的格式表，仅供往返构造；禁止替换为真实 pytdx 密钥。
@@ -267,10 +271,10 @@ def test_msi_gbbq_ref_price():
 
 
 def test_msi_catalog_rel_path_and_root():
-    rel = r"hf-1min\2022plus\SH\600999.parquet"
-    assert validate_rel_path(rel) == "hf-1min/2022plus/SH/600999.parquet"
-    assert str(resolve(r"F:\data", rel)) == r"F:\data\hf-1min\2022plus\SH\600999.parquet"
-    assert resolve("/data", rel) == Path("/data/hf-1min/2022plus/SH/600999.parquet")
+    rel = "hf/SH/600000.parquet"
+    assert validate_rel_path(rel.replace("/", "\\")) == rel
+    assert str(resolve(r"F:\data", rel)) == str(PureWindowsPath(r"F:\data\hf\SH\600000.parquet"))
+    assert resolve("/mnt/f/data", rel) == Path("/mnt/f/data/hf/SH/600000.parquet")
     for bad in (
         "/absolute",
         "../escape",
@@ -312,21 +316,112 @@ def test_catalog_bj_empty_and_prefix_filter():
         rel_path="hf-1min/2022plus/SH/600999.parquet",
         sha256="a" * 64,
         row_count=240,
-        splice_segment="hf",
+        splice_segment="hf_1m",
         generator=GENERATOR,
     )
 
 
+def _lc(day, minute=571):
+    return LC_LAYOUT.pack(encode_lc_date(day), minute, 10.0, 10.0, 10.0, 10.0, 100.0, 10, 0)
+
+
 def test_msi_catalog_one_source_per_stock_day():
-    entries, counts = hf_entries_from_manifest(
-        [
-            _manifest(),
-            _manifest(last_ts="2026-08-07 09:31:00+08:00"),
-            _manifest(last_ts="2026-08-06 23:31:00+00:00"),
-        ],
+    [hf], counts = hf_entries_from_manifest(
+        [_manifest(last_ts="2026-08-07 15:00:00+08:00")], GENERATOR
+    )
+    lc = lc_entry(
+        "tdx-min/vipdoc/sh/minline/sh600999.lc1",
+        _lc(date(2026, 8, 7)),
+        "b" * 64,
+        "lc1",
         GENERATOR,
     )
-    assert len(entries) == 1 and counts["reject_after_hf_end"] == 2
+    assert counts == {"registered": 1}
+    assert hf.date_to == date(2026, 8, 7)
+    assert effective_range(hf) == (date(2026, 8, 6), date(2026, 8, 6))
+    assert effective_range(lc) == (date(2026, 8, 7), date(2026, 8, 7))
+    check_overlap([hf], lc)
+    check_overlap([hf, lc], lc)
+    day = date(2026, 8, 7)
+    assert [
+        entry.source
+        for entry in (hf, lc)
+        if (interval := effective_range(entry)) and interval[0] <= day <= interval[1]
+    ] == ["tdx_local"]
+    with pytest.raises(ValueError, match="重叠"):
+        check_overlap([hf, lc], replace(lc, rel_path="another.lc1"))
+    with pytest.raises(ValueError, match="SHA256"):
+        check_overlap([lc], replace(lc, sha256="c" * 64))
+    check_overlap([lc], replace(lc, code="000999.SZ"))
+    check_overlap([lc], replace(lc, kind="5m"))
+    check_overlap([hf], replace(hf, rel_path="empty.parquet", date_from=day))
+    assert effective_range(replace(hf, date_from=day)) is None
+    assert effective_range(replace(lc, date_to=date(2026, 8, 6))) is None
+    with pytest.raises(ValueError, match="未知"):
+        effective_range(replace(lc, splice_segment="bad"))
+
+
+@pytest.mark.parametrize(
+    "market,symbol,kind,directory,segment",
+    [
+        ("sh", "600999", "lc1", "minline", "vipdoc_1m"),
+        ("sz", "302999", "lc5", "fzline", "lc5"),
+    ],
+)
+def test_lc_catalog_actual_dates_and_layout(market, symbol, kind, directory, segment):
+    data = _lc(date(2026, 8, 10)) + _lc(date(2026, 8, 6))
+    entry = lc_entry(
+        f"tdx-min/vipdoc/{market}/{directory}/{market}{symbol}.{kind}",
+        data,
+        "a" * 64,
+        kind,
+        GENERATOR,
+    )
+    assert (entry.code, entry.source, entry.kind, entry.splice_segment) == (
+        f"{symbol}.{market.upper()}",
+        "tdx_local",
+        "1m" if kind == "lc1" else "5m",
+        segment,
+    )
+    assert (entry.row_count, entry.date_from, entry.date_to) == (
+        2,
+        date(2026, 8, 6),
+        date(2026, 8, 10),
+    )
+    assert effective_range(entry) == (
+        date(2026, 8, 7) if kind == "lc1" else date(2026, 8, 6),
+        date(2026, 8, 10),
+    )
+
+
+@pytest.mark.parametrize(
+    "rel,kind,data",
+    [
+        ("tdx-min/vipdoc/bj/minline/bj920999.lc1", "lc1", _lc(date(2026, 8, 7))),
+        ("tdx-min/vipdoc/sh/minline/sh900999.lc1", "lc1", _lc(date(2026, 8, 7))),
+        ("tdx-min/vipdoc/sh/minline/sz000999.lc1", "lc1", _lc(date(2026, 8, 7))),
+        ("tdx-min/vipdoc/sh/minline/sh600999.lc1", "lc5", _lc(date(2026, 8, 7))),
+        ("tdx-min/vipdoc/sh/minline/sh600999.lc1", "lc1", b""),
+        ("tdx-min/vipdoc/sh/minline/sh600999.lc1", "lc1", b"x"),
+        ("tdx-min/vipdoc/sh/minline/sh600999.lc1", "lc1", bytes(32)),
+    ],
+)
+def test_lc_catalog_invalid_file_refused(rel, kind, data):
+    with pytest.raises(ValueError):
+        lc_entry(rel, data, "a" * 64, kind, GENERATOR)
+
+
+def test_msi_minute_not_written_to_pg():
+    probes = Path(tb143_export.__file__).parent
+    sql = "\n".join(
+        (probes / name).read_text() for name in ("tb143_load_day.sql", "tb143_load_meta.sql")
+    )
+    sql = re.sub(r"--[^\n]*", "", sql)
+    assert not re.search(
+        r"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:market\.)?minute(?:5)?_bars\b", sql, re.I
+    )
+    assert "INSERT INTO market.minute_file_catalog" in sql
+    assert not re.search(r"\b(?:UPDATE|DELETE)\b", sql, re.I)
 
 
 def test_catalog_malformed_fields_refused():
@@ -408,6 +503,90 @@ def test_export_day_partial_and_summary(tmp_path):
     }
 
 
+def test_export_day_split_by_year(tmp_path):
+    archive, eligible, out = tmp_path / "day.zip", tmp_path / "codes.txt", tmp_path / "out"
+    archive.write_bytes(
+        _zip_bytes({"sh/lday/sh600999.day": _day(day=20200102) + _day(day=20261113)})
+    )
+    eligible.write_text(CODE, encoding="utf-8")
+    assert (
+        tb143_export.main(
+            [
+                "day",
+                "--zip",
+                str(archive),
+                "--eligible-codes",
+                str(eligible),
+                "--split-by-year",
+                "--generator",
+                GENERATOR,
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    summary = json.loads((out / "summary.json").read_text())["day"]
+    assert set(summary["files"]) == {"day_2020.csv", "day_2026.csv"}
+    for name, info in summary["files"].items():
+        data = (out / name).read_bytes()
+        assert info == {"rows": 1, "sha256": hashlib.sha256(data).hexdigest()}
+        [row] = list(csv.DictReader(io.StringIO(data.decode())))
+        assert row["trade_date"].startswith(name[4:8])
+    assert not (out / "daily_bars.csv").exists()
+    assert not list(out.glob("*.part"))
+
+
+@pytest.mark.parametrize("mismatch", [None, "sha256", "bytes"])
+def test_export_lc_catalog_checks_snapshot(tmp_path, mismatch):
+    rel = "tdx-min/vipdoc/sh/minline/sh600999.lc1"
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    data = _lc(date(2026, 8, 7))
+    path.write_bytes(data)
+    manifest = tmp_path / "SHA256SUMS.csv"
+    sha = hashlib.sha256(data).hexdigest()
+    _write_manifest(
+        manifest,
+        [
+            {
+                "rel_path": rel,
+                "sha256": "0" * 64 if mismatch == "sha256" else sha,
+                "bytes": len(data) + (1 if mismatch == "bytes" else 0),
+            }
+        ],
+    )
+    # 清单由 PowerShell 5.1 生成，含 UTF-8 BOM。
+    manifest.write_text(manifest.read_text(), encoding="utf-8-sig")
+    out = tmp_path / "out"
+    assert tb143_export.main(
+        [
+            "lc-catalog",
+            "--root",
+            str(tmp_path),
+            "--sha-manifest",
+            str(manifest),
+            "--generator",
+            GENERATOR,
+            "--out",
+            str(out),
+        ]
+    ) == (2 if mismatch else 0)
+    target = out / "minute_file_catalog.csv"
+    summary = json.loads((out / "summary.json").read_text())["lc-catalog"]
+    if mismatch:
+        assert not target.exists()
+        assert summary["error"].startswith(f"{mismatch}_mismatch")
+    else:
+        [entry] = list(csv.DictReader(io.StringIO(target.read_text())))
+        assert (entry["sha256"], entry["rel_path"], entry["splice_segment"]) == (
+            sha,
+            rel,
+            "vipdoc_1m",
+        )
+    assert not list(out.glob("*.part"))
+
+
 def test_msi_no_network(tmp_path, monkeypatch):
     from app.ingest import egress
 
@@ -469,7 +648,7 @@ def test_msi_no_network(tmp_path, monkeypatch):
     assert event["cash_per_share"] == "0.200000" and event["source"] == "tdx_gbbq"
     with (out / "minute_file_catalog.csv").open(encoding="utf-8", newline="") as stream:
         [entry] = list(csv.DictReader(stream))
-    assert entry["generator"] == GENERATOR and entry["splice_segment"] == "hf"
+    assert entry["generator"] == GENERATOR and entry["splice_segment"] == "hf_1m"
     assert not calls
 
 

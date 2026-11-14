@@ -45,8 +45,18 @@ def offline_schema(pg_conn):
     return schema
 
 
-def _load(conn, schema, catalog_sha="a", duplicate_sha=None):
-    """执行原 SQL；仅以 STDIN 代替服务端文件，事务边界由测试 fixture 回滚。"""
+def _load(
+    conn,
+    schema,
+    catalog_sha="a",
+    duplicate_sha=None,
+    *,
+    meta=False,
+    before="2025-01-01",
+    extra_catalog=None,
+    extra_day=None,
+):
+    """执行拆分 SQL；以 STDIN 代替服务端文件，事务边界由测试 fixture 回滚。"""
     csv_rows = {
         "day_stage": [
             [
@@ -60,9 +70,7 @@ def _load(conn, schema, catalog_sha="a", duplicate_sha=None):
                 "volume",
                 "amount",
             ],
-            ["600999.SH", "2025-01-02", "none", 12.34, 12.34, 12.34, 12.34, 700, 8638],
             ["600999.SH", "2024-01-02", "none", 12.34, 12.34, 12.34, 12.34, 700, 8638],
-            ["600999.SH", "2026-01-02", "none", 12.34, 12.34, 12.34, 12.34, 700, 8638],
         ],
         "gbbq_stage": [
             [
@@ -95,11 +103,11 @@ def _load(conn, schema, catalog_sha="a", duplicate_sha=None):
                 "600999.SH",
                 "1m",
                 "2025-01-02",
-                "2026-08-06",
+                "2026-08-07",
                 "hf/x.parquet",
                 catalog_sha * 64,
                 240,
-                "hf",
+                "hf_1m",
                 "c" * 40,
             ],
         ],
@@ -107,7 +115,13 @@ def _load(conn, schema, catalog_sha="a", duplicate_sha=None):
     if duplicate_sha:
         csv_rows["catalog_stage"].append(csv_rows["catalog_stage"][-1][:])
         csv_rows["catalog_stage"][-1][6] = duplicate_sha * 64
-    source = (BACKEND / "probes/tb143_load.sql").read_text(encoding="utf-8")
+    if extra_catalog:
+        csv_rows["catalog_stage"].extend(extra_catalog)
+    if extra_day:
+        csv_rows["day_stage"].extend(extra_day)
+    filename = "tb143_load_meta.sql" if meta else "tb143_load_day.sql"
+    source = (BACKEND / "probes" / filename).read_text(encoding="utf-8")
+    source = source.replace(":'before'", f"'{before}'")
     source = source.replace("market.", f'"{schema}".')
     pending = []
     for line in source.splitlines():
@@ -146,21 +160,15 @@ def test_msi_existing_mairui_never_overwritten(pg_conn, offline_schema, preload)
                       repeat('b', 64), now());
             INSERT INTO "{offline_schema}".minute_file_catalog
               VALUES ('hf_1min', '600999.SH', '1m', '2025-01-02', '2026-08-06',
-                      'hf/x.parquet', repeat('a', 64), 240, 'hf', repeat('c', 40), now());
+                      'hf/x.parquet', repeat('a', 64), 240, 'hf_1m', repeat('c', 40), now());
         ''')
     _load(pg_conn, offline_schema)
     assert pg_conn.execute(
         f"SELECT close, source FROM \"{offline_schema}\".daily_bars WHERE trade_date='2025-01-02'"
     ).fetchone() == (12, "mairui")
-    rows = pg_conn.execute(
-        "SELECT target, year, inserted, skipped FROM load_counts ORDER BY target, year"
-    ).fetchall()
+    rows = pg_conn.execute("SELECT candidates, inserted, skipped FROM load_counts").fetchall()
     assert rows == [
-        ("daily_bars", 2024, 0 if preload else 1, 1 if preload else 0),
-        ("daily_bars", 2025, 0, 1),
-        ("daily_bars", 2026, 0 if preload else 1, 1 if preload else 0),
-        ("ex_rights_events", None, 0 if preload else 1, 1 if preload else 0),
-        ("minute_file_catalog", None, 0 if preload else 1, 1 if preload else 0),
+        (1, 0 if preload else 1, 1 if preload else 0),
     ]
     assert (
         pg_conn.execute("SELECT * FROM mairui_before").fetchone()
@@ -181,7 +189,7 @@ def test_msi_catalog_sha_mismatch_refused(pg_conn, offline_schema, existing):
         pg_conn.execute(f'''
             INSERT INTO "{offline_schema}".minute_file_catalog
               VALUES ('hf_1min', '600999.SH', '1m', '2025-01-02', '2026-08-06',
-                      'hf/x.parquet', repeat('a', 64), 240, 'hf', repeat('c', 40), now())
+                      'hf/x.parquet', repeat('a', 64), 240, 'hf_1m', repeat('c', 40), now())
         ''')
     with pytest.raises(psycopg.errors.RaiseException, match="SHA256"):
         with pg_conn.transaction():
@@ -190,6 +198,7 @@ def test_msi_catalog_sha_mismatch_refused(pg_conn, offline_schema, existing):
                 offline_schema,
                 catalog_sha="d",
                 duplicate_sha=None if existing else "e",
+                meta=True,
             )
     assert pg_conn.execute(f'SELECT count(*) FROM "{offline_schema}".daily_bars').fetchone() == (1,)
     assert pg_conn.execute(
@@ -198,6 +207,56 @@ def test_msi_catalog_sha_mismatch_refused(pg_conn, offline_schema, existing):
     assert pg_conn.execute(
         f'SELECT sha256 FROM "{offline_schema}".minute_file_catalog'
     ).fetchall() == ([("a" * 64,)] if existing else [])
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+def test_msi_catalog_one_source_per_stock_day(pg_conn, offline_schema, conflict):
+    import psycopg
+
+    lc = [
+        "tdx_local",
+        "600999.SH",
+        "1m",
+        "2026-08-07",
+        "2026-08-10",
+        "tdx-min/a.lc1",
+        "b" * 64,
+        240,
+        "vipdoc_1m",
+        "c" * 40,
+    ]
+    if conflict:
+        other = lc[:]
+        other[5] = "tdx-min/b.lc1"
+        with pytest.raises(psycopg.errors.RaiseException, match="有效区间重叠"):
+            with pg_conn.transaction():
+                _load(pg_conn, offline_schema, meta=True, extra_catalog=[lc, other])
+    else:
+        _load(pg_conn, offline_schema, meta=True, extra_catalog=[lc])
+        assert pg_conn.execute(
+            f'SELECT count(*) FROM "{offline_schema}".minute_file_catalog'
+        ).fetchone() == (2,)
+
+
+@pytest.mark.parametrize(
+    "before,extra_day,reason",
+    [
+        ("2024-01-02", None, "日期必须"),
+        ("2026-01-01", None, "已有麦蕊行"),
+        (
+            "2025-01-01",
+            [["600999.SH", "2023-01-02", "none", 12.34, 12.34, 12.34, 12.34, 700, 8638]],
+            "只能加载一年",
+        ),
+    ],
+)
+def test_day_load_refuses_invalid_batch(pg_conn, offline_schema, before, extra_day, reason):
+    import psycopg
+
+    with pytest.raises(psycopg.errors.RaiseException, match=reason):
+        with pg_conn.transaction():
+            _load(pg_conn, offline_schema, before=before, extra_day=extra_day)
+    assert pg_conn.execute(f'SELECT count(*) FROM "{offline_schema}".daily_bars').fetchone() == (1,)
 
 
 @pytest.mark.parametrize("rel", ["/absolute", "x/../y", r"x\y", "F:drive"])
@@ -210,14 +269,14 @@ def test_catalog_path_constraints(pg_conn, offline_schema, rel):
                 f'''
                 INSERT INTO "{offline_schema}".minute_file_catalog
                   VALUES ('hf_1min', '600999.SH', '1m', '2025-01-02', '2026-08-06',
-                          %s, repeat('a', 64), 240, 'hf', repeat('c', 40), now())
+                          %s, repeat('a', 64), 240, 'hf_1m', repeat('c', 40), now())
             ''',
                 (rel,),
             )
 
 
-def test_load_mairui_signature_change_rolls_back(pg_conn, offline_schema):
-    """合成触发器意外新增麦蕊行时，摘要断言必须拒绝并回滚本次加载。"""
+def test_load_mairui_count_change_rolls_back(pg_conn, offline_schema):
+    """合成触发器意外新增麦蕊行时，行数断言必须拒绝并回滚本次加载。"""
     import psycopg
 
     pg_conn.execute(f'''
@@ -233,7 +292,7 @@ def test_load_mairui_signature_change_rolls_back(pg_conn, offline_schema):
           FOR EACH ROW WHEN (NEW.source = 'tdx_local')
           EXECUTE FUNCTION "{offline_schema}".unexpected_mairui();
     ''')
-    with pytest.raises(psycopg.errors.RaiseException, match="麦蕊行前后摘要改变"):
+    with pytest.raises(psycopg.errors.RaiseException, match="麦蕊行数前后必须"):
         with pg_conn.transaction():
             _load(pg_conn, offline_schema)
     assert pg_conn.execute(f'SELECT count(*) FROM "{offline_schema}".daily_bars').fetchone() == (1,)

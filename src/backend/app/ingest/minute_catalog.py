@@ -10,6 +10,17 @@ from datetime import date, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from zoneinfo import ZoneInfo
 
+from app.ingest.tdx_local import LC_LAYOUT, decode_lc_date
+
+# 定稿 8b32fcf §3.3，出自 DS splice 的 HF_END / SINGLE_DAY / MAIN_START。
+HF_END = date(2026, 8, 6)
+SINGLE_DAY = date(2026, 8, 7)
+MAIN_START = date(2026, 8, 10)
+PREFIXES = {
+    "SH": {"600", "601", "603", "605", "688", "689"},
+    "SZ": {"000", "001", "002", "003", "300", "301", "302"},
+}
+
 
 @dataclass(frozen=True)
 class CatalogEntry:
@@ -25,6 +36,76 @@ class CatalogEntry:
     row_count: int
     splice_segment: str
     generator: str
+
+
+def effective_range(entry: CatalogEntry) -> tuple[date, date] | None:
+    """文件实际区间与分段求交；空交集返回 None，不修改目录日期。"""
+    first, last = entry.date_from, entry.date_to
+    if entry.splice_segment == "hf_1m":
+        last = min(last, HF_END)
+    elif entry.splice_segment == "vipdoc_1m":
+        first = max(first, SINGLE_DAY)
+    elif entry.splice_segment != "lc5":
+        raise ValueError("未知 splice_segment")
+    return (first, last) if first <= last else None
+
+
+def check_overlap(existing: Iterable[CatalogEntry], new: CatalogEntry) -> None:
+    """拒绝同 code、kind 的有效区间重叠；同键同 SHA 复跑保持幂等。"""
+    new_range = effective_range(new)
+    for entry in existing:
+        if (entry.code, entry.kind) != (new.code, new.kind):
+            continue
+        if (entry.source, entry.rel_path) == (new.source, new.rel_path):
+            if entry.sha256 != new.sha256:
+                raise ValueError("目录同键 SHA256 不同，拒绝登记")
+            continue
+        old_range = effective_range(entry)
+        if (
+            old_range
+            and new_range
+            and max(old_range[0], new_range[0]) <= min(old_range[1], new_range[1])
+        ):
+            raise ValueError("目录有效区间重叠，拒绝登记")
+
+
+def lc_entry(rel_path: str, data: bytes, sha256: str, kind: str, generator: str) -> CatalogEntry:
+    """登记原始 .lc 文件快照，不转换 parquet（编排者 15:25 裁定）。
+
+    此处与契约 §3.2「转换为 parquet」的差异待架构确认；行数与日期取自原始记录。
+    """
+    rel_path = validate_rel_path(rel_path)
+    match = re.fullmatch(
+        r"tdx-min/vipdoc/(sh|sz)/(minline|fzline)/(sh|sz)([0-9]{6})\.(lc1|lc5)", rel_path
+    )
+    if not match:
+        raise ValueError("不支持的沪深分钟文件路径")
+    market, directory, prefix, symbol, suffix = match.groups()
+    if (
+        kind not in ("lc1", "lc5")
+        or suffix != kind
+        or directory != ("minline" if kind == "lc1" else "fzline")
+        or market != prefix
+        or symbol[:3] not in PREFIXES[market.upper()]
+    ):
+        raise ValueError("分钟文件市场、前缀或 kind 不合法")
+    if not data or len(data) % LC_LAYOUT.size:
+        raise ValueError("分钟文件为空或不是 32 字节记录的整数倍")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise ValueError("SHA256 不合法")
+    days = [decode_lc_date(record[0]) for record in LC_LAYOUT.iter_unpack(data)]
+    return CatalogEntry(
+        source="tdx_local",
+        code=f"{symbol}.{market.upper()}",
+        kind="1m" if kind == "lc1" else "5m",
+        date_from=min(days),
+        date_to=max(days),
+        rel_path=rel_path,
+        sha256=sha256,
+        row_count=len(days),
+        splice_segment="vipdoc_1m" if kind == "lc1" else "lc5",
+        generator=generator,
+    )
 
 
 def validate_rel_path(rel: str) -> str:
@@ -49,11 +130,7 @@ def resolve(root: str, rel: str) -> Path:
 def hf_entries_from_manifest(
     rows: Iterable[Mapping[str, str]], generator: str
 ) -> tuple[list[CatalogEntry], Counter[str]]:
-    """直接登记 2022plus 产物；含退市沪深股，排除 BJ 与 HF 分段之后的文件。"""
-    prefixes = {
-        "SH": {"600", "601", "603", "605", "688", "689"},
-        "SZ": {"000", "001", "002", "003", "300", "301", "302"},
-    }
+    """直接登记 2022plus 产物的实际日期；含退市沪深股，排除 BJ。"""
     entries: list[CatalogEntry] = []
     counts: Counter[str] = Counter()
     for row in rows:
@@ -65,7 +142,7 @@ def hf_entries_from_manifest(
         if nrows == 0:
             counts["skip_empty"] += 1
             continue
-        if not re.fullmatch(r"[0-9]{6}", symbol) or symbol[:3] not in prefixes.get(exchange, set()):
+        if not re.fullmatch(r"[0-9]{6}", symbol) or symbol[:3] not in PREFIXES.get(exchange, set()):
             counts["reject_prefix"] += 1
             continue
         try:
@@ -75,9 +152,6 @@ def hf_entries_from_manifest(
             first, last = [stamp.astimezone(ZoneInfo("Asia/Shanghai")).date() for stamp in stamps]
         except ValueError:
             counts["reject_date"] += 1
-            continue
-        if last > date(2026, 8, 6):  # 契约 §3.2 的 HF 分段上界。
-            counts["reject_after_hf_end"] += 1
             continue
         if nrows < 0 or first > last or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"]):
             counts["reject_catalog"] += 1
@@ -92,7 +166,7 @@ def hf_entries_from_manifest(
                 rel_path=validate_rel_path(f"hf-1min/2022plus/{exchange}/{symbol}.parquet"),
                 sha256=row["sha256"],
                 row_count=nrows,
-                splice_segment="hf",
+                splice_segment="hf_1m",
                 generator=generator,
             )
         )

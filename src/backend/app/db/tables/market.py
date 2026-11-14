@@ -422,7 +422,7 @@ minute_file_catalog = Table(
     PrimaryKeyConstraint("source", "code", "kind", "rel_path"),
     one_of("source", ["hf_1min", "tdx_local"]),
     one_of("kind", ["1m", "5m"]),
-    one_of("splice_segment", ["hf", "vipdoc_single", "vipdoc_main"]),
+    one_of("splice_segment", ["hf_1m", "vipdoc_1m", "lc5"]),
     CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_hex"),
     CheckConstraint("row_count >= 0", name="row_count_nonnegative"),
     CheckConstraint("date_from <= date_to", name="date_order"),
