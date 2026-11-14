@@ -24,6 +24,7 @@ from app.ingest import daily_bars as fetcher
 from app.ingest.daily_bars_plan import (
     BEIJING,
     DailyBarsPlanError,
+    backfill_start_blocked,
     ready_for_window,
     segments,
     window_days,
@@ -159,8 +160,15 @@ def process(
                 raise RuntimeError("daily_bars_run_identity_changed")
             if (
                 continue_batches
-                and fetcher._stamp(clock).astimezone(BEIJING).date()
-                != item["created_at"].astimezone(BEIJING).date()
+                and (
+                    fetcher._stamp(clock).astimezone(BEIJING).date()
+                    != item["created_at"].astimezone(BEIJING).date()
+                    or (
+                        item["batch_kind"] == "backfill"
+                        and item["attempted_at"] is None
+                        and backfill_start_blocked(fetcher._stamp(clock))
+                    )
+                )
             ):
                 _failed(conn, item, "daily_bars_batch_expired", clock())
                 return "failed"
@@ -445,7 +453,10 @@ def _resume(
             if item is None:
                 return False
             now = fetcher._stamp(clock)
-            if now.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date():
+            if (
+                now.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date()
+                or (item["batch_kind"] == "backfill" and backfill_start_blocked(now))
+            ):
                 _end_resume(conn, item, "daily_bars_batch_expired")
                 return False
             if _resume_stopped(conn, item, stop, halt):
@@ -463,6 +474,9 @@ def _resume(
                 _end_resume(conn, item, "data_licence_unavailable")
                 return False
             if _resume_stopped(conn, item, stop, halt) or _halted(conn):
+                return False
+            if item["batch_kind"] == "backfill" and backfill_start_blocked(fetcher._stamp(clock)):
+                _end_resume(conn, item, "daily_bars_batch_expired")
                 return False
             intents.enqueue(
                 conn,
@@ -510,6 +524,7 @@ def wake_delayed(
             if (
                 batch_budget(item["batch_kind"]).kind == "unset"
                 or now.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date()
+                or (item["batch_kind"] == "backfill" and backfill_start_blocked(now))
             ):
                 continue
             until = delayed_until(conn, now, item["batch_kind"], item["window_trading_days"])
@@ -572,6 +587,11 @@ def tick(
             stamp = fetcher._stamp(clock)
             expired = (
                 stamp.astimezone(BEIJING).date() != item["created_at"].astimezone(BEIJING).date()
+                or (
+                    item["batch_kind"] == "backfill"
+                    and item["attempted_at"] is None
+                    and backfill_start_blocked(stamp)
+                )
             )
             uncertain = item["status"] == "running" and item["attempted_at"] is not None
             until = (
