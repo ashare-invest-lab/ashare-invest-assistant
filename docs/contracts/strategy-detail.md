@@ -82,8 +82,9 @@
 | to_state | lifecycle | 否 | `to_state` |
 | trigger | `"admin"`\|`"health_machine"` | 否 | `trigger` |
 | at | string(datetime) | 否 | `at` |
+| reason | string | 是 | `reason`；管理员说明，按 §8 第 2 项对普通用户展示 |
 
-- 不返回 `actor_id`。`reason` 是管理员自由文本，是否对普通用户展示待裁定（§8 第 2 项），裁定前不返回。
+- 不返回 `actor_id`。`reason` 按 §8 第 2 项返回；后端须在 selfcheck 里确认 `change_lifecycle` 的 reason 入参不含个人信息（约束未验证前，按原样返回但不得拼入 actor 信息）。
 - 空态：策略可见但没有事件时，返回空分页。不得根据当前 lifecycle、版本创建或派生关系合成事件。派生版本继承母版本的 `lifecycle`，但没有自己的事件，这是预期行为。
 - 错误：通用错误，加 `404 NOT_FOUND`、`400 INVALID_CURSOR`、`400 VALIDATION_ERROR`（version_id 不是 UUID 时）。
 
@@ -126,10 +127,10 @@
 - `strategy_list` 的排序目前是 `strategies.id`，与 §1.2 默认排序不同，本文不改。
 - 写接口、管理端 lifecycle 和健康状态机都不改。
 
-## 8. 待编排者裁定
+## 8. 裁定（2026-11-14 编排者，按架构师推荐定稿）
 
-1. 认可 §6 的关联裁定（版本绑定、真源为 `card_version_id`、卡对策略 1:N）。
-2. lifecycle `reason` 是否对普通用户展示。建议展示，因为它是管理员针对策略写的说明，不含个人信息；前提是先确认 `change_lifecycle` 的入参约束，未验证。
-3. `/strategies/{id}` 在 `current_version_id` 为空时返回 404，还是返回 200 空态。本文取 404，与列表内连接一致。
-4. 两条 lifecycle-events 路径并存，还是在 v0.3 去掉版本级路径。
-5. 后端实现的派单范围：3 个 GET 加卡反查 1 个，共 4 个只读路由，加对应的 selfchecks；前端随后接 T-F40 的待裁定 1–5。
+1. **认可 §6 关联裁定**：唯一真源为 `strategy_versions.card_version_id`，按版本绑定，卡版本对策略版本 1:N。
+2. **lifecycle `reason` 对普通用户展示**（见 §4 字段表）。`change_lifecycle` 入参约束未验证，由后端 selfcheck 补核。
+3. **`/strategies/{id}` 在 `current_version_id` 为空时返回 404**，与列表内连接一致。
+4. **两条 lifecycle-events 路径并存**，共用一个查询（见 §4）；是否在后续版本去掉版本级路径，不在本单范围。
+5. **后端派单范围**：4 个只读路由（3 个 GET 加卡反查），加对应 selfchecks；前端随后按本契约接 T-F40 的待裁定 1–5。
