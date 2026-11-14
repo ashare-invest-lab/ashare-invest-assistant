@@ -494,7 +494,7 @@
   - 常量 `UPSERT_BATCH_ROWS`，值 1000（`app/marketdata/daily_bars.py`），并在模块导入时断言它乘以每行参数数不超过 65535。
   - 写入前按 (code, trade_date, adj_type) 升序排序，再按 1000 行切块；每块一条 `INSERT … ON CONFLICT DO NOTHING RETURNING`。
   - 每块的读回比较只查本块未插入的键，用 (code, trade_date, adj_type) 元组 IN（顺带完成 T-A132 非阻塞项⑶），不再用三个独立 IN 做笛卡尔范围查询。
-  - `UpsertStats` 跨块累加；issues 全局排序去重。签名、返回类型、不 UPDATE 的规则都不变。
+  - `UpsertStats` 跨块累加；issues 全局排序去重。签名、返回类型、不 UPDATE 的规则都不变（T-A153 C1 例外：已有行为 `tdx_local`、写入方为 mairui 时按 `multi-source-ingest.md` §4 替换）。
 - 事务边界：全部块都在调用方的同一个事务里（`fetch_and_record` 仍不 begin/commit；`daily_bars_fetch_task` 用一个 `engine.begin()`），本次运行只写一行 pipeline_runs。任一块出错整体回滚，任务另开事务写 failed（§7 补6 不变）。不做逐块提交：那会让失败的运行留下半截数据，也与「一次运行一行运行记录」冲突。
 - 不需要迁移。
 

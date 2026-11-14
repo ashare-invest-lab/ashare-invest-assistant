@@ -56,7 +56,7 @@
 - 库内价、量、额都是 MONEY = Numeric(20,4)（`app/db/base.py`）。
 - 价格：.day 为 uint32 ÷ 100（`DAY_PRICE_DIVISOR`）。.lc1 / .lc5 为 float32 元，**不 ÷100**，按 0.01 **ROUND_HALF_UP**（DS `splice.decode_lc1`；按 §5 C6，main 的 ROUND_HALF_EVEN 不用于分钟价）。HF 为 float64 元，DS 不另舍入，parquet 原值保存。麦蕊原值写入。
 - 成交量统一为**股**：麦蕊日线 v 是手，×100（T003 GAP2；`validate_bar`；T-T81 全库额 ÷（量 × 收）中位 1.0002）。.day、.lc1、.lc5、HF 本来就是股，不乘。麦蕊 1 分钟 v 的单位官方文档没写，**未验证**，核实前不写麦蕊分钟量。
-- 成交额统一为**元**，各源原值；入库（日线）量化到 4 位，分钟 parquet 不舍入。.day、.lc1 的 float32 只有约 7 位有效数字，4 位量化不损失信息；DS 研究不舍入是因为在 float64 里算，两者不冲突。
+- 成交额统一为**元**，各源原值；入库（日线）按 MONEY 列量化到 4 位（日契 §3.3），万分之一元以下的 float32 尾数会被舍去，对元级成交额无实际影响；分钟 parquet 不舍入，同 DS。
 - 麦蕊陷阱：单股网络源 `/hsrl/ssjy/{code}` 的 v 是**万手**（T003 GAP2）；`ssjy/all` 的成交额取整到百元（T-B140）。这两个接口不作为历史入库源。
 - 分钟量合计与日量本来就差几十股（通达信自身如此，T-DATA-SRC），不做「合计等于日量」的强校验（分契 §1.2）。
 
@@ -66,7 +66,9 @@
   - 只收 category 为 1（除权除息）且 market 为 0（SZ）或 1（SH）的事件，代码按 GBK 解码；
   - 每股现金 D = 红利 ÷ 10，配股价 Pp 原值，送转比例 S = 送转 ÷ 10，配股比例 R = 配股 ÷ 10；
   - 除权（息）参考价 ref_e = (pc_raw − D + Pp × R) / (1 + S + R)，pc_raw 为除权日前一交易日的不复权收盘（沪交易规则第 4.3.2 条、深第 4.4.2 条）；
-  - 交易日 t 只用除权日 e ≤ t 的事件；跨日比值用后复权因子 F_t = Π(e≤t) pc_raw,e / ref_e。
+  - 交易日 t 只用除权日 e ≤ t 的事件；跨日比值用后复权因子 F_t = Π(e≤t) pc_raw,e / ref_e，最早交易日因子为 1（标准后复权连乘，本契约约定，DS 与 retest_plan 未写此式，「未验证」）。
+  - 一次计算只用一个 gbbq 快照（显式指定 snapshot_sha256，记入结果），不得混用多个快照的事件。
+  - pc_raw 取不到（除权日前无不复权收盘，如历史起点之前或长期停牌缺行）或 ref_e ≤ 0 时，该事件不参与，记 `adjust_factor_missing:<除权日>`，不补 1、不跳过后续事件的记录。
 - 北交所：DS 不收 BJ 事件，所以北交所缺因子，记 `adjust_factor_missing`，不补 1（源契 §6 Q2 的保守规则不变）。
 - 麦蕊 pc 已按除权除息调整（T-T81：2,797 行 pc 不等于上一日收盘，分布与除权相符），只作 ref_e 的旁证，不能当 pc_raw。
 - 已知局限：gbbq 只有单一快照，事后更正无法追溯（`retest_plan.md` §2.4 第 5 条）。
@@ -87,11 +89,11 @@
 | .day 文件名市场 + 6 位代码 | D.code | 目录与前缀定交易所，`normalize_code` | 6 位 + 后缀 | 非 A 股、非 stock 跳过并按原因计数（`scan`） |
 | .day 日期 | D.trade_date | YYYYMMDD | date | 非法日期记录拒绝；同文件同日重复则文件拒绝（DS `DailyArchive.records` 报错） |
 | .day open/high/low/close | D.open/high/low/close | uint32 ÷ 100 | 到分，无需舍入 | 价格为 0、高低价矛盾记录拒绝 |
-| .day volume | D.volume | uint32，股，不乘 | 整数 | 单位自检失败文件拒绝（`unit_suspect`，额 ÷ 量落在 [low, high] ±1%，失败超过 5%） |
+| .day volume | D.volume | uint32，股，不乘 | 整数 | 单位自检失败文件拒绝（`unit_suspect`，额 ÷ 量落在 [low, high] ±1%，失败超过 5%；阈值沿用日契 §3.3） |
 | .day amount | D.amount | float32，元 | 4 位 | `non_finite`、`out_of_range` 记录拒绝 |
 | .day 保留字段 | 不写 | — | — | 不当前收用；D.pre_close 写空 |
 | .day 其他列 | D.adj_type / source / is_suspended / source_licence_id | none / tdx_local / 空 / 空 | — | — |
-| 麦蕊日线 t | D.trade_date | `YYYY-MM-DD` 或 `YYYY-MM-DD 00:00:00`（C9） | date | 其他格式、时间部分非零：记录拒绝 |
+| 麦蕊日线 t | D.trade_date | `YYYY-MM-DD`、`YYYYMMDD` 或 `YYYY-MM-DD 00:00:00`（C9） | date | 其他格式、时间部分非零：记录拒绝 |
 | 麦蕊日线 o/h/l/c、a | D 同名列 | 元，原值 | 4 位 | `validate_bar` |
 | 麦蕊日线 v | D.volume | 手 × 100 | 整数股 | 换算后非整数拒绝（`validate_bar`） |
 | 麦蕊日线 pc / sf | D.pre_close / is_suspended | 前收原值 / 1 为真；停牌行平价 OHLC、零量额原样写（C10） | — | pc 非正拒绝 |
@@ -109,13 +111,13 @@
 | .lc1 / .lc5 代码 | symbol、exchange | 只收 sh、sz 目录与前缀白名单（DS `selected_lc1`、`selected_symbol`） | 6 位 | bj 目录不读（C7） |
 | .lc1 / .lc5 日期 + 分钟数 | timestamp | 打包日期解码；零点加分钟数；Asia/Shanghai；.lc1 的 13:00 按 `relabel_1300`（C11），.lc5 不套 | 结束时刻 | 非法日期、分钟数 ≥ 1440、非法标签、重复时间戳、11:30 与 13:00 同日并存：文件拒绝 |
 | .lc1 / .lc5 open/high/low/close | open/high/low/close | float32 元，不 ÷100 | 0.01，ROUND_HALF_UP（C6） | `non_finite`、高低价矛盾：记录拒绝 |
-| .lc1 / .lc5 volume | volume | uint32，股，不乘 | 整数 | 单位自检同 .day |
+| .lc1 / .lc5 volume | volume | uint32，股，不乘 | 整数 | 单位自检同 .day（阈值用于分钟的适用性「未验证」，沿用分契 §1.2 的现行做法） |
 | .lc1 / .lc5 amount | turnover | float32，元 | 不舍入（DS `decode_lc1`） | `non_finite`：记录拒绝 |
 | HF symbol + exchange | symbol、exchange | 原值 | 6 位 | `is_bj` 为真或 exchange 为 BJ：不登记；前缀不在白名单：拒绝 |
 | HF timestamp | timestamp | 原值（已带时区，09:30 已并入 09:31） | 结束时刻 | 不在 09:31–11:30、13:01–15:00：文件拒绝 |
 | HF OHLC、volume、turnover | 同名列 | 元 / 股 / 元，原值 | 不舍入 | — |
 
-- 单源分段照旧（§4）：hf_1min 只用 2026-08-06 及以前，tdx_local .lc1 只用 2026-08-07 及以后，每个股票-日只取一个来源。分段写在目录表 `splice_segment`，读取方按目录选文件，不跨源补根。
+- 单源分段照旧（§4）：hf_1min 只用 2026-08-06 及以前，tdx_local .lc1 只用 2026-08-07 及以后，每个股票-日只取一个来源；.lc5 不分段。分段写在目录表 `splice_segment`，读取方按有效区间（§3.3）选文件、过滤行，不跨源补根。
 
 ### 3.3 目录表（`market.minute_file_catalog`，新建）
 
@@ -124,19 +126,20 @@
 | source | text | hf_1min 或 tdx_local |
 | code | text | 6 位 + 后缀 |
 | kind | text | 1m 或 5m |
-| date_from、date_to | date | 文件内首末交易日（北京时间） |
+| date_from、date_to | date | 文件内实际首末交易日（北京时间），不按分段裁剪 |
 | rel_path | text | 相对配置根目录的路径，一律用正斜杠存储 |
 | sha256 | text | 文件 sha256 |
 | row_count | bigint | 行数 |
-| splice_segment | text | hf（≤2026-08-06）、vipdoc_single（2026-08-07）、vipdoc_main（≥2026-08-10）之一，取自 DS `splice` 常量 |
+| splice_segment | text | 该文件可用的日期段：hf_1m（≤ `HF_END` 2026-08-06）、vipdoc_1m（≥ `SINGLE_DAY` 2026-08-07，含单日段与 `MAIN_START` 起主段）、lc5（.lc5 全部日期，无拼接）之一，取自 DS `splice` 常量 |
 | generator | text | 生成脚本名与版本（文件 sha256 或提交号），如 `convert_file` 所在 convert.py、T-B143 转换脚本 |
 | registered_at | timestamptz | 登记时间 |
 
 - 主键 (source, code, kind, rel_path)；同键重复登记时 sha256 不同即拒绝并报告，不覆盖。
-- 根目录是部署参数（运维写在部署机本地 env 文件），**不写进代码常量，也不写进 compose 默认值**（同日契 §3.2）。读取时用 pathlib 把根目录与 rel_path 拼接，根目录可以带 Windows 盘符；rel_path 不得是绝对路径、不得含 `..`。
+- **有效区间** = [date_from, date_to] ∩ splice_segment 的日期段。登记时检查同一 (code, kind) 已登记条目的有效区间，有交集即拒绝登记并报告；由此保证每个股票-日、每种 kind 只有一个文件、一个来源。文件不裁剪（HF 产物直接使用，其中晚于 `HF_END` 的行由读取方按有效区间过滤）。
+- 根目录是部署参数（运维写在部署机本地 env 文件），**不写进代码常量，也不写进 compose 默认值**（同日契 §3.2）。根目录是**读取方所在主机**上的路径：在用户 Windows 上直接读时可为带盘符的路径，在 Linux 容器里读时是 F: 的挂载点（挂载由部署配置，不在本契约）。拼接规则：rel_path 按正斜杠拆段后接到根目录；rel_path 不得是绝对路径、不得含盘符或 `..`。
 - 读取方打开文件前核对 sha256 与 row_count，不一致即停并报告。
 - 目录表不存行情数值；删除或移动 F: 上的文件须另经用户同意（硬红线：不删用户数据）。
-- 本节列名、主键、`splice_segment` 取值是本契约约定，无外部出处（「未验证」，T-B143 实现时可提修改，经架构评审）。
+- 本节列名、主键、有效区间规则、`splice_segment` 取值是本契约约定，无外部出处（「未验证」，T-B143 实现时可提修改，经架构评审）。
 
 ### 3.4 入库：gbbq（`market.ex_rights_events`，新建）
 
@@ -154,14 +157,18 @@
 
 - **日线**：mairui 优先于 tdx_local。主键 (code, trade_date, adj_type) 一键一行。
   - 通达信导入遇已有任何行一律 DO NOTHING，不覆盖（日契 §2）；hsjday 与 vipdoc 同键，先写者留下，差异进对账报告。
-  - **麦蕊后到、已有行为 tdx_local**：麦蕊替换该行（C1）。**这是唯一允许的跨源替换**。顺序：先按日契 §5 规则比对，把差异写进对账明细（kind 为 replaced_tdx_local，其余字段同下），再在同一事务里更新整行（含 source 改为 mairui）；对账明细写失败则不替换。已有行为 mairui、fake 或其他来源时，仍是 DO NOTHING。
+  - **麦蕊后到、已有行为 tdx_local**：麦蕊替换该行（C1）。**这是唯一允许的跨源替换**。已有行为 mairui、fake 或其他来源时，仍是 DO NOTHING。顺序：
+    1. 按日契 §5 规则比对，把每个差异字段写进对账 jsonl 并落盘（kind 为 replaced_tdx_local，existing_source 为 tdx_local、existing_value 为旧值，incoming_source 为 mairui、incoming_value 为新值）；各字段都相同时也写一行（field 为 `*`，kind 为 replaced_tdx_local_same），保证每次替换都有记录。落盘失败则不替换。
+    2. 执行条件更新：只在该行 source 仍为 tdx_local 时更新整行（含 source 改为 mairui），条件不满足（被并发写入改掉）则影响 0 行、不替换。
+    3. 事务结束后再写一行结果（kind 为 replace_result，值为 committed、skipped 或 rolled_back），对账以结果行为准；只有第 1 步、没有 committed 结果行的，视为未替换。
+    4. `UpsertStats` 增加 replaced 计数；替换不计入 conflicts，也不产生 conflict issue。
   - 不设截止日 D（C1，日契 §3.4 已改）：通达信可导全部历史；快照仍排除 tdx_local（日契 §4），日报只用麦蕊。
 - **1 分钟（文件层）**：hf_1min 与 tdx_local 按 DS 拼接常量分段（`splice` 的 `HF_END`、`SINGLE_DAY`、`MAIN_START`），每个股票-日只取一个来源，不跨源补根（DS `merge_sources`）。麦蕊盘中 1 分钟在 PG，按分契 §1.3。
 - **5 分钟**：只有 tdx_local（.lc5 parquet）。
 - **差异比对与标记**（不新增阈值）：
   - 日线：OHLC 到分完全相等，量完全相等，额 |差| ≤ max(1 元, |已有值| × 2.4e-7)（日契 §5，`AMOUNT_ABS_TOL`、`AMOUNT_REL_TOL`）；
   - 分钟：OHLC、量完全相等，额不比（分契 §1.2）；
-  - 差异写入对账 jsonl（日契 §3.3「导入时的落盘文件」，字段 code、trade_date、ts、field、existing_source、existing_value、tdx_value、tolerance、kind），末行汇总；库里不加差异标记列。
+  - 差异写入对账 jsonl（日契 §3.3「导入时的落盘文件」，字段 code、trade_date、ts、field、existing_source、existing_value、tdx_value、tolerance、kind；替换场景另用 incoming_source、incoming_value，见上），末行汇总；库里不加差异标记列。
   - `retest_plan.md` §2.7 的 0.005 元、0.1%、98% 是研究门槛（98% 标「未验证」），导入只报告，不作拒绝条件；T-B143 不调用 DS `check_splice` 当导入闸。
 
 ## 5. 裁定（2026-11-14 编排者）
@@ -170,15 +177,15 @@
 
 | # | 原契约 / main | 裁定 |
 | --- | --- | --- |
-| C1 | 日契 §3.4 截止日 D；同键双方 DO NOTHING（U-T1） | 取消截止日 D；麦蕊后到可替换 tdx_local 行，唯一跨源替换，先写对账明细（§4）。日契 §1、§2、§3.4、§7 U-T1 与源契 §7 ⑤ 已加 T-A153 注记 |
+| C1 | 日契 §3.4 截止日 D；同键双方 DO NOTHING（U-T1） | 取消截止日 D；麦蕊后到可替换 tdx_local 行，唯一跨源替换，先写对账明细（§4）。日契 §1、§2、§3.3、§3.4、§7 U-T1、源契 §7 ⑤ 与 §8.3、快照契约（`daily-snapshot-from-bars.md`）§13 已加 T-A153 注记 |
 | C2 | 分契 §1.3 跨源先写者留下 | 离线历史分钟按 DS 日期分段、股票-日单源（§4） |
-| C3 | 分契 §2.1、§2.2 分钟线入 `minute_bars` / `minute5_bars` | 离线历史分钟线不入 PG：F: 上 parquet（含退市股，北交所不导）+ 目录表（§3.2、§3.3）；日线与 gbbq 入库；读取方本地读 parquet。分契 §1.2 已加注记 |
+| C3 | 分契 §2.1、§2.2 分钟线入 `minute_bars` / `minute5_bars` | 离线历史分钟线不入 PG：F: 上 parquet（含退市股，北交所不导）+ 目录表（§3.2、§3.3）；日线与 gbbq 入库；读取方本地读 parquet。分契 §1.2、§2.2、§3.4 与验收已加注记 |
 | C4 | `MINUTE_BAR_SOURCES` 无 HF | 因 C3，不再改 minute_bars 的 CHECK；hf_1min 只作目录表 source 取值 |
-| C5 | 日契 §2 由麦蕊 pc 推因子；库无权息表 | gbbq 统一算（§2.5）；新建 `market.ex_rights_events`（§3.4） |
+| C5 | 日契 §2 由麦蕊 pc 推因子；库无权息表 | gbbq 统一算（§2.5）；新建 `market.ex_rights_events`（§3.4）；gbbq 因子实现落地前，日契 §2、源契 §6 Q2、快照契约 §2 的缺口口径照旧 |
 | C6 | `tdx_local._quantize` 为 ROUND_HALF_EVEN | 分钟价按 DS 用 ROUND_HALF_UP（只在半分边界有差，如 10.125 → 10.13） |
 | C7 | 分契 §1.2 分钟默认要求 bj、可 `,exclude-bj` | .lc1、.lc5、HF 都不导北交所；日线 bj .day 照日契导入 |
 | C8 | 库日历只有 2026 | 按 `sessions.merged_calendar` 补 2022 起历史日历，另开单 |
-| C9 | `_trade_date`（`tb140_history_load`，未合入 main）只认 `YYYY-MM-DD`、`YYYYMMDD` | 加认 `YYYY-MM-DD 00:00:00`，时间部分非零拒绝 |
+| C9 | `_trade_date`（`tb140_history_load`，未合入 main）只认 `YYYY-MM-DD`、`YYYYMMDD` | 保留这两种，加认 `YYYY-MM-DD 00:00:00`，时间部分非零拒绝 |
 | C10 | 源契 §7 ④ 停牌占位行 OHLC、量额全空 | 麦蕊停牌行按源原样写（平价 OHLC、零量额），下游以 is_suspended 为准；不回写已有行 |
 | C11 | `parse_lc_bytes` 无 13:00 处理 | 采用 DS `relabel_1300`（§2.3） |
 
@@ -186,12 +193,12 @@
 
 DS 数据在用户电脑 F:\ashare-invest-assistant\data\。T-B143 开工第一步由本团队后端**只读**核对下列各项，结果写进 T-B143 报告；任何一项与预期不一致或缺失，停下上报编排者，不自行调整口径。不改、不删 F: 上任何文件。
 - [ ] `tdx-pack/hsjday.zip`、`gbbq.zip` 的完整 sha256 是否与 box `tdx-pack` 的 `hsjday_20261110.zip`、`gbbq_20261110.zip` 相同；`T-B136-tdx-manifest.json` 是否存在。DS `prepare_tdx.prepare` 不记 Last-Modified，下载时点只能从 manifest 或文件时间旁证。
-- [ ] `hf-1min/T-B136-hf-ready.json` 是否存在、内容是否 ok；`2022plus/manifest.json`、`manifest_files.csv` 的 sha256 是否与 box 相同（`compare_manifest` 只保证关键字段一致，不保证字节相同）。
+- [ ] `hf-1min/T-B136-hf-ready.json` 是否存在、内容是否 ok；`2022plus/manifest.json`、`manifest_files.csv` 是否与 box 版本按 `prepare_hf.compare_manifest` 的口径语义一致（不一致才停）；字节 sha256 是否相同只记录，不作停止条件（Arrow 序列化可不同）。
 - [ ] `hf-1min/raw/metadata` 是否在，四个 csv（market_calendar、coverage_by_instrument、no_bar_day_classification、absent_instruments）的 sha256。
 - [ ] `calendars` 目录实际有哪些文件；预公告日历的 sha256 是否等于 `runner_data.CALENDAR_SHA`。
 - [ ] `retest-inputs` 下 st_history.csv、listing_history.csv、termination_list.csv、delisting_period.csv 的 sha256 是否与 `docs/strategies/T-R65/README.md` 产物清单一致（状态数据，不进本表映射）。
 - [ ] DS 是否持有 tdx-min（vipdoc 1 分钟）包及其 manifest、SHA256SUMS；没有的话，DS 的 lc1 输入是什么（`runner_data.preflight` 支持两包或本地 vipdoc 两种）。
-- [ ] F: 上 2022plus 是否已排除北交所（`is_bj`）、是否含退市股（manifest 的 `delisted_stocks`），与 C3 一致。
+- [ ] F: 上 2022plus 的北交所文件数（DS 配置记为 `bj_files`）与是否含退市股（manifest 的 `delisted_stocks`）：只记录。北交所文件可以存在，T-B143 不登记（C7）；退市股缺失才停。
 
 ## 7. 验收（G/W/T，全部用虚构代码与数值）
 
@@ -199,16 +206,17 @@ DS 数据在用户电脑 F:\ashare-invest-assistant\data\。T-B143 开工第一�
 - `test_msi_day_volume_shares_not_multiplied`：Given 构造 .day，价 1234（整数）、量 700、额 8638.0 / Then 价 12.34，量 700（不乘 100），source 为 tdx_local，pre_close、is_suspended 为空。
 - `test_msi_day_duplicate_date_rejects_file`：Given 同文件两条同日记录 / Then 该文件拒绝，运行为 partial，其他文件照常。
 - `test_msi_day_no_until_cutoff`：Given .day 含麦蕊 3 年窗口内的日期，未传截止日 / Then 照常导入（C1）。
-- `test_msi_mairui_replaces_tdx_local_after_reconcile`：Given 已有 tdx_local 行收盘 12.00，麦蕊同键收盘 12.01 / When 麦蕊写入 / Then 对账明细先有一条 kind 为 replaced_tdx_local，该行变为麦蕊值且 source 为 mairui；Given 打桩让对账明细写失败 / Then 不替换。
+- `test_msi_mairui_replaces_tdx_local_after_reconcile`：Given 已有 tdx_local 行收盘 12.00，麦蕊同键收盘 12.01 / When 麦蕊写入 / Then jsonl 先有 replaced_tdx_local 行（existing_value 12.00、incoming_value 12.01），后有 replace_result 为 committed，该行为麦蕊值且 source 为 mairui，replaced 计 1、conflicts 计 0；Given 各字段相同 / Then 有 replaced_tdx_local_same 行且仍替换；Given 打桩让 jsonl 落盘失败 / Then 不替换；Given 更新前该行已被改为 mairui / Then 影响 0 行，结果行为 skipped。
 - `test_msi_existing_mairui_never_overwritten`：Given 已有 mairui 行收盘 12.00，通达信同键 12.01 / Then 原行不变，对账 jsonl 一条 mismatch，复跑 inserted 为 0。
 - `test_msi_lc1_price_round_half_up`：Given .lc1 价 10.125（float32 可精确表示）/ Then parquet 中为 10.13。
 - `test_msi_lc1_relabel_1300`：Given 一个股票-日 239 个标准标签加 13:00 / Then 13:00 改为 11:30；条件不全 / Then 丢弃 13:00；11:30 与 13:00 并存 / Then 文件拒绝。
 - `test_msi_lc_bj_not_read`：Given root 下有 bj/minline、bj/fzline / Then 不扫描、不生成 parquet、不登记目录。
-- `test_msi_minute_not_written_to_pg`：Given 一次离线分钟导入 / Then `market.minute_bars`、`market.minute5_bars` 行数不变，目录表新增对应条目。
-- `test_msi_catalog_rel_path_and_root`：Given 根目录参数为 `F:\\data` 形式与 `/data` 形式各一 / Then rel_path 存为正斜杠相对路径，两种根目录都能拼出可读路径；rel_path 为绝对路径或含 `..` / Then 拒绝登记。
+- `test_msi_minute_not_written_to_pg`：Given 打桩记录全部 SQL / When 一次离线分钟导入 / Then 对 `market.minute_bars`、`market.minute5_bars` 的 INSERT、UPDATE、DELETE 语句为 0，目录表新增对应条目。
+- `test_msi_catalog_rel_path_and_root`：Given 根目录 `F:\\data`（按 Windows 路径规则）与 `/mnt/f/data`（按 POSIX 路径规则）各一，rel_path `hf/SH/600000.parquet`（虚构）/ Then 两种拼接结果分别为对应主机上的正确路径；rel_path 为绝对路径、含盘符或 `..` / Then 拒绝登记。
 - `test_msi_catalog_sha_mismatch_refused`：Given 同键重复登记且 sha256 不同 / Then 拒绝并报告，原条目不变；读取时文件 sha256 与目录不符 / Then 停。
-- `test_msi_catalog_one_source_per_stock_day`：Given 同一代码 2026-08-07 既有 HF 又有 .lc1 / Then 目录分段只让 tdx_local 覆盖该日；HF 文件的 date_to 不晚于 2026-08-06。
+- `test_msi_catalog_one_source_per_stock_day`：Given HF 文件 date_to 为 2026-08-07（splice_segment hf_1m）与 .lc1 文件 date_from 为 2026-08-07（vipdoc_1m）/ Then 两者都可登记，有效区间分别止于 08-06、起于 08-07，读取 08-07 只返回 tdx_local；Given 再登记一个同代码 vipdoc_1m 文件覆盖 08-07 / Then 拒绝登记。
 - `test_msi_gbbq_category1_shsz_only`：Given 构造事件 category 1 的 SH、SZ 各一条，category 2 一条，北交所一条 / Then 只入库两条，换算为红利 ÷10、送转 ÷10、配股 ÷10，source 为 tdx_gbbq。
+- `test_msi_gbbq_one_snapshot_and_missing_pc`：Given 两个快照含同一事件 / Then 指定一个快照计算时该事件只乘一次；Given 除权日前无收盘 / Then 记 adjust_factor_missing，不补 1。
 - `test_msi_gbbq_ref_price`：Given pc_raw 12.00、D 0.2、Pp 8.00、S 0.1、R 0.1 / Then ref_e = (12.00 − 0.2 + 0.8) / 1.2 = 10.50；除权日晚于 t 的事件不参与。
 - `test_msi_mairui_pro_pc_sf_not_mapped`：Given pro/history 一行带 pc、sf / Then 不写 pre_close、is_suspended。
 - `test_msi_mairui_daily_t_midnight_format`：Given t 为 `2025-04-21 00:00:00` 与 `2025-04-21` / Then 同一 trade_date；`2025-04-21 10:00:00` / Then 记录拒绝。
