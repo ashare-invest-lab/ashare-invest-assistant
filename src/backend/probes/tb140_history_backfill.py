@@ -10,10 +10,11 @@
 - 不打印证书，异常与 URL 日志一律脱敏。异常只记录类名与时间，不记消息文本。
 - 先记账后请求；原子更新计数；持久化断点。
 - 传输失败（断开/超时/连不上）：关连接、等 60 秒、重建连接续接同一只；进程累计最多续接 3 次，第 4 次 halted+STOP。每次重试也先记账。
-- HTTP 429 / 业务码 103 / STOP / HTTP 503 / 其他非 200 或业务限流：立即 halted+追加 STOP，不重试。
+- HTTP 429 / 业务码 101、103、429 / STOP / HTTP 503 / 其他非 200 或业务限流：立即 halted+追加 STOP，不重试。
 - 非 200 时把响应体前 300 字节脱敏后记入 runs.jsonl。
 - 不清除旧 STOP（只追加原因，从不 unlink / 覆盖清空）。
-- 每批最多 2000；请求间隔由调用方给定（本模块下限 ≥ 1 秒）。
+- 每批最多 2000；请求间隔默认 1 秒，下限 0.2 秒（t1153s3904；T003-mairui-capability）。
+- 麦蕊连接直接使用 http.client，不读取代理环境变量，不设置隧道。
 - 数据只写 --run-dir，不入仓库。
 - 容器无 requests/httpx；本文件只使用标准库 + 同目录 tb140_history_load。
 - 不提供清 STOP、复位 halted、从 0 建账本的开关。
@@ -51,7 +52,11 @@ from tb140_history_load import (
 
 HOST = "api.mairuiapi.com"
 BATCH_CAP = 2000
-MIN_INTERVAL = 1.0
+# 用户卡片 t1153s3904：每秒 5 次、单进程直连、遇限流即停；
+# T003-mairui-capability：钻石版 6000 次/分钟、每日不限。
+RATE_FLOOR_SECONDS = 0.2
+MIN_INTERVAL = RATE_FLOOR_SECONDS
+DEFAULT_INTERVAL = 1.0
 MAX_BODY = 10 * 1024 * 1024
 HTTP_BODY_PREVIEW_BYTES = 300
 TRANSPORT_RESUME_LIMIT = 3
@@ -253,11 +258,13 @@ def history_path_log(code: str, st: str, et: str) -> str:
 
 
 def open_connection(timeout: float = 40.0) -> http.client.HTTPSConnection:
+    """直连固定主机；http.client 不读取代理环境变量，也不设置隧道。"""
     context = ssl.create_default_context()
     return http.client.HTTPSConnection(HOST, timeout=timeout, context=context)
 
 
 def request_once(conn: Any, path: str) -> tuple[int, Any, bytes]:
+    status: int | None = None
     try:
         conn.request(
             "GET",
@@ -270,13 +277,18 @@ def request_once(conn: Any, path: str) -> tuple[int, Any, bytes]:
         )
         resp = conn.getresponse()
         status = int(resp.status)
-        raw = resp.read(MAX_BODY + 1)
+        raw = resp.read(HTTP_BODY_PREVIEW_BYTES if status != 200 else MAX_BODY + 1)
     except Halt:
         raise
     except BaseException as exc:
+        if status is not None and status != 200:
+            # 已收到非 200，响应体读取失败也必须熔断，不能误判为可续接传输错误。
+            return status, None, b""
         if _is_transport(exc):
             raise TransportFailure(type(exc).__name__) from None
         raise Halt("transport_or_internal_failure_no_retry") from None
+    if status != 200:
+        return status, raw.decode("utf-8", errors="replace"), raw
     if len(raw) > MAX_BODY:
         raise Halt("response_too_large")
     preview = raw[:HTTP_BODY_PREVIEW_BYTES]
@@ -302,7 +314,7 @@ class Backfill:
         counter_path: Path,
         stop_path: Path,
         run_dir: Path,
-        interval: float = MIN_INTERVAL,
+        interval: float = DEFAULT_INTERVAL,
         connection_factory: Callable[[], Any] | None = None,
         sleeper: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -326,6 +338,7 @@ class Backfill:
 
     def _refuse_if_stopped(self, state: dict[str, Any]) -> None:
         if self.stop_path.exists():
+            self._persist_halt(state, "STOP")
             raise Halt("STOP")
         if state.get("halted"):
             raise Halt("halted")
@@ -449,7 +462,7 @@ def run_batch(
     stop_path: Path,
     run_dir: Path,
     max_calls: int = BATCH_CAP,
-    interval: float = MIN_INTERVAL,
+    interval: float = DEFAULT_INTERVAL,
     st: str = HIST_ST.strftime("%Y%m%d"),
     et: str = HIST_ET.strftime("%Y%m%d"),
     licence_ids: list[str] | None = None,
@@ -588,7 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stop-file", type=Path, required=True)
     p.add_argument("--run-dir", type=Path, required=True, help="原始与 SQL 只写这里，勿放仓库内")
     p.add_argument("--max", type=int, default=BATCH_CAP)
-    p.add_argument("--interval", type=float, default=MIN_INTERVAL)
+    p.add_argument("--interval", type=float, default=DEFAULT_INTERVAL, help="请求间隔秒，默认 1，小于 0.2 拒绝")
     p.add_argument("--st", default=HIST_ST.strftime("%Y%m%d"))
     p.add_argument("--et", default=HIST_ET.strftime("%Y%m%d"))
     p.add_argument(

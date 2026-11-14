@@ -12,6 +12,7 @@ import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 PROBES = Path(__file__).resolve().parent
 if str(PROBES) not in sys.path:
@@ -437,7 +438,9 @@ def test_existing_stop_not_cleared_and_no_request() -> None:
         assert called["n"] == 0
         assert ws["stop"].read_text(encoding="utf-8").startswith("OLD_STOP_LINE_KEEP_ME")
         state = json.loads(ws["counter"].read_text(encoding="utf-8"))
-        assert state["total"] == 0 and state["halted"] is False
+        assert state["total"] == 0 and state["halted"] is True
+        assert state["halt_reason"] == "STOP"
+        assert ws["stop"].read_text(encoding="utf-8").splitlines()[-1].endswith(" STOP")
         assert not ws["lic"].exists()
 
 
@@ -599,6 +602,7 @@ def test_stdlib_only_and_no_live_host() -> None:
         assert "os.environ" not in src and "MAIRUI_LICENCE" not in src
     assert bf.HOST == "api.mairuiapi.com"
     assert "http.client" in (PROBES / "tb140_history_backfill.py").read_text(encoding="utf-8")
+    assert "set_tunnel" not in (PROBES / "tb140_history_backfill.py").read_text(encoding="utf-8")
     svsrc = (PROBES / "tb140_history_supervisor.py").read_text(encoding="utf-8")
     assert not re.search(r"^\s*(import|from)\s+(requests|httpx)\b", svsrc, re.M)
     assert "MAIRUI_LICENCE" not in svsrc
@@ -736,11 +740,20 @@ def test_transport_fourth_halts() -> None:
 
 
 def test_fuse_codes_do_not_retry() -> None:
-    """503 / 429 / 业务 103 / 已有 STOP：不重试、不等 60 秒。"""
+    """非 200 / JSON 或纯文本业务停止码 / 已有 STOP：不重试、不等 60 秒。"""
     cases = [
         ("http503", (503, "unavailable body " + MOCK_SECRET + ("Z" * 400)), "503"),
         ("http429", (429, "103:同一Licence证书"), "429"),
+        ("http302", (302, "redirect"), "302"),
+        ("http500", (500, "server error"), "500"),
+        ("http503_non_utf8", (503, b"\xff"), "503"),
+        ("biz101", (200, {"code": 101}), "rate"),
+        ("biz103_code_only", (200, {"code": "103"}), "rate"),
+        ("biz429", (200, {"code": 429}), "rate"),
         ("biz103", (200, {"code": "103", "msg": "限流"}), "rate"),
+        ("text101", (200, "101:quota"), "rate"),
+        ("text103", (200, "103:quota"), "rate"),
+        ("text429", (200, "429:quota"), "rate"),
     ]
     for label, script_item, needle in cases:
         with tempfile.TemporaryDirectory() as raw:
@@ -772,12 +785,15 @@ def test_fuse_codes_do_not_retry() -> None:
                 raise Fail(f"{label} should halt")
             except bf.Halt as exc:
                 text = str(exc)
-                assert needle in text or "rate" in text or "HTTP" in text, (label, text)
+                assert needle in text, (label, text)
             assert len(made) == 1
             assert _request_count(made) == 1
             assert 60.0 not in sleeps
             state = json.loads(ws["counter"].read_text(encoding="utf-8"))
             assert state["halted"] is True and state["done_history"] == []
+            assert state["total"] == 1
+            assert ws["stop"].read_text(encoding="utf-8").splitlines()[-1].endswith(state["halt_reason"])
+            assert made[0].closed is True
             dumped = buf.getvalue() + (ws["run"] / "runs.jsonl").read_text(encoding="utf-8")
             assert MOCK_SECRET not in dumped
             if label == "http503":
@@ -813,6 +829,39 @@ def test_fuse_codes_do_not_retry() -> None:
             assert str(exc) == "STOP"
         assert called["n"] == 0
         assert ws["stop"].read_text(encoding="utf-8").startswith("OLD_STOP_LINE_KEEP_ME")
+
+
+def test_non_200_body_failure_does_not_retry() -> None:
+    class BrokenBodyResp(FakeResp):
+        def read(self, n: int = -1) -> bytes:
+            raise TimeoutError("mock response body timeout")
+
+    class BrokenBodyConn(ScriptedConn):
+        def getresponse(self) -> Any:
+            status, body = self.script.pop(0)
+            return BrokenBodyResp(status, body)
+
+    for status in (429, 503, 500):
+        with tempfile.TemporaryDirectory() as raw:
+            ws = _workspace(Path(raw))
+            conn = BrokenBodyConn([(status, None)])
+            now, sleep, sleeps, _ = _clock([])
+            try:
+                with redirect_stdout(io.StringIO()):
+                    bf.run_batch(
+                        codes_file=ws["codes"], licence_file=ws["lic"],
+                        counter_path=ws["counter"], stop_path=ws["stop"],
+                        run_dir=ws["run"], connection_factory=lambda: conn,
+                        sleeper=sleep, clock=now,
+                    )
+                raise Fail("non-200 must halt even if body read fails")
+            except bf.Halt as exc:
+                assert str(exc).startswith(f"HTTP_{status}")
+            state = bf.load_counter(ws["counter"])
+            assert state["halted"] is True and state["total"] == 1
+            assert ws["stop"].read_text(encoding="utf-8").splitlines()[-1].endswith(state["halt_reason"])
+            assert len(conn.requests) == 1 and conn.closed is True
+            assert 60.0 not in sleeps
 
 
 def test_cross_batch_db_and_checkpoint() -> None:
@@ -905,14 +954,14 @@ def test_supervisor_interval_and_db_failure() -> None:
                     counter_path=ws["counter"],
                     stop_path=ws["stop"],
                     run_dir=ws["run"],
-                    interval=1.0,
+                    interval=0.19,
                     connection_factory=lambda: ScriptedConn([]),
                     sleeper=lambda _s: None,
                     clock=lambda: 0.0,
                     environ=MOCK_ENV,
                     db_connect=lambda _d: FakePg(),
                 )
-            raise Fail("interval 1 should be rejected by supervisor")
+            raise Fail("interval 0.19 should be rejected by supervisor")
         except bf.Halt as exc:
             assert "interval" in str(exc)
         assert not ws["lic"].exists()
@@ -954,6 +1003,137 @@ def test_supervisor_interval_and_db_failure() -> None:
         assert not ws["lic"].exists()
 
 
+def _check_interval(*, supervised: bool, interval: float, accepted: bool) -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        ws = _workspace(Path(raw))
+        conn = ScriptedConn([(200, [_bar()])] * 3)
+        now, sleep, sleeps, _ = _clock([])
+        kwargs: dict[str, Any] = {
+            "codes_file": ws["codes"],
+            "licence_file": ws["lic"],
+            "counter_path": ws["counter"],
+            "stop_path": ws["stop"],
+            "run_dir": ws["run"],
+            "max_calls": 2,
+            "interval": interval,
+            "connection_factory": lambda: conn,
+            "sleeper": sleep,
+            "clock": now,
+        }
+        runner = sv.run_supervised if supervised else bf.run_batch
+        if supervised:
+            kwargs.update(environ=MOCK_ENV, db_connect=lambda _d: FakePg())
+        try:
+            with redirect_stdout(io.StringIO()):
+                summary = runner(**kwargs)
+        except bf.Halt as exc:
+            assert not accepted, str(exc)
+            assert str(exc) == "interval_below_minimum"
+        else:
+            assert accepted, "interval below floor should be rejected"
+            expected = 3 if supervised else 2
+            assert summary["done"] == expected and summary["halt"] is None
+            assert len(conn.requests) == expected
+            assert len(sleeps) == expected and all(s >= 0.2 for s in sleeps)
+        state = bf.load_counter(ws["counter"])
+        assert state["halted"] is False
+        if not accepted:
+            assert conn.requests == [] and sleeps == [] and state["total"] == 0
+        assert not ws["lic"].exists()
+
+
+def test_backfill_interval_floor_accepted() -> None:
+    _check_interval(supervised=False, interval=0.2, accepted=True)
+
+
+def test_backfill_interval_below_floor_rejected() -> None:
+    _check_interval(supervised=False, interval=0.19, accepted=False)
+
+
+def test_supervisor_interval_floor_accepted() -> None:
+    assert sv.build_parser().get_default("interval") == 2.0
+    assert "小于 0.2 拒绝" in sv.build_parser().format_help()
+    _check_interval(supervised=True, interval=0.2, accepted=True)
+
+
+def test_supervisor_interval_below_floor_rejected() -> None:
+    _check_interval(supervised=True, interval=0.19, accepted=False)
+
+
+def test_direct_http_client_connection() -> None:
+    # 同时替换 TLS 上下文及连接构造器，既不读证书也不打开网络。
+    with patch.object(bf.ssl, "create_default_context") as context_factory:
+        with patch.object(bf.http.client, "HTTPSConnection") as connection_factory:
+            conn = bf.open_connection(timeout=12.0)
+            connection_factory.assert_called_once_with(
+                bf.HOST, timeout=12.0, context=context_factory.return_value,
+            )
+            assert conn is connection_factory.return_value
+            conn.set_tunnel.assert_not_called()
+
+
+def test_proxy_env_presence_only() -> None:
+    class PresenceOnlyEnv(dict):
+        def __getitem__(self, key: str) -> str:
+            assert key not in sv.PROXY_ENV_NAMES, "proxy value must not be read"
+            return super().__getitem__(key)
+
+        def get(self, key: str, default: Any = None) -> Any:
+            assert key not in sv.PROXY_ENV_NAMES, "proxy value must not be read"
+            return super().get(key, default)
+
+    # 空值也算变量存在；同时覆盖大小写，且日志只含布尔值。
+    for name in (None, *sv.PROXY_ENV_NAMES):
+        with tempfile.TemporaryDirectory() as raw:
+            ws = _workspace(Path(raw))
+            env = PresenceOnlyEnv(MOCK_ENV)
+            if name is not None:
+                env[name] = ""
+            conn = ScriptedConn([(200, [_bar()])] * 3)
+            now, sleep, _, _ = _clock([])
+            with redirect_stdout(io.StringIO()):
+                overall = sv.run_supervised(
+                    codes_file=ws["codes"], licence_file=ws["lic"],
+                    counter_path=ws["counter"], stop_path=ws["stop"],
+                    run_dir=ws["run"], connection_factory=lambda: conn,
+                    sleeper=sleep, clock=now, environ=env,
+                    db_connect=lambda _d: FakePg(),
+                )
+            logged = json.loads((ws["run"] / "runs.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+            for record in (overall, logged):
+                assert type(record["proxy_env_present"]) is bool
+                assert record["proxy_env_present"] is (name is not None)
+
+
+def test_supervisor_existing_stop_halts_and_appends() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        ws = _workspace(Path(raw))
+        old = "OLD_STOP_LINE_KEEP_ME\n"
+        ws["stop"].write_text(old, encoding="utf-8")
+
+        def forbidden(*_args: Any) -> Any:
+            raise Fail("STOP must refuse before connecting")
+
+        try:
+            with redirect_stdout(io.StringIO()):
+                sv.run_supervised(
+                    codes_file=ws["codes"], licence_file=ws["lic"],
+                    counter_path=ws["counter"], stop_path=ws["stop"],
+                    run_dir=ws["run"], connection_factory=forbidden,
+                    sleeper=forbidden, environ=MOCK_ENV, db_connect=forbidden,
+                )
+            raise Fail("STOP should refuse")
+        except bf.Halt as exc:
+            assert str(exc) == "STOP"
+        state = bf.load_counter(ws["counter"])
+        assert state["halted"] is True and state["halt_reason"] == "STOP"
+        assert state["total"] == 0
+        text = ws["stop"].read_text(encoding="utf-8")
+        assert text.startswith(old) and text.splitlines()[-1].endswith(" STOP")
+        overall = json.loads((ws["run"] / "runs.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert type(overall["proxy_env_present"]) is bool
+
+
 def test_parameterized_insert_and_conflict() -> None:
     rows, _ = ld.normalize_history("000001", [_bar()])
     db = FakePg()
@@ -989,8 +1169,16 @@ def main() -> int:
         ("transport_resume_three_then_success", test_transport_resume_three_then_success),
         ("transport_fourth_halts", test_transport_fourth_halts),
         ("fuse_codes_do_not_retry", test_fuse_codes_do_not_retry),
+        ("non_200_body_failure_does_not_retry", test_non_200_body_failure_does_not_retry),
         ("cross_batch_db_and_checkpoint", test_cross_batch_db_and_checkpoint),
         ("supervisor_interval_and_db_failure", test_supervisor_interval_and_db_failure),
+        ("backfill_interval_0.2_accepted", test_backfill_interval_floor_accepted),
+        ("backfill_interval_0.19_rejected", test_backfill_interval_below_floor_rejected),
+        ("supervisor_interval_0.2_accepted", test_supervisor_interval_floor_accepted),
+        ("supervisor_interval_0.19_rejected", test_supervisor_interval_below_floor_rejected),
+        ("direct_http_client_connection", test_direct_http_client_connection),
+        ("proxy_env_presence_only", test_proxy_env_presence_only),
+        ("supervisor_existing_stop_halts_and_appends", test_supervisor_existing_stop_halts_and_appends),
         ("parameterized_insert_and_conflict", test_parameterized_insert_and_conflict),
     ]
     for name, fn in tests:

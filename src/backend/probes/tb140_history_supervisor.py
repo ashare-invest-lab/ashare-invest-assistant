@@ -5,7 +5,8 @@
 单进程、单条 HTTP 长连接；批与批之间只写库再继续，靠账本 done_history 断点续接。
 不依赖外部逐批启动，也不提供清 STOP / 复位 halted / 从 0 建账本的开关。
 
-默认请求间隔 2 秒；--interval 小于 2 直接拒绝。
+默认请求间隔 2 秒；--interval 小于 0.2 拒绝（t1153s3904；T003-mairui-capability）。
+麦蕊连接直接使用 http.client，不读代理变量值、不设置隧道；启动汇总只记录代理变量是否存在。
 数据库连接串只从 --db-url-env 指定名字的环境变量读取（默认 DATABASE_URL），不打印连接串。
 """
 from __future__ import annotations
@@ -22,6 +23,7 @@ from typing import Any
 
 from tb140_history_backfill import (
     BATCH_CAP,
+    RATE_FLOOR_SECONDS,
     Halt,
     Backfill,
     delete_licence_file,
@@ -40,7 +42,9 @@ from tb140_history_load import (
     to_psycopg_dsn,
 )
 
-SUPERVISOR_MIN_INTERVAL = 2.0
+SUPERVISOR_MIN_INTERVAL = RATE_FLOOR_SECONDS
+SUPERVISOR_DEFAULT_INTERVAL = 2.0
+PROXY_ENV_NAMES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 DEFAULT_DB_URL_ENV = "DATABASE_URL"
 # 默认环境变量名出处：
 # src/backend/app/config.py 中 Settings.database_url，
@@ -87,7 +91,7 @@ def run_supervised(
     stop_path: Path,
     run_dir: Path,
     max_calls: int = BATCH_CAP,
-    interval: float = SUPERVISOR_MIN_INTERVAL,
+    interval: float = SUPERVISOR_DEFAULT_INTERVAL,
     st: str = HIST_ST.strftime("%Y%m%d"),
     et: str = HIST_ET.strftime("%Y%m%d"),
     licence_ids: list[str] | None = None,
@@ -111,6 +115,7 @@ def run_supervised(
         "done": 0,
         "halt": None,
         "licence_deleted": False,
+        "proxy_env_present": any(name in env for name in PROXY_ENV_NAMES),
     }
     try:
         if interval < SUPERVISOR_MIN_INTERVAL:
@@ -220,7 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--stop-file", type=Path, required=True)
     p.add_argument("--run-dir", type=Path, required=True, help="原始与 SQL 只写这里，勿放仓库内")
     p.add_argument("--max", type=int, default=BATCH_CAP, help="每批上限，默认 2000，不能更大")
-    p.add_argument("--interval", type=float, default=SUPERVISOR_MIN_INTERVAL, help="请求间隔秒，默认 2，小于 2 拒绝")
+    p.add_argument("--interval", type=float, default=SUPERVISOR_DEFAULT_INTERVAL, help="请求间隔秒，默认 2，小于 0.2 拒绝")
     p.add_argument("--st", default=HIST_ST.strftime("%Y%m%d"))
     p.add_argument("--et", default=HIST_ET.strftime("%Y%m%d"))
     p.add_argument(
