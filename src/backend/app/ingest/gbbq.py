@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from collections.abc import Sequence
+from bisect import bisect_left
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
+from typing import TypedDict
 from zipfile import ZipFile
 
 
@@ -128,3 +130,87 @@ def ref_price(
 ) -> Decimal:
     """契约 §2.5 的单次除权参考价；调用方负责选择前收和适用事件。"""
     return (pc_raw - cash + rights_price * rights) / (1 + bonus + rights)
+
+
+class AdjustmentEvent(TypedDict):
+    code: str
+    ex_date: date
+    snapshot_sha256: str
+    cash_per_share: Decimal
+    rights_price: Decimal
+    bonus_ratio: Decimal
+    rights_ratio: Decimal
+
+
+@dataclass(frozen=True)
+class AdjustFactorsResult:
+    snapshot_sha256: str
+    factors: dict[date, Decimal | None]
+    issues: tuple[str, ...]
+
+
+def compute_adjust_factors(
+    *,
+    code: str,
+    trade_dates: Sequence[date],
+    raw_closes: Mapping[date, Decimal],
+    events: Sequence[AdjustmentEvent],
+    snapshot_sha256: str,
+) -> AdjustFactorsResult:
+    """§2.5：单快照后复权连乘；trade_dates 须包含完整交易日历。
+
+    前收只取事件前一交易日，缺行不退回更早收盘。无效事件不参与乘积，
+    但使当日及后续累计因子不可用；继续检查后续事件并逐条报告缺口。
+    不读取行情源的 pre_close，不访问网络或数据库。
+    """
+    if not snapshot_sha256:
+        raise ValueError("snapshot_sha256 is required")
+    days = sorted(set(trade_dates))
+    if code.endswith(".BJ"):
+        return AdjustFactorsResult(snapshot_sha256, dict.fromkeys(days), ("adjust_factor_missing",))
+    selected = sorted(
+        (
+            event
+            for event in events
+            if days
+            and event["ex_date"] <= days[-1]
+            and event["code"] == code
+            and event["snapshot_sha256"] == snapshot_sha256
+        ),
+        key=lambda event: event["ex_date"],
+    )
+    if len({event["ex_date"] for event in selected}) != len(selected):
+        raise ValueError("duplicate_event")
+    factors: dict[date, Decimal | None] = {}
+    issues: list[str] = []
+    product = Decimal(1)
+    event_index = 0
+    missing = False
+    for day in days:
+        while event_index < len(selected) and selected[event_index]["ex_date"] <= day:
+            event = selected[event_index]
+            event_index += 1
+            previous_index = bisect_left(days, event["ex_date"]) - 1
+            pc_raw = raw_closes.get(days[previous_index]) if previous_index >= 0 else None
+            reference: Decimal | None = None
+            values = [
+                event["cash_per_share"],
+                event["rights_price"],
+                event["bonus_ratio"],
+                event["rights_ratio"],
+            ]
+            if (
+                pc_raw is not None
+                and pc_raw.is_finite()
+                and pc_raw > 0
+                and all(value.is_finite() for value in values)
+                and 1 + event["bonus_ratio"] + event["rights_ratio"] > 0
+            ):
+                reference = ref_price(pc_raw, *values)
+            if pc_raw is None or reference is None or not reference.is_finite() or reference <= 0:
+                issues.append(f"adjust_factor_missing:{event['ex_date'].isoformat()}")
+                missing = True
+            else:
+                product *= pc_raw / reference
+        factors[day] = None if missing else product
+    return AdjustFactorsResult(snapshot_sha256, factors, tuple(issues))
