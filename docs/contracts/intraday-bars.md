@@ -22,6 +22,8 @@
 
 ### 1.2 历史：通达信 minline / fzline（只取 A 股）
 
+- T-A153 裁定 C3（编排者 2026-11-14，见 `multi-source-ingest.md` §3.2、§3.3）：离线历史 .lc1 / .lc5 与 HF 1 分钟不再导入 PG，保留为 parquet 并登记 `market.minute_file_catalog`，读取方本地读文件。现有 `intraday-bars-import-tdx` 导入保留，但不用于离线历史全量；本节以下的口径（时间戳、单位、只取 A 股）仍适用于文件层。
+
 - 据编排者 2026-11-10 只读扫描（架构未核实）：
   - minline 的 .lc1：sh 4,831、sz 4,369、bj 360 个文件，样本每只 31,920 根，约 133 个交易日；
   - fzline 的 .lc5：同样的文件数，样本每只 13,776 根，约 287 个交易日。

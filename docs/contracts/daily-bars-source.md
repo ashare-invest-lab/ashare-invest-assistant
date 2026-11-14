@@ -254,6 +254,7 @@
   - `UpsertStats` 是冻结 dataclass，字段为 `inserted: int`、`unchanged: int`、`conflicts: int`、`issues: tuple[str, ...]`（只放 `daily_bar_conflict:<code>:<date>`，按字典序）。
   - 同值比较列：open、high、low、close、pre_close、volume、amount、is_suspended。先把入参量化到列精度（MONEY 为 4 位小数）再精确比较，NULL 只与 NULL 相等。**不比较** fetched_at、source、source_licence_id：同值但来源不同算 unchanged，保留原行的来源。
   - 写法：先 `INSERT … ON CONFLICT DO NOTHING RETURNING`；没有插入的键读回比较，分为 unchanged 或 conflict。任何情况都不 UPDATE。
+  - 例外（T-A153 裁定 C1，编排者 2026-11-14，见 `multi-source-ingest.md` §4）：已有行 source 为 `tdx_local`、写入方为 mairui 时，先写对账明细（kind 为 replaced_tdx_local），再在同一事务里 UPDATE 整行（source 改为 mairui）；对账明细写失败则不 UPDATE。这是唯一的跨源替换，其他来源组合仍不 UPDATE。
   - 运行记录：`fetch_and_record` 每次执行（休市日除外，见 ⑧）插入一行 pipeline_runs，kind=daily_batch，step=`daily_bars.fetch`，run_date=trade_date。
     - stats 只含：user_id、window_trading_days、codes（标的数）、inserted、unchanged、conflicts、missing、suspended、issues（排序后的字符串列表）。
     - 证券代码可以出现在 issue 字符串里；不得写入数量、成本、账户 id、用户名。
