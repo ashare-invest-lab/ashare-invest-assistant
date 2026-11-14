@@ -49,7 +49,7 @@
 
 ## (b) DB halted 人工恢复
 
-- **背景**：`daily_bars_consumer._halted` 只要看到任一 halted outbox 行，`process`、`_resume`、`wake_delayed` 就永久拒绝；只删 HALT 文件不能恢复（`T-A150-C2-effective.md` 第 11 条）。
+- **背景**（即生效确认的 K1，已裁定 11-14 编排者并入本项）：`daily_bars_consumer._halted` 只要看到任一 halted outbox 行，`process`、`_resume`、`wake_delayed` 就永久拒绝；只删 HALT 文件不能恢复（`T-A150-C2-effective.md` 第 11 条）。
 - **门控**：解除 HALT 属硬红线，每次都须用户本人批准。CLI 必须带 `--approval <卡片号>`，卡片号写入审计；默认 dry-run。
 - **入口**：新 CLI `daily-bars-halt-clear [--approval ID] [--apply]`，由运维在 ingest 容器内执行。不提供 API、定时任务或 worker 入口。
 - **前置**（任何一条不满足就拒绝，退出码非 0）：
@@ -92,7 +92,7 @@
   - 真调麦蕊属硬红线：接线提交可以离线合入，但生产启用就是单 D，须用户本人批准；
   - 批准内容按 §9.4：批型及每批上限、首次实调的次数和时段、`DAILY_BARS_SOURCE` 设为 mairui、回执安装；
   - T-B140 的既有批准不覆盖本项。
-  - 前置：(b) 已合入；K2、K3（见生效确认）已裁定。
+  - 前置：(b) 已合入（含 K1）；§9.3「批次当日有效」和命令行回填守卫已实现（K2）；T-B141 已完成 licence_id 核实（K3）。K1–K3 的去向均已裁定 11-14 编排者。
 - **输入和输出**：
   - 签名沿用 `Transport`：(code, start, end) → (status, DailyBar | DailyBarsResult | None)；
   - 只经 `ingest/egress.mairui_get` 出网（单出口、STOP/HALT 前置、`limited`、`classify`、`_write_halt`），每个计划段只发一次；
@@ -103,7 +103,7 @@
 - **接线**：`write_heartbeat` 调 `tick_bars` 时传入 transport 和 page_days。两者都只由单 D 的那次提交打开，默认仍为 None，也就是现在的 0 出网状态。
 - **停止**：
   - 遇 STOP、HALT、103、429，立即整批停，不重试，不续接；
-  - 503 按用户卡片 t1088s3682 的口径同样即停（比 §9.3 严，**待编排者确认后写回 §9.3**）；
+  - 503 同样即停，依据用户卡片 t1088s3682（已裁定 11-14 编排者，已写回 §9.3）；
   - 网络异常按 `transport_or_response_failed_no_retry` 处理，不重试。
 - **节流**：两次请求至少间隔 2 秒，依据用户卡片 t1080s3653 和 t1088s3682；单连接，`ingest.yaml` 并发为 1。
 - **未验证**（单 D 小实调前都不得设默认值）：

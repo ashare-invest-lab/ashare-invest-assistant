@@ -4,7 +4,7 @@
 - 实物：#104 outbox 722c376、#109 plan abf42bd、#111 batch-budget bbd0e6d、#116 consumer 12aa2bb、#117 window f554c6b、#118 continuation 8d4303a、#119 time-gate 1d9d2c3、#120 late-history c99921e。八片都已在 origin/main=4aae38a 中。合计 54 个文件，+4,490／−240，21 个提交（git 复核）。
 - 阻断口径：只算正常路径误拦或误放、契约承诺未兑现、放宽断言变绿、用户 Windows 部署必挂、前视或定义错误。其余记非阻断。
 
-**结论：有条件生效。** 在默认双 0 下，§9.3 的结构、判定和离线测试都已兑现，部署后出网 0 次。打开任一批上限常量（单 D）之前，须先满足 K1–K3。
+**结论：有条件生效。** 在默认双 0 下，§9.3 的结构、判定和离线测试都已兑现，部署后出网 0 次。打开任一批上限常量（单 D）之前，须先满足 K1–K3。K1–K3 的去向已裁定（11-14 编排者），见文末。
 
 ## 逐条核对
 
@@ -21,7 +21,7 @@
 | 9 | 续接条件：quota_deferred、有就绪进展、无 HALT 时推 batch_seq+1；无进展记 `daily_bars_resume_stalled` | `process` 的 `record`、`_resume`；`test_partial_progress_can_continue_until_later_batch_stalls`、`test_resume_stalled_no_infinite_loop`、`test_continuation_has_no_fixed_batch_count_ceiling`、`test_do_nothing_on_future_rows_is_not_new_readiness_progress` | 一致。17:00 截断时不看进展也续接，这是契约 §9.3 时间窗条款的要求，不算偏差 |
 | 10 | 遇 STOP、HALT、103、429：整批停，写 HALT，不续接、不重试 | `send`、`UpstreamHaltError`、`persist_halt`；`test_each_send_rechecks_stop_and_rate_limit_halts_without_continuation`、`test_halt_never_creates_continuation`、`test_batch_budget_halts_on_103`／`_429`／`_stop` | 一致。非阻断：本批已收到的行随事务一起回滚（`test_stop_on_second_history_page_rolls_back_and_blocks_next_tick`），已花掉的调用作废 |
 | 11 | HALT 由运维人工清除后才恢复 | `_halted`：只要存在任一 halted outbox 行，`process`、`_resume`、`wake_delayed` 就一律拒绝 | **偏差**：删掉 HALT 文件不能恢复，也没有解除入口（aia_maint 对 outbox 只有 SELECT(id,user_id) 和 DELETE）。默认 0 时无影响 → K1 |
-| 12 | 「直到做完」：唯一的停止条件是做完、STOP/HALT/103/429 或无进展 | `process`、`send`、`_resume` 比较北京自然日：跨日后待续批记 `daily_bars_batch_expired`；运行中的批跨日时 `send` 抛 `DailyBarsPlanError`，整批回滚 | **偏差**：多了一个停止条件；跨北京零点的回填会丢掉本批已取到的行。默认 0 时无影响 → K2 |
+| 12 | 「直到做完」：唯一的停止条件是做完、STOP/HALT/103/429 或无进展 | `process`、`send`、`_resume` 比较北京自然日：跨日后待续批记 `daily_bars_batch_expired`；运行中的批跨日时 `send` 抛 `DailyBarsPlanError`，整批回滚 | **偏差**：多了一个停止条件；跨北京零点的回填会丢掉本批已取到的行。默认 0 时无影响 → K2（已裁定：写入 §9.3） |
 | 13 | 开市日 17:00–17:45 不跑回填批和补历史批；运行中顺延，续接放入 `jobs:delayed`，17:45 放出；17:15 例行批不受限 | `delayed_until`、`HistoryWindowDeferredError`、`wake_delayed`、CLI 窗口拒绝；`test_running_batch_stops_at_1700_commits_completed_pages_and_delays_rest`、`test_exact_1745_releases_and_duplicate_wakeup_never_replays`、`test_1715_daily_can_pass_history_at_front_of_db_queue`、`test_cli_past_trade_date_respects_1700_start` | 一致 |
 | 14 | 结构上界：一批调用次数 ≤ min(计划次数, 上限) | `test_batch_budget_no_cap_calls_equal_planned`、`test_window_pages_are_complete_nonoverlapping_and_whole_code_budget` | 一致 |
 | 15 | 回执校验、`DAILY_HTTP_LIMIT` 为 1、`live_budget_issue()` 不变；环境变量和回执不能放宽上限 | `read_daily_bars_grant`、`_authorized`；`test_limit_not_widened_by_env_or_receipt`、`test_revalidate_exact_receipt_and_current_owner_status_before_attempt` | 一致 |
@@ -32,9 +32,13 @@
 
 ## 生效条件（单 D 打开任一常量之前）
 
-- **K1**：实现 DB halted 的人工恢复入口（后继 (b)），并且该入口须经用户本人批准才能使用。
-- **K2**：编排者二选一。①把「批次只在创建当日（北京时间）有效」写进 §9.3 停止条件，CLI 回填补一条最晚启动时刻的守卫；②改实现：跨日时像 17:00 截断那样提交已完成的标的再结束。架构师推荐①，改动最小。
-- **K3**：单 D 前核实库里现有麦蕊行（含 T-B140 回填）的 source_licence_id 是否等于当前有效证书 id。如果不等，C2 会把这些行视为未就绪并重新请求，需先由编排者裁定。
+- **K1**：实现 DB halted 的人工恢复入口，并且该入口须经用户本人批准才能使用。
+  - 已裁定 11-14 编排者：并入后继 (b)（`docs/contracts/C2-successors.md`）。
+- **K2**：跨北京自然日失效。
+  - 已裁定 11-14 编排者：取推荐案。§9.3 新增「批次当日有效」作为停止条件，并加命令行回填最晚启动守卫（22:45，未验证）；守卫的实现另开后端单。
+  - 同次裁定：503 即停，对回填和 live adapter 全部生效，已写回 §9.3。
+- **K3**：核实库里现有麦蕊行（含 T-B140 回填）的 source_licence_id 是否等于当前有效证书 id。
+  - 已裁定 11-14 编排者：并入 T-B141（见 `reports/T-B141-arch.md` P5）。
 
 ## 范围外（不影响 C2 生效，转后继 (a)）
 
