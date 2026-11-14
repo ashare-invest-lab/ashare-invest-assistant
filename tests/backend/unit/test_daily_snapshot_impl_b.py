@@ -1203,6 +1203,16 @@ def test_owned_snapshot_includes_active_licence_mairui(b_db: SimpleNamespace) ->
         assert _instr(row.items, CODE_A) is not None
         assert f"owned_snapshot_licence_unbound:{CODE_A}" not in _omitted_issues(row.items)
         assert row.licence_id is None
+        from app.db.tables.reviews import data_snapshots
+
+        # 日报/owned 读侧按 user_id + purpose + items 取，licence_id 填值留待办。
+        readable = conn.execute(select(data_snapshots).where(
+            data_snapshots.c.user_id == b_db.u1,
+            data_snapshots.c.purpose == "report",
+            data_snapshots.c.licence_id.is_(None),
+            data_snapshots.c.id == _sid,
+        )).one()
+        assert readable.items == row.items
 
 
 def test_owned_snapshot_excludes_other_licence_and_null_mairui(b_db: SimpleNamespace) -> None:
@@ -1225,3 +1235,31 @@ def test_owned_snapshot_excludes_other_licence_and_null_mairui(b_db: SimpleNames
         omitted = _omitted_issues(row.items)
         assert f"owned_snapshot_licence_unbound:{CODE_A}" in omitted
         assert f"owned_snapshot_licence_unbound:{CODE_B}" in omitted
+
+
+def test_owned_snapshot_rebind_after_replacement(b_db: SimpleNamespace, tmp_path: Path) -> None:
+    from app.cli.mairui_licence_bind import bind
+    from app.db.tables.licences import user_data_licences
+    from app.db.tables.market import daily_bars
+
+    with b_db.engine.begin() as conn:
+        old = _seed_licence(conn, b_db.u1)
+        _fetch_three(conn)
+        conn.execute(update(daily_bars).where(daily_bars.c.code == CODE_A).values(
+            source="mairui", source_licence_id=old
+        ))
+        assert _instr(_build(conn, b_db)[2].items, CODE_A) is not None
+        conn.execute(update(user_data_licences).where(user_data_licences.c.id == old).values(
+            deleted_at=dt.datetime.now(dt.UTC), ciphertext=None, licence_hmac=None
+        ))
+        active = _seed_licence(conn, b_db.u1)
+        row = _build(conn, b_db)[2]
+        assert f"owned_snapshot_licence_unbound:{CODE_A}" in _omitted_issues(row.items)
+        report = bind(conn, tmp_path / "manifest", from_licence=old, apply=True)
+        assert report.licence_id == active and report.rows == 3
+        row = _build(conn, b_db)[2]
+        assert _instr(row.items, CODE_A) is not None
+        assert f"owned_snapshot_licence_unbound:{CODE_A}" not in _omitted_issues(row.items)
+        assert conn.execute(select(daily_bars.c.source_licence_id).where(
+            daily_bars.c.code == CODE_A
+        )).scalars().all() == [active] * 3

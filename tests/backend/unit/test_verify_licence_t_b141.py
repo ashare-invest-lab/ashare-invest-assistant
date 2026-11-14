@@ -417,3 +417,25 @@ def test_tick_persist_failure_is_acked_and_not_replayed(world: SimpleNamespace) 
 
 def test_light_path_uses_shanghai_year() -> None:
     assert vl.light_path(dt.datetime(2026, 12, 31, 17, 0, tzinfo=dt.UTC)) == "/tcalendar/list/2027/"
+
+
+def test_102_status_view_keeps_pending_and_reports_error(world: SimpleNamespace) -> None:
+    from app.licences.service import status_view
+
+    _stub(world, 200, {"error": "102 证书无效"})
+    _run(world)
+    view = status_view(_row(world))
+    assert view["status"] == PENDING
+    assert view["last_error_code"] == "102"
+
+
+def test_unknown_reason_logged_without_body(world: SimpleNamespace,
+                                           caplog: pytest.LogCaptureFixture) -> None:
+    body = "tb141-fake-response-body-do-not-log"
+    _stub(world, 404, body)
+    with caplog.at_level("INFO", logger=vl.__name__):
+        _run(world)
+    assert _row(world).last_error_code is None
+    assert "verify_licence kept" in caplog.text
+    assert "http_404" in caplog.text
+    assert body not in caplog.text

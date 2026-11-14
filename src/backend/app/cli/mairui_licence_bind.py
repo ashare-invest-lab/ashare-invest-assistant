@@ -1,6 +1,7 @@
 """T-B141（架构师 T-A152 风险①）：把回填写入的 mairui NULL 行绑定到唯一 active 证书。
 
 幂等可重跑：回填结束后再跑一次补齐，每次用新的清单路径；回滚按清单置回 NULL。
+换证用 --from-licence 直接改绑，不产生 unbound。
 调用方负责事务，清单 fsync 成功后才更新数据库；不读取证书值。
 """
 
@@ -34,7 +35,8 @@ class BindReport:
 
 
 def _process(
-    conn: Connection, keys: list[Key], licence_id: uuid.UUID, *, apply: bool, undo: bool
+    conn: Connection, keys: list[Key], licence_id: uuid.UUID, *, apply: bool, undo: bool,
+    source_licence: uuid.UUID | None = None, restore_to: uuid.UUID | None = None,
 ) -> int:
     count = 0
     bars = daily_bars.c
@@ -47,13 +49,16 @@ def _process(
             bars.trade_date == batch.c.trade_date,
             bars.adj_type == batch.c.adj_type,
             bars.source == "mairui",
-            bars.source_licence_id == licence_id if undo else bars.source_licence_id.is_(None),
+            bars.source_licence_id == licence_id if undo else (
+                bars.source_licence_id == source_licence
+                if source_licence is not None else bars.source_licence_id.is_(None)
+            ),
         )
         if apply:
             result = conn.execute(
                 update(daily_bars)
                 .where(*conditions)
-                .values(source_licence_id=None if undo else licence_id)
+                .values(source_licence_id=restore_to if undo else licence_id)
             )
             count += result.rowcount
         else:
@@ -63,7 +68,10 @@ def _process(
     return count
 
 
-def bind(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
+def bind(
+    conn: Connection, manifest: Path, *, apply: bool, from_licence: uuid.UUID | None = None
+) -> BindReport:
+    """绑定 NULL 行；换证用 from_licence 直接改绑，不产生 unbound。"""
     ids = conn.execute(
         select(user_data_licences.c.id).where(
             user_data_licences.c.status == "active", user_data_licences.c.deleted_at.is_(None)
@@ -72,9 +80,26 @@ def bind(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
     if len(ids) != 1:
         return BindReport(None, 0, False, f"active_licence_count:{len(ids)}")
     licence_id = ids[0]
+    if from_licence is not None:
+        owner = conn.execute(
+            select(user_data_licences.c.user_id).where(user_data_licences.c.id == from_licence)
+        ).scalar_one_or_none()
+        active_owner = conn.execute(
+            select(user_data_licences.c.user_id).where(user_data_licences.c.id == licence_id)
+        ).scalar_one()
+        if owner is None:
+            return BindReport(licence_id, 0, False, "from_licence_missing")
+        if owner != active_owner:
+            return BindReport(licence_id, 0, False, "from_licence_not_owner")
+        if from_licence == licence_id:
+            return BindReport(licence_id, 0, False, "from_licence_is_active")
     stmt = (
         select(*(daily_bars.c[name] for name in HEADER))
-        .where(daily_bars.c.source == "mairui", daily_bars.c.source_licence_id.is_(None))
+        .where(
+            daily_bars.c.source == "mairui",
+            daily_bars.c.source_licence_id == from_licence
+            if from_licence is not None else daily_bars.c.source_licence_id.is_(None),
+        )
         .order_by(*(daily_bars.c[name] for name in HEADER))
     )
     if apply:
@@ -84,13 +109,16 @@ def bind(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
         return BindReport(licence_id, len(keys), apply)
     fd = os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
-        stream.write(f"# licence_id={licence_id}\n")
+        suffix = f" from_licence={from_licence}" if from_licence is not None else ""
+        stream.write(f"# licence_id={licence_id}{suffix}\n")
         writer = csv.writer(stream, lineterminator="\n")
         writer.writerow(HEADER)
         writer.writerows((code, date.isoformat(), adj) for code, date, adj in keys)
         stream.flush()
         os.fsync(stream.fileno())
-    count = _process(conn, keys, licence_id, apply=True, undo=False)
+    count = _process(
+        conn, keys, licence_id, apply=True, undo=False, source_licence=from_licence
+    )
     if count != len(keys):
         raise RuntimeError(f"bind rowcount mismatch: expected {len(keys)}, got {count}")
     return BindReport(licence_id, count, True)
@@ -101,8 +129,13 @@ def rollback(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
         first = stream.readline().rstrip("\n")
         if not first.startswith("# licence_id="):
             raise ValueError("invalid manifest licence header")
-        licence_id = uuid.UUID(first.removeprefix("# licence_id="))
-        if first != f"# licence_id={licence_id}":
+        header, separator, source = first.partition(" from_licence=")
+        licence_id = uuid.UUID(header.removeprefix("# licence_id="))
+        restore_to = uuid.UUID(source) if separator else None
+        expected = f"# licence_id={licence_id}"
+        if restore_to is not None:
+            expected += f" from_licence={restore_to}"
+        if first != expected:
             raise ValueError("invalid manifest licence header")
         reader = csv.reader(stream, strict=True)
         if next(reader, None) != HEADER:
@@ -117,7 +150,7 @@ def rollback(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
             keys.append((row[0], date, row[2]))
         if len(set(keys)) != len(keys):
             raise ValueError("duplicate manifest key")
-    count = _process(conn, keys, licence_id, apply=apply, undo=True)
+    count = _process(conn, keys, licence_id, apply=apply, undo=True, restore_to=restore_to)
     return BindReport(licence_id, count, apply)
 
 
@@ -125,21 +158,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="T-B141 mairui licence binding")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--rollback", action="store_true")
+    parser.add_argument("--from-licence", type=uuid.UUID)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="report row count only (default)")
     mode.add_argument("--apply", action="store_true", help="write changes")
     args = parser.parse_args(argv)
+    if args.rollback and args.from_licence is not None:
+        parser.error("--from-licence cannot be used with --rollback")
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         parser.error("DATABASE_URL is required in the environment")
     engine = create_engine(dsn)
     try:
         with engine.begin() as conn:
-            report = (rollback if args.rollback else bind)(conn, args.manifest, apply=args.apply)
+            if args.rollback:
+                report = rollback(conn, args.manifest, apply=args.apply)
+            else:
+                report = bind(conn, args.manifest, apply=args.apply, from_licence=args.from_licence)
         if report.refused:
             print(report.refused)
             return 3
-        print(f"licence_id={report.licence_id} rows={report.rows}")
+        suffix = f" from_licence={args.from_licence}" if args.from_licence is not None else ""
+        print(f"licence_id={report.licence_id} rows={report.rows}{suffix}")
         return 0
     finally:
         engine.dispose()
