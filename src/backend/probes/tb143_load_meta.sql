@@ -1,4 +1,4 @@
--- gbbq + 目录单独加载；本轮仅保留代码，不执行。
+-- gbbq + 目录单独加载；与日线脚本互不调用。
 -- psql -v csvdir=/服务端可读的导出目录 -f tb143_load_meta.sql
 \set ON_ERROR_STOP on
 BEGIN;
@@ -36,7 +36,7 @@ CREATE TEMP TABLE load_counts (target text, candidates bigint, inserted bigint, 
   ON COMMIT DROP;
 DO $$
 DECLARE
-  n bigint;
+  v_inserted bigint;
 BEGIN
   IF EXISTS (
     SELECT 1 FROM catalog_stage a JOIN catalog_stage b
@@ -56,20 +56,22 @@ BEGIN
   END IF;
   INSERT INTO market.ex_rights_events (
     code, ex_date, cash_per_share, rights_price, bonus_ratio, rights_ratio, source, snapshot_sha256
-  ) SELECT code, ex_date, cash_per_share, rights_price, bonus_ratio, rights_ratio, source, snapshot_sha256
-    FROM gbbq_stage
+  ) SELECT s.code, s.ex_date, s.cash_per_share, s.rights_price, s.bonus_ratio, s.rights_ratio,
+      s.source, s.snapshot_sha256
+    FROM gbbq_stage AS s
     ON CONFLICT (code, ex_date, snapshot_sha256) DO NOTHING;
-  GET DIAGNOSTICS n = ROW_COUNT;
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
   INSERT INTO load_counts
-    SELECT 'ex_rights_events', count(*), n, count(*) - n FROM gbbq_stage;
+    SELECT 'ex_rights_events', count(*), v_inserted, count(*) - v_inserted FROM gbbq_stage AS s;
   INSERT INTO market.minute_file_catalog (
     source, code, kind, date_from, date_to, rel_path, sha256, row_count, splice_segment, generator
-  ) SELECT source, code, kind, date_from, date_to, rel_path, sha256, row_count, splice_segment, generator
-    FROM catalog_stage
+  ) SELECT s.source, s.code, s.kind, s.date_from, s.date_to, s.rel_path, s.sha256, s.row_count,
+      s.splice_segment, s.generator
+    FROM catalog_stage AS s
     ON CONFLICT (source, code, kind, rel_path) DO NOTHING;
-  GET DIAGNOSTICS n = ROW_COUNT;
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
   INSERT INTO load_counts
-    SELECT 'minute_file_catalog', count(*), n, count(*) - n FROM catalog_stage;
+    SELECT 'minute_file_catalog', count(*), v_inserted, count(*) - v_inserted FROM catalog_stage AS s;
 END $$;
 SELECT * FROM load_counts ORDER BY target;
 COMMIT;

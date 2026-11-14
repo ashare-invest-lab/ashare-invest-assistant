@@ -16,6 +16,7 @@ function Write-Log([string]$Message) {
 try { New-Item -ItemType Directory -Path $Lock -ErrorAction Stop | Out-Null }
 catch { Write-Log 'LOCKED'; exit 0 }
 $exitCode = 0
+$allYearsSucceeded = $false
 $year = '尚未开始'
 function Invoke-Docker([string[]]$Arguments) {
     $oldPreference = $ErrorActionPreference
@@ -44,7 +45,7 @@ function Read-Manifest([string]$Name, [string]$Pattern, [string[]]$ExpectedNames
     return $entries
 }
 try {
-    Write-Log 'START；成功或失败均清理本地 all.bin、b1..b5.tgz、p?? 分片。'
+    Write-Log 'START；仅全部年份成功后清理本地 all.bin、b1..b5.tgz、p??；失败保留文件供重跑。'
     $Dir = (Get-Item -LiteralPath $Dir -Force).FullName
     if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { throw 'Dir 必须是目录' }
     if ($AllSha -notmatch '^[0-9a-fA-F]{64}$') { throw 'AllSha 格式错误' }
@@ -61,23 +62,36 @@ try {
     $bundleNames = @(1..5 | ForEach-Object { "b$_.tgz" })
     $parts = Read-Manifest 'PARTS' 'p[0-9]{2}' $partNames
     $bundles = Read-Manifest 'BUNDLES' 'b[1-5]\.tgz' $bundleNames
-    foreach ($name in $partNames) { Check-Hash (Join-Path $Dir $name) $parts[$name] }
     $allPath = Join-Path $Dir 'all.bin'
-    $output = [IO.File]::Create($allPath)
-    try {
-        foreach ($name in ($partNames | Sort-Object)) {
-            $inputStream = [IO.File]::OpenRead((Join-Path $Dir $name))
-            try { $inputStream.CopyTo($output) } finally { $inputStream.Dispose() }
-        }
-    } finally { $output.Dispose() }
-    Check-Hash $allPath $AllSha
+    if (Test-Path -LiteralPath $allPath) {
+        Check-Hash $allPath $AllSha
+        Write-Log 'REUSE all.bin'
+    } else {
+        foreach ($name in $partNames) { Check-Hash (Join-Path $Dir $name) $parts[$name] }
+        $output = [IO.File]::Create($allPath)
+        try {
+            foreach ($name in ($partNames | Sort-Object)) {
+                $inputStream = [IO.File]::OpenRead((Join-Path $Dir $name))
+                try { $inputStream.CopyTo($output) } finally { $inputStream.Dispose() }
+            }
+        } finally { $output.Dispose() }
+        Check-Hash $allPath $AllSha
+    }
     $inputStream = [IO.File]::OpenRead($allPath)
     try {
         $buffer = New-Object byte[] 1048576
         for ($i = 0; $i -lt 5; $i++) {
             $remaining = $sizes[$i]
             if ($remaining -gt ($inputStream.Length - $inputStream.Position)) { throw 'BundleSizes 超出 all.bin' }
-            $output = [IO.File]::Create((Join-Path $Dir $bundleNames[$i]))
+            $bundlePath = Join-Path $Dir $bundleNames[$i]
+            if (Test-Path -LiteralPath $bundlePath) {
+                Check-Hash $bundlePath $bundles[$bundleNames[$i]]
+                if ((Get-Item -LiteralPath $bundlePath).Length -ne $remaining) { throw "BundleSizes 与 $bundlePath 不符" }
+                $inputStream.Seek($remaining, [IO.SeekOrigin]::Current) | Out-Null
+                Write-Log "REUSE $($bundleNames[$i])"
+                continue
+            }
+            $output = [IO.File]::Create($bundlePath)
             try {
                 while ($remaining -gt 0) {
                     $read = $inputStream.Read($buffer, 0, [int][Math]::Min([long]$buffer.Length, $remaining))
@@ -85,7 +99,7 @@ try {
                     $output.Write($buffer, 0, $read); $remaining -= $read
                 }
             } finally { $output.Dispose() }
-            Check-Hash (Join-Path $Dir $bundleNames[$i]) $bundles[$bundleNames[$i]]
+            Check-Hash $bundlePath $bundles[$bundleNames[$i]]
         }
         if ($inputStream.Position -ne $inputStream.Length) { throw 'BundleSizes 未覆盖整个 all.bin' }
     } finally { $inputStream.Dispose() }
@@ -120,6 +134,7 @@ try {
         if ($i -lt $csvs.Count - 1) { Start-Sleep -Seconds $PauseSeconds }
     }
     Write-Log "TOTAL candidates=$candidates inserted=$inserted skipped=$skipped"
+    $allYearsSucceeded = $true
 } catch {
     $exitCode = 1
     Write-Log "ERROR stopped_year=$year；此前已提交年份保留。$($_.Exception.Message)"
@@ -127,8 +142,12 @@ try {
     try { Invoke-Docker @('exec', $Container, 'rm', '-rf', '/tmp/tb143d') }
     catch { $exitCode = 1; Write-Log "CLEANUP container ERROR $($_.Exception.Message)" }
     try {
-        foreach ($file in Get-ChildItem -LiteralPath $Dir -File -Force) {
-            if ($file.Name -cmatch '^(all\.bin|b.*\.tgz|p..)$') { Remove-Item -LiteralPath $file.FullName -Force }
+        if ($allYearsSucceeded -and $exitCode -eq 0) {
+            foreach ($file in Get-ChildItem -LiteralPath $Dir -File -Force) {
+                if ($file.Name -cmatch '^(all\.bin|b.*\.tgz|p[0-9]{2})$') { Remove-Item -LiteralPath $file.FullName -Force }
+            }
+        } else {
+            Write-Log 'KEEP local all.bin、b*.tgz、p??、PARTS、BUNDLES；可校验 SHA256 后重跑。'
         }
     } catch { $exitCode = 1; Write-Log "CLEANUP local ERROR $($_.Exception.Message)" }
     finally {

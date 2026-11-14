@@ -29,23 +29,23 @@ CREATE TEMP TABLE mairui_before ON COMMIT DROP AS SELECT * FROM mairui_count;
 CREATE TEMP TABLE load_counts (candidates bigint, inserted bigint, skipped bigint) ON COMMIT DROP;
 DO $$
 DECLARE
-  n bigint;
-  total bigint;
+  v_inserted bigint;
+  v_total bigint;
 BEGIN
-  IF (SELECT n FROM mairui_before) <> 0 THEN
+  IF (SELECT b.n FROM mairui_before AS b) <> 0 THEN
     RAISE EXCEPTION 'before 之前已有麦蕊行，拒绝加载';
   END IF;
-  SELECT count(*) INTO total FROM day_stage;
+  SELECT count(*) INTO v_total FROM day_stage AS s;
   INSERT INTO market.daily_bars (
     code, trade_date, adj_type, open, high, low, close, volume, amount,
     source, pre_close, is_suspended, source_licence_id, fetched_at
   )
-  SELECT code, trade_date, adj_type, open, high, low, close, volume, amount,
+  SELECT s.code, s.trade_date, s.adj_type, s.open, s.high, s.low, s.close, s.volume, s.amount,
     'tdx_local', NULL, NULL, NULL, now()
-  FROM day_stage
+  FROM day_stage AS s
   ON CONFLICT (code, trade_date, adj_type) DO NOTHING;
-  GET DIAGNOSTICS n = ROW_COUNT;
-  INSERT INTO load_counts VALUES (total, n, total - n);
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
+  INSERT INTO load_counts VALUES (v_total, v_inserted, v_total - v_inserted);
 END $$;
 CREATE TEMP TABLE mairui_after ON COMMIT DROP AS SELECT * FROM mairui_count;
 DO $$
