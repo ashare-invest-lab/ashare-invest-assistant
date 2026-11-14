@@ -1,5 +1,7 @@
 # C2 后继三项：边界契约要点（T-A150 ②）
 
+起草：Codex L3（gpt-6.1-sol/high）只读独立起草，与架构师初稿对照合并；架构师审改定稿。采纳与删减见 `reports/T-A150.md`。
+
 上位契约：`daily-bars-source.md` §8.1、§9.2、§9.3、§9.6。本文件只定边界，不改上位契约的默认值。
 三项共同遵守：
 - 默认部署出网 0 次；
@@ -22,9 +24,9 @@
   - batch_kind 固定为 daily。
 - **输出**：
   - 每次触发最多一个 `daily_bars_fetch` 任务，带 codes 参数；
-  - outbox 新增可空列 codes，续接批原样带上；
-  - 幂等键加入 codes 摘要（代码排序后取哈希）。
-  - 这需要新迁移，**取代 §9.2「无新迁移」，待编排者裁定**。
+  - codes（排序去重后的列表）写进原运行的 pipeline_runs.stats；`process` 本来就会读取该运行，从中取出 codes，续接批照抄；
+  - outbox 幂等键加入 codes 摘要（排序后取哈希），不同代码集合不会被合并；
+  - 不新增表，不加迁移，与 §9.2「无新迁移」一致。
 - **状态和错误码**：
   - window 为 None：不入队，记 skipped，issue 为 `calendar_not_covered`；
   - 代码已就绪（`backfill_ready`，口径同 `ready_for_window`）：剔除，全部就绪则不入队；
@@ -53,11 +55,13 @@
 - **前置**（任何一条不满足就拒绝，退出码非 0）：
   - STOP 文件不存在；
   - HALT 文件已由运维删除；
-  - 存在 halted 行；
-  - 最近一次 halted 的 finished_at 早于当前北京自然日。依据是用户卡片 t1088s3682「再遇限流就停下等我」和 t1080s3653「停到明天」；这个冷却口径「未验证」，由用户批准时确认。
+  - 存在 halted 行。
+- **dry-run 输出**：逐行列出待处理 halted 行的 id、owner、error_code 和 finished_at，作为用户批准的精确范围。
 - **动作**：
-  - 在一个事务里，把全部 halted 行改为 failed，error_code 改为 `daily_bars_halt_cleared`，保留原 finished_at；
-  - 另记一条 pipeline_runs 审计，step 为 `daily_bars.halt_clear`，stats 带卡片号与行数；
+  - 在与消费相同的 `single_egress` 锁内逐行加锁复核；只处理批准范围内、且仍为 halted 的行；
+  - 把这些行改为 failed，error_code 改为 `daily_bars_halt_cleared`，保留 finished_at 和 attempted_at；
+  - 另记一条 pipeline_runs 审计，step 为 `daily_bars.halt_clear`，stats 带卡片号与行 id；
+  - 重复执行为 no-op，不报错；范围外仍有 halted 行时继续阻断，并在输出中列出；
   - 不改回 pending，不重新入队，不重建续接；
   - 恢复后要再跑，由运维重新执行 `daily-bars-backfill --apply`，已就绪的标的自动跳过。
 - **权限**：用迁移为 aia_maint 增加最小授权：只允许经一个 SECURITY DEFINER 函数改上述两列，不开放整表 UPDATE。
@@ -67,14 +71,16 @@
   - 3：存在 HALT 文件；
   - 4：缺批准卡片号；
   - 5：没有 halted 行；
-  - 6：未过冷却。
+  - 6：行状态在复核时已变化，整个事务回滚。
 - **禁区**：
-  - 不删除 outbox、pipeline_runs 或 bars（删用户数据属硬红线）；
+  - 不用 DELETE 消除拦截；不删除 outbox、pipeline_runs 或 bars（删用户数据属硬红线）；
+  - 不恢复证书状态，不放宽预算；
   - 不碰名单链路的 HALT；
   - 代码里不自动清除 HALT（§8.1 不变）。
 - **验收**：
   - `test_halt_clear_dry_run_default_and_requires_approval`；
-  - `test_halt_clear_refuses_stop_or_halt_file_or_cooldown`；
+  - `test_halt_clear_refuses_stop_or_halt_file`；
+  - `test_halt_clear_exact_rows_atomic_and_idempotent`；
   - `test_halt_clear_marks_failed_never_pending_no_requeue`；
   - `test_after_clear_only_new_intents_run`；
   - `test_halt_clear_writes_audit_with_approval_id`；
@@ -89,8 +95,9 @@
   - 前置：(b) 已合入；K2、K3（见生效确认）已裁定。
 - **输入和输出**：
   - 签名沿用 `Transport`：(code, start, end) → (status, DailyBar | DailyBarsResult | None)；
-  - 只经 `ingest/egress.mairui_get` 出网（单出口、STOP/HALT 前置、`limited`、`classify`、`_write_halt`）；
-  - 证书只在 ingest 进程内经 `daily_lists.credential` 解封，不进 Redis、日志或异常文本；
+  - 只经 `ingest/egress.mairui_get` 出网（单出口、STOP/HALT 前置、`limited`、`classify`、`_write_halt`），每个计划段只发一次；
+  - 使用 `process` 已持有的 `single_egress` 租约，不另抢租约，不另开 HTTP 出口，不跟随重定向；
+  - 证书只在全部门控通过后、在 ingest 进程内经 `daily_lists.credential` 解封；证书和完整请求地址都不进 Redis、日志或异常文本；
   - `adj_type` 固定为 none；
   - `history_confirmation` 默认 None。只有响应里有明确字段证明「没有更早历史」时，才设 `no_earlier`；该字段「未验证」，未验证前一律 None。
 - **接线**：`write_heartbeat` 调 `tick_bars` 时传入 transport 和 page_days。两者都只由单 D 的那次提交打开，默认仍为 None，也就是现在的 0 出网状态。
@@ -110,7 +117,8 @@
   - 测试不连真网。
 - **验收（离线）**：
   - `test_live_adapter_unwired_by_default`；
-  - `test_adapter_only_via_mairui_get`；
+  - `test_adapter_uses_held_lease_and_mairui_get_once_per_segment`；
+  - `test_heartbeat_closed_gates_load_no_secret`；
   - `test_adapter_halts_on_stop_103_429_503_no_retry`；
   - `test_adapter_min_interval_2s`；
   - `test_adapter_never_logs_or_raises_secret`；
