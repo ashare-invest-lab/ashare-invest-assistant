@@ -12,6 +12,7 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from datetime import date
@@ -26,6 +27,71 @@ from app.cli import tb143_reconcile_load as loader
 from app.cli.tb143_export import DAY_COLUMNS
 from app.cli.tb143_inputs import prepare
 from app.ingest.tdx_local import DAY_LAYOUT, ExistingBar
+from probes.tb140_history_load import RowReject, confirm_bj_offline_volume_units
+
+
+@pytest.fixture(autouse=True)
+def reset_bj_confirmation():
+    with pytest.raises(RowReject, match="bj_offline_requires_20_distinct_codes"):
+        confirm_bj_offline_volume_units([])
+    yield
+    with pytest.raises(RowReject, match="bj_offline_requires_20_distinct_codes"):
+        confirm_bj_offline_volume_units([])
+
+
+def test_bj_confirmation_is_reexported_from_app():
+    from app import bj_offline_volume as shared
+    from probes import tb140_history_load as load
+
+    assert load.confirm_bj_offline_volume_units is shared.confirm_bj_offline_volume_units
+    assert load._bj_write_unconfirmed is shared._bj_write_unconfirmed
+    assert loader._bj_write_unconfirmed is shared._bj_write_unconfirmed
+    assert load.RowReject is shared.RowReject
+    assert load.CodeReject is shared.CodeReject
+    with pytest.raises(load.RowReject, match="bj_offline_requires_20_distinct_codes"):
+        shared.confirm_bj_offline_volume_units([])
+
+
+def test_cli_starts_with_only_app_in_image(tmp_path):
+    backend = tmp_path / "backend"
+    shutil.copytree(
+        Path(loader.__file__).resolve().parents[1],
+        backend / "app",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    script = """
+import importlib.util
+import runpy
+import sys
+sys.path.insert(0, sys.argv.pop(1))
+assert importlib.util.find_spec("probes") is None
+runpy.run_module("app.cli.tb143_reconcile_load", run_name="__main__")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(backend), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "--apply" in result.stdout
+
+
+def confirm_synthetic_bj():
+    """仅测试使用的 20 只虚构同日原始 v/本地股数对照。"""
+    confirmed = confirm_bj_offline_volume_units(
+        {
+            "mairui": {"code": f"920{number:03d}.BJ", "t": "2031-01-02", "v": "1"},
+            "tdx_local": {
+                "code": f"920{number:03d}.BJ",
+                "trade_date": "2031-01-02",
+                "volume": "100",
+                "source": "tdx_local",
+            },
+        }
+        for number in range(100, 120)
+    )
+    assert len(confirmed) == 20
 
 
 class MemoryRepository:
@@ -145,6 +211,8 @@ def invoke(tmp_path, args, repo, extra=()):
 
 @pytest.mark.parametrize("apply", [False, True])
 def test_classification_and_existing_rows_unchanged(tmp_path, apply):
+    if apply:
+        confirm_synthetic_bj()
     args = inputs(
         tmp_path,
         history=[
@@ -174,6 +242,7 @@ def test_classification_and_existing_rows_unchanged(tmp_path, apply):
         "non_a_share": 1,
         "abnormal": 2,
         "out_of_scope": 1,
+        "blocked_bj_unconfirmed": 0,
     }
     assert repo.reads > 0
     assert all(repo.rows[k] == v for k, v in original.items())
@@ -259,6 +328,7 @@ def test_integrity_preflight_blocks_all_apply(tmp_path, failure, apply):
 
 @pytest.mark.parametrize("mode", ["insert_failure", "mairui_change"])
 def test_failed_transaction_rolls_back_and_others_continue(tmp_path, mode):
+    confirm_synthetic_bj()
     args = inputs(tmp_path)
     repo = MemoryRepository()
     original_insert = repo.insert
@@ -300,6 +370,7 @@ def test_invalid_rows(tmp_path, change):
 
 
 def test_bad_header_file_failure_does_not_stop_bj(tmp_path):
+    confirm_synthetic_bj()
     args = inputs(tmp_path)
     (tmp_path / "history/day_2001.csv").write_text(
         "code,trade_date\n000001.SZ,2001-01-02\n"
@@ -433,7 +504,10 @@ def isolated_pg():
         root = Path(temporary)
         data = root / "db"
         subprocess.run(
-            [initdb, "-D", str(data), "--auth=trust", "--no-locale", "-U", "fixture"],
+            [
+                initdb, "-D", str(data), "--auth=trust", "--no-locale",
+                "--encoding=UTF8", "-U", "fixture",
+            ],
             check=True,
             capture_output=True,
         )
@@ -464,6 +538,8 @@ def isolated_pg():
 
 @pytest.mark.parametrize("failure", [None, "insert", "mairui", "dry"])
 def test_real_pg_transaction_and_preservation(tmp_path, isolated_pg, failure):
+    if failure != "dry":
+        confirm_synthetic_bj()
     args = inputs(tmp_path, history=[row(day="2001-01-02"), row(day="2001-01-03")])
     with psycopg.connect(isolated_pg, autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS market CASCADE; CREATE SCHEMA market")
@@ -531,6 +607,7 @@ def test_owned_lock_is_released_on_success_and_failure(tmp_path, invalid_codes):
 
 
 def test_existing_tdx_mismatch_is_preserved_on_apply(tmp_path):
+    confirm_synthetic_bj()
     args = inputs(tmp_path)
     repo = MemoryRepository()
     existing_key = ("000001.SZ", date(2001, 1, 2), "none")
@@ -543,6 +620,7 @@ def test_existing_tdx_mismatch_is_preserved_on_apply(tmp_path):
 
 
 def test_csv_parser_failure_rolls_back_file_and_continues(tmp_path):
+    confirm_synthetic_bj()
     args = inputs(tmp_path)
     path = tmp_path / "history/day_2001.csv"
     with path.open("a") as stream:
@@ -552,6 +630,60 @@ def test_csv_parser_failure_rolls_back_file_and_continues(tmp_path):
     assert result == 1 and summary["batches"][0]["error"] == "Error"
     assert [key[0] for key in repo.rows] == ["920001.BJ"]
     assert summary["batches"][1]["status"] == "committed"
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("mixed", [False, True])
+def test_unconfirmed_bj_never_reaches_insert(tmp_path, monkeypatch, apply, mixed):
+    history = [row(), row("600001.SH")]
+    blocked = (
+        [
+            row(code) for code in (
+                "920002.BJ", "430001.SH", "831001.SZ", "873001.SH", "920003.SH", "000003.BJ"
+            )
+        ]
+        if mixed else []
+    )
+    args = inputs(tmp_path, history=history + blocked)
+    repo = MemoryRepository()
+    securities = repo.securities()
+    securities.update({r["code"]: ("stock", "listed") for r in history + blocked})
+    monkeypatch.setattr(repo, "securities", lambda: securities)
+    # 同一 CSV 混合沪深与 BJ，跨多个 insert 块仍须独立统计阻断数。
+    monkeypatch.setattr(loader, "CHUNK", 1)
+    inserted_codes = []
+    original_insert = repo.insert
+
+    def insert(rows):
+        inserted_codes.extend(r[0] for r in rows)
+        assert all(r[0] in {"000001.SZ", "600001.SH"} for r in rows)
+        return original_insert(rows)
+
+    monkeypatch.setattr(repo, "insert", insert)
+    result, summary = invoke(
+        tmp_path, args, repo, ["--dsn", "offline", *(["--apply"] if apply else [])]
+    )
+    assert result == 0 and summary["status"] == "ok"
+    assert inserted_codes == (["000001.SZ", "600001.SH"] if apply else [])
+    assert summary["counts"]["new"] == 3 + len(blocked)
+    assert summary["counts"]["blocked_bj_unconfirmed"] == (1 + len(blocked) if apply else 0)
+    assert [b["inserted"] for b in summary["batches"]] == ([2, 0] if apply else [0, 0])
+    assert all(
+        b["status"] == ("committed" if apply else "dry_run") for b in summary["batches"]
+    )
+    assert all(b["before"]["mairui"] == b["after"]["mairui"] for b in summary["batches"])
+
+
+def test_failed_reconfirmation_revokes_bj_apply(tmp_path):
+    confirm_synthetic_bj()
+    with pytest.raises(RowReject, match="bj_offline_requires_20_distinct_codes"):
+        confirm_bj_offline_volume_units([])
+    args = inputs(tmp_path)
+    repo = MemoryRepository()
+    result, summary = invoke(tmp_path, args, repo, ["--dsn", "offline", "--apply"])
+    assert result == 0
+    assert [key[0] for key in repo.rows] == ["000001.SZ"]
+    assert summary["counts"]["blocked_bj_unconfirmed"] == 1
 
 
 def test_input_symlink_escape_is_not_opened(tmp_path, monkeypatch):

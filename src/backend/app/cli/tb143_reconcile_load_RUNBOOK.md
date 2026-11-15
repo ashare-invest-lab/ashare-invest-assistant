@@ -36,6 +36,40 @@
 
 9. 确认 dry-run 和完整性审核通过后，**显式 `--apply`**；PowerShell 使用同一参数并加 `-Apply`，输出换成全新 `$OutApply`。工具会重新校验/对账，不直接信任旧 dry-run。按每个 CSV 独立事务（zip 按年），任何已有来源的同键行都保留，只有新增键写 `source=tdx_local`、`ON CONFLICT DO NOTHING`；不 UPDATE/DELETE。每笔在对账开始前获取日线表写互斥锁并持有至事务结束，大文件可能持锁较久；等待锁超过 5 秒即该批失败，其他批继续，不需停止栈。
 
-10. 复核 `batches[*].status`：`committed` 为独立成功，`failed` 已回滚，已成功批次保留；有失败不要当整次原子操作。每批 `before/after` 含全表、mairui、tdx_local、本批键数量；**mairui 必须前后不变**，否则回滚该批。新增数须等于全表、tdx_local、本批键数量的增量。`reconcile.jsonl` 也逐批记录 `batch_prepared` 和 `batch_result`；突然中断、只见 prepared 时以新主键清单配合只读查询判断事务结果，不自动删除任何行。失败/哈希不符时保留全部源文件、恢复文件和容器现场，宿主机日志会记录容器临时目录；搬运审计失败时从该目录取回。重跑对已提交键只对账/DO NOTHING。退出码：Python 0=完成或锁已存在，1=部分失败/输入不完整 dry-run，2=前置拒绝；PowerShell 对容器非零统一返回 1 并记日志。
+   **BJ 写入依赖与默认阻断（T-B149b）：#151 依赖尚未合入的 #163；本分支已 merge be/T-B149（7268ae3），拿到了共享判定。** 共享判定位于仅依赖标准库的 `app.bj_offline_volume`，随后端镜像的 app 一并部署；`probes.tb140_history_load` 仅再导出以兼容离线脚本。本工具在生产 `repo.insert` 前复用共享模块的 `_bj_write_unconfirmed` 与进程内确认状态；`.BJ` 及同模块前缀归属判为北交所的候选均受门闩控制，不另写确认口径。独立启动的 Python CLI / PowerShell `-Apply` 默认未确认，因此拒绝 BJ 写入，沪深历史仍可 apply。dry-run 不要求确认，照常对账且不 INSERT。
+
+   **当前用户库 + 现有 tdx 包无法自动满足确认，不能靠查库放行：**
+
+   - `reports/T-B140.md` 记录 355 只 920xxx 的麦蕊历史回填因 history 接口 503 未完成；11-13 当日批含 355 只 920xxx，最初错标 `.SH`，T-B140d 已修正为 `.BJ`。库内麦蕊 BJ 基本只有 **2026-11-13** 一天。
+   - tdx 包 `hsjday_20261110` 止于 **2026-11-10**，与 11-13 没有重叠日。`reports/T-B143.md` 明确记录「同日对算做不了」：被核查的一只异常股及 5 只对照股的 mairui 行都只有 11-13，tdx 文件止于 11-10；并指出库内麦蕊 BJ `volume` 已是**股**，并非原始 `v`。不得把库内 `volume/100` 反推为原始 `v`，也不得跨交易日拼对或用 `unit_suspect`/均价旁证代替确认。
+   - `reports/T-B146c.md` 记录单只 BJ 历史真调 1212 根（2021-11-15～2026-11-13）**未写库**，不能作为库内证据，单只也不满足 20 只门槛。本流程不调用麦蕊 API。
+
+   **以后如有合格的离线原始对照，须在同一 Python 进程先确认再 apply：** 运维准备仓库外 JSON 数组，每项为 `{"mairui": 原始行, "tdx_local": 本地行}`。原始行须含 `code/t/v`，本地行须含 `code/trade_date/volume/source`；同一合法 `.BJ` 代码、同一交易日、`source=tdx_local`，原始 `v`（手）×100 精确等于本地 `volume`（股），所有对照一致且覆盖 **≥20 只不同代码**。只调用共享函数 `confirm_bj_offline_volume_units`；每次调用先撤销旧确认，失败即停止。成功后不限于样本代码；新进程必须重新确认。禁止虚构生产对照、强制放行或从旧审计产物恢复确认。
+
+   在后端目录的同一解释器内执行以下调用方式；`PAIRS_FILE` 为上述仓库外真实原始对照文件，其余路径由运维填写。仍须遵循前述共同宿主机锁与完整性审核；此处没有新增 CLI / PowerShell 放行参数。
+
+   ```bash
+   PYTHONPATH=. python - "$PAIRS_FILE" \
+     --shards-dir "$DIR_A" --bj-codes "$CODES" --bj-data "$DIR_B_OR_ZIP" \
+     --out "$NEW_AUDIT_DIR" --lock-dir "$SHARED_CONTAINER_LOCK" --apply <<'PY'
+   import json
+   import sys
+   from decimal import Decimal
+   from pathlib import Path
+   from app.bj_offline_volume import confirm_bj_offline_volume_units
+   from app.cli.tb143_reconcile_load import main
+
+   pairs_file, *argv = sys.argv[1:]
+   pairs = json.loads(Path(pairs_file).read_text(encoding="utf-8"), parse_float=Decimal)
+   confirm_bj_offline_volume_units(pairs)
+   raise SystemExit(main(argv))
+   PY
+   ```
+
+   真实 DSN、代码名单、原始行情与对照文件均不得写入仓库。若尚未取得合格原始对照，保持 BJ 阻断；本单不获取这些数据。
+
+   `new` 和候选/新增主键 CSV 保留全部对账候选，**不代表全部已经写入**。apply 跳过的 BJ 另计 `blocked_bj_unconfirmed`（逐批与汇总），并写入 `reconcile.jsonl`；实际应插入数为 `new - blocked_bj_unconfirmed`。仅 BJ 的批次可 `committed` 且 `inserted=0`；有阻断不等于失败，须看阻断计数。混合批次沪深照常提交，不会因 BJ 被跳过触发 `insert_count_mismatch` 或回滚已成功沪深批次。dry-run 的阻断计数为 0，表示未尝试写入，不能作为 BJ 获准写入的证据。
+
+10. 复核 `batches[*].status`：`committed` 为独立成功，`failed` 已回滚，已成功批次保留；有失败不要当整次原子操作。每批 `before/after` 含全表、mairui、tdx_local、本批键数量；**mairui 必须前后不变**，否则回滚该批。实际 `inserted`（已扣除 `blocked_bj_unconfirmed`）须等于全表、tdx_local、本批键数量的增量。`reconcile.jsonl` 也逐批记录 `batch_prepared` 和 `batch_result`；突然中断、只见 prepared 时以新主键清单配合只读查询判断事务结果，不自动删除任何行。失败/哈希不符时保留全部源文件、恢复文件和容器现场，宿主机日志会记录容器临时目录；搬运审计失败时从该目录取回。重跑对已提交键只对账/DO NOTHING。退出码：Python 0=完成或锁已存在，1=部分失败/输入不完整 dry-run，2=前置拒绝；PowerShell 对容器非零统一返回 1 并记日志。
 
 11. 运维使用现有日K读取入口检查 `000001.SZ` 与调用方名单中一只 `920xxx.BJ` 的日K可读（这里只是验收代码标签，不提供任何真实行情），分别核实历史和全窗口。复核每笔 mairui 计数不变、总新增与汇总一致。人工回滚如有需要另行审批，本工具没有删除入口。保留审计文件和日志；**不要重启栈，重启由运维另做**。

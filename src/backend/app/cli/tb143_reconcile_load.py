@@ -13,7 +13,7 @@ import os
 import re
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, contextmanager, suppress
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -22,6 +22,7 @@ from zipfile import BadZipFile, ZipFile
 
 import psycopg
 
+from app.bj_offline_volume import CodeReject, _bj_write_unconfirmed, qualified_code
 from app.cli.tb143_export import DAY_COLUMNS
 from app.cli.tb143_inputs import InputKeys, Inputs, prepare
 from app.ingest.tdx_history import DayRefusal, iter_day_zip
@@ -216,7 +217,16 @@ def _batch(
 ) -> dict[str, object]:
     counts: Counter[str] = Counter(
         dict.fromkeys(
-            ("new", "identical", "mismatch", "non_a_share", "abnormal", "out_of_scope"), 0
+            (
+                "new",
+                "identical",
+                "mismatch",
+                "non_a_share",
+                "abnormal",
+                "out_of_scope",
+                "blocked_bj_unconfirmed",
+            ),
+            0,
         )
     )
     report: dict[str, object] = {"file": str(path), "route": route, "counts": counts, "inserted": 0}
@@ -333,7 +343,22 @@ def _batch(
                 with candidates.open(encoding="utf-8", newline="") as stream:
                     rows: list[tuple[object, ...]] = []
                     for row in csv.DictReader(stream):
-                        rows.append(values(parse_row(row)))
+                        bar = parse_row(row)
+                        # 共用确认状态；前缀复用同模块的归属规则，防止 BJ 错标后缀绕过。
+                        code = bar.code
+                        if not code.endswith(".BJ"):
+                            with suppress(CodeReject):
+                                code = qualified_code(code[:6])
+                        if _bj_write_unconfirmed({"code": code}):
+                            counts["blocked_bj_unconfirmed"] += 1
+                            detail(
+                                log,
+                                "blocked_bj_unconfirmed",
+                                code=bar.code,
+                                trade_date=bar.trade_date,
+                            )
+                            continue
+                        rows.append(values(bar))
                         if len(rows) >= CHUNK:
                             inserted += repo.insert(rows)
                             rows.clear()
@@ -343,7 +368,7 @@ def _batch(
             if before_counts["mairui"] != after_counts["mairui"]:
                 raise ValueError("mairui_count_changed")
             if apply and (
-                inserted != counts["new"]
+                inserted != counts["new"] - counts["blocked_bj_unconfirmed"]
                 or after_counts["total"] - before_counts["total"] != inserted
                 or after_counts["tdx_local"] - before_counts["tdx_local"] != inserted
                 or after_counts["batch_keys"] - before_counts["batch_keys"] != inserted
@@ -363,7 +388,10 @@ def _batch(
 def run(args: argparse.Namespace, factory: Callable[[str], Repository]) -> int:
     args.out.mkdir(parents=True, exist_ok=False)
     counts: Counter[str] = Counter(
-        dict.fromkeys(("new", "identical", "mismatch", "non_a_share", "abnormal"), 0)
+        dict.fromkeys(
+            ("new", "identical", "mismatch", "non_a_share", "abnormal", "blocked_bj_unconfirmed"),
+            0,
+        )
     )
     summary: dict[str, Any] = {
         "mode": "apply" if args.apply else "dry_run",
