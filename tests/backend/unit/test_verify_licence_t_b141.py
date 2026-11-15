@@ -54,6 +54,7 @@ def world(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[SimpleNam
     monkeypatch.setenv("SERVICE_NAME", "api")
     monkeypatch.setenv("APP_ENV", "local")
     monkeypatch.delenv("MAIRUI_LICENCE", raising=False)
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # HTTP remains stubbed; exercise live semantics.
     gen = _open_temp_db()
     ctx = next(gen)
     try:

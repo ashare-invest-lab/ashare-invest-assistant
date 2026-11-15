@@ -94,6 +94,7 @@ def _seed_licence(conn: Any, owner: uuid.UUID, *, status: str) -> uuid.UUID:
 def test_verify_licence_consumer_writes_active_after_queued_intent(
     temp_db: Engine, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # transport below is synthetic, never real HTTP.
     # plan.md：ingest 消费 verify_licence 后把状态写回（成功应为 active，并记 last_verified_at）。
     # 轻量接口路径未验证，本例不固定 URL；不外呼。
     lid = None
