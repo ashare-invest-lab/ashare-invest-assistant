@@ -9,8 +9,9 @@
 | T-R73_golden.json | 四份完整输入、160 个逐日答案、四笔独立模拟交易、逐日 explain |
 | check_T-R73.py | 独立重算、递归逐字段比较、内存篡改自测；失败 exit 1 |
 | T-R73_README.md | 手算、字段契约、未验证边界 |
+| gen_T-R73.py | 【虚构】合成 golden 生成脚本（T-R73b，L-042 合成 golden 豁免）；纯合成，不读外部数据 |
 
-运行：`PYTHONDONTWRITEBYTECODE=1 /tmp/ckvenv/bin/python docs/strategies/golden/check_T-R73.py`；另执行同命令的 `python -O` 形式。可传入其他 JSON 路径作负例验证。checker 不含 `assert`，不访问网络、不读环境变量或数据库、不写文件。
+运行：`PYTHONDONTWRITEBYTECODE=1 /tmp/ckvenv/bin/python docs/strategies/golden/check_T-R73.py`；另执行同命令的 `python -O` 形式。可传入其他 JSON 路径作负例验证。checker 不含 `assert`，不访问网络、不读环境变量或数据库；默认路径运行时还会调用 gen_T-R73.py 写入系统临时目录，逐字节比对重新生成内容与提交的 JSON，不一致即 exit 1（传入其他 JSON 路径时跳过此比对），不写仓库文件。环境标识为虚构的 ENV-PRI/ENV-AUX，不对应任何公开指数代码。
 
 ## PN-06 断言字段约定
 

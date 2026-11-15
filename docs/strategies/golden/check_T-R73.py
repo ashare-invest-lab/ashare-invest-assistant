@@ -9,7 +9,9 @@ import json
 import math
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 
 
 def require(ok, message):
@@ -262,10 +264,24 @@ def validate(data, wrong_last_anchor=False):
         compare(computed, case["expect"], case["id"])
 
 
+def check_regenerated(path):
+    """L-042 合成 golden 豁免：gen_T-R73.py 重新生成的内容必须与提交内容逐字节一致。"""
+    gen = Path(__file__).with_name("gen_T-R73.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run([sys.executable, str(gen), tmp], capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise ValueError("生成脚本失败：" + proc.stderr.strip()[-300:])
+        if (Path(tmp) / "T-R73_golden.json").read_bytes() != path.read_bytes():
+            raise ValueError("重新生成的 golden 与提交内容不一致")
+
+
 def main():
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("T-R73_golden.json")
     data = json.loads(path.read_text(encoding="utf-8"))
     validate(data)
+    regen_checked = len(sys.argv) <= 1
+    if regen_checked:
+        check_regenerated(path)
     price = copy.deepcopy(data)
     price["cases"][0]["bars"][30]["close"] -= .01
     suspension = copy.deepcopy(data)
@@ -279,7 +295,7 @@ def main():
             rejected.append(dict(name=name, diagnostic=str(exc)))
         else:
             raise ValueError("篡改负例被接受：" + name)
-    print(json.dumps(dict(result="PASS", cases=len(data["cases"]), daily_rows=sum(len(c["bars"]) for c in data["cases"]),
+    print(json.dumps(dict(result="PASS", regenerated_identical=regen_checked, cases=len(data["cases"]), daily_rows=sum(len(c["bars"]) for c in data["cases"]),
                           negative_mutations_rejected=rejected), ensure_ascii=False))
 
 
