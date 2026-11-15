@@ -843,11 +843,6 @@
       "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
-      "path": "docs/strategies/T-R71/.last.md",
-      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：本轮 P1 接口对照修改与验收记录；非策略身份，lifecycle draft 不变"
-    },
-    {
       "path": "docs/strategies/T-R71/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71：每日决策候选研究草稿/索引/验收；lifecycle draft，不可导入，不分配新运行身份；周期见单卡 §1"
@@ -2541,8 +2536,7 @@
       "docs/strategies/T-R71/S-02_st_oversold_rebound.md",
       "docs/strategies/T-R71/S-04_st_broken_board.md",
       "docs/strategies/T-R71/W-02_sw_breakout.md",
-      "docs/strategies/T-R71/acceptance.md",
-      "docs/strategies/T-R71/.last.md"
+      "docs/strategies/T-R71/acceptance.md"
     ],
     "preexisting_auxiliary_paths_reconciled": [
       "docs/strategies/F23-v4/README.md",
