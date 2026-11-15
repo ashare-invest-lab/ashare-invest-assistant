@@ -8,13 +8,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Queue requests must neither share PR groups nor replace pending queue runs.
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'merge_group' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -36,6 +39,7 @@ env:
 jobs:
   # Wait only for an already-running exact-main push, in parallel with backend.
   # Retain this required readiness check; never run another measurement.
+  # PR and merge_group both require their exact main base, without fallback.
   coverage-base:
     name: trusted main coverage readiness
     runs-on: ubuntu-24.04

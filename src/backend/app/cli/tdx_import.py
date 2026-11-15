@@ -45,6 +45,7 @@ from app.marketdata.daily_bars import (
     UPSERT_BATCH_ROWS,
     DailyBar,
     DailyBarsResult,
+    UpsertStats,
     _approved_owners,
     _union_universe,
     upsert_daily_bars,
@@ -100,7 +101,9 @@ class TdxDeps(Protocol):
         self, kind: Kind, code: str, bars: Sequence[TdxBar]
     ) -> Mapping[object, ExistingBar]: ...
 
-    def write(self, kind: Kind, bars: Sequence[TdxBar], fetched_at: dt.datetime) -> int: ...
+    def write(
+        self, kind: Kind, bars: Sequence[TdxBar], fetched_at: dt.datetime
+    ) -> int | UpsertStats: ...
 
     def record_run(self, report: RunReport, run_date: dt.date) -> None: ...
 
@@ -201,7 +204,9 @@ class DbDeps:
         ).all()
         return {r.ts: _existing(r) for r in rows}
 
-    def write(self, kind: Kind, bars: Sequence[TdxBar], fetched_at: dt.datetime) -> int:
+    def write(
+        self, kind: Kind, bars: Sequence[TdxBar], fetched_at: dt.datetime
+    ) -> int | UpsertStats:
         if kind == "day":
             result = DailyBarsResult(
                 bars=[
@@ -224,7 +229,8 @@ class DbDeps:
             stats = upsert_daily_bars(
                 self.conn, result, source=TDX_LOCAL_SOURCE, licence_id=None, fetched_at=fetched_at
             )
-            return stats.inserted
+            # 全部插入保留原计数接口；未全部插入时携带原因与实际写入数。
+            return stats.inserted if stats.inserted == len(bars) else stats
         table = minute_bars if kind == "lc1" else minute5_bars
         inserted = 0
         for offset in range(0, len(bars), UPSERT_BATCH_ROWS):
@@ -401,8 +407,15 @@ def _execute(
         scope = deps.owned_codes(bj)
         ident = run_id or uuid.uuid4().hex[:12]
 
+        blocked_bj = 0
+
         def writer(bars: Sequence[TdxBar]) -> int:
-            return deps.write(kind, bars, now)
+            nonlocal blocked_bj
+            result = deps.write(kind, bars, now)
+            if isinstance(result, UpsertStats):
+                blocked_bj += result.blocked_bj_unconfirmed
+                return result.inserted
+            return result
 
         report = run_import(
             root=args.root,
@@ -421,6 +434,10 @@ def _execute(
             # 分钟线金额容差无出处（日线 §5 只针对日线）：未验证，默认不比对金额。
             compare_amount=kind == "day",
         )
+        if blocked_bj:
+            report.status = "partial"
+            report.rejected_records["blocked_bj_unconfirmed"] += blocked_bj
+            report.issues.append("blocked_bj_unconfirmed")
     except TdxRefused as exc:
         # T-B133 11:07 裁定②：分钟线缺 bj 目录时提示可显式排除 bj（排除后清单记缺口）。
         bj_missing = intraday and exc.reason.startswith("root_missing:bj/")
@@ -431,8 +448,8 @@ def _execute(
         deps.record_run(report, today)
     for key, value in report.stats().items():
         print(f"{key}={value}")
-    print("applied" if args.apply else "dry-run")
-    return 0
+    print("partial" if blocked_bj else "applied" if args.apply else "dry-run")
+    return _REFUSED if blocked_bj else 0
 
 
 def daily_main(
