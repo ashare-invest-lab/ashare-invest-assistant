@@ -17,12 +17,8 @@ from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-if __package__:
-    from . import tb140_history_load as history_load
-    from . import tb140_history_backfill as history_backfill
-else:
-    import tb140_history_load as history_load
-    import tb140_history_backfill as history_backfill
+import requests
+from requests.adapters import HTTPAdapter
 
 HOST = "https://api.mairuiapi.com"
 RUNTIME = Path("/workspace/team/runtime")
@@ -45,7 +41,11 @@ def now() -> str:
 
 
 def mkt(code: str) -> str:
-    return history_load.market_of(code.strip())
+    if code.startswith(("6", "9")):
+        return "SH"
+    if code.startswith(("4", "8")) or code.startswith("92"):
+        return "BJ"
+    return "SZ"
 
 
 def load_counter() -> dict[str, Any]:
@@ -77,9 +77,7 @@ def write_secret() -> str:
     return TEMP_SECRET.read_text(encoding="utf-8").strip()
 
 
-def session():
-    import requests
-    from requests.adapters import HTTPAdapter
+def session() -> requests.Session:
     s = requests.Session(); s.trust_env = False; s.proxies = {}
     s.mount("https://", HTTPAdapter(max_retries=0, pool_connections=1, pool_maxsize=1, pool_block=True))
     return s
@@ -119,24 +117,15 @@ def call(sess, st, secret, kind, path_tmpl, params=None) -> tuple[int, Any]:
     return status, body
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["latest20", "ssjy_all", "history"])
     ap.add_argument("--max", type=int, default=BATCH_CAP)
     ap.add_argument("--codes-file")
-    ap.add_argument("--st", default=None)
-    ap.add_argument("--et", default=None)
-    a = ap.parse_args(argv)
-    try:
-        start, end = history_load.parse_window(a.st, a.et)
-        codes, skipped = (history_load.requestable_history_codes(history_backfill.load_codes(Path(a.codes_file)))
-                          if a.mode == "history" else ([], []))
-    except (ValueError, TypeError):
-        return 1
+    a = ap.parse_args()
     DATA.mkdir(parents=True, exist_ok=True)
     st = load_counter()
     summ: dict[str, Any] = {"mode": a.mode, "started_mst": now(), "calls": 0, "halt": None}
-    summ["skipped_codes"] = skipped
     secret = ""
     try:
         if st.get("halted"):
@@ -155,19 +144,17 @@ def main(argv: list[str] | None = None) -> int:
             summ["calls"] += 1
             (DATA / f"ssjy_all_{datetime.now(MST).strftime('%Y%m%dT%H%M%S')}.json").write_text(json.dumps({"at": now(), "status": s, "body": b}, ensure_ascii=False))
         else:
-            summ["expansion_plan"] = history_load.plan_history_expansion(st, ledger_path=COUNTER, st=start, et=end)
+            codes = [l.strip() for l in Path(a.codes_file).read_text().split() if l.strip()]
             done = set(st.get("done_history") or [])
             todo = [c for c in codes if c not in done][: min(a.max, BATCH_CAP)]
             out = DATA / "history.jsonl"
             with out.open("a", encoding="utf-8") as f:
                 for c in todo:
-                    s, b = call(sess, st, secret, "history", history_backfill.history_path(c, secret, start, end))
+                    s, b = call(sess, st, secret, "history", f"/hsstock/history/{c}.{mkt(c)}/d/n/{{licence}}", {"st": HIST_ST, "et": HIST_ET})
                     summ["calls"] += 1
                     f.write(json.dumps({"code": c, "mkt": mkt(c), "at": now(), "status": s, "n": len(b) if isinstance(b, list) else None, "body": b}, ensure_ascii=False) + "\n")
                     f.flush()
-                    st.setdefault("done_history", []).append(c)
-                    st.setdefault("history_windows", {})[c] = {"st": start.isoformat() if start else None, "et": end.isoformat() if end else None}
-                    save_counter(st)
+                    st.setdefault("done_history", []).append(c); save_counter(st)
             summ["remaining"] = len([c for c in codes if c not in set(st["done_history"])])
         sess.close()
         return 0
@@ -182,7 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         summ["licence_deleted"] = not TEMP_SECRET.exists()
         summ["total"] = st.get("total"); summ["halted"] = st.get("halted"); summ["finished_mst"] = now()
         txt = json.dumps(summ, ensure_ascii=False)
-        txt = history_backfill.redact(txt, secret)
+        if secret:
+            txt = txt.replace(secret, "***")
         print(txt)
         with (DATA / "runs.jsonl").open("a") as f:
             f.write(txt + "\n")

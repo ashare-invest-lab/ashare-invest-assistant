@@ -114,7 +114,7 @@ def test_normalize_and_units() -> None:
 
 def test_validation_rejects() -> None:
     # 窗口外跳过，不入库、不伪造
-    rows, rejects = ld.normalize_history("000001", [_bar(t="2020-01-01"), _bar(t="2026-11-14")], st=ld.HIST_ST, et=ld.HIST_ET)
+    rows, rejects = ld.normalize_history("000001", [_bar(t="2020-01-01"), _bar(t="2026-11-14")])
     assert rows == []
     assert {r["reason"] for r in rejects} == {"date_out_of_window"}
     # OHLC 矛盾
@@ -161,29 +161,6 @@ def test_sql_and_conflict() -> None:
     assert lid == uid and note == "bound"
     lid, note = ld.resolve_active_licence([uid, "12345678-1234-4234-8234-123456789abd"])
     assert lid is None and note == "pending_bind_ambiguous"
-
-
-def test_offline_insert_blocks_unconfirmed_bj() -> None:
-    # 主动撤销旧确认，使本用例不依赖其他自检的运行顺序。
-    try:
-        ld.confirm_bj_offline_volume_units([])
-        raise Fail("empty comparison must revoke confirmation and fail")
-    except ld.RowReject:
-        pass
-    bj_rows, rejects = ld.normalize_history("920801", [_bar()])
-    assert rejects == []
-    existing: set[tuple[str, str, str]] = set()
-    stats = ld.apply_insert_offline(existing, bj_rows)
-    assert stats == {"inserted": 0, "skipped_existing": 0, "total": 0,
-                     "blocked_bj_unconfirmed": 1}
-    assert ("920801.BJ", "2024-01-02", "none") not in existing
-    sh_rows, _ = ld.normalize_history("689801", [_bar()])
-    sz_rows, _ = ld.normalize_history("302801", [_bar()])
-    mixed = ld.apply_insert_offline(
-        {("689801.SH", "2024-01-02", "none")}, bj_rows + sh_rows + sz_rows + sz_rows,
-    )
-    assert mixed == {"inserted": 1, "skipped_existing": 2, "total": 2,
-                     "blocked_bj_unconfirmed": 1}
 
 
 class FakeResp:
@@ -348,7 +325,7 @@ def test_success_and_redaction() -> None:
         now, sleep, sleeps, box = _clock([])
         buf = io.StringIO()
         with redirect_stdout(buf):
-            summary = bf.run_batch(st="20231113", et="20261113",
+            summary = bf.run_batch(
                 codes_file=ws["codes"],
                 licence_file=ws["lic"],
                 counter_path=ws["counter"],
@@ -888,15 +865,6 @@ def test_non_200_body_failure_does_not_retry() -> None:
 
 
 def test_cross_batch_db_and_checkpoint() -> None:
-    # 20 只人工合成 BJ 对照，只确认量单位，不读取真实行情或证券样本。
-    ld.confirm_bj_offline_volume_units([
-        {
-            "mairui": {"code": f"{920801 + offset}.BJ", "t": "2024-01-04", "v": 2 + offset},
-            "tdx_local": {"code": f"{920801 + offset}.BJ", "trade_date": "2024-01-04",
-                          "source": "tdx_local", "volume": 200 + offset * 100},
-        }
-        for offset in range(20)
-    ])
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
         ws = _workspace(tmp)
@@ -1189,7 +1157,6 @@ def main() -> int:
         ("normalize_units_adj_identity", test_normalize_and_units),
         ("validation_rejects", test_validation_rejects),
         ("sql_conflict_and_licence_bind", test_sql_and_conflict),
-        ("offline_insert_blocks_unconfirmed_bj", test_offline_insert_blocks_unconfirmed_bj),
         ("success_redaction_interval", test_success_and_redaction),
         ("calls_counted_on_429", test_429_is_counted_and_halts),
         ("existing_stop_preserved", test_existing_stop_not_cleared_and_no_request),

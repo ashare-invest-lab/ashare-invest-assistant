@@ -18,60 +18,29 @@ import re
 import sys
 import time
 from collections.abc import Callable, Mapping
-from datetime import date
 from pathlib import Path
 from typing import Any
 
-if __package__:
-    from .tb140_history_backfill import (
-        BATCH_CAP,
-        RATE_FLOOR_SECONDS,
-        Halt,
-        Backfill,
-        delete_licence_file,
-        load_codes,
-        load_counter,
-        now_mst,
-        read_licence_file,
-        redact,
-        run_batch,
-    )
-else:
-    from tb140_history_backfill import (
-        BATCH_CAP,
-        RATE_FLOOR_SECONDS,
-        Halt,
-        Backfill,
-        delete_licence_file,
-        load_codes,
-        load_counter,
-        now_mst,
-        read_licence_file,
-        redact,
-        run_batch,
-    )
-if __package__:
-    from .tb140_history_load import (
-        RowReject,
-        parse_window,
-        requestable_history_codes,
-        plan_history_expansion,
-        jsonl_reconcile_sink,
-        apply_daily_bars,
-        resolve_active_licence,
-        to_psycopg_dsn,
-    )
-else:
-    from tb140_history_load import (
-        RowReject,
-        parse_window,
-        requestable_history_codes,
-        plan_history_expansion,
-        jsonl_reconcile_sink,
-        apply_daily_bars,
-        resolve_active_licence,
-        to_psycopg_dsn,
-    )
+from tb140_history_backfill import (
+    BATCH_CAP,
+    RATE_FLOOR_SECONDS,
+    Halt,
+    Backfill,
+    delete_licence_file,
+    load_codes,
+    load_counter,
+    now_mst,
+    read_licence_file,
+    redact,
+    run_batch,
+)
+from tb140_history_load import (
+    HIST_ET,
+    HIST_ST,
+    apply_daily_bars,
+    resolve_active_licence,
+    to_psycopg_dsn,
+)
 
 SUPERVISOR_MIN_INTERVAL = RATE_FLOOR_SECONDS
 SUPERVISOR_DEFAULT_INTERVAL = 2.0
@@ -123,8 +92,8 @@ def run_supervised(
     run_dir: Path,
     max_calls: int = BATCH_CAP,
     interval: float = SUPERVISOR_DEFAULT_INTERVAL,
-    st: str | date | None = None,
-    et: str | date | None = None,
+    st: str = HIST_ST.strftime("%Y%m%d"),
+    et: str = HIST_ET.strftime("%Y%m%d"),
     licence_ids: list[str] | None = None,
     connection_factory: Callable[[], Any] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
@@ -134,10 +103,6 @@ def run_supervised(
     db_connect: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     """跑完账本中尚未完成的全部代码；每批（含熔断已完成部分）单事务写库。"""
-    try:
-        st, et = parse_window(st, et)
-    except RowReject as exc:
-        raise Halt(str(exc)) from None
     run_dir.mkdir(parents=True, exist_ok=True)
     env = environ if environ is not None else os.environ
     secret = ""
@@ -185,14 +150,12 @@ def run_supervised(
         overall["licence_bind"] = bind_note
 
         def persist(rows: list[dict[str, Any]]) -> dict[str, Any]:
-            return apply_daily_bars(db_conn, rows, lid, reconcile_sink=jsonl_reconcile_sink(run_dir / "reconcile.jsonl"))
+            return apply_daily_bars(db_conn, rows, lid)
 
         while True:
             state = load_counter(counter_path)
             engine._refuse_if_stopped(state)
-            codes, skipped = requestable_history_codes(load_codes(codes_file))
-            overall["skipped_codes"] = skipped
-            overall["expansion_plan"] = plan_history_expansion(state, ledger_path=counter_path, st=st, et=et)
+            codes = load_codes(codes_file)
             done = {str(x) for x in state.get("done_history") or []}
             remaining = [c for c in codes if c not in done]
             if not remaining:
@@ -263,8 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-dir", type=Path, required=True, help="原始与 SQL 只写这里，勿放仓库内")
     p.add_argument("--max", type=int, default=BATCH_CAP, help="每批上限，默认 2000，不能更大")
     p.add_argument("--interval", type=float, default=SUPERVISOR_DEFAULT_INTERVAL, help="请求间隔秒，默认 2，小于 0.2 拒绝")
-    p.add_argument("--st", default=None)
-    p.add_argument("--et", default=None)
+    p.add_argument("--st", default=HIST_ST.strftime("%Y%m%d"))
+    p.add_argument("--et", default=HIST_ET.strftime("%Y%m%d"))
     p.add_argument(
         "--licence-id",
         action="append",

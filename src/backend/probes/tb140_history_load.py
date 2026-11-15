@@ -7,17 +7,15 @@
 - 库内 volume 为股：daily-bars-tdx 契约「两侧均为股」，故 volume = v × 100。
 - 主键 (code, trade_date, adj_type)，ON CONFLICT DO NOTHING：app/db/tables/market.py。
 - active 证书判定对齐 owned_daily_read._licence（status=active、未删除、未暂停、未过期、无 hold）。
-- T-A158 第 5 项：BJ 写库前须 confirm_bj_offline_volume_units 离线对算至少 20 只。
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +23,7 @@ HIST_ST = date(2023, 11, 13)
 HIST_ET = date(2026, 11, 13)
 ADJ_TYPE = "none"
 SOURCE = "mairui"
-APPLY_PAYLOAD_PREFIX = "-- tb140_apply_payload="
 VOL_MULT = 100  # 手 → 股
-_bj_offline_volume_codes: frozenset[str] = frozenset()
 
 # 公开交易所代码段 + 本批 codes_ashare.txt 实际前缀。
 # 不用 startswith("6"/"9") 这种宽泛规则（既有 tb140_daily_bars.mkt 会把 920 判成 SH）。
@@ -67,69 +63,6 @@ def qualified_code(code: str) -> str:
     return f"{code.strip()}.{market_of(code)}"
 
 
-def parse_window(
-    st: str | date | None = None, et: str | date | None = None,
-) -> tuple[date | None, date | None]:
-    """CLI 日期只接受 YYYYMMDD；内部允许 date，缺省不补边界。"""
-    def parse(value: str | date | None) -> date | None:
-        if value is None:
-            return None
-        if type(value) is date:
-            return value
-        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{8}", value):
-            raise RowReject("window_date_invalid")
-        try:
-            return date(int(value[:4]), int(value[4:6]), int(value[6:]))
-        except ValueError:
-            raise RowReject("window_date_invalid") from None
-
-    start, end = parse(st), parse(et)
-    if start is not None and end is not None and start > end:
-        raise RowReject("window_start_after_end")
-    return start, end
-
-
-def requestable_history_codes(codes: Sequence[str]) -> tuple[list[str], list[dict[str, str]]]:
-    """所有回填入口共用：识别 BJ 旧码但不请求、不推算新码。"""
-    accepted, skipped = [], []
-    for value in codes:
-        code = value.strip()
-        market = market_of(code)
-        if market == "BJ" and not code.startswith("920"):
-            skipped.append({"code": code, "reason": "旧码不请求"})
-        else:
-            accepted.append(code)
-    return accepted, skipped
-
-
-def plan_history_expansion(
-    ledger: Mapping[str, Any], *, ledger_path: str | Path | None = None,
-    st: str | date | None = None, et: str | date | None = None,
-) -> dict[str, Any]:
-    """只规划扩窗待补；不改原账本、计数或 HALT，不发请求。"""
-    start, end = parse_window(st, et)
-    window = ledger.get("window")
-    windows = ledger.get("history_windows")
-    if not isinstance(windows, Mapping):
-        windows = {}
-    pending = []
-    if start is None and end is None:
-        for code in ledger.get("done_history") or []:
-            recorded = windows.get(code, window)
-            if not isinstance(recorded, dict) or any(
-                key not in recorded or recorded[key] is not None for key in ("st", "et")
-            ):
-                pending.append(code)
-    return {
-        "original_ledger": str(ledger_path) if ledger_path is not None else None,
-        "original_window": dict(window) if isinstance(window, dict) else None,
-        "window": {"st": start.isoformat() if start else None, "et": end.isoformat() if end else None},
-        "pending": [{"code": code, "reason": "旧窗口待补：old_window_not_complete"} for code in pending],
-        "pending_codes": pending,
-        "auto_request": False,
-    }
-
-
 def _decimal(value: Any, name: str) -> Decimal:
     if isinstance(value, bool) or value is None:
         raise RowReject(f"field_invalid:{name}")
@@ -154,58 +87,6 @@ def _trade_date(value: Any) -> date:
     raise RowReject("trade_date_invalid")
 
 
-def confirm_bj_offline_volume_units(
-    pairs: Iterable[Mapping[str, Mapping[str, Any]]],
-) -> frozenset[str]:
-    """用调用方提供的本地对照确认 BJ 量单位；纯计算，不读取文件、出网或连库。
-
-    每项为 {"mairui": 原始行, "tdx_local": 本地行}：原始行须含 code/t/v，
-    本地行须含 code/trade_date/volume/source。代码须为同一合法 .BJ 标准码，
-    日期须相同，source 须为 tdx_local，且原始 v（手）×100 精确等于 volume（股）。
-    不自动转码；全部对照一致且至少涵盖 20 只不同代码才通过，返回确认代码集。
-
-    模块在进程内默认未确认；成功后允许各写入口写 BJ（不限于样本代码）。
-    每次调用先撤销旧确认，失败抛 RowReject，不能跨调用累加样本或沿用旧确认。
-    确认不从产物恢复；新进程调用 Python 写入入口仍须先离线确认。
-    """
-    global _bj_offline_volume_codes
-    _bj_offline_volume_codes = frozenset()
-    matched: set[str] = set()
-    for pair in pairs:
-        if not isinstance(pair, Mapping):
-            raise RowReject("bj_offline_pair_invalid")
-        mairui, tdx = pair.get("mairui"), pair.get("tdx_local")
-        if not isinstance(mairui, Mapping) or not isinstance(tdx, Mapping):
-            raise RowReject("bj_offline_pair_invalid")
-        code = tdx.get("code")
-        if (not isinstance(code, str) or not _QUALIFIED_RE.fullmatch(code)
-                or not code.endswith(".BJ") or mairui.get("code") != code):
-            raise RowReject("bj_offline_code_mismatch")
-        try:
-            if qualified_code(code[:6]) != code:
-                raise RowReject("bj_offline_code_mismatch")
-        except CodeReject:
-            raise RowReject("bj_offline_code_mismatch") from None
-        if tdx.get("source") != "tdx_local":
-            raise RowReject("bj_offline_source_invalid")
-        if _trade_date(mairui.get("t")) != _trade_date(tdx.get("trade_date")):
-            raise RowReject("bj_offline_date_mismatch")
-        lots = _decimal(mairui.get("v"), "v")
-        shares = _decimal(tdx.get("volume"), "volume")
-        if (lots < 0 or shares < 0 or shares != shares.to_integral_value()
-                or lots * VOL_MULT != shares):
-            raise RowReject("bj_offline_volume_mismatch")
-        matched.add(code)
-    if len(matched) < 20:
-        raise RowReject("bj_offline_requires_20_distinct_codes")
-    _bj_offline_volume_codes = frozenset(matched)
-    return _bj_offline_volume_codes
-
-
-def _bj_write_unconfirmed(row: Mapping[str, Any]) -> bool:
-    return not _bj_offline_volume_codes and str(row.get("code", "")).endswith(".BJ")
-
-
 def _is_suspended(value: Any) -> bool:
     return value in (1, "1", True, "true", "True")
 
@@ -226,7 +107,7 @@ def _identity_ok(row: dict[str, Any], expected: str) -> None:
         raise RowReject("identity_mismatch")
 
 
-def validate_bar(row: Any, expected_code: str, *, st: date | None = None, et: date | None = None) -> dict[str, Any] | None:
+def validate_bar(row: Any, expected_code: str, *, st: date = HIST_ST, et: date = HIST_ET) -> dict[str, Any] | None:
     """通过则返回可入库行；日期越界返回 None（跳过、不伪造）；其余抛 RowReject。"""
     if not _QUALIFIED_RE.fullmatch(expected_code):
         raise CodeReject("qualified_code_invalid")
@@ -234,8 +115,7 @@ def validate_bar(row: Any, expected_code: str, *, st: date | None = None, et: da
         raise RowReject("row_not_object")
     _identity_ok(row, expected_code)
     day = _trade_date(row.get("t"))
-    st, et = parse_window(st, et)
-    if (st is not None and day < st) or (et is not None and day > et):
+    if day < st or day > et:
         return None
     open_ = _decimal(row.get("o"), "o")
     high = _decimal(row.get("h"), "h")
@@ -277,11 +157,10 @@ def normalize_history(
     code: str,
     body: Any,
     *,
-    st: date | None = None,
-    et: date | None = None,
+    st: date = HIST_ST,
+    et: date = HIST_ET,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     """只接受 list body。返回 (rows, rejects)。不编造缺日。"""
-    st, et = parse_window(st, et)
     expected = qualified_code(code)
     if not isinstance(body, list):
         raise RowReject("history_body_not_list")
@@ -364,32 +243,11 @@ def render_insert_sql(
     *,
     bind_note: str,
 ) -> str:
-    """生成非替换路径的幂等 INSERT；有 tdx 重叠时拒绝离线 SQL 执行。
-
-    产物通过 apply_insert_artifact 读取载荷并复用 apply_daily_bars，支持受审计替换。
-    直接用 psql 执行只允许非替换路径；重叠时必须走 Python 的持久化对账和事务后回执。
-    licence_id 必须是已裁定值，不在渲染时查库。
-    BJ 未经 confirm_bj_offline_volume_units 确认时只记录阻断注释，不生成其写入载荷
-    或 SQL；混合批次中的沪深行仍可生成 INSERT。
-    """
+    """生成可独立执行的幂等 INSERT。licence_id 必须是已裁定值，不在此查库。"""
     material = list(rows)
-    for row in material:
-        row_insert_params(row, licence_id)
-    writable = [row for row in material if not _bj_write_unconfirmed(row)]
-    blocked_bj = len(material) - len(writable)
-    blocked_note = (
-        f"-- BJ INSERT blocked: bj_offline_volume_units_unconfirmed ({blocked_bj} rows); "
-        "call confirm_bj_offline_volume_units first.\n"
-    ) if blocked_bj else ""
-    material = writable
-    if blocked_bj and not material:
-        return blocked_note
-    payload = json.dumps({"bars": material, "licence_id": licence_id}, ensure_ascii=False, default=str)
     lookup = ACTIVE_LICENCE_SQL.replace("\n", "\n-- ")
     lines = [
-        "-- T-B140c artifact: apply_insert_artifact uses audited conditional replacement.",
-        "-- Direct psql execution only supports non-replacement INSERT ON CONFLICT DO NOTHING.",
-        APPLY_PAYLOAD_PREFIX + payload,
+        "-- T-B140c offline-generated; ON CONFLICT DO NOTHING; no destructive DML or DDL",
         f"-- bind_note={bind_note}",
         "\\set ON_ERROR_STOP on",
         "BEGIN;",
@@ -397,26 +255,11 @@ def render_insert_sql(
     ]
     if not material:
         lines.extend(["-- no rows", "COMMIT;"])
-        return blocked_note + "\n".join(lines) + "\n"
+        return "\n".join(lines) + "\n"
     cols = (
         "code,trade_date,adj_type,open,high,low,close,pre_close,"
         "volume,amount,is_suspended,source,source_licence_id"
     )
-    keys = ",\n".join(
-        "(" + ",".join(_sql_literal(row[key]) for key in ("code", "trade_date", "adj_type")) + ")"
-        for row in material
-    )
-    lines.extend([
-        "-- Fail closed on replacement: use the audited Python writer for these keys.",
-        "DO $tb149_guard$ BEGIN",
-        "IF EXISTS (SELECT 1 FROM market.daily_bars AS b JOIN (VALUES",
-        keys,
-        ") AS incoming(code, trade_date, adj_type) ON b.code = incoming.code",
-        "AND b.trade_date = incoming.trade_date::date AND b.adj_type = incoming.adj_type",
-        "WHERE b.source = 'tdx_local') THEN",
-        "RAISE EXCEPTION 'tdx_local overlap requires audited conditional UPDATE via apply_daily_bars';",
-        "END IF; END $tb149_guard$;",
-    ])
     lines.append(f"INSERT INTO market.daily_bars ({cols}) VALUES")
     values: list[str] = []
     lic = "NULL"
@@ -448,47 +291,33 @@ def render_insert_sql(
     if licence_id is None:
         lines.append(f"-- pending bind: {bind_note}; source_licence_id is NULL")
     lines.append("COMMIT;")
-    return blocked_note + "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 def apply_insert_offline(
     existing: set[tuple[str, str, str]],
     rows: Sequence[dict[str, Any]],
 ) -> dict[str, int]:
-    """内存模拟 ON CONFLICT DO NOTHING，不连库。
-
-    未确认 BJ 行不进入模拟表，返回 blocked_bj_unconfirmed 计数；沪深行照常处理。
-    """
+    """内存模拟 ON CONFLICT DO NOTHING，不连库。"""
     table = set(existing)
     inserted = 0
     skipped = 0
-    blocked_bj = 0
     for row in rows:
         if row.get("source") != SOURCE or row.get("adj_type") != ADJ_TYPE:
             raise RowReject("source_or_adj_forged")
-        if _bj_write_unconfirmed(row):
-            blocked_bj += 1
-            continue
         key = (str(row["code"]), str(row["trade_date"]), ADJ_TYPE)
         if key in table:
             skipped += 1
             continue
         table.add(key)
         inserted += 1
-    result = {"inserted": inserted, "skipped_existing": skipped, "total": len(table)}
-    if blocked_bj:
-        result["blocked_bj_unconfirmed"] = blocked_bj
-    return result
+    return {"inserted": inserted, "skipped_existing": skipped, "total": len(table)}
 
 
-def write_normalized(
-    path: Path, code: str, rows: Sequence[dict[str, Any]], rejects: Sequence[dict[str, str]],
-    *, st: date | None = None, et: date | None = None,
-) -> None:
-    st, et = parse_window(st, et)
+def write_normalized(path: Path, code: str, rows: Sequence[dict[str, Any]], rejects: Sequence[dict[str, str]]) -> None:
     payload = {
         "code": qualified_code(code),
-        "window": {"st": st.isoformat() if st else None, "et": et.isoformat() if et else None},
+        "window": {"st": HIST_ST.isoformat(), "et": HIST_ET.isoformat()},
         "adj_type": ADJ_TYPE,
         "source": SOURCE,
         "n": len(rows),
@@ -506,12 +335,6 @@ def load_normalized(path: Path) -> list[dict[str, Any]]:
     if payload.get("source") != SOURCE or payload.get("adj_type") != ADJ_TYPE:
         raise RowReject("source_or_adj_forged")
     expected = str(payload.get("code", ""))
-    window = payload.get("window") or {}
-    try:
-        st = date.fromisoformat(window["st"]) if window.get("st") is not None else None
-        et = date.fromisoformat(window["et"]) if window.get("et") is not None else None
-    except (TypeError, ValueError):
-        raise RowReject("window_date_invalid") from None
     rows, _ = normalize_history(
         expected.split(".")[0],
         [
@@ -529,7 +352,6 @@ def load_normalized(path: Path) -> list[dict[str, Any]]:
             }
             for r in payload.get("bars", [])
         ],
-        st=st, et=et,
     )
     for row in rows:
         if row["code"] != expected:
@@ -568,14 +390,6 @@ def row_insert_params(row: dict[str, Any], licence_id: str | None) -> tuple[Any,
         raise RowReject("source_or_adj_forged")
     if not _QUALIFIED_RE.fullmatch(str(row["code"])):
         raise RowReject("qualified_code_invalid")
-    # 公共写入入口也拒绝伪造后缀、非法字段与非整数股数，不能只依赖上游校验。
-    raw = {
-        "code": row["code"], "t": row["trade_date"],
-        "o": row["open"], "h": row["high"], "l": row["low"], "c": row["close"],
-        "pc": row.get("pre_close"), "v": _decimal(row["volume"], "volume") / VOL_MULT,
-        "a": row["amount"], "sf": row["is_suspended"],
-    }
-    validate_bar(raw, qualified_code(str(row["code"]).split(".")[0]))
     lic: str | None
     if licence_id is None:
         lic = None
@@ -598,228 +412,44 @@ def row_insert_params(row: dict[str, Any], licence_id: str | None) -> tuple[Any,
     )
 
 
-# 来源与字段必须可证实；不能从计数推断已有行的来源。
-SELECT_EXISTING_BAR_SQL = """
-SELECT count(*) OVER () AS row_count, source, open, high, low, close, pre_close,
-       volume, amount, is_suspended
-FROM market.daily_bars WHERE code = %s AND trade_date = %s AND adj_type = %s
-""".strip()
-
-REPLACE_TDX_LOCAL_SQL = """
-UPDATE market.daily_bars
-SET open = %s, high = %s, low = %s, close = %s, pre_close = %s,
-    volume = %s, amount = %s, is_suspended = %s, source = %s,
-    source_licence_id = %s, fetched_at = now()
-WHERE code = %s AND trade_date = %s AND adj_type = %s AND source = 'tdx_local'
-""".strip()
-
-
-def jsonl_reconcile_sink(path: Path) -> Callable[[dict[str, Any]], None]:
-    """每条记录追加、flush 到磁盘后才返回；失败向事务边界传播。"""
-    path = path.resolve()
-    def sink(record: dict[str, Any]) -> None:
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-    return sink
-
-
-def _replacement_records(old: Mapping[str, Any], row: Mapping[str, Any], replacement_id: str) -> list[dict[str, Any]]:
-    common = {
-        "replacement_id": replacement_id, "code": row["code"],
-        "trade_date": str(row["trade_date"]), "adj_type": row["adj_type"], "ts": None,
-        "existing_source": "tdx_local", "incoming_source": SOURCE,
-    }
-    records = []
-    for field in ("open", "high", "low", "close", "pre_close", "volume", "amount", "is_suspended"):
-        existing, incoming = old.get(field), row.get(field)
-        tolerance = Decimal(0)
-        if field != "is_suspended":
-            existing = _decimal(existing, field) if existing is not None else None
-            incoming = _decimal(incoming, field) if incoming is not None else None
-            if field in ("open", "high", "low", "close", "pre_close"):
-                existing = existing.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if existing is not None else None
-                incoming = incoming.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if incoming is not None else None
-            if field == "amount":
-                tolerance = max(Decimal(1), abs(existing or Decimal(0)) * Decimal("2.4e-7"))
-        same = existing == incoming
-        if not same and field != "is_suspended" and existing is not None and incoming is not None:
-            same = abs(existing - incoming) <= tolerance
-        if not same:
-            records.append(dict(common, kind="replaced_tdx_local", field=field,
-                                existing_value=str(existing) if existing is not None else None,
-                                incoming_value=str(incoming) if incoming is not None else None,
-                                tolerance=str(tolerance)))
-    return records or [dict(common, kind="replaced_tdx_local_same", field="*",
-                            existing_value=dict(old), incoming_value=dict(row), tolerance="0")]
-
-
 def apply_daily_bars(
     conn: Any,
     rows: Sequence[dict[str, Any]],
     licence_id: str | None = None,
-    *, reconcile_sink: Callable[[dict[str, Any]], None] | None = None,
-    reconcile_path: Path = Path("tb140_history_reconcile.jsonl"),
 ) -> dict[str, int]:
-    """INSERT 保持 DO NOTHING；仅在持久化对账成功后条件替换 tdx_local。
+    """单事务幂等写入 daily_bars。只执行参数化 INSERT … ON CONFLICT DO NOTHING 与 SELECT count。
 
-    默认对账写当前运行目录 tb140_history_reconcile.jsonl；可显式指定路径或持久化 sink。
-
-    对账失败回滚；结果记录在本函数拥有的事务结束后写入。缺少事务接口时拒绝替换。
-    不建连接、不加载应用或数据库依赖，允许注入假连接。
-    BJ 未经 confirm_bj_offline_volume_units 确认时不进入写入参数，返回
-    blocked_bj_unconfirmed 计数；混合批次中的沪深行仍按原规则处理。
+    禁止 DELETE / TRUNCATE / DDL / UPDATE。返回写前、写后计数与新插入行数。
+    连接对象需提供 cursor()，以及可选的 transaction() 或 commit/rollback（psycopg 3.x 或同等假对象）。
     """
-    writable_rows = [row for row in rows if not _bj_write_unconfirmed(row)]
-    blocked_bj = len(rows) - len(writable_rows)
-    material = [row_insert_params(row, licence_id) for row in writable_rows]
-    outcomes: list[dict[str, Any]] = []
-    sink = reconcile_sink or jsonl_reconcile_sink(reconcile_path)
-    # 不能把外层事务中的 savepoint 释放误记成 committed。
-    status = getattr(getattr(conn, "info", None), "transaction_status", 0)
-    if status is not None and int(status) != 0:
-        raise RowReject("connection_transaction_already_active")
-    tx = getattr(conn, "transaction", None)
-    transactional = callable(tx) or callable(getattr(conn, "commit", None))
+    material = [row_insert_params(row, licence_id) for row in rows]
 
-    def count() -> int:
-        with conn.cursor() as cur:
+    def _count(owner: Any) -> int:
+        with owner.cursor() as cur:
             cur.execute(COUNT_DAILY_BARS_SQL)
             fetched = cur.fetchone()
             return int(fetched[0]) if fetched is not None else 0
 
-    def run() -> dict[str, int]:
-        before = count()
-        replaced = 0
+    def _run(owner: Any) -> dict[str, int]:
+        before = _count(owner)
         if material:
-            with conn.cursor() as cur:
+            with owner.cursor() as cur:
                 cur.executemany(INSERT_DAILY_BARS_SQL, material)
-                if transactional:
-                    for row, params in zip(writable_rows, material):
-                        cur.execute(SELECT_EXISTING_BAR_SQL, params[:3])
-                        fetchall = getattr(cur, "fetchall", None)
-                        if callable(fetchall):
-                            candidates = fetchall()
-                        else:
-                            fetched = cur.fetchone()
-                            candidates = [fetched] if fetched is not None else []
-                        candidates = [dict(item) if isinstance(item, Mapping) else
-                                      dict(zip(("row_count", "source", "open", "high", "low", "close", "pre_close", "volume", "amount", "is_suspended"), item))
-                                      for item in candidates]
-                        old = next((item for item in candidates
-                                    if item.get("source") == "tdx_local"
-                                    and all(str(item.get(key, row[key])) == str(row[key])
-                                            for key in ("code", "trade_date", "adj_type"))), None)
-                        if old is None:
-                            continue
-                        replacement_id = str(uuid.uuid4())
-                        outcome = {"kind": "replace_result", "replacement_id": replacement_id,
-                                   "code": row["code"], "trade_date": str(row["trade_date"]),
-                                   "adj_type": row["adj_type"], "existing_source": "tdx_local",
-                                   "incoming_source": SOURCE, "value": "rolled_back"}
-                        for record in _replacement_records(old, row, replacement_id):
-                            sink(record)
-                            if outcome not in outcomes:
-                                outcomes.append(outcome)
-                        cur.execute(REPLACE_TDX_LOCAL_SQL, params[3:] + params[:3])
-                        changed = max(0, int(cur.rowcount))
-                        replaced += changed
-                        outcome["value"] = "committed" if changed else "skipped"
-        after = count()
-        result = {"count_before": before, "count_after": after, "inserted": after - before}
-        if blocked_bj:
-            result["blocked_bj_unconfirmed"] = blocked_bj
-        if replaced or reconcile_sink is not None:
-            result["replaced"] = replaced
-        return result
+        after = _count(owner)
+        return {"count_before": before, "count_after": after, "inserted": after - before}
 
-    def finish(rolled_back: bool = False) -> None:
-        for outcome in outcomes:
-            value = "rolled_back" if rolled_back else outcome["value"]
-            sink(dict(outcome, value=value, replace_result=value))
-
-    try:
-        if callable(tx):
-            with tx():
-                result = run()
-        elif transactional:
-            try:
-                result = run()
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
-        else:
-            result = run()
-    except BaseException as exc:
+    tx = getattr(conn, "transaction", None)
+    if callable(tx):
+        with tx():
+            return _run(conn)
+    if hasattr(conn, "commit"):
         try:
-            finish(rolled_back=True)
+            result = _run(conn)
+            conn.commit()
+            return result
         except BaseException:
-            exc.add_note("replace_result_write_failed")
-        raise
-    finish()
-    return result
-
-
-WRONG_SUFFIX_GROUP_SQL = """
-SELECT code, source, adj_type, count(*) AS row_count,
-       min(trade_date) AS first_date, max(trade_date) AS last_date
-FROM market.daily_bars
-WHERE code ~ '^920[0-9]{3}[.]SH$'
-GROUP BY code, source, adj_type ORDER BY code, source, adj_type
-""".strip()
-
-WRONG_SUFFIX_COMPARE_SQL = """
-SELECT bad.code, bad.source AS existing_source, target.source AS target_source,
-       bad.adj_type,
-       CASE WHEN target.code IS NULL THEN 'target_missing'
-            WHEN ROW(bad.open, bad.high, bad.low, bad.close, bad.pre_close,
-                     bad.volume, bad.amount, bad.is_suspended)
-                 IS NOT DISTINCT FROM
-                 ROW(target.open, target.high, target.low, target.close, target.pre_close,
-                     target.volume, target.amount, target.is_suspended)
-            THEN 'same_key_same_values' ELSE 'same_key_different_values' END AS category,
-       count(*) AS row_count, min(bad.trade_date) AS first_date, max(bad.trade_date) AS last_date
-FROM market.daily_bars AS bad
-LEFT JOIN market.daily_bars AS target
-  ON target.code = left(bad.code, 6) || '.BJ'
- AND target.trade_date = bad.trade_date AND target.adj_type = bad.adj_type
-WHERE bad.code ~ '^920[0-9]{3}[.]SH$'
-GROUP BY bad.code, bad.source, target.source, bad.adj_type, category
-ORDER BY bad.code, bad.source, target.source, bad.adj_type, category
-""".strip()
-
-
-def wrong_suffix_stats(conn: Any) -> dict[str, list[Any]]:
-    """在传入连接仅执行两条 SELECT；不提交、不回滚、不改连接或账本状态。"""
-    with conn.cursor() as cur:
-        cur.execute(WRONG_SUFFIX_GROUP_SQL)
-        groups = list(cur.fetchall())
-        cur.execute(WRONG_SUFFIX_COMPARE_SQL)
-        comparison = list(cur.fetchall())
-    return {"groups": groups, "comparison": comparison}
-
-
-def apply_insert_artifact(
-    conn: Any, path: Path, *, reconcile_path: Path | None = None,
-) -> dict[str, int]:
-    """只读取生成产物的 JSON 载荷，复用审计写入器；绝不直接执行文件中的 SQL。
-
-    SQL 和此入口的非替换路径均保留 DO NOTHING；替换使用相同的对账、条件更新和回执。
-    默认对账文件放产物旁，避免依赖进程工作目录。
-    """
-    payloads = [line[len(APPLY_PAYLOAD_PREFIX):] for line in path.read_text(encoding="utf-8").splitlines()
-                if line.startswith(APPLY_PAYLOAD_PREFIX)]
-    if len(payloads) != 1:
-        raise RowReject("artifact_payload_invalid")
-    try:
-        payload = json.loads(payloads[0])
-    except json.JSONDecodeError:
-        raise RowReject("artifact_payload_invalid") from None
-    if not isinstance(payload, dict) or not isinstance(payload.get("bars"), list):
-        raise RowReject("artifact_payload_invalid")
-    return apply_daily_bars(
-        conn, payload["bars"], payload.get("licence_id"),
-        reconcile_path=reconcile_path if reconcile_path is not None else path.with_suffix(".reconcile.jsonl"),
-    )
+            rollback = getattr(conn, "rollback", None)
+            if callable(rollback):
+                rollback()
+            raise
+    return _run(conn)
