@@ -29,6 +29,9 @@ from pg_o61 import (  # noqa: E402
     validate_temp_db_name,
 )
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from test_ta87_m1_a1_a24_t_t50 import _ensure_tpl  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[3]
 CFG = IngestConfig.model_validate(
     yaml.safe_load((ROOT / "config/ingest.yaml").read_text(encoding="utf-8"))
@@ -50,7 +53,7 @@ def engine() -> Iterator[Engine]:
     模板库名仍读 TT51_TEMPLATE_DB（默认 tt51_tpl）。本机缺省须核 o61-pg；
     CI 非缺省端口不误拦；禁连 o53/o55/o57/o60。连接读 PGHOST/PGPORT/PGUSER/PGPASSWORD。
     """
-    host, port, _user, _password = resolve_libpq_params()
+    host, port, user, _password = resolve_libpq_params()
     try:
         guard_temp_pg(host, port)
     except PgOwnershipError as exc:
@@ -63,6 +66,8 @@ def engine() -> Iterator[Engine]:
         hide_parameters=True,
     )
     try:
+        # 本模块独立运行也准备私有模板；沿用源模板校验与 datallowconn=false 护栏。
+        _ensure_tpl({"PGHOST": host, "PGPORT": str(port), "PGUSER": user}, tpl=tpl)
         with admin.connect() as conn:
             conn.execute(text(f"CREATE DATABASE {name} TEMPLATE {tpl}"))
     except Exception as exc:  # noqa: BLE001
