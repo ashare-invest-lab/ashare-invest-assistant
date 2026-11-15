@@ -8,18 +8,18 @@
 
 计数按以下七列表的参数行：不同用途的窗口分别列，同一参数跨规则重复出现只列一次；共同参数逐卡展开，故总数不与 T-R71 README 的79个分组登记项相同。固定向量拆到用途；冲击档表每个分档一行。没有默认数值但必须冻结的佣金、R/计日也保留状态。证券代码、接口编号、合成输入的500日/1拆2/预热80根、数据覆盖起点和纯单位换算常数不是卡阈值，不充当已验证参数。§5新增费率历史段及背景按制度证据单列，不增添四卡默认参数，故不计入§2逐卡参数行数。
 
-T-R75 于2026-11-15补做费率制度的公开官方原文核对，详见§5：印花税补齐2008及2023等分段；过户费因中国结算原页抓取失败降为「未验证（官方原文待补）」；最低佣金改为「以用户券商为准、未验证」。其余制度状态沿用仓库已有核查，本轮未重新核法。科创板1股递增仍未验证；上市30日、长停牌5日、低价2元仍为内部闸门。四卡正文及§22未在本单修改，其中过户费、最低佣金的旧状态不能覆盖本审计更正。
+T-R75于2026-11-15补做费率制度的公开官方原文核对，补齐印花税分段并将最低佣金改为「以用户券商为准、未验证」。同日T-R76通过中国结算通知目录、官方PDF、北交所业务规则页及财政部/发改委政策原文，补齐2012/2015/2022过户费、北交所三段经手费及证管费0.02‰和纳入日期，详见§5；四卡现段过户费恢复已验证，北市过户费前段的起始日仍待补。其余制度状态沿用仓库已有核查，本轮未重新核法。科创板1股递增仍未验证；上市30日、长停牌5日、低价2元仍为内部闸门。四卡正文及§22未在本单修改，费用状态以本审计为准。
 
 P 表示 docs/strategies/golden/T-R73_golden.json 中对应 case（卡号-FX1）的 params；F 表示同 case 的 fixed_params；unverified 均为同 case 字段。表中「一致」只表示当前数值/口径相符，不表示历史有效性通过。「仅登记」表示有字段而未参与相应求值；「golden未用」表示未覆盖该参数。敏感性列 A–E 指 §4 最小复测包，原值和网格均非本轮选优结果。无原范围的固定项以原值为单点区间，先做消融或边界核验；新增网格须先预注册，不能编成原稿已有范围。
 
 | 卡 | 参数数 | 已验证 | 未验证 | params核对 |
 |---|---:|---:|---:|---|
-| S-01 | 78 | 12 | 66 | 9项一致 |
-| S-02 | 77 | 12 | 65 | 9项一致 |
-| S-04 | 71 | 12 | 59 | 5项一致 |
-| W-02 | 83 | 12 | 71 | 8项一致 |
+| S-01 | 78 | 13 | 65 | 9项一致 |
+| S-02 | 77 | 13 | 64 | 9项一致 |
+| S-04 | 71 | 13 | 58 | 5项一致 |
+| W-02 | 83 | 13 | 70 | 8项一致 |
 
-T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。每卡各有过户费、最低佣金两行由已验证降级，其他行状态不变；§5的25项制度段/背景另计15项已验证、10项未验证（包含实际最低佣金）。
+T-R76计数更正（相对T-R75）：总参数仍309；已验证48→52，未验证261→257。每卡各1项现段过户费恢复已验证，实际最低佣金仍未验证；§5的25项制度段/背景另计已验证15→23、未验证10→2（北市过户费前段起始日、实际最低佣金）。
 
 ## 2. 逐卡参数明细
 
@@ -100,7 +100,7 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 | S-01 | 价格最小变动/限价舍入 | 0.01元；ROUND_HALF_UP | docs/strategies/market_rules_check.md §3 M2/6 | 制度固定，按有效日分段 | 已验证 | 一致：checker固定0.01；P/F无键 |
 | S-01 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-01 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| S-01 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起（待核值） | 本文件§5 F10：中国结算《关于降低股票交易过户费收费标准的通知》，原页HTTP 500；撤销T-R58 §5 R7转载交叉核对所支持的已验证状态 | 制度固定，按有效日分段 | 未验证（官方原文待补） | golden未用：fees=null |
+| S-01 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-01 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | S-01 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-01 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
@@ -182,7 +182,7 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 | S-02 | 价格最小变动/限价舍入 | 0.01元；ROUND_HALF_UP | docs/strategies/market_rules_check.md §3 M2/6 | 制度固定，按有效日分段 | 已验证 | 一致：checker固定0.01；P/F无键 |
 | S-02 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-02 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| S-02 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起（待核值） | 本文件§5 F10：中国结算《关于降低股票交易过户费收费标准的通知》，原页HTTP 500；撤销T-R58 §5 R7转载交叉核对所支持的已验证状态 | 制度固定，按有效日分段 | 未验证（官方原文待补） | golden未用：fees=null |
+| S-02 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-02 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | S-02 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-02 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
@@ -258,7 +258,7 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 | S-04 | 价格最小变动/限价舍入 | 0.01元；ROUND_HALF_UP | docs/strategies/market_rules_check.md §3 M2/6 | 制度固定，按有效日分段 | 已验证 | 一致：checker固定0.01；P/F无键 |
 | S-04 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-04 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| S-04 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起（待核值） | 本文件§5 F10：中国结算《关于降低股票交易过户费收费标准的通知》，原页HTTP 500；撤销T-R58 §5 R7转载交叉核对所支持的已验证状态 | 制度固定，按有效日分段 | 未验证（官方原文待补） | golden未用：fees=null |
+| S-04 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-04 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | S-04 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-04 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
@@ -346,7 +346,7 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 | W-02 | 价格最小变动/限价舍入 | 0.01元；ROUND_HALF_UP | docs/strategies/market_rules_check.md §3 M2/6 | 制度固定，按有效日分段 | 已验证 | 一致：checker固定0.01；P/F无键 |
 | W-02 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | W-02 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| W-02 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起（待核值） | 本文件§5 F10：中国结算《关于降低股票交易过户费收费标准的通知》，原页HTTP 500；撤销T-R58 §5 R7转载交叉核对所支持的已验证状态 | 制度固定，按有效日分段 | 未验证（官方原文待补） | golden未用：fees=null |
+| W-02 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | W-02 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | W-02 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | W-02 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
@@ -452,13 +452,13 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 
 上述差异检验预先定义效应方向与统计量，加入同一BH比较族；不能只报告组内显著而不检验组间差异。数据接口编号是未来依赖登记，不表示已接入；未取得字段、状态历史、实际成本或成交证据时，先记录阻塞，不以接口路径本身充当样本外证据。
 
-## 5. T-R75｜费率与交易成本制度原文核对（2026-11-15）
+## 5. T-R75/T-R76｜费率与交易成本制度原文核对（2026-11-15）
 
 ### 5.1 口径与逐项证据
 
-仅采用财政部、税务总局、中国结算、沪深北交易所、证监会的官方域名；没有以媒体、券商转载或搜索摘要替代原文。下面「已验证」只验证所列制度值/历史适用段，不验证策略有效性、用户实收、完整费用实现或样本外表现。抓取用公开网页GET及curl，不带账户鉴权；HTTP 4xx/5xx即使curl退出0也记失败。文号未在成功原文中显示的写「页面未列」，原文失败者写「待补」，不猜文号。
+仅采用财政部、税务总局、中国结算、沪深北交易所、全国股转、证监会及gov.cn政策库的官方域名；发改委原文位于ndrc.gov.cn。没有以媒体、券商转载或搜索摘要替代原文。下面「已验证」只验证所列制度值/历史适用段，不验证策略有效性、用户实收、完整费用实现或样本外表现。抓取用公开网页GET及curl，不带账户鉴权；HTTP 4xx/5xx即使curl退出0也记失败。文号未在成功原文中显示的写「页面未列」，原文失败者写「待补」，不猜文号。
 
-本表为人民币A股普通竞价交易基准；每边费率指买方、卖方各对各自成交额计收，并非往返总额。成交面额与成交金额不可混用。B股、基金、协议转让、大宗交易、优先股、跨境额外收费不直接套用本表；例如深交所2023通知明确A股大宗经手费另下浮30%。2016-05-01价税分离不等于投资者价税合计费率再次下降，上交所官方回顾明确价税合计不超过原标准；本表不另造一个投资者费率段。历史起点尚未核实的前标准只作待核背景，不向更早日期外推；北市补证也不改变四卡排除北交所的研究范围。
+本表为人民币A股普通竞价交易基准；每边费率指买方、卖方各自计收，并非往返总额；除明确注明成交面额的历史段外，按各自成交金额计费。成交面额与成交金额不可混用。B股、基金、协议转让、大宗交易、优先股、跨境额外收费不直接套用本表；例如深交所2023通知明确A股大宗经手费另下浮30%。2016-05-01价税分离不等于投资者价税合计费率再次下降，上交所官方回顾明确价税合计不超过原标准；本表不另造一个投资者费率段。历史起点尚未核实的前标准只作待核背景，不向更早日期外推；北市补证也不改变四卡排除北交所的研究范围。
 
 | 编号/项目 | 费率数值与计费基数/方向 | 生效日及适用段 | 官方原文标题、发布机构、文号 | 官方URL | 抓取结果及适用说明 | 状态 |
 |---|---|---|---|---|---|---|
@@ -467,11 +467,11 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 | F03 印花税：2008年第二次调整 | 卖方1‰=0.1%；买方0 | 2008-09-19至2022-06-30（随后由法律承接） | 《关于做好调整证券交易印花税税率相关工作的通知》；上海证券交易所（执行财政部、国家税务总局决定）；页面未列文号；发布2008-09-18 | [官方原文/尝试入口](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20150912_3988239.shtml) | 成功，HTTP 200；只引用上交所自己的执行通知，未冒充财政部原通知 | 已验证 |
 | F04 印花税：法律承接段 | 证券交易成交金额1‰=0.1%，只向出让方征收 | 2022-07-01起；未减半段至2023-08-27；四卡建模截取2023-04-10起 | 《中华人民共和国印花税法》；全国人大常委会通过，国家主席公布；税务总局官网收录全文；中华人民共和国主席令第89号；2021-06-10通过 | [官方原文/尝试入口](https://fgk.chinatax.gov.cn/zcfgk/c100009/c5193058/content.html) | 成功，HTTP 200；第3/5/20条及税率表，附件图另核见下文 | 已验证 |
 | F05 印花税：减半段 | 1‰×1/2=0.5‰=0.05%，卖方；买方0 | 2023-08-28起 | 《关于减半征收证券交易印花税的公告》；财政部、税务总局；财政部 税务总局公告2023年第39号；发布2023-08-27 | [官方原文/尝试入口](https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm) | 成功，HTTP 200；公告写减半，0.05%由F04税率换算 | 已验证 |
-| F06 过户费：2012年第一次下调（待核值） | 沪市按成交面额0.5‰→0.375‰；深市按成交金额0.0255‰维持；买卖双方分别收取 | 2012-06-01起至2012-08-31；更早段起点未核 | 《2012年A股交易过户费调整通知（准确标题、文号待补）》；中国证券登记结算有限责任公司；待补 | [官方原文/尝试入口](https://www.chinaclear.cn/zdjs/gszb/gszb_list.shtml) | 失败，官方通知目录HTTP 500；未定位2012通知的具体原页，不能凭目录确认数值/日期 | 未验证（官方原文待补） |
-| F07 过户费：2012年第二次下调（待核值） | 沪市按成交面额0.375‰→0.3‰；深市按成交金额0.0255‰维持；双向 | 2012-09-01至2015-07-31 | 《2012年上海市场A股交易过户费下调通知（准确标题、文号待补）》；中国证券登记结算有限责任公司；待补 | [官方原文/尝试入口](https://www.chinaclear.cn/zdjs/gszb/gszb_list.shtml) | 失败，官方通知目录HTTP 500；具体原页未定位；2015联合答问仅旁证调整前数值 | 未验证（官方原文待补） |
-| F08 过户费：统一金额计费（待核值） | 沪深A股统一按成交金额0.02‰=0.002%，买卖各收；替代沪市成交面额0.3‰、深市成交金额0.0255‰ | 2015-08-01至2022-04-28 | 《关于调整A股交易过户费收费标准有关事项的通知》；中国证券登记结算有限责任公司；文号待补；发布2015-07-09待原页核 | [官方原文/尝试入口](https://www.chinaclear.cn/zdjs/gszb/201507/9aeee4d21a6f47f5b3741637993b004b.shtml) | 失败，HTTPS跳回官网首页后HTTP 500；HTTP及移动域名也失败；联合答问仅作官方旁证 | 未验证（官方原文待补） |
-| F09 过户费：北市下调前（待核值） | 北京市场A股/挂牌股份按成交金额0.025‰=0.0025%，买卖各收 | 截至2022-04-28的前标准；北市适用起始日未核，不臆填开市日 | 《关于降低股票交易过户费收费标准的通知（其中调整前标准）》；中国证券登记结算有限责任公司；文号待补；拟核发布日2022-04-28 | [官方原文/尝试入口](https://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml) | 失败，HTTP 500；该前段起点也待原文补齐 | 未验证（官方原文待补） |
-| F10 过户费：统一下调（待核值） | 沪深北A股/挂牌股份按成交金额0.01‰=0.001%，买卖各收；沪深由0.02‰、北市由0.025‰下调 | 2022-04-29起 | 《关于降低股票交易过户费收费标准的通知》；中国证券登记结算有限责任公司；文号待补；拟核发布日2022-04-28 | [官方原文/尝试入口](https://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml) | 失败，HTTPS跳回官网首页后HTTP 500；HTTP及移动域名也失败 | 未验证（官方原文待补） |
+| F06 过户费：2012年第一次下调 | 中国结算收取的沪市A股按成交面额0.5‰→0.375‰；深市按成交金额0.0255‰维持；双向口径结合F07核对 | 2012-06-01至2012-08-31；更早段起点未核 | 《关于调整A股交易过户费收费标准的通知》；中国证券登记结算有限责任公司；原文未列文号；落款2012-04-30 | [官方PDF](https://www.chinaclear.cn/old_files/1335773025208.pdf) | 成功，HTTP 200；1页PDF正文；沪市基数为面额，所列为中国结算收费部分，非含证券公司留存的全部历史实收 | 已验证 |
+| F07 过户费：2012年第二次下调 | 中国结算在沪市向买卖双方各按成交面额0.375‰→0.3‰；深市按成交金额0.0255‰维持 | 2012-09-01至2015-07-31 | 《关于进一步调整A股交易过户费收费标准有关事项的通知》；中国证券登记结算有限责任公司；原文未列文号；落款2012-08-02 | [官方PDF](https://www.chinaclear.cn/old_files/1343899420865.pdf) | 成功，HTTP 200；1页PDF正文第1/2条；证券公司收取并留存的沪市过户费另同比下降20%，不将其与本行中国结算部分混同 | 已验证 |
+| F08 过户费：统一金额计费 | 沪深A股统一按成交金额0.02‰=0.002%，买卖各收；替代沪市成交面值0.3‰、深市成交金额0.0255‰ | 2015-08-01至2022-04-28 | 《关于调整A股交易过户费收费标准有关事项的通知》；中国证券登记结算有限责任公司；页面未列文号；落款/发布2015-07-09 | [官方正文](https://www.chinaclear.cn/zdjs/gszb/201507/59ccd4176d2645f8b60b2d30fc3631bf.shtml) | 成功，HTTP 200；首段及第1条明确生效日、双向费率、证券经营机构不予留存；不用页面生成时间2023-05-08替代发文日 | 已验证 |
+| F09 过户费：北市下调前（数值已核、起始日待补） | 北京市场A股/挂牌股份按成交金额0.025‰=0.0025%，买卖各收 | 2022-04-28通知列示的调整前标准；北市适用起始日未核，不外推为开市即适用 | 《中国结算关于降低股票交易过户费收费标准的通知》（调整前标准）；中国证券登记结算有限责任公司；页面未列文号；落款/发布2022-04-28 | [官方正文](https://www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml) | 成功，HTTP 200，仅核到调整前数值；2021业务指南引用动态收费表，未给0.025‰及其起始日，完整历史段仍不晋级 | 未验证（官方原文待补） |
+| F10 过户费：统一下调 | 沪深北A股/挂牌股份按成交金额0.01‰=0.001%，买卖各收；沪深由0.02‰、北市由0.025‰下调 | 2022-04-29起 | 《中国结算关于降低股票交易过户费收费标准的通知》；中国证券登记结算有限责任公司；页面未列文号；落款/发布2022-04-28 | [官方正文](https://www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml) | 成功，HTTP 200；原文明确生效日及沪深北统一双向费率；替换T-R75无法取得正文的另一URL | 已验证 |
 | F11 上交所经手费：2012年第一次下调 | 成交金额0.11‰→0.087‰=0.0087%，买卖各收 | 2012-06-01至2012-08-31 | 《上海证券交易所调整部分收费标准的通知》；上海证券交易所；页面未列文号；发布2012-04-30 | [官方原文/尝试入口](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20150912_3988543.shtml) | 成功，HTTP 200；历史段；双向口径与F12前标准衔接 | 已验证 |
 | F12 上交所经手费：2012年第二次下调 | 成交金额0.087‰→0.0696‰=0.00696%，买卖各收 | 2012-09-01至2015-07-31 | 《关于上海证券交易所继续降低A股证券交易经手费标准的通知》；上海证券交易所；页面未列文号；发布2012-08-02 | [官方原文/尝试入口](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20150912_3988591.shtml) | 成功，HTTP 200；历史段 | 已验证 |
 | F13 上交所经手费：2015年下调 | 成交金额0.0696‰→0.0487‰=0.00487%，买卖各收 | 2015-08-01至2023-08-27 | 《沪、深证券交易所和中国证券登记结算公司负责人就降低A股交易结算收费标准答记者问》；上交所官网发布三方联合答问；无文号；发布2015-07-01 | [官方原文/尝试入口](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20150912_3988866.shtml) | 成功，HTTP 200；明确8月1日实施；这是联合答问原文，未冒充单独收费通知 | 已验证 |
@@ -480,11 +480,11 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 | F16 深交所经手费：2012年第二次下调 | 成交金额0.087‰→0.0696‰=0.00696%，买卖各收 | 2012-09-01至2015-07-31 | 《关于调整深圳市场A股交易经手费收费标准的通知》；深圳证券交易所；页面未列文号；发布2012-08-02 | [官方原文/尝试入口](https://www.szse.cn/aboutus/trends/news/t20120802_518315.html) | 成功，HTTP 200；双向口径与F17前标准衔接 | 已验证 |
 | F17 深交所经手费：2015年下调 | A股成交金额0.0696‰→0.0487‰=0.00487%，买卖各收 | 2015-08-01至2023-08-27 | 《关于调整部分证券品种收费标准的通知》；深圳证券交易所；深证会〔2015〕233号；发布2015-07-29 | [官方原文/尝试入口](https://www.szse.cn/www/lawrules/rule/all/t20190326_565731.html) | 成功，HTTP 200；发布日期按正文，不按迁移URL中的20190326 | 已验证 |
 | F18 深交所经手费：2023年下调 | A股成交金额0.0487‰→0.0341‰=0.00341%，买卖各收 | 2023-08-28起 | 《关于下调股票交易经手费收费标准的通知》；深圳证券交易所；深证上〔2023〕768号；发布2023-08-18 | [官方原文/尝试入口](https://www.szse.cn/disclosure/notice/t20230818_602805.html) | 成功，首次curl rc=28连接超时；网页读取成功，curl复抓HTTP 200 | 已验证 |
-| F19 北交所经手费：开市段（待核值） | 普通股成交金额0.5‰=0.05%，买卖各收 | 2021-11-15至2022-11-30 | 《关于发布《北京证券交易所业务收费管理办法》的公告及附表》；北京证券交易所；北证公告〔2021〕49号（文号及适用状态待原页复核） | [官方原文/尝试入口](https://www.bse.cn/scgl_list/200011013.html) | 失败，curl HTTP 403；不能将搜索索引中的全文当作本轮成功抓取；历史办法后续已修改的状态也待原页核 | 未验证（官方原文待补） |
-| F20 北交所经手费：2022年下调（待核值） | 成交金额0.5‰→0.25‰=0.025%，买卖各收 | 2022-12-01至2023-08-27 | 《关于下调交易经手费标准的公告》；北京证券交易所；北证公告〔2022〕37号（待原页复核）；发布2022-11-18待核 | [官方原文/尝试入口](https://www.bse.cn/important_news/200013817.html) | 失败，curl HTTP 403；网页读取重定向循环；官方新闻页同样403 | 未验证（官方原文待补） |
-| F21 北交所经手费：2023年下调（待核值） | 成交金额0.25‰→0.125‰=0.0125%，买卖各收 | 2023-08-28起 | 《关于下调股票交易经手费收费标准的通知》；北京证券交易所；北证公告〔2023〕54号（待原页复核）；发布2023-08-18待核 | [官方原文/尝试入口](https://www.bse.cn/important_news/200018086.html) | 失败，curl HTTP 403；网页读取重定向循环 | 未验证（官方原文待补） |
+| F19 北交所经手费：开市段 | 普通股成交金额0.5‰=0.05%，买卖各收 | 2021-11-15至2022-11-30 | 《关于发布〈北京证券交易所业务收费管理办法〉的公告》及附表；北京证券交易所；北证公告〔2021〕49号；发布2021-11-12 | [官方业务规则正文](https://www.bse.cn/scgl_list/200011013.html) | 成功，HTTP 200；匿名Cookie配合curl -L跟随302后取得全文/附表；实施日期2021-11-15，页面标已被修改，仅用于本历史段 | 已验证 |
+| F20 北交所经手费：2022年下调 | 成交金额0.5‰→0.25‰=0.025%，买卖各收 | 2022-12-01至2023-08-27 | 《关于下调交易经手费标准的公告》；北京证券交易所；北证公告〔2022〕37号；发布2022-11-18 | [官方业务规则正文](https://www.bse.cn/scgl_list/200013827.html) | 成功，HTTP 200；匿名Cookie配合curl -L取得正文收费表及实施日期；页面标已被修改，仅用于本历史段 | 已验证 |
+| F21 北交所经手费：2023年下调 | 成交金额0.25‰→0.125‰=0.0125%，买卖各收 | 2023-08-28起 | 《关于下调股票交易经手费收费标准的通知》；北京证券交易所；北证公告〔2023〕54号；发布2023-08-18 | [官方业务规则正文](https://www.bse.cn/scgl_list/200018104.html) | 成功，HTTP 200；匿名Cookie配合curl -L取得正文收费表及实施日期；页面标现行有效 | 已验证 |
 | F22 证管费：沪深降费 | 股票成交金额0.04‰→0.02‰=0.002%；清算按买卖各边核算 | 2012-01-01起；2012-09-01调整清算参数，1至8月多收部分另退 | 《关于调整上海证券市场证券交易监管费收费标准的通知》；上海证券交易所、中国结算上海分公司；收费主体为中国证监会；页面未列本通知文号；引用会计部函〔2012〕403号转发发改价格〔2012〕2119号 | [官方原文/尝试入口](https://www.sse.com.cn/lawandrules/guide/other/c/c_20230116_5312163.shtml) | 成功，HTTP 200；只确认该次降费原文和日期，不把清算调整日当生效日 | 已验证 |
-| F23 证管费：北市及现行清单补证（待核值） | 证监会向沪深北交易所按股票交易额0.02‰=0.002%收取；投资者按边代收须结合费表/协议 | 北市纳入的准确生效日待补；沪深沿F22历史段 | 《中国证监会及下属单位综合性涉企收费目录清单》；中国证券监督管理委员会；标准由财政部、国家发展改革委制定；清单无文号；列发改价格规〔2018〕917号、发改价格〔2021〕1947号等，后续原通知待补 | [官方原文/尝试入口](https://www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/%E4%B8%AD%E5%9B%BD%E8%AF%81%E7%9B%91%E4%BC%9A%E5%8F%8A%E4%B8%8B%E5%B1%9E%E5%8D%95%E4%BD%8D%E7%BB%BC%E5%90%88%E6%80%A7%E6%B6%89%E4%BC%81%E6%94%B6%E8%B4%B9%E7%9B%AE%E5%BD%95%E6%B8%85%E5%8D%95.pdf) | 失败，curl rc=35 TLS连接意外EOF；搜索索引可定位清单但不据此晋级 | 未验证（官方原文待补） |
+| F23 证管费：北市纳入及收费标准 | 中国证监会向北京证券交易所按股票交易额0.02‰=0.002%收取；现行清单写股票年交易额；投资者按边代收另须结合费表/协议 | 自北交所开市日2021-11-15起纳入；不把2021年12月政策落款日或2022年公示日当纳入日 | 《财政部 发展改革委关于证券期货业、银行业和保险业监管费有关问题的通知》财税〔2021〕65号（2021-12-02）；《国家发展改革委 财政部关于银行业、保险业和证券期货业监管费收费标准有关问题的通知》发改价格〔2021〕1947号（2021-12-30）；沪深基准见发改价格规〔2018〕917号；《中国证监会及下属单位综合性涉企收费目录清单》由中国证券监督管理委员会发布，无文号 | [财政部65号正文](https://szs.mof.gov.cn/zt/mlqd_8464/zcgd/202112/t20211214_3774393.htm)、[发改委1947号正文](https://www.ndrc.gov.cn/xwdt/tzgg/202201/t20220107_1311591.html)、[917号正文](https://www.ndrc.gov.cn/xxgk/zcfb/ghxwj/201806/t20180627_960950.html)；清单PDF及开市日证据见§5.2 | 均成功，HTTP 200；65号第1条自开市日起纳入，1947号第2条按沪深同标准，917号第1（一）条0.02‰；证监会PDF第1页另核沪深北同费率 | 已验证 |
 | F24 佣金上限（背景） | 证券交易金额3‰=0.3%为上限；包含代收证管费及交易所手续费，非实际费率 | 2002-05-01起；文件级适用状态见下文 | 《关于调整证券交易佣金收取标准的通知》；中国证监会、国家发展计划委员会、国家税务总局；证监发〔2002〕21号；发布2002-04-04 | [官方原文/尝试入口](https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html) | 成功，HTTP 200；第1/6/8条；仅验证监管上限背景，不验证用户协议 | 已验证 |
 | F25 最低佣金（用户协议参数） | 实际最低额以用户券商为准；历史文件为A股每笔不足5元按5元收取，5元不晋级卡参数 | 历史规定2002-05-01起；用户协议生效日、实际最低额未核 | 《关于调整证券交易佣金收取标准的通知（历史起点5元背景）》；中国证监会、国家发展计划委员会、国家税务总局；证监发〔2002〕21号；不是用户协议 | [官方原文/尝试入口](https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html) | 官方历史正文成功，HTTP 200；实际协议未读取/未验证 | 以用户券商为准、未验证 |
 
@@ -493,14 +493,108 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 - F04税率附件：税务总局广东站所载[《中华人民共和国印花税法》全文](https://guangdong.chinatax.gov.cn/gdsw/zjfg/2023-03/06/content_1f02a0e8bc254856aa0cc68a8cae0c74.shtml)及[税率表第二页图片](https://guangdong.chinatax.gov.cn/gdsw/zjfg/2023-03/06/1f02a0e8bc254856aa0cc68a8cae0c74/images/20211126154316_0.jpg)均HTTP 200；实际打开图片确认证券交易为「成交金额的千分之一」。不是从网页上传日期推导生效日。
 - F13联合答问为2015-07-01的拟实施口径；另抓取上交所[《减费降负促活力 上交所减免部分项目收费》](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20180731_4604157.shtml)，HTTP 200，其2018-07-31原文回顾明确2012-06-01为0.0087%、2012-09-01为0.00696%、2015-08-01为0.00487%，据此核对实际历史衔接，不单凭拟调整答问确认实施。
 - F14正式附件：[2023年8月收费指引DOCX](https://www.sse.com.cn/lawandrules/sselawsrules2025/charge/c/10781461/files/6ead9e7d60e14272a19cd75b622dd2ef.docx)HTTP 200，解包读取第3.1.1条确认A股竞价按0.00341%双向收取；[136号原旧链接](https://www.sse.com.cn/lawandrules/sselawsrules/charge/c/c_20230818_5725373.shtml)HTTP 404，因此更正为137号正文及其附件，另以[上交所原发布新闻](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20230818_5725378.shtml)核对0.00487%→0.00341%，不把新闻标题写成通知标题。
-- F06/F07只定位到[中国结算通知目录](https://www.chinaclear.cn/zdjs/gszb/gszb_list.shtml)，HTTP 500，尚未定位2012两份具体原文URL；标题/文号及生效日、面额计费待补，不能升级。F08的调整前基数及2015统一费率可由[三方联合答问](https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20150912_3988866.shtml)HTTP 200旁证，但不能代替中国结算原通知。F06/F07未使用转载作为验证来源。
-- F08已尝试[HTTPS原页](https://www.chinaclear.cn/zdjs/gszb/201507/9aeee4d21a6f47f5b3741637993b004b.shtml)、[HTTP原页](http://www.chinaclear.cn/zdjs/gszb/201507/9aeee4d21a6f47f5b3741637993b004b.shtml)及[移动域名同路径](https://m.chinaclear.cn/zdjs/gszb/201507/9aeee4d21a6f47f5b3741637993b004b.shtml)：HTTPS/移动域名均跳回http://www.chinaclear.cn/后HTTP 500，HTTP原页也500，响应体空；不能称已获取官方原文。
-- F09/F10已尝试[HTTPS原页](https://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml)、[HTTP原页](http://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml)及[移动域名同路径](https://m.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml)：HTTPS/移动域名均跳回http://www.chinaclear.cn/后HTTP 500，HTTP原页也500，响应体空；不能称已获取官方原文。
-- F19/F20/F21三个北交所原页均HTTP 403；F20/F21网页读取还报告重定向循环；[F20官方新闻页](https://www.bse.cn/important_news/200013819.html)也403。官方搜索索引可定位标题/文号和待核值，但本轮不把索引视为成功抓取，因此全部保留「未验证（官方原文待补）」。
-- F23尝试表中证监会PDF，curl rc=35（TLS握手意外EOF），未取得正文；另尝试[财政部相关政策目录](https://szs.mof.gov.cn/zt/mlqd_8464/zcgd/)HTTP 502及[2018通知候选旧路径](https://www.mof.gov.cn/zhengwuxinxi/zhengcefabu/201806/t20180626_2940620.htm)HTTP 404，均未取得该原通知，候选路径不当作已定位原文。F22的2012原文不能单独证明后来北市纳入的日期。
+- T-R76从中国结算[通知公告目录](https://www.chinaclear.cn/zdjs/xtzgg/center_flist.shtml)进入分页，2012年两通知分别直接链接至F06/F07的官方PDF。F06英文站附件也取得HTTP 200，但英文将沪市基数写成“trading value”，故基数以中文PDF的「成交面额」为准。F06/F07只验证中国结算收费部分；2012年第二份通知另明定证券公司留存部分同比下调，不能把表内单项直接当完整历史实收。
+- F08/F10由官方目录重新定位到表中正文，均HTTP 200；T-R75使用的2015/2022另一组URL仍重定向首页后500。新正文未列文号，按「页面未列文号」记录，不用转载补猜。F08正文和目录均给2015-07-09，忽略迁移生成时间；F10确认为2022-04-28发文、4月29日起执行。
+- F09仅补齐0.025‰双向的调整前数值；[2021年北交所登记结算业务指南发布通知](https://www.chinaclear.cn/zdjs/bjsjjsfgs/202110/662502f2ba8a4867bb284509fb88f9ea.shtml)及其[官方附件](https://www.chinaclear.cn/zdjs/bjsjjsfgs/202110/662502f2ba8a4867bb284509fb88f9ea/files/20211102171747707.pdf)均HTTP 200，通知定2021-11-15施行，但附件第六章仅引用官网动态收费表，不能据此推定0.025‰的适用起点。[2021年部分业务规则修订通知](https://www.chinaclear.cn/zdjs/gszb/202110/4d4cde3008f141a29e76def19a80b57f.shtml)及其附件也未补出该起点；当前收费表已更新为0.01‰。因此F09整段仍为「未验证（官方原文待补）」，不伪称数值仍未取到。
+- F19/F20/F21先以浏览器UA重试仍有302循环，curl UA则403；改为浏览器UA、启用新建匿名Cookie会话并以`curl -L --tlsv1.2`跟随302后，三份业务规则正文均HTTP 200，实际读取元数据、正文及收费表。F20/F21改链至业务规则栏目，不再只依赖新闻页或搜索索引；F19/F20的「已被修改」与历史段验证不冲突。
+- F23的[证监会官方收费清单PDF](https://www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/%E4%B8%AD%E5%9B%BD%E8%AF%81%E7%9B%91%E4%BC%9A%E5%8F%8A%E4%B8%8B%E5%B1%9E%E5%8D%95%E4%BD%8D%E7%BB%BC%E5%90%88%E6%80%A7%E6%B6%89%E4%BC%81%E6%94%B6%E8%B4%B9%E7%9B%AE%E5%BD%95%E6%B8%85%E5%8D%95.pdf)本轮以浏览器UA、`curl -L --tlsv1.2`取得HTTP 200；PDF为5页图像，渲染查看第1页，确认向沪深北按股票年交易额0.02‰收取及所引政策。65号/1947号/917号正文也均HTTP 200，构成纳入时间及数值的证据链；[证监会《对十三届全国人大五次会议第7147号建议的答复》](https://www.csrc.gov.cn/csrc/c101800/c7161925/content.shtml)HTTP 200确认北交所于2021-11-15开市。[北京市政府政策库的1947号全文](https://www.beijing.gov.cn/zhengce/zhengcefagui/qtwj/202202/t20220228_2617699.html)也HTTP 200。纳入日期来自“自开市之日”，不是从清单发布日期倒推。
 - F24/F25[税务总局公报正文](https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html)HTTP 200，核到第1条上限3‰及起点5元、第6条券商自行制定标准、第8条2002-05-01起执行；[证监会法规库](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=2&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)HTTP 200，元数据明确文件级「现行有效」，发文日2002-04-04、实施日2002-05-01、失效日期空。正文包含动态模板，未用模板确认条文；条文以税务总局公报为准。不能将文件误写成已整体失效，也不能用文件级有效推定用户当前5元实收已核实。
 
-原出处更正记录：四卡历史印花税原只指向T-R58 §5 R6，现补F04的官方全文/附件，0.1%不变；减半段补财政部2023年第39号的财政部原页，0.05%不变。原过户费借T-R58 §5 R7的非本次认可域名转载交叉核对却标已验证，现撤销此依据及状态，保留0.001%为待核值并明确2022-04-29生效待原文补证。原最低佣金把历史规定视为实际收费制度固定值，现撤销该状态，改为「以用户券商为准、未验证」；5元只保留历史背景/待验证压力档。经手费、证管费、佣金上限原§2未单列，本节补制度证据，不声称原卡已实现这些分段。
+原出处更正记录：四卡历史印花税原只指向T-R58 §5 R6，现补F04的官方全文/附件，0.1%不变；减半段补财政部2023年第39号的财政部原页，0.05%不变。原过户费借T-R58 §5 R7的非本次认可域名转载交叉核对，T-R75已撤销该依据及状态；T-R76以F10中国结算官方通知重新验证0.001%及2022-04-29生效，恢复四卡对应行状态。原最低佣金把历史规定视为实际收费制度固定值，现撤销该状态，改为「以用户券商为准、未验证」；5元只保留历史背景/待验证压力档。经手费、证管费、佣金上限原§2未单列，本节补制度证据，不声称原卡已实现这些分段。
+
+### 5.2.1 T-R76逐URL请求记录
+
+以下为本轮实际发出的全部curl请求，按URL合并重复UA重试；B=Chrome浏览器UA，C=curl/8.0，K=Mozilla/5.0并启用本轮新建匿名Cookie会话。均使用`-L --tlsv1.2`，最多跟随8次重定向，不携带账户鉴权。HTTP 200仅表示取得响应，目录、脚本、当前费表和大事记不自动成为历史制度证据。000表示未取得HTTP响应；rc=35为TLS意外EOF，rc=47为302循环达到重定向上限。
+
+| URL | UA与HTTP/rc（各次结果） | 正文用途或失败原因 |
+|---|---|---|
+| [szs.mof.gov.cn/zt/mlqd_8464/zcgd/202112/t20211214_3774393.htm](http://szs.mof.gov.cn/zt/mlqd_8464/zcgd/202112/t20211214_3774393.htm) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文 |
+| [www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml](http://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文 |
+| [chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml](https://chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml) | B: HTTP 000 / rc=35 | TLS握手意外EOF |
+| [www.chinaclear.cn/english/](https://www.chinaclear.cn/english/) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml](https://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml) | B: HTTP 500 / rc=0；C: HTTP 500 / rc=0 | 服务器错误，未取得目标正文；302→500，最终 http://www.chinaclear.cn/ |
+| [www.bse.cn/scgl_list/200011013.html](http://www.bse.cn/scgl_list/200011013.html) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文 |
+| [www.beijing.gov.cn/zhengce/zhengcefagui/qtwj/202202/t20220228_2617699.html](https://www.beijing.gov.cn/zhengce/zhengcefagui/qtwj/202202/t20220228_2617699.html) | B: HTTP 200 / rc=0 | 政府政策库1947号全文 |
+| [www.bse.cn/scgl_list/200011013.html](https://www.bse.cn/scgl_list/200011013.html) | B: HTTP 302 / rc=47；C: HTTP 403 / rc=0；K: HTTP 200 / rc=0 | 302重定向循环，未取得正文；访问被拒，未取得正文；F19正文、附表及实施日期 |
+| [www.bse.cn/important_news/200013817.html](http://www.bse.cn/important_news/200013817.html) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文 |
+| [www.chinaclear.cn/zdjs/gszb/201507/9aeee4d21a6f47f5b3741637993b004b.shtml](https://www.chinaclear.cn/zdjs/gszb/201507/9aeee4d21a6f47f5b3741637993b004b.shtml) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文；302→500，最终 http://www.chinaclear.cn/ |
+| [www.bse.cn/important_news/200018086.html](https://www.bse.cn/important_news/200018086.html) | B: HTTP 302 / rc=47；C: HTTP 403 / rc=0 | 302重定向循环，未取得正文；访问被拒，未取得正文 |
+| [www.bse.cn/important_news/200018086.html](http://www.bse.cn/important_news/200018086.html) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文 |
+| [bse.cn/scgl_list/200011013.html](https://bse.cn/scgl_list/200011013.html) | B: HTTP 000 / rc=35 | TLS握手意外EOF |
+| [www.bse.cn/important_news/200013817.html](https://www.bse.cn/important_news/200013817.html) | B: HTTP 302 / rc=47；C: HTTP 403 / rc=0 | 302重定向循环，未取得正文；访问被拒，未取得正文 |
+| [www.chinaclear.cn/zdjs/](https://www.chinaclear.cn/zdjs/) | B: HTTP 200 / rc=0 | 公开栏目/正文辅助定位，不单独证明历史费率 |
+| [szs.mof.gov.cn/zt/mlqd_8464/zcgd/202112/t20211214_3774393.htm](https://szs.mof.gov.cn/zt/mlqd_8464/zcgd/202112/t20211214_3774393.htm) | B: HTTP 200 / rc=0 | F23自开市日起征收 |
+| [bse.cn/important_news/200013817.html](https://bse.cn/important_news/200013817.html) | B: HTTP 000 / rc=35 | TLS握手意外EOF |
+| [www.neeq.com.cn/](https://www.neeq.com.cn/) | B: HTTP 200 / rc=0 | 公开栏目/正文辅助定位，不单独证明历史费率 |
+| [bse.cn/important_news/200018086.html](https://bse.cn/important_news/200018086.html) | B: HTTP 000 / rc=35 | TLS握手意外EOF |
+| [www.chinaclear.cn/zdjs/wywtz/service_flist.shtml](https://www.chinaclear.cn/zdjs/wywtz/service_flist.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/fywgz/law_flist.shtml](https://www.chinaclear.cn/zdjs/fywgz/law_flist.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/fbzyls/service_tlist.shtml](https://www.chinaclear.cn/zdjs/fbzyls/service_tlist.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/english/anno/media_list.shtml](https://www.chinaclear.cn/english/anno/media_list.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.neeq.com.cn/important_news/200013817.html](https://www.neeq.com.cn/important_news/200013817.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.bse.cn/fee.html](https://www.bse.cn/fee.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.bse.cn/business_rules.html](https://www.bse.cn/business_rules.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.neeq.com.cn/m/important_news/200013817.html](https://www.neeq.com.cn/m/important_news/200013817.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.chinaclear.cn/zdjs/yfzywgz/law_flist.shtml](https://www.chinaclear.cn/zdjs/yfzywgz/law_flist.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/english/005/legal_tlist.shtml](https://www.chinaclear.cn/english/005/legal_tlist.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.neeq.com.cn/scgl_list/200011013.html](https://www.neeq.com.cn/scgl_list/200011013.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.neeq.com.cn/important_news/200018086.html](https://www.neeq.com.cn/important_news/200018086.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.chinaclear.cn/zdjs/dsj/about_dsj.shtml](https://www.chinaclear.cn/zdjs/dsj/about_dsj.shtml) | B: HTTP 200 / rc=0 | 公司大事记；不代替制度通知 |
+| [www.bse.cn/m/scgl_list/200011013.html](https://www.bse.cn/m/scgl_list/200011013.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.bse.cn/scgl_list/200013827.html](https://www.bse.cn/scgl_list/200013827.html) | B: HTTP 302 / rc=47；K: HTTP 200 / rc=0 | 302重定向循环，未取得正文；F20正文、费表及实施日期 |
+| [www.bse.cn/m/important_news/200018086.html](https://www.bse.cn/m/important_news/200018086.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.bse.cn/scgl_list/200018104.html](https://www.bse.cn/scgl_list/200018104.html) | B: HTTP 302 / rc=47；K: HTTP 200 / rc=0 | 302重定向循环，未取得正文；F21正文、费表及实施日期 |
+| [www.bse.cn/scgl_list/200011013.html?from=rules](https://www.bse.cn/scgl_list/200011013.html?from=rules) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.bse.cn/m/important_news/200013817.html](https://www.bse.cn/m/important_news/200013817.html) | B: HTTP 302 / rc=47 | 302重定向循环，未取得正文 |
+| [www.chinaclear.cn/zdjs/xhtml/js/page.js](https://www.chinaclear.cn/zdjs/xhtml/js/page.js) | B: HTTP 200 / rc=0 | 网页导航/分页辅助脚本，不是费率证据 |
+| [www.chinaclear.cn/zdjs/xhtml/js/service.js](https://www.chinaclear.cn/zdjs/xhtml/js/service.js) | B: HTTP 200 / rc=0 | 网页导航/分页辅助脚本，不是费率证据 |
+| [www.chinaclear.cn/english/xhtml/js/media.js](https://www.chinaclear.cn/english/xhtml/js/media.js) | B: HTTP 404 / rc=0 | 该候选资源不存在 |
+| [www.chinaclear.cn/english/005/legal_tlist/code_0.shtml](https://www.chinaclear.cn/english/005/legal_tlist/code_0.shtml) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文；302→500，最终 http://www.chinaclear.cn/ |
+| [www.chinaclear.cn/zdjs/wywtz/service_flist/code_0.shtml](https://www.chinaclear.cn/zdjs/wywtz/service_flist/code_0.shtml) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文；302→500，最终 http://www.chinaclear.cn/ |
+| [www.chinaclear.cn/english/anno/media_list/code_0.shtml](https://www.chinaclear.cn/english/anno/media_list/code_0.shtml) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文；302→500，最终 http://www.chinaclear.cn/ |
+| [www.chinaclear.cn/zdjs/yfzywgz/law_flist/code_0.shtml](https://www.chinaclear.cn/zdjs/yfzywgz/law_flist/code_0.shtml) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文；302→500，最终 http://www.chinaclear.cn/ |
+| [www.chinaclear.cn/zdjs/fbzyls/service_tlist/code_0.shtml](https://www.chinaclear.cn/zdjs/fbzyls/service_tlist/code_0.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/中国证监会及下属单位综合性涉企收费目录清单.pdf](http://www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/%E4%B8%AD%E5%9B%BD%E8%AF%81%E7%9B%91%E4%BC%9A%E5%8F%8A%E4%B8%8B%E5%B1%9E%E5%8D%95%E4%BD%8D%E7%BB%BC%E5%90%88%E6%80%A7%E6%B6%89%E4%BC%81%E6%94%B6%E8%B4%B9%E7%9B%AE%E5%BD%95%E6%B8%85%E5%8D%95.pdf) | B: HTTP 500 / rc=0 | 服务器错误，未取得目标正文 |
+| [csrc.gov.cn/csrc/c101982/c7572057/7572057/files/中国证监会及下属单位综合性涉企收费目录清单.pdf](https://csrc.gov.cn/csrc/c101982/c7572057/7572057/files/%E4%B8%AD%E5%9B%BD%E8%AF%81%E7%9B%91%E4%BC%9A%E5%8F%8A%E4%B8%8B%E5%B1%9E%E5%8D%95%E4%BD%8D%E7%BB%BC%E5%90%88%E6%80%A7%E6%B6%89%E4%BC%81%E6%94%B6%E8%B4%B9%E7%9B%AE%E5%BD%95%E6%B8%85%E5%8D%95.pdf) | B: HTTP 000 / rc=35 | TLS握手意外EOF |
+| [www.csrc.gov.cn/csrc/c101982/c7572057/content.shtml](https://www.csrc.gov.cn/csrc/c101982/c7572057/content.shtml) | B: HTTP 200 / rc=0 | 公开栏目/正文辅助定位，不单独证明历史费率 |
+| [www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/中国证监会及下属单位综合性涉企收费目录清单.pdf?download=1](https://www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/%E4%B8%AD%E5%9B%BD%E8%AF%81%E7%9B%91%E4%BC%9A%E5%8F%8A%E4%B8%8B%E5%B1%9E%E5%8D%95%E4%BD%8D%E7%BB%BC%E5%90%88%E6%80%A7%E6%B6%89%E4%BC%81%E6%94%B6%E8%B4%B9%E7%9B%AE%E5%BD%95%E6%B8%85%E5%8D%95.pdf?download=1) | B: HTTP 200 / rc=0 | 同一F23清单PDF参数变体 |
+| [www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/中国证监会及下属单位综合性涉企收费目录清单.pdf](https://www.csrc.gov.cn/csrc/c101982/c7572057/7572057/files/%E4%B8%AD%E5%9B%BD%E8%AF%81%E7%9B%91%E4%BC%9A%E5%8F%8A%E4%B8%8B%E5%B1%9E%E5%8D%95%E4%BD%8D%E7%BB%BC%E5%90%88%E6%80%A7%E6%B6%89%E4%BC%81%E6%94%B6%E8%B4%B9%E7%9B%AE%E5%BD%95%E6%B8%85%E5%8D%95.pdf) | B: HTTP 200 / rc=0 | F23清单PDF第1页，沪深北0.02‰ |
+| [www.chinaclear.cn/english/anno/media_list/code_1.shtml](https://www.chinaclear.cn/english/anno/media_list/code_1.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/wywtz/service_flist/code_1.shtml](https://www.chinaclear.cn/zdjs/wywtz/service_flist/code_1.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/english/005/legal_tlist/code_1.shtml](https://www.chinaclear.cn/english/005/legal_tlist/code_1.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/yfzywgz/law_flist/code_1.shtml](https://www.chinaclear.cn/zdjs/yfzywgz/law_flist/code_1.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.ndrc.gov.cn/xxgk/zcfb/ghxwj/201806/t20180627_960950.html](https://www.ndrc.gov.cn/xxgk/zcfb/ghxwj/201806/t20180627_960950.html) | B: HTTP 200 / rc=0 | F23所接沪深标准0.02‰ |
+| [www.ndrc.gov.cn/xwdt/tzgg/202201/t20220107_1311591.html](https://www.ndrc.gov.cn/xwdt/tzgg/202201/t20220107_1311591.html) | B: HTTP 200 / rc=0 | F23沪深北同标准 |
+| [www.chinaclear.cn/zdjs/fbzyls/202512/cbcf7d603e7444b382ce7ca8017105b8/files/北京市场证券登记结算业务收费及代收税费一览表.pdf](https://www.chinaclear.cn/zdjs/fbzyls/202512/cbcf7d603e7444b382ce7ca8017105b8/files/%E5%8C%97%E4%BA%AC%E5%B8%82%E5%9C%BA%E8%AF%81%E5%88%B8%E7%99%BB%E8%AE%B0%E7%BB%93%E7%AE%97%E4%B8%9A%E5%8A%A1%E6%94%B6%E8%B4%B9%E5%8F%8A%E4%BB%A3%E6%94%B6%E7%A8%8E%E8%B4%B9%E4%B8%80%E8%A7%88%E8%A1%A8.pdf) | B: HTTP 200 / rc=0 | 现行北市过户费0.01‰；不证明F09历史起始 |
+| [www.chinaclear.cn/zdjs/fbzyls/202512/922adc26c2ff4865930c7fb77688bb8a/files/上海市场证券登记结算业务收费及代收税费一览表.pdf](https://www.chinaclear.cn/zdjs/fbzyls/202512/922adc26c2ff4865930c7fb77688bb8a/files/%E4%B8%8A%E6%B5%B7%E5%B8%82%E5%9C%BA%E8%AF%81%E5%88%B8%E7%99%BB%E8%AE%B0%E7%BB%93%E7%AE%97%E4%B8%9A%E5%8A%A1%E6%94%B6%E8%B4%B9%E5%8F%8A%E4%BB%A3%E6%94%B6%E7%A8%8E%E8%B4%B9%E4%B8%80%E8%A7%88%E8%A1%A8.pdf) | B: HTTP 200 / rc=0 | 现行沪市收费表，不倒推历史起始 |
+| [www.chinaclear.cn/zdjs/fbzyls/202512/a59388fbfa714c5fa546784891a42e30/files/深圳市场证券登记结算业务收费及代收税费一览表.pdf](https://www.chinaclear.cn/zdjs/fbzyls/202512/a59388fbfa714c5fa546784891a42e30/files/%E6%B7%B1%E5%9C%B3%E5%B8%82%E5%9C%BA%E8%AF%81%E5%88%B8%E7%99%BB%E8%AE%B0%E7%BB%93%E7%AE%97%E4%B8%9A%E5%8A%A1%E6%94%B6%E8%B4%B9%E5%8F%8A%E4%BB%A3%E6%94%B6%E7%A8%8E%E8%B4%B9%E4%B8%80%E8%A7%88%E8%A1%A8.pdf) | B: HTTP 200 / rc=0 | 现行深市收费表，不倒推历史起始 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/yfzywgz/law_flist/code_1_31.shtml](https://www.chinaclear.cn/zdjs/yfzywgz/law_flist/code_1_31.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/editor_file/20130807152120317.pdf](https://www.chinaclear.cn/zdjs/editor_file/20130807152120317.pdf) | B: HTTP 200 / rc=0 | F06英文通知；面额基数仍以中文为准 |
+| [www.csrc.gov.cn/csrc/c101800/c7161925/content.shtml](https://www.csrc.gov.cn/csrc/c101800/c7161925/content.shtml) | B: HTTP 200 / rc=0 | 开市日2021-11-15 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_25.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_25.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_55.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_55.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_40.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_40.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/gszb/center_list.shtml](https://www.chinaclear.cn/zdjs/gszb/center_list.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/gszb/center_list/code_2.shtml](https://www.chinaclear.cn/zdjs/gszb/center_list/code_2.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_14.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_14.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_33.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_33.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/old_files/1343899420865.pdf](https://www.chinaclear.cn/old_files/1343899420865.pdf) | B: HTTP 200 / rc=0 | F07中文通知PDF |
+| [www.chinaclear.cn/old_files/1335773025208.pdf](https://www.chinaclear.cn/old_files/1335773025208.pdf) | B: HTTP 200 / rc=0 | F06中文通知PDF |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_16.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_16.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_32.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_32.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_31.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_31.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_15.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_15.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml](https://www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml) | B: HTTP 200 / rc=0 | F09调整前数值、F10新标准及生效日；F09起始未给 |
+| [www.chinaclear.cn/zdjs/gszb/201507/59ccd4176d2645f8b60b2d30fc3631bf.shtml](https://www.chinaclear.cn/zdjs/gszb/201507/59ccd4176d2645f8b60b2d30fc3631bf.shtml) | B: HTTP 200 / rc=0 | F08正文及发文/生效日 |
+| [www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_18.shtml](https://www.chinaclear.cn/zdjs/xtzgg/center_flist/code_1_18.shtml) | B: HTTP 200 / rc=0 | 官方栏目/分页，用于定位；不凭目录晋级 |
+| [www.chinaclear.cn/zdjs/gszb/202110/4d4cde3008f141a29e76def19a80b57f.shtml](https://www.chinaclear.cn/zdjs/gszb/202110/4d4cde3008f141a29e76def19a80b57f.shtml) | B: HTTP 200 / rc=0 | 2021修订通知，未给F09费率起始 |
+| [www.chinaclear.cn/zdjs/bjsjjsfgs/202110/662502f2ba8a4867bb284509fb88f9ea.shtml](https://www.chinaclear.cn/zdjs/bjsjjsfgs/202110/662502f2ba8a4867bb284509fb88f9ea.shtml) | B: HTTP 200 / rc=0 | 2021指南发布通知，未给F09费率起始 |
+| [www.chinaclear.cn/zdjs/gszb/202110/4d4cde3008f141a29e76def19a80b57f/files/20211030215050662.pdf](https://www.chinaclear.cn/zdjs/gszb/202110/4d4cde3008f141a29e76def19a80b57f/files/20211030215050662.pdf) | B: HTTP 200 / rc=0 | 2021修订条款未补F09费率起始 |
+| [www.chinaclear.cn/zdjs/bjsjjsfgs/202110/662502f2ba8a4867bb284509fb88f9ea/files/20211102171747707.pdf](https://www.chinaclear.cn/zdjs/bjsjjsfgs/202110/662502f2ba8a4867bb284509fb88f9ea/files/20211102171747707.pdf) | B: HTTP 200 / rc=0 | 2021指南仅引用动态收费表，未列F09起始 |
+
+网页读取工具另尝试F19/F20/F21旧原页，均报重定向循环；财政部65号网页读取先报超时，随后上表curl取得200。T-R75失败记录不等同于本轮仍失败；本轮成功须以正文核读为准。
 
 ### 5.3 成本模型边界与计数
 
@@ -508,6 +602,6 @@ T-R75计数更正：总参数仍309；已验证56→48，未验证253→261。�
 
 滑点10/10/10/15bp（S-01/S-02/S-04/W-02）、0–50bp压力范围、ADV20、参与率≤0.1%/≤0.5%/≤1%/≤2%/>2%对应0/5/15/30/60bp、参与率>2%容量闸门、有效K<5或ADV=0回退60bp，均是内部交易成本模型参数，没有官方制度生效日；保留§2的原仓库出处和未验证状态，不能通过补税费原文升级。
 
-逐卡309项计数仅按§2七列表参数行：S-01为78项/已验证12/未验证66，S-02为77/12/65，S-04为71/12/59，W-02为83/12/71；合计已验证56→48、未验证253→261。最低佣金的「以用户券商为准、未验证」及带待补后缀的状态均计入未验证。§5单列25项历史段/背景，15项已验证、10项未验证，与309项不同计数边界，不能相加冒充四卡参数总数。
+逐卡309项计数仅按§2七列表参数行：S-01为78项/已验证13/未验证65，S-02为77/13/64，S-04为71/13/58，W-02为83/13/70；相对T-R75，合计已验证48→52、未验证261→257，仅四卡各1项现段过户费恢复验证。最低佣金的「以用户券商为准、未验证」及带待补后缀的状态均计入未验证。§5单列25项历史段/背景，已验证15→23、未验证10→2：F06/F07/F08/F10/F19/F20/F21/F23共8行升级，F09起始日和F25实际最低佣金未验证；与309项不同计数边界，不能相加冒充四卡参数总数。
 
 本轮只修订本文件，不增删策略身份、范围文件或horizon，P2N-R10已登记本路径且不存上述参数计数，因此无需同步登记。任何费率原文补齐后也仍需按真实成交日和券商协议冻结费用，并完成历史样本外研究；本轮不运行行情复测。
