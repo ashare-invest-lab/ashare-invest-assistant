@@ -1,9 +1,14 @@
 ﻿<#
 .SYNOPSIS
-旧日线 psql 装载入口已停用：SQL 现在仅 staging，不能提交目标表。
+校验已离线导出的日线包，按年加载到本地 PostgreSQL。
 .DESCRIPTION
-旧包可能仍含可执行目标表 SQL，故在解包、docker、psql 与清理前拒绝。
-保留调用参数便于旧调度获得明确非零退出；待 Python 公共 writer 包装器迁移后启用。
+先在 src/backend 下运行 python -m app.cli.tb143_export day --zip <ZIP> `
+    --eligible-codes <资格集> --before <日期> --split-by-year --out <输出目录> `
+    --generator <app/cli/tb143_export.py 的 git blob SHA>。
+包内 SQL 不执行；使用本工作树的 Python 入口及 staging SQL。
+后端虚拟环境须已安装依赖，DATABASE_URL 由调用环境提供（不读取 .env）。
+Container 仅用于解包和校验；Python 从宿主机连接 DATABASE_URL。
+每年启动新 Python 进程，BJ 未确认即阻断；跳过或阻断保留所有产物并非零退出。
 #>
 [CmdletBinding()]
 param(
@@ -17,5 +22,172 @@ param(
     [ValidateRange(0,2147483647)][int]$PauseSeconds = 5
 )
 $ErrorActionPreference = 'Stop'
-Write-Error 'tb143 day load runner disabled: use app.marketdata.daily_bars; keep all input artifacts.'
-exit 1
+function Write-Log([string]$Message) {
+    Add-Content -LiteralPath $Log -Encoding UTF8 -Value (('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Message))
+}
+try { New-Item -ItemType Directory -Path $Lock -ErrorAction Stop | Out-Null }
+catch { Write-Log 'LOCKED'; exit 1 }
+$exitCode = 0
+$allYearsSucceeded = $false
+$year = '尚未开始'
+function Invoke-Docker([string[]]$Arguments) {
+    $oldPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue' # PS 5.1 的原生命令 stderr 也必须完整记入日志。
+        $script:dockerOutput = @(& docker @Arguments 2>&1)
+        $nativeExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $oldPreference }
+    foreach ($line in $script:dockerOutput) { Write-Log ([string]$line) }
+    if ($nativeExit -ne 0) { throw "docker exit=$nativeExit arguments=$($Arguments -join ' ')" }
+}
+function Check-Hash([string]$Path, [string]$Expected) {
+    if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ine $Expected) { throw "SHA256 不符: $Path" }
+    Write-Log "SHA256 OK $Path"
+}
+function Read-Manifest([string]$Name, [string]$Pattern, [string[]]$ExpectedNames) {
+    $entries = @{}
+    foreach ($line in Get-Content -LiteralPath (Join-Path $Dir $Name) -Encoding UTF8) {
+        if ($line -notmatch "^([0-9a-fA-F]{64})  ($Pattern)$") { throw "$Name 行格式错误: $line" }
+        $file = $Matches[2]; $hash = $Matches[1]
+        if ($entries.ContainsKey($file)) { throw "$Name 重复文件: $file" }
+        $entries[$file] = $hash
+    }
+    if ($entries.Count -ne $ExpectedNames.Count) { throw "$Name 文件数错误" }
+    foreach ($file in $ExpectedNames) { if (-not $entries.ContainsKey($file)) { throw "$Name 缺少 $file" } }
+    return $entries
+}
+try {
+    $python = Join-Path $PSScriptRoot '../.venv/Scripts/python.exe'
+    if (-not (Test-Path -LiteralPath $python)) { $python = Join-Path $PSScriptRoot '../.venv/bin/python' }
+    if (-not (Test-Path -LiteralPath $python)) { throw '缺少后端 Python 虚拟环境' }
+    if (-not $env:DATABASE_URL) { throw '缺少 DATABASE_URL' }
+    Write-Log 'START；仅全部年份成功后清理本地 all.bin、b1..b5.tgz、p??；失败保留文件供重跑。'
+    $Dir = (Get-Item -LiteralPath $Dir -Force).FullName
+    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { throw 'Dir 必须是目录' }
+    if ($AllSha -notmatch '^[0-9a-fA-F]{64}$') { throw 'AllSha 格式错误' }
+    $parsedDate = [datetime]::MinValue
+    if (-not [datetime]::TryParseExact($Before, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::None, [ref]$parsedDate)) { throw 'Before 必须是 yyyy-MM-dd' }
+    $sizes = @($BundleSizes.Split(',') | ForEach-Object {
+        $n = 0L
+        if (-not [long]::TryParse($_.Trim(), [ref]$n) -or $n -le 0) { throw 'BundleSizes 必须是正整数字节数' }
+        $n
+    })
+    if ($sizes.Count -ne 5) { throw 'BundleSizes 必须恰好有五项' }
+    $partNames = @(0..56 | ForEach-Object { 'p{0:00}' -f $_ })
+    $bundleNames = @(1..5 | ForEach-Object { "b$_.tgz" })
+    $parts = Read-Manifest 'PARTS' 'p[0-9]{2}' $partNames
+    $bundles = Read-Manifest 'BUNDLES' 'b[1-5]\.tgz' $bundleNames
+    $allPath = Join-Path $Dir 'all.bin'
+    if (Test-Path -LiteralPath $allPath) {
+        Check-Hash $allPath $AllSha
+        Write-Log 'REUSE all.bin'
+    } else {
+        foreach ($name in $partNames) { Check-Hash (Join-Path $Dir $name) $parts[$name] }
+        $output = [IO.File]::Create($allPath)
+        try {
+            foreach ($name in ($partNames | Sort-Object)) {
+                $inputStream = [IO.File]::OpenRead((Join-Path $Dir $name))
+                try { $inputStream.CopyTo($output) } finally { $inputStream.Dispose() }
+            }
+        } finally { $output.Dispose() }
+        Check-Hash $allPath $AllSha
+    }
+    $inputStream = [IO.File]::OpenRead($allPath)
+    try {
+        $buffer = New-Object byte[] 1048576
+        for ($i = 0; $i -lt 5; $i++) {
+            $remaining = $sizes[$i]
+            if ($remaining -gt ($inputStream.Length - $inputStream.Position)) { throw 'BundleSizes 超出 all.bin' }
+            $bundlePath = Join-Path $Dir $bundleNames[$i]
+            if (Test-Path -LiteralPath $bundlePath) {
+                Check-Hash $bundlePath $bundles[$bundleNames[$i]]
+                if ((Get-Item -LiteralPath $bundlePath).Length -ne $remaining) { throw "BundleSizes 与 $bundlePath 不符" }
+                $inputStream.Seek($remaining, [IO.SeekOrigin]::Current) | Out-Null
+                Write-Log "REUSE $($bundleNames[$i])"
+                continue
+            }
+            $output = [IO.File]::Create($bundlePath)
+            try {
+                while ($remaining -gt 0) {
+                    $read = $inputStream.Read($buffer, 0, [int][Math]::Min([long]$buffer.Length, $remaining))
+                    if ($read -eq 0) { throw 'all.bin 提前结束' }
+                    $output.Write($buffer, 0, $read); $remaining -= $read
+                }
+            } finally { $output.Dispose() }
+            Check-Hash $bundlePath $bundles[$bundleNames[$i]]
+        }
+        if ($inputStream.Position -ne $inputStream.Length) { throw 'BundleSizes 未覆盖整个 all.bin' }
+    } finally { $inputStream.Dispose() }
+    Invoke-Docker @('exec', $Container, 'mkdir', '-p', '/tmp/tb143d')
+    foreach ($name in $bundleNames) {
+        Invoke-Docker @('cp', (Join-Path $Dir $name), "${Container}:/tmp/tb143d/")
+        Invoke-Docker @('exec', '-w', '/tmp/tb143d', $Container, 'tar', 'xzf', $name)
+        Invoke-Docker @('exec', $Container, 'rm', '-f', "/tmp/tb143d/$name")
+    }
+    Invoke-Docker @('exec', '-w', '/tmp/tb143d', $Container, 'sha256sum', '-c', 'SUMS')
+    Invoke-Docker @('exec', '-w', '/tmp/tb143d', $Container, 'find', '.', '-maxdepth', '1', '-type', 'f', '-name', 'day_*.csv')
+    $csvs = @($script:dockerOutput | ForEach-Object {
+        if ([string]$_ -notmatch '^\./day_[0-9]{4}\.csv$') { throw "非法日线文件名: $_" }
+        ([string]$_).Substring(2)
+    } | Sort-Object)
+    Write-Log "CSV count=$($csvs.Count)"
+    if ($csvs.Count -eq 0) { throw '没有 day_YYYY.csv' }
+    $candidates = 0L; $inserted = 0L; $skipped = 0L; $skippedBj = 0L
+    for ($i = 0; $i -lt $csvs.Count; $i++) {
+        $csv = $csvs[$i]; $year = $csv.Substring(4, 4)
+        Write-Log "YEAR $year START；此前成功年份已独立提交。"
+        $localCsv = Join-Path $Dir $csv
+        Invoke-Docker @('cp', "${Container}:/tmp/tb143d/$csv", $localCsv)
+        Push-Location (Join-Path $PSScriptRoot '..')
+        $oldPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $loadOutput = @(& $python -m probes.tb143_day_load --csv $localCsv --before $Before 2>&1)
+            $loadExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $oldPreference; Pop-Location }
+        foreach ($line in $loadOutput) { Write-Log ([string]$line) }
+        $counts = @($loadOutput | ForEach-Object {
+            if ([string]$_ -match '^\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*$') {
+                [pscustomobject]@{ Candidates = [long]$Matches[1]; Inserted = [long]$Matches[2]; Skipped = [long]$Matches[3] }
+            }
+        })
+        if ($counts.Count -ne 1) { throw "YEAR $year candidates/inserted/skipped 解析失败" }
+        $blocked = @($loadOutput | ForEach-Object {
+            if ([string]$_ -match '^\s*blocked_bj_unconfirmed\s*\|\s*(\d+)\s*$') {
+                [long]$Matches[1]
+            }
+        })
+        if ($blocked.Count -ne 1) { throw "YEAR $year BJ 阻断计数解析失败" }
+        $skippedBj += $blocked[0]
+        $candidates += $counts[0].Candidates; $inserted += $counts[0].Inserted; $skipped += $counts[0].Skipped
+        if ($skippedBj -gt 0) { throw "YEAR $year BJ 未确认，保留产物。" }
+        if ($loadExit -ne 0) { throw "YEAR $year Python exit=$loadExit，保留产物。" }
+        Write-Log "YEAR $year COMMITTED candidates=$($counts[0].Candidates) inserted=$($counts[0].Inserted) skipped=$($counts[0].Skipped)"
+        if ($i -lt $csvs.Count - 1) { Start-Sleep -Seconds $PauseSeconds }
+    }
+    Write-Log "TOTAL candidates=$candidates inserted=$inserted skipped=$skipped"
+    $allYearsSucceeded = $true
+} catch {
+    $exitCode = 1
+    Write-Log "ERROR stopped_year=$year；此前已提交年份保留。$($_.Exception.Message)；修复上述问题并校验 SHA256 后，可在 src/backend 运行 python -m probes.tb143_day_load --csv <CSV> --before <DATE>（年度 CSV 经公共 writer，BJ 仍须通过确认门闩）；通达信日线导入用 python -m app.cli daily-bars-import-tdx。"
+} finally {
+    try {
+        if ($allYearsSucceeded) { Invoke-Docker @('exec', $Container, 'rm', '-rf', '/tmp/tb143d') }
+    }
+    catch { $exitCode = 1; Write-Log "CLEANUP container ERROR $($_.Exception.Message)" }
+    try {
+        if ($allYearsSucceeded -and $exitCode -eq 0) {
+            foreach ($file in Get-ChildItem -LiteralPath $Dir -File -Force) {
+                if ($file.Name -cmatch '^(all\.bin|b.*\.tgz|p[0-9]{2})$') { Remove-Item -LiteralPath $file.FullName -Force }
+            }
+        } else {
+            Write-Log 'KEEP local all.bin、b*.tgz、p??、PARTS、BUNDLES；可校验 SHA256 后重跑。'
+        }
+    } catch { $exitCode = 1; Write-Log "CLEANUP local ERROR $($_.Exception.Message)" }
+    finally {
+        try { Remove-Item -LiteralPath $Lock -Force }
+        catch { $exitCode = 1; Write-Log "CLEANUP lock ERROR $($_.Exception.Message)" }
+    }
+}
+exit $exitCode
