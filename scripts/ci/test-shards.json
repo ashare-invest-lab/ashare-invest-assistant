@@ -4,7 +4,10 @@
   "max_skipped": {
     "serial_pg": 65
   },
-  "_max_skipped_source": "main run 43725507492（c6a79d0）JUnit：serial_pg 组 1190 passed / 65 skipped / 0 failed；跳过原因均为接口未实现或部署期角色/口令目录，非缺 PG。上调须在 PR 写明理由。",
+  "min_passed": {
+    "serial_pg": 1190
+  },
+  "_max_skipped_source": "main run 43725507492（c6a79d0）JUnit：serial_pg 组 1190 passed / 65 skipped / 0 failed；跳过原因均为接口未实现或部署期角色/口令目录，非缺 PG。上调须在 PR 写明理由。min_passed 来源 main run 43731108139（6270179）与 43728565711（c3085ac）JUnit 均为 serial_pg 1190 passed。",
   "colocate": [
     [
       "tests/backend/unit/test_ta87_m1_a1_a24_t_t50.py",

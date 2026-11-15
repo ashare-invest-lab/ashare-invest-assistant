@@ -14,7 +14,7 @@ def case_file(case: ET.Element, files: set[str]) -> str | None:
     """Map a JUnit testcase to its tests/ file (classname may carry a class suffix)."""
     if case.get("file") and "tests/" + case.get("file", "") in files:
         return "tests/" + case.get("file", "")
-    parts = (case.get("classname") or "").split(".")
+    parts = (case.get("classname") or case.get("name") or "").split(".")
     while parts:
         path = "tests/" + "/".join(parts) + ".py"
         if path in files:
@@ -31,7 +31,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--group", default="serial_pg")
     args = parser.parse_args(argv)
     try:
-        limit = json.loads(args.config.read_text(encoding="utf-8"))["max_skipped"][args.group]
+        config = json.loads(args.config.read_text(encoding="utf-8"))
+        limit = config["max_skipped"][args.group]
+        min_passed = config["min_passed"][args.group]
         files = {row["file"] for row in yaml.safe_load(args.groups.read_text(encoding="utf-8"))["tests"]
                  if row["group"] == args.group}
         counts = {"passed": 0, "skipped": 0, "failed": 0}
@@ -45,9 +47,11 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 counts["passed"] += 1
         print(f"{args.group}: passed={counts['passed']} skipped={counts['skipped']} "
-              f"failed={counts['failed']} (max_skipped={limit})")
+              f"failed={counts['failed']} (max_skipped={limit} min_passed={min_passed})")
         if counts["passed"] == 0:
             raise ValueError(f"{args.group}: no test ran")
+        if counts["passed"] < min_passed:
+            raise ValueError(f"{args.group}: passed {counts['passed']} < minimum {min_passed}")
         if counts["skipped"] > limit:
             raise ValueError(f"{args.group}: skipped {counts['skipped']} > baseline {limit}")
     except (OSError, ValueError, KeyError, TypeError, ET.ParseError, yaml.YAMLError) as error:

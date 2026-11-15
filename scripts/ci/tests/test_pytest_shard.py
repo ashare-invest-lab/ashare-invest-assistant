@@ -162,7 +162,7 @@ def test_serial_skips_guard(tmp_path, capsys):
     groups.write_text('version: 1\ntests:\n  - {"file": "tests/backend/api_app/test_pg.py", "group": "serial_pg"}\n'
                       '  - {"file": "tests/backend/unit/test_x.py", "group": "parallel"}\n')
     config = tmp_path / "c.json"
-    config.write_text(json.dumps({"max_skipped": {"serial_pg": 1}}))
+    config.write_text(json.dumps({"max_skipped": {"serial_pg": 1}, "min_passed": {"serial_pg": 1}}))
 
     def run(cases):
         junit = tmp_path / "j.xml"
@@ -176,3 +176,49 @@ def test_serial_skips_guard(tmp_path, capsys):
     assert run([ok, skip, skip]) == 1
     assert run([skip]) == 1
     assert "::error" in capsys.readouterr().out
+
+
+def test_serial_skips_guard_counts_module_skip(tmp_path, capsys):
+    import check_serial_skips
+
+    groups = tmp_path / "g.yaml"
+    groups.write_text('version: 1\ntests:\n'
+                      '  - {"file": "tests/backend/api_app/test_pg.py", "group": "serial_pg"}\n'
+                      '  - {"file": "tests/backend/api_app/test_other_pg.py", "group": "serial_pg"}\n')
+    config = tmp_path / "c.json"
+    config.write_text(json.dumps({"max_skipped": {"serial_pg": 1}, "min_passed": {"serial_pg": 3}}))
+    junit = tmp_path / "j.xml"
+    junit.write_text('<testsuites><testsuite>'
+                     '<testcase classname="" name="backend.api_app.test_pg">'
+                     '<skipped message="collection skipped"/></testcase>'
+                     '<testcase classname="backend.api_app.test_other_pg" name="a"/>'
+                     '<testcase classname="backend.api_app.test_other_pg" name="b"/>'
+                     '</testsuite></testsuites>')
+
+    assert check_serial_skips.main([str(junit), "--groups", str(groups), "--config", str(config)]) == 1
+    output = capsys.readouterr().out
+    assert "passed=2 skipped=1" in output
+    assert "min_passed=3" in output
+    assert "::error" in output
+
+
+@pytest.mark.parametrize("passed,min_passed,expected", [(1, 2, 1), (2, 2, 0), (0, 0, 1)])
+def test_serial_skips_guard_min_passed(tmp_path, capsys, passed, min_passed, expected):
+    import check_serial_skips
+
+    groups = tmp_path / "g.yaml"
+    groups.write_text('version: 1\ntests:\n'
+                      '  - {"file": "tests/backend/api_app/test_pg.py", "group": "serial_pg"}\n')
+    config = tmp_path / "c.json"
+    config.write_text(json.dumps({"max_skipped": {"serial_pg": 1}, "min_passed": {"serial_pg": min_passed}}))
+    junit = tmp_path / "j.xml"
+    junit.write_text('<testsuites><testsuite>' + ''.join(
+        f'<testcase classname="backend.api_app.test_pg" name="test_{i}"/>' for i in range(passed)) +
+        '<testcase classname="backend.api_app.test_pg" name="s"><skipped/></testcase>'
+        '</testsuite></testsuites>')
+
+    assert check_serial_skips.main([str(junit), "--groups", str(groups), "--config", str(config)]) == expected
+    output = capsys.readouterr().out
+    assert f"passed={passed} skipped=1" in output
+    assert f"min_passed={min_passed}" in output
+    assert ("::error" in output) == bool(expected)
