@@ -1,4 +1,5 @@
 import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
+import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
 import { ENUMS } from '../../api/enums';
@@ -10,6 +11,8 @@ import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../compone
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { tradeDay } from '../../lib/market';
+import { StockErrorBoundary } from './StockErrorBoundary';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
 import { AddToResearch } from '../../features/research/AddToResearch';
@@ -20,6 +23,19 @@ type TabKey = (typeof TABS)[number];
 
 /** /stocks/:code 个股档案（plan §2.4）：行情头 + 深色分时/日K/周K + 周期分类 + 财务/资金/因子/公告外链 */
 export function StockPage() {
+  const { code = '' } = useParams();
+  const client = useQueryClient();
+  return (
+    <StockErrorBoundary key={code} onRetry={() => {
+      // 连同档案缓存标为过期，重挂载后重新读取本证券的数据。
+      void client.invalidateQueries({ predicate: (q) => q.queryKey[1] === code.trim().toUpperCase() });
+    }}>
+      <StockPageContent />
+    </StockErrorBoundary>
+  );
+}
+
+function StockPageContent() {
   const { code: raw = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -94,17 +110,18 @@ function StockBody({ profile }: { profile: SecurityProfile }) {
 
 function todayBar(bars: Bar[] | undefined, q: QuoteItem | null | undefined) {
   const last = bars?.[bars.length - 1];
-  return last && q?.t && last.t.slice(0, 10) === q.t.slice(0, 10) ? last : null;
+  const day = tradeDay(q?.t);
+  return last && day && tradeDay(last.t) === day ? last : null;
 }
 
 /** 1m 响应顶层 pre_close（契约 v0.2.6 Bar 响应）；只在与行情同一交易日时使用 */
 function intradayPreClose(res: BarsResponse | undefined, q: QuoteItem | null | undefined) {
-  if (!res?.pre_close || !q?.t) return null;
+  const quoteDay = tradeDay(q?.t);
+  if (!res?.pre_close || !quoteDay) return null;
   // A-12/F-14：data_as_of 可为 null（无数据时点），不能直接 slice；取不到交易日就不认这个前收
   const stamp = res.items[0]?.t ?? res.data_as_of;
-  if (!stamp) return null;
-  const day = stamp.slice(0, 10);
-  return day === q.t.slice(0, 10) ? res.pre_close : null;
+  const day = tradeDay(stamp);
+  return day && day === quoteDay ? res.pre_close : null;
 }
 
 /**

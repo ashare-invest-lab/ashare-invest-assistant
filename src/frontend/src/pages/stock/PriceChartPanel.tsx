@@ -8,7 +8,7 @@ import { KlineChart } from '../../components/charts/KlineChart';
 import { KlineWindowInfo } from '../../components/charts/KlineWindowInfo';
 import type { ChartMarker } from '../../components/charts/chartBase';
 import { GAP_REASON } from '../../i18n/labels';
-import { dayMinutes } from '../../lib/market';
+import { dayMinutes, tradeDay } from '../../lib/market';
 
 const NO_MARKERS: ChartMarker[] = [];
 /** 分时一次取全天；日 K / 周 K 是窗口大小（T-F21：向左拖到边缘再按 before 取更早一页） */
@@ -37,7 +37,7 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
   const shownRes = shownFreq === '1m' ? minute.data : kl.first;
   // A-12/F-14：data_as_of 可为 null（无数据时点），取不到就不认交易日，不能直接 slice
   const minuteStamp = minute.data ? (minute.data.items[0]?.t ?? minute.data.data_as_of) : null;
-  const tradeDate = minute.data && shownFreq === '1m' && minuteStamp ? minuteStamp.slice(0, 10) : null;
+  const tradeDate = shownFreq === '1m' ? tradeDay(minuteStamp) : null;
   const minutes = useMemo(() => (tradeDate ? dayMinutes(tradeDate) : []), [tradeDate]);
   // 评审 M2：空图时说明原因（gaps 的原因码 + message）
   const empty = shownRes ? (
