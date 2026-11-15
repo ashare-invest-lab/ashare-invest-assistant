@@ -221,8 +221,9 @@ def test_leak_window_detector_positive_and_negative_controls() -> None:
 # ======================= 组 1：证书值永不回显 =======================
 def test_full_lifecycle_never_echoes_licence(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any],
                                               sql: Callable[..., Any], authdb: SimpleNamespace,
-                                              logs: Callable[[], str]) -> None:
+                                              logs: Callable[[], str], monkeypatch: pytest.MonkeyPatch) -> None:
     """PUT → GET → /me → PATCH → POST /test → 管理端列表 → 暂停/恢复 → DELETE：任何响应、错误体、日志、库、Redis 都没有证书片段。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     lic = fake_licence()
     s = session()
     call = Rec(s)
@@ -390,7 +391,9 @@ def test_put_rate_limit_10_per_hour_other_user_unaffected(session: Callable[...,
     assert b("PUT", "/me/data-licence", json=body_of(fake_licence())).status_code == 202
 
 
-def test_verify_rate_limit_5_per_hour_other_user_unaffected(session: Callable[..., SimpleNamespace]) -> None:
+def test_verify_rate_limit_5_per_hour_other_user_unaffected(session: Callable[..., SimpleNamespace],
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     a, b = Rec(session()), Rec(session())
     assert a("PUT", "/me/data-licence", json=body_of(fake_licence())).status_code == 202
     assert b("PUT", "/me/data-licence", json=body_of(fake_licence())).status_code == 202

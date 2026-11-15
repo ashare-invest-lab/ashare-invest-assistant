@@ -7,35 +7,17 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Connection, or_, select
+from sqlalchemy import Connection, select
 
-from app.db.tables.licences import user_data_licence_holds as holds
-from app.db.tables.licences import user_data_licence_status as licences
 from app.db.tables.market import daily_bars, trading_calendar
 from app.marketdata.bars_read import BarsQuery, PlaceholderBarsReader
-from app.marketdata.daily_snapshot import FINAL_AFTER
+from app.marketdata.daily_snapshot import FINAL_AFTER, active_licence_id
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
-
-
-def _licence(conn: Connection, owner: uuid.UUID, now: dt.datetime) -> uuid.UUID | None:
-    v = licences.c
-    return conn.execute(
-        select(v.id)
-        .select_from(licences.outerjoin(holds, holds.c.user_id == v.user_id))
-        .where(
-            v.user_id == owner,
-            v.deleted_at.is_(None),
-            v.status == "active",
-            holds.c.user_id.is_(None),
-            or_(v.paused_until.is_(None), v.paused_until <= now),
-            or_(v.expires_on.is_(None), v.expires_on >= now.astimezone(BEIJING).date()),
-        )
-    ).scalar_one_or_none()
 
 
 def _expected_day(conn: Connection, now: dt.datetime) -> dt.date | None:
@@ -63,7 +45,7 @@ class OwnedDailyBarsReader(PlaceholderBarsReader):
             return content
         now = _now()
         with self.engine.connect() as conn:
-            lid = _licence(conn, owner, now)
+            lid = active_licence_id(conn, owner, now)
             if lid is None:
                 content["gaps"] = [
                     {
