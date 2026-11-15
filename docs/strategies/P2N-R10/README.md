@@ -5,6 +5,8 @@
 > **T-R49 刷新（T-A112）**：H-01 落 v3，`cards/hold_risk_monitor.md` 由 v2 改为 v3，v2 冻结为 `cards/history/hold_risk_monitor.v2.md`（新增历史身份）。现计 **44 个身份记录、22 个源文件**（historical_frozen 3、current_formal 3、多值 9），scope 124；`check_horizons.py` 身份常量 43→44，历史文件匹配由仅 `.v1` 改为任意 `.vN`。下文「43」「H-01 v2」等为 P2N-R10 当时记录。
 >
 > **T-R55 刷新（编排者裁定 S-01 升 v2）**：`cards/st_pullback_ma.md` 由 v1 改为 v2，v1（055105a 内容，即 T-B100 导入库内者）冻结为 `cards/history/st_pullback_ma.v1.md`（新增历史身份）。现计 **45 个身份记录、23 个源文件**（historical_frozen 4、current_formal 3、多值 9、explicit_single short 10）；`check_horizons.py` 身份常量 44→45。上文/下文「44」「43」为当时快照。
+>
+> **T-R69 刷新（census 登记）**：origin/main=4aae38a 上 55 个已合入、尚未登记的非身份文件（DS 各 PR 合入的 F23-v4、R-03、S1-7、S2-7、T-DATA-ST、T-R58/judging_framework、T-R62、T-R65、T-R66b、f23_lexicon_spec），连同本单新增的 `T-R69/daily_retest_readiness.md`，一并登记为非身份文件；scope 130→186，身份记录 45、源文件 23 不变，`check_horizons.py` 不改。
 
 枚举docs/strategies下全部90个既有文件路径；不执行这些文件。按plan §2.5.14的正式strategy-card/spec围栏、知识卡标题/身份行、catalog §2目录表分别定位。**43个独立文档身份记录，21个源文件**，不等于43个生产策略：当前正式卡含L2规格2、冻结历史版本2、T-R16不可导入研究知识卡16、目录研究条目23。相同key的不同版本/不同文档分别保留；目录文档版本0.3.8不是策略version_no，策略版本未知写null。
 
