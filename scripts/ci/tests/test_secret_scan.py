@@ -76,6 +76,42 @@ def test_range_scan_catches_added_then_deleted(tmp_repo: Path) -> None:
     assert r.returncode == 0, r.stdout
 
 
+@pytest.mark.parametrize("event,has_before", [("pull_request", False), ("merge_group", False),
+    ("push", True), ("push", False), ("schedule", False), ("workflow_dispatch", False)])
+def test_workflow_scan_range(tmp_repo: Path, tmp_path: Path, event: str, has_before: bool) -> None:
+    workflow = yaml.safe_load((REPO / ".github/workflows/secret-scan.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["scan"]["steps"]
+    step = next(s for s in steps if s.get("id") == "range")
+    assert step["env"]["MERGE_GROUP_BASE"] == "${{ github.event.merge_group.base_sha }}"
+    assert step["env"]["MERGE_GROUP_HEAD"] == "${{ github.event.merge_group.head_sha }}"
+    write(tmp_repo, "README", "base\n")
+    base = commit_all(tmp_repo)
+    write(tmp_repo, "added", "temporary\n")
+    commit_all(tmp_repo)
+    git(tmp_repo, "rm", "-q", "added")
+    head = commit_all(tmp_repo)
+    output = tmp_path / "range-output"
+    env = {**os.environ, **{key: "" for key in step["env"]},
+           "EVENT": event, "GITHUB_OUTPUT": str(output), "PUSH_AFTER": head,
+           "PUSH_BEFORE": base if has_before else "0" * 40}
+    if event == "pull_request":
+        env.update(PR_BASE=base, PR_HEAD=head)
+    elif event == "merge_group":
+        env.update(MERGE_GROUP_BASE=base, MERGE_GROUP_HEAD=head)
+    result = subprocess.run(["bash", "-c", step["run"]], cwd=tmp_repo, env=env,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if event in {"pull_request", "merge_group"} or has_before:
+        assert output.read_text() == f"mode=range\nrange={base}..{head}\n"
+        assert "2 个提交" in result.stdout
+    else:
+        assert output.read_text() == "mode=history\n"
+    for name in ("gitleaks（.gitleaks.toml）", "secret_scan.py（同一套 S1–S9，含告警级规则）"):
+        consumer = next(s for s in steps if s.get("name") == name)
+        assert consumer["env"]["RANGE"] == "${{ steps.range.outputs.range }}"
+        assert 'range "$RANGE"' in consumer["run"]
+
+
 # ------------------------------------------------------------------ 构建产物 dist/（T-O03）
 DIST_FILES = ["src/frontend/dist/assets/a.js", "src/frontend/prototype/dist/b.js", "src/frontend/x/y/dist/c.js"]
 

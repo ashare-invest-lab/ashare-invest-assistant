@@ -33,6 +33,26 @@ def test_workflows_agree():
     assert re.fullmatch(r"\d+\.\d+\.\d+", _pinned()), "PYYAML_VERSION 必须是精确版本"
 
 
+def test_workflows_declare_merge_group_checks_requested():
+    for path in WORKFLOWS:
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        # PyYAML's YAML 1.1 loader treats the unquoted GitHub key `on` as True.
+        events = workflow[True]
+        assert events["merge_group"] == {"types": ["checks_requested"]}, path.name
+
+
+def test_queue_concurrency_is_isolated_and_never_cancelled():
+    for path in WORKFLOWS:
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for scope in [workflow, *workflow["jobs"].values()]:
+            if "concurrency" not in scope:
+                continue
+            concurrency = scope["concurrency"]
+            assert "github.event_name" in concurrency["group"], path.name
+            assert "github.event_name == 'merge_group' && github.run_id" in concurrency["group"], path.name
+            assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}", path.name
+
+
 def test_pre_commit_pins_same_version():
     cfg = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     hooks = [h for r in cfg["repos"] for h in r["hooks"] if "secret_scan.py" in str(h.get("entry", ""))]
