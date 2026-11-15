@@ -1,13 +1,13 @@
 # 多源统一接入口径契约（T-A153，定稿）
 
-状态：定稿（编排者 2026-11-14 14:31 丹佛裁定，§5），架构契约，不代表已实现。基线 main `4aae38a`。供后端 T-B143 使用：日线与 gbbq 入库，离线历史分钟线（HF、tdx-min）只登记文件目录、不入 PG。§3 是 T-B143 必须遵守的映射表，§6 是 T-B143 第一步必做核对清单。
+状态：定稿（编排者 2026-11-14 14:31 丹佛裁定，§5），架构契约，不代表已实现。原定稿基线 main `4aae38a`；本次入口状态复核基线为本地 `origin/main` `08331bd`。供后端 T-B143 使用：日线与 gbbq 入库，离线历史分钟线（HF、tdx-min）只登记文件目录、不入 PG。§3 是 T-B143 必须遵守的映射表，§6 是 T-B143 第一步必做核对清单。
 
 依据（只引用函数名、用例名、文件路径加章节号）：
 - 编排者 2026-11-14 13:44（丹佛）裁定（`rules/TEAM-RULES.md` 末节）：全部导入 hsjday、gbbq、hf-1min 2022+、tdx-min；只导 A 股；只追加、不覆盖麦蕊行；source 字段区分来源；不删原文件。其中分钟线落点、麦蕊替换 tdx_local 已由 14:31 裁定改写（§5 C1、C3）。
 - 本单派单口径：成交量统一为股（麦蕊 v×100）；库存 adj_type 为 none，复权因子由 gbbq 统一算。
 - 编排者转用户 t1120u：**以 DS 11-10 重建数据和 DS 转换脚本为口径真源**，避免两套口径。DS 脚本在 `origin/ds/T-B136` 的 `src/backend/retest/t_r58/`（`ds/B-01`、`ds/T-15-retest`、`ds/R67-gate-successor` 中 `prepare_hf.py`、`prepare_tdx.py`、`splice.py` 内容相同）。HF 转换器是团队数据区的 `hf-1min/scripts/convert.py`（`convert_file`），DS 的 `prepare_hf.main` 调的就是它，并用 `compare_manifest` 要求产物 manifest 与参考 manifest 关键字段一致。DS 数据实物在用户电脑 F: 盘，架构未读；脚本看不出的项由 T-B143 第一步核对（§6）。
 - 现有契约：`daily-bars-tdx.md`（下称日契）、`intraday-bars.md`（分契）、`daily-bars-source.md`（源契）。与它们冲突处按 §5 裁定执行，三份契约的对应条款已同步加 T-A153 注记。
-- 麦蕊日线入库的现行字段处理在 T-B140 回填脚本 `tb140_history_load`（`validate_bar`、`market_of`、`_trade_date`、`_identity_ok`），位于 be/T-B140 工作树，**尚未合入 main**；下文引用这些函数名均指该脚本。
+- 麦蕊日线入库的字段处理引用 T-B140 回填脚本 `src/backend/probes/tb140_history_load.py`（`validate_bar`、`market_of`、`_trade_date`、`_identity_ok`）；本次以本地 `origin/main` 核实该脚本已存在，BJ 门闩与入口收口状态见源契 §10.11。
 - 实测记录：`reports/T-DATA-SRC.md`、`reports/T-T81.md`、`reports/T-B140.md`、`reports/T003-mairui-capability.md`；研究方案 `docs/strategies/T-R58/retest_plan.md` §2.4、§2.7。
 - 麦蕊官方文档（2026-11-14 抓取）：https://www.mairuiapi.com/hsdata 的「历史分时交易」「最新分时交易（Pro版）」「历史分时交易（Pro版）」「完整历史分时交易（Pro版）」。
 
@@ -58,7 +58,7 @@
 - 库内价、量、额都是 MONEY = Numeric(20,4)（`app/db/base.py`）。
 - 价格：.day 为 uint32 ÷ 100（`DAY_PRICE_DIVISOR`）。.lc1 / .lc5 为 float32 元，**不 ÷100**，按 0.01 **ROUND_HALF_UP**（DS `splice.decode_lc1`；按 §5 C6，main 的 ROUND_HALF_EVEN 不用于分钟价）。HF 为 float64 元，DS 不另舍入，parquet 原值保存。麦蕊原值写入。
 - 成交量统一为**股**：麦蕊日线 v 是手，×100（T003 GAP2；`validate_bar`；T-T81 全库额 ÷（量 × 收）中位 1.0002）。.day、.lc1、.lc5、HF 本来就是股，不乘。麦蕊 1 分钟 v 的单位官方文档没写，**未验证**，核实前不写麦蕊分钟量。
-- 北交所 `/bj/history` 日线 v 同样为手，入库复用 `validate_bar` 的 `VOL_MULT` 同样 ×100 换成股，价额按元原值，换算后允许写库（`reports/T-B146c.md`，小样本 1 只 920682.BJ、1 日 2026-11-13；详见 [daily-bars-source.md](daily-bars-source.md) §10.7 第 4 项；虚构夹具用例见同契约 §10.6 的 `test_ta157_bj_volume_lots_to_shares`）。真实执行仍须既有任务授权。
+- 北交所 `/bj/history` 日线原始 v 仅按 ×100 规范化为股（`validate_bar` 的 `VOL_MULT`），价额按元原值。规范化与一只一日小样本不构成写库放行；所有来源（含 tdx_local）须先满足 [daily-bars-source.md](daily-bars-source.md) §10.2、§10.10–§10.11。当前真实批次确认与入口验收未完成，保持阻断。`reports/T-B146c.md` 的 1 只 920682.BJ、1 日 2026-11-13 仅为历史小样本事实（源契 §10.7 第 4 项），不是准入证据；虚构夹具 `test_ta157_bj_volume_lots_to_shares`（源契 §10.6）也只证明规范化。真实执行仍须既有任务授权。
 - 成交额统一为**元**，各源原值；入库（日线）按 MONEY 列量化到 4 位（日契 §3.3），万分之一元以下的 float32 尾数会被舍去，对元级成交额无实际影响；分钟 parquet 不舍入，同 DS。
 - 麦蕊陷阱：单股网络源 `/hsrl/ssjy/{code}` 的 v 是**万手**（T003 GAP2）；`ssjy/all` 的成交额取整到百元（T-B140）。这两个接口不作为历史入库源。
 - 分钟量合计与日量本来就差几十股（通达信自身如此，T-DATA-SRC），不做「合计等于日量」的强校验（分契 §1.2）。
@@ -77,6 +77,7 @@
 - 已知局限：gbbq 只有单一快照，事后更正无法追溯（`retest_plan.md` §2.4 第 5 条）。
 
 ### 2.6 停牌与零成交
+- 以下一般存储规则中的 BJ 日线先受 [daily-bars-source.md](daily-bars-source.md) §10.2、§10.10–§10.11 准入约束；停牌或零成交的存储语义不单独授予写库放行。
 - 麦蕊日线：sf 为 1 时写 is_suspended=true。实际返回的停牌行带平价 OHLC（四价相等，等于 pre_close），量额为 0（T-T81：1,149 行全部如此）。按源原样写入；下游 `OwnedDailyBarsReader.read` 先判 is_suspended，所以不会当成交易日用。源契 §7 ④「占位行 OHLC 为空」不适用于麦蕊源原样行（§5 C10）。
 - 通达信、HF：停牌日没有记录，**不得据缺行推断停牌，不写占位行**；is_suspended 写空（日契 §2）。HF 的 `no_bar_day_classification.csv` 不转换成停牌标志。
 - 零成交不等于停牌：有记录、量为 0 的分钟或日线照常写入，不设 is_suspended；单位自检跳过量为 0 的记录（`unit_suspect`）。
@@ -190,7 +191,7 @@ BJ 日线映射后的写库确认及入口约束见 [daily-bars-source.md](daily
 | C6 | `tdx_local._quantize` 为 ROUND_HALF_EVEN | 分钟价按 DS 用 ROUND_HALF_UP（只在半分边界有差，如 10.125 → 10.13） |
 | C7 | 分契 §1.2 分钟默认要求 bj、可 `,exclude-bj` | .lc1、.lc5、HF 都不导北交所；日线 bj .day 照日契导入 |
 | C8 | 库日历只有 2026 | 按 `sessions.merged_calendar` 补 2022 起历史日历，另开单 |
-| C9 | `_trade_date`（`tb140_history_load`，未合入 main）只认 `YYYY-MM-DD`、`YYYYMMDD` | 保留这两种，加认 `YYYY-MM-DD 00:00:00`，时间部分非零拒绝 |
+| C9 | `_trade_date`（`tb140_history_load`，原裁定时的行为；本次 main 已有该脚本）只认 `YYYY-MM-DD`、`YYYYMMDD` | 保留这两种，加认 `YYYY-MM-DD 00:00:00`，时间部分非零拒绝 |
 | C10 | 源契 §7 ④ 停牌占位行 OHLC、量额全空 | 麦蕊停牌行按源原样写（平价 OHLC、零量额），下游以 is_suspended 为准；不回写已有行 |
 | C11 | `parse_lc_bytes` 无 13:00 处理 | 采用 DS `relabel_1300`（§2.3） |
 
