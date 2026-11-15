@@ -7,6 +7,7 @@
 - 库内 volume 为股：daily-bars-tdx 契约「两侧均为股」，故 volume = v × 100。
 - 主键 (code, trade_date, adj_type)，ON CONFLICT DO NOTHING：app/db/tables/market.py。
 - active 证书判定对齐 owned_daily_read._licence（status=active、未删除、未暂停、未过期、无 hold）。
+- T-A158 第 5 项：BJ 写库前须 confirm_bj_offline_volume_units 离线对算至少 20 只。
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ ADJ_TYPE = "none"
 SOURCE = "mairui"
 APPLY_PAYLOAD_PREFIX = "-- tb140_apply_payload="
 VOL_MULT = 100  # 手 → 股
+_bj_offline_volume_codes: frozenset[str] = frozenset()
 
 # 公开交易所代码段 + 本批 codes_ashare.txt 实际前缀。
 # 不用 startswith("6"/"9") 这种宽泛规则（既有 tb140_daily_bars.mkt 会把 920 判成 SH）。
@@ -150,6 +152,58 @@ def _trade_date(value: Any) -> date:
     except ValueError as exc:
         raise RowReject("trade_date_invalid") from exc
     raise RowReject("trade_date_invalid")
+
+
+def confirm_bj_offline_volume_units(
+    pairs: Iterable[Mapping[str, Mapping[str, Any]]],
+) -> frozenset[str]:
+    """用调用方提供的本地对照确认 BJ 量单位；纯计算，不读取文件、出网或连库。
+
+    每项为 {"mairui": 原始行, "tdx_local": 本地行}：原始行须含 code/t/v，
+    本地行须含 code/trade_date/volume/source。代码须为同一合法 .BJ 标准码，
+    日期须相同，source 须为 tdx_local，且原始 v（手）×100 精确等于 volume（股）。
+    不自动转码；全部对照一致且至少涵盖 20 只不同代码才通过，返回确认代码集。
+
+    模块在进程内默认未确认；成功后允许两个写入口写 BJ（不限于样本代码）。
+    每次调用先撤销旧确认，失败抛 RowReject，不能跨调用累加样本或沿用旧确认。
+    确认不从产物恢复；新进程调用 Python 写入入口仍须先离线确认。
+    """
+    global _bj_offline_volume_codes
+    _bj_offline_volume_codes = frozenset()
+    matched: set[str] = set()
+    for pair in pairs:
+        if not isinstance(pair, Mapping):
+            raise RowReject("bj_offline_pair_invalid")
+        mairui, tdx = pair.get("mairui"), pair.get("tdx_local")
+        if not isinstance(mairui, Mapping) or not isinstance(tdx, Mapping):
+            raise RowReject("bj_offline_pair_invalid")
+        code = tdx.get("code")
+        if (not isinstance(code, str) or not _QUALIFIED_RE.fullmatch(code)
+                or not code.endswith(".BJ") or mairui.get("code") != code):
+            raise RowReject("bj_offline_code_mismatch")
+        try:
+            if qualified_code(code[:6]) != code:
+                raise RowReject("bj_offline_code_mismatch")
+        except CodeReject:
+            raise RowReject("bj_offline_code_mismatch") from None
+        if tdx.get("source") != "tdx_local":
+            raise RowReject("bj_offline_source_invalid")
+        if _trade_date(mairui.get("t")) != _trade_date(tdx.get("trade_date")):
+            raise RowReject("bj_offline_date_mismatch")
+        lots = _decimal(mairui.get("v"), "v")
+        shares = _decimal(tdx.get("volume"), "volume")
+        if (lots < 0 or shares < 0 or shares != shares.to_integral_value()
+                or lots * VOL_MULT != shares):
+            raise RowReject("bj_offline_volume_mismatch")
+        matched.add(code)
+    if len(matched) < 20:
+        raise RowReject("bj_offline_requires_20_distinct_codes")
+    _bj_offline_volume_codes = frozenset(matched)
+    return _bj_offline_volume_codes
+
+
+def _bj_write_unconfirmed(row: Mapping[str, Any]) -> bool:
+    return not _bj_offline_volume_codes and str(row.get("code", "")).endswith(".BJ")
 
 
 def _is_suspended(value: Any) -> bool:
@@ -315,10 +369,21 @@ def render_insert_sql(
     产物通过 apply_insert_artifact 读取载荷并复用 apply_daily_bars，支持受审计替换。
     直接用 psql 执行只允许非替换路径；重叠时必须走 Python 的持久化对账和事务后回执。
     licence_id 必须是已裁定值，不在渲染时查库。
+    BJ 未经 confirm_bj_offline_volume_units 确认时只记录阻断注释，不生成其写入载荷
+    或 SQL；混合批次中的沪深行仍可生成 INSERT。
     """
     material = list(rows)
     for row in material:
         row_insert_params(row, licence_id)
+    writable = [row for row in material if not _bj_write_unconfirmed(row)]
+    blocked_bj = len(material) - len(writable)
+    blocked_note = (
+        f"-- BJ INSERT blocked: bj_offline_volume_units_unconfirmed ({blocked_bj} rows); "
+        "call confirm_bj_offline_volume_units first.\n"
+    ) if blocked_bj else ""
+    material = writable
+    if blocked_bj and not material:
+        return blocked_note
     payload = json.dumps({"bars": material, "licence_id": licence_id}, ensure_ascii=False, default=str)
     lookup = ACTIVE_LICENCE_SQL.replace("\n", "\n-- ")
     lines = [
@@ -332,7 +397,7 @@ def render_insert_sql(
     ]
     if not material:
         lines.extend(["-- no rows", "COMMIT;"])
-        return "\n".join(lines) + "\n"
+        return blocked_note + "\n".join(lines) + "\n"
     cols = (
         "code,trade_date,adj_type,open,high,low,close,pre_close,"
         "volume,amount,is_suspended,source,source_licence_id"
@@ -383,7 +448,7 @@ def render_insert_sql(
     if licence_id is None:
         lines.append(f"-- pending bind: {bind_note}; source_licence_id is NULL")
     lines.append("COMMIT;")
-    return "\n".join(lines) + "\n"
+    return blocked_note + "\n".join(lines) + "\n"
 
 
 def apply_insert_offline(
@@ -593,8 +658,12 @@ def apply_daily_bars(
 
     对账失败回滚；结果记录在本函数拥有的事务结束后写入。缺少事务接口时拒绝替换。
     不建连接、不加载应用或数据库依赖，允许注入假连接。
+    BJ 未经 confirm_bj_offline_volume_units 确认时不进入写入参数，返回
+    blocked_bj_unconfirmed 计数；混合批次中的沪深行仍按原规则处理。
     """
-    material = [row_insert_params(row, licence_id) for row in rows]
+    writable_rows = [row for row in rows if not _bj_write_unconfirmed(row)]
+    blocked_bj = len(rows) - len(writable_rows)
+    material = [row_insert_params(row, licence_id) for row in writable_rows]
     outcomes: list[dict[str, Any]] = []
     sink = reconcile_sink or jsonl_reconcile_sink(reconcile_path)
     # 不能把外层事务中的 savepoint 释放误记成 committed。
@@ -617,7 +686,7 @@ def apply_daily_bars(
             with conn.cursor() as cur:
                 cur.executemany(INSERT_DAILY_BARS_SQL, material)
                 if transactional:
-                    for row, params in zip(rows, material):
+                    for row, params in zip(writable_rows, material):
                         cur.execute(SELECT_EXISTING_BAR_SQL, params[:3])
                         fetchall = getattr(cur, "fetchall", None)
                         if callable(fetchall):
@@ -649,6 +718,8 @@ def apply_daily_bars(
                         outcome["value"] = "committed" if changed else "skipped"
         after = count()
         result = {"count_before": before, "count_after": after, "inserted": after - before}
+        if blocked_bj:
+            result["blocked_bj_unconfirmed"] = blocked_bj
         if replaced or reconcile_sink is not None:
             result["replaced"] = replaced
         return result

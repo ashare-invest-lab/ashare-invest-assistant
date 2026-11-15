@@ -865,6 +865,15 @@ def test_non_200_body_failure_does_not_retry() -> None:
 
 
 def test_cross_batch_db_and_checkpoint() -> None:
+    # 20 只人工合成 BJ 对照，只确认量单位，不读取真实行情或证券样本。
+    ld.confirm_bj_offline_volume_units([
+        {
+            "mairui": {"code": f"{920801 + offset}.BJ", "t": "2024-01-04", "v": 2 + offset},
+            "tdx_local": {"code": f"{920801 + offset}.BJ", "trade_date": "2024-01-04",
+                          "source": "tdx_local", "volume": 200 + offset * 100},
+        }
+        for offset in range(20)
+    ])
     with tempfile.TemporaryDirectory() as raw:
         tmp = Path(raw)
         ws = _workspace(tmp)

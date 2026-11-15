@@ -479,6 +479,8 @@ def _safe_persist(
     summary["db_count_after"] = stats.get("count_after")
     summary["db_inserted"] = stats.get("inserted")
     summary["db_replaced"] = stats.get("replaced", 0)
+    if stats.get("blocked_bj_unconfirmed"):
+        summary["db_blocked_bj_unconfirmed"] = stats["blocked_bj_unconfirmed"]
 
 
 def run_batch(
