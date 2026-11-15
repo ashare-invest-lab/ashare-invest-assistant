@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import csv
 import hashlib
@@ -12,22 +13,24 @@ import io
 import json
 import shutil
 import subprocess
-import sys
 import tempfile
-from contextlib import contextmanager
-from datetime import date
+from contextlib import contextmanager, nullcontext
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 from zipfile import ZipFile
 
 import psycopg
 import pytest
-
 from app.cli import tb143_reconcile_load as loader
 from app.cli.tb143_export import DAY_COLUMNS
 from app.cli.tb143_inputs import prepare
 from app.ingest.tdx_local import DAY_LAYOUT, ExistingBar
+from app.marketdata import daily_bars as writer
 from probes.tb140_history_load import RowReject, confirm_bj_offline_volume_units
+from sqlalchemy.dialects import postgresql
 
 
 @pytest.fixture(autouse=True)
@@ -52,29 +55,42 @@ def test_bj_confirmation_is_reexported_from_app():
         shared.confirm_bj_offline_volume_units([])
 
 
-def test_cli_starts_with_only_app_in_image(tmp_path):
+def test_cli_starts_with_only_app_in_image(tmp_path, capsys, monkeypatch):
     backend = tmp_path / "backend"
     shutil.copytree(
         Path(loader.__file__).resolve().parents[1],
         backend / "app",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    script = """
-import importlib.util
-import runpy
-import sys
-sys.path.insert(0, sys.argv.pop(1))
-assert importlib.util.find_spec("probes") is None
-runpy.run_module("app.cli.tb143_reconcile_load", run_name="__main__")
-"""
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", script, str(backend), "--help"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert "--apply" in result.stdout
+    assert not (backend / "probes").exists()
+
+    def imports(path):
+        names = set()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                assert node.level == 0, "检查相对导入前须解析其绝对模块名"
+                names.add(node.module or "")
+        assert not any(name == "probes" or name.startswith("probes.") for name in names)
+        return names
+
+    # 检查镜像中的 CLI 及其直接 app 依赖；全程不启动 Python 子进程。
+    direct = imports(backend / "app/cli/tb143_reconcile_load.py")
+    for name in sorted(direct):
+        if name == "app" or name.startswith("app."):
+            module = backend.joinpath(*name.split("."))
+            path = module / "__init__.py" if module.is_dir() else module.with_suffix(".py")
+            assert path.is_file(), f"镜像缺少直接依赖：{name}"
+            imports(path)
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    factory = Mock(side_effect=AssertionError("--help 不得连接数据库"))
+    with pytest.raises(SystemExit) as exited:
+        loader.main(["--help"], factory=factory)
+    assert exited.value.code == 0
+    assert "--apply" in capsys.readouterr().out
+    factory.assert_not_called()
 
 
 def confirm_synthetic_bj():
@@ -143,7 +159,7 @@ class MemoryRepository:
         # 首次写库前，两份审计清单必须已完整关闭并可读。
         assert self.out is not None
         assert list(self.out.glob("*_new_keys.csv"))
-        latest = sorted(self.out.glob("*_candidates.csv"))[-1]
+        latest = max(self.out.glob("*_candidates.csv"))
         with latest.open() as stream:
             assert len(list(csv.DictReader(stream))) > 0
         inserted = 0
@@ -487,11 +503,124 @@ def test_transport_bundles_are_verified_and_unpacked(tmp_path):
     assert (result.files[0].parent / "tb143_load_day.sql").read_bytes() == legacy
 
 
-def test_sql_is_append_only_and_fixed_source():
-    sql = loader.INSERT_SQL.upper()
+@pytest.mark.parametrize("existing_source", ["mairui", "tdx_local"])
+def test_sql_is_append_only_and_fixed_source(monkeypatch, existing_source):
+    incoming = writer_bar("689998.SH")
+    insert_result = Mock()
+    insert_result.all.return_value = []  # 同键已存在，数据库按 DO NOTHING 返回空。
+    select_result = Mock()
+    select_result.mappings.return_value = [
+        dict(vars(incoming), source=existing_source, close=Decimal(11))
+    ]
+    conn = Mock()
+    conn.execute.side_effect = [insert_result, select_result]
+    monkeypatch.setattr(loader, "Connection", lambda *args, **kwargs: nullcontext(conn))
+    upsert = Mock(wraps=writer.upsert_daily_bars)
+    monkeypatch.setattr(loader, "upsert_daily_bars", upsert)
+    repo = object.__new__(loader.PgRepository)
+    repo.conn = SimpleNamespace(
+        info=SimpleNamespace(transaction_status=psycopg.pq.TransactionStatus.INTRANS)
+    )
+    values = (
+        incoming.code, incoming.trade_date, incoming.adj_type,
+        *(getattr(incoming, field) for field in DAY_COLUMNS[3:]),
+    )
+    assert repo.insert([values]) == 0
+    upsert.assert_called_once()
+    assert upsert.call_args.kwargs["source"] == "tdx_local"
+    assert upsert.call_args.args[1].bars == [incoming]
+    statements = [
+        call.args[0].compile(dialect=postgresql.dialect())
+        for call in conn.execute.call_args_list
+    ]
+    sql = str(statements[0]).upper()
     assert "ON CONFLICT (CODE, TRADE_DATE, ADJ_TYPE) DO NOTHING" in sql
-    assert "UPDATE" not in sql and "DELETE" not in sql and "'TDX_LOCAL'" in sql
+    assert statements[0].params["source_m0"] == "tdx_local"
+    # 仅约束本次 tdx 追加实际执行的语句，不限制 mairui 条件替换分支。
+    assert len(statements) == 2 and str(statements[1]).startswith("SELECT")
+    assert all("UPDATE" not in str(statement).upper() for statement in statements)
     assert "D.ADJ_TYPE='NONE'" in loader.KEY_SQL.upper()
+
+
+def writer_bar(code):
+    return writer.DailyBar(
+        code=code,
+        trade_date=date(2031, 1, 2),
+        adj_type="none",
+        open=Decimal(10),
+        high=Decimal(10),
+        low=Decimal(10),
+        close=Decimal(10),
+        pre_close=None,
+        volume=Decimal(100),
+        amount=Decimal(1000),
+        is_suspended=None,
+    )
+
+
+@pytest.fixture
+def writer_connection():
+    """只回放新行 RETURNING，不连接数据库；保留真实 pg_insert 构造。"""
+    conn = Mock()
+
+    def execute(statement):
+        compiled = statement.compile(dialect=postgresql.dialect())
+        assert str(compiled).startswith("INSERT INTO market.daily_bars")
+        params = compiled.params
+        keys = [
+            SimpleNamespace(
+                code=value,
+                trade_date=params[name.replace("code_", "trade_date_", 1)],
+                adj_type=params[name.replace("code_", "adj_type_", 1)],
+            )
+            for name, value in params.items() if name.startswith("code_m")
+        ]
+        return SimpleNamespace(all=lambda: keys)
+
+    conn.execute.side_effect = execute
+    return conn
+
+
+@pytest.mark.parametrize("source", ["mairui", "tdx_local", "fake", "future_source"])
+@pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.parametrize("mixed", [False, True])
+def test_upsert_daily_bars_bj_gate_has_no_source_whitelist(
+    monkeypatch, writer_connection, source, confirmed, mixed
+):
+    # 全为虚构输入，涵盖合法后缀、43/83/87/920、错后缀和无后缀绕过。
+    bj = {
+        "920998.BJ", "430998.BJ", "830998.BJ", "870998.BJ",
+        "430997.SH", "830997.SZ", "870997.SH", "920997.SZ",
+        "430996", "830996", "870996", "920996", "009998.BJ",
+    }
+    sh_sz = {"689998.SH", "003998.SZ", "302998.SZ", "688998.SH"} if mixed else set()
+    if confirmed:
+        confirm_synthetic_bj()  # 写入码不在确认样本里，门闩是进程级确认。
+    insert = Mock(wraps=writer.pg_insert)
+    monkeypatch.setattr(writer, "pg_insert", insert)
+    # 混合行跨批时也必须在构造 INSERT 前完成过滤。
+    monkeypatch.setattr(writer, "UPSERT_BATCH_ROWS", 2)
+    stats = writer.upsert_daily_bars(
+        writer_connection,
+        writer.DailyBarsResult(bars=[writer_bar(code) for code in sorted(bj | sh_sz)]),
+        source=source,
+        licence_id=None,
+        fetched_at=datetime(2031, 1, 2, tzinfo=UTC),
+    )
+    expected = bj | sh_sz if confirmed else sh_sz
+    assert stats.inserted == len(expected)
+    assert stats.blocked_bj_unconfirmed == (0 if confirmed else len(bj))
+    assert (stats.unchanged, stats.conflicts, stats.replaced, stats.issues) == (0, 0, 0, ())
+    assert insert.call_count == (len(expected) + 1) // 2
+    inserted = []
+    for call in writer_connection.execute.call_args_list:
+        params = call.args[0].compile(dialect=postgresql.dialect()).params
+        inserted.extend(value for name, value in params.items() if name.startswith("code_m"))
+        assert all(value == source for name, value in params.items() if name.startswith("source_m"))
+    assert sorted(inserted) == sorted(expected)
+    if not expected:
+        insert.assert_not_called()
+        writer_connection.execute.assert_not_called()
 
 
 @pytest.fixture(scope="module")
