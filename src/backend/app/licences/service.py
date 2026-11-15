@@ -55,6 +55,11 @@ from app.db.tables.licences import (
 from app.db.tables.licences import user_data_licences as udl
 from app.db.tables.ops import ingest_request_log
 from app.db.tables.users import users
+from app.ingest.mode import (
+    VERIFY_OFFLINE_MESSAGE,
+    VERIFY_OFFLINE_REASON,
+    verification_is_offline,
+)
 from app.licences.keys import parse_public_keys
 from app.licences.seal import cooldown_fingerprint, licence_hmac, seal_licence
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
@@ -544,6 +549,8 @@ def set_status(
 
 def enqueue_verify(rds: redis.Redis, *, licence_id: uuid.UUID, verification_id: uuid.UUID) -> None:
     """``XADD ingest:requests``：只带 ``licence_id``（plan §2.1B：明文不经过 Redis）。"""
+    if verification_is_offline():
+        raise AppError(ErrorCode.UPSTREAM_UNAVAILABLE, message=VERIFY_OFFLINE_MESSAGE)
     rds.xadd(
         INGEST_REQUESTS_STREAM,
         {
@@ -561,6 +568,13 @@ def enqueue_verify_best_effort(
 ) -> None:
     """已提交的 PUT/resume 之后投递；Redis 不可用时只记日志（行状态仍为
     ``pending_verification``，由 ingest 启动/周期扫描兜底，见 T-B45 报告）。"""
+    if verification_is_offline():
+        logger.warning(
+            "data-licence: verify intent not queued licence_id=%s reason=%s",
+            licence_id,
+            VERIFY_OFFLINE_REASON,
+        )
+        return
     try:
         enqueue_verify(rds, licence_id=licence_id, verification_id=verification_id)
     except redis.RedisError as exc:

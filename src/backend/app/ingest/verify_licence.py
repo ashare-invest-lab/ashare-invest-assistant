@@ -33,6 +33,7 @@ from app.db.tables.licences import data_licence_events, user_data_licences
 from app.ingest.daily_lists import HALT, STOP, DailyHaltError, credential
 from app.ingest.egress import EgressDenied, EgressLease, mairui_get, single_egress
 from app.ingest.intents import VerifyIntent, parse_intent
+from app.ingest.mode import VERIFY_OFFLINE_REASON, verification_is_offline
 from app.ingest.runtime import get_ingest_core
 from app.ingest.upstream import Signal
 from app.licences.service import INGEST_REQUESTS_STREAM
@@ -161,7 +162,9 @@ def process_verify_intent(
     current = str(row.status)
     calls = 0
     reason: str | None = None
-    if current not in _ACTIVATABLE:
+    if verification_is_offline():
+        reason = VERIFY_OFFLINE_REASON
+    elif current not in _ACTIVATABLE:
         reason = "licence_unavailable"
     elif stop.exists() or halt.exists():
         reason = "STOP"

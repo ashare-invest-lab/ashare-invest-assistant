@@ -1,5 +1,51 @@
 # T-R71 验收记录
 
+## T-R71d 按 T-A159 修改验收
+
+依据团队报告 T-A159「*_qfq 口径裁定」及「条件」两节落实 C1/C2。四卡 lifecycle 保持 draft，仅输出候选信号；本轮没有行情复测、G1–G7 或派生实现结论。下方旧轮的 scope 和验收统计均为历史快照，本轮结果以本节为准。
+
+- 冲突：horizon_inventory.json 的 56 处冲突均已消除。保留 main 的 T-R69 登记及 t_r69_refresh、本分支 T-R71 登记及 t_r71_refresh；55 个共同辅助路径去重，双方说明保留。实际合并 scope=192，加本轮 .last.md 后为193；身份45、来源身份文件23不变，records/stats 未改。
+- C1：四卡 §5、相关 B02/B08 与 §11，以及 README §3、共同前置、§5、§7 采用 T-A159 的 qfq@as_of 定义；S-01/S-02 §23 同步移除旧字段疑义。字段名保留；仅晚于信号日锚定的前复权限展示。绝对元价阈值、一字板、涨跌停价用不复权；每个历史 T 独立重算，不复用末日序列。
+- C2：S-02/S-04 §7 X1b、W-02 §7 X5 及三卡 §9 明确持久化「不复权价位 L_raw + 冻结日 s」，每个 T 按 L_raw(s)×A(s)/A(T) 换算，与 qfq@T 收盘比较；W-02 阈值再乘 1−fail_pct。禁止保存某日 qfq 数值后跨除权日直接比较；QFQ-1/QFQ-2 尚未实现。README §4 同步；S-01 不涉及 C2。
+
+按文件发现结果运行全部15个 check_*.py，使用 `/tmp/ckvenv/bin/python`，普通与 `-O` 各一次。每次命令均为 `PYTHONDONTWRITEBYTECODE=1 /tmp/ckvenv/bin/python docs/strategies/<脚本>` 或增加 `-O`；子进程使用显式无凭据环境，仅提供 PATH、PYTHONDONTWRITEBYTECODE、PYTHONNOUSERSITE、LANG、TMPDIR，不继承 DATABASE_URL，不加载环境文件，不联网、不调麦蕊、不读数据库。未改 checker，未执行其他 test 脚本。
+
+| 脚本（相对 docs/strategies） | 普通 rc | -O rc |
+|---|---|---|
+| `F23-v4/check_q5_evidence_seeds.py` | 0 | 0 |
+| `P2N-R10/check_horizons.py` | 0 | 0 |
+| `S2-7/check_public_sources.py` | 0 | 0 |
+| `T-R21/check_T-R21.py` | 0 | 0 |
+| `T-R22/check_f23.py` | 0 | 0 |
+| `T-R23/check_f23_v2.py` | 0 | 0 |
+| `T-R23/check_f23_v2_1.py` | 0 | 0 |
+| `T-R62/check_f23_v3.py` | 0 | 0 |
+| `check_f21_ready.py` | 1 | 1 |
+| `check_p2n01_dimension_mapping.py` | 0 | 0 |
+| `golden/check_P2N-09.py` | 0 | 0 |
+| `golden/check_P2N-R08.py` | 0 | 0 |
+| `golden/check_P2N-R09.py` | 0 | 0 |
+| `golden/check_T-R15.py` | 0 | 0 |
+| `golden/check_exdiv_T-R15.py` | 0 | 0 |
+
+合计30次：28次 rc=0；指定基线例外 check_f21_ready.py 普通与 -O 各 rc=1，均报“DATABASE_URL 未设置；本脚本只读、不写，但需要目标库（通常是隔离库）。”本轮不提供连接信息，不尝试连接目标库；该 CLI 的数据库验收仍未完成。其余14个 checker 两种模式全部 rc=0，符合本轮单列基线例外的要求。
+
+P2N-R10 两种模式均 PASS：scope_files=192、identity_records=45、source_identity_files=23、negative_mutations_rejected=8。JSON 可解析且路径唯一；与冲突前两侧 records、stats 逐项相同，双方新增登记集合均保全。
+
+| 其他检查 | rc | 结果 |
+|---|---|---|
+| `rg -n "^(<<<<<<<|=======|>>>>>>>)" docs/strategies` | 1 | 空输出，无冲突标记 |
+| T-R71 旧字段待确认措辞 rg | 1 | 空输出 |
+| 本轮策略文档禁止绝对路径及禁用表述 rg | 1 | 空输出 |
+| `git diff --check` | 0 | 无空白错误 |
+| JSON/双方登记保全、C1/C2 分节、draft、依赖条数核对 | 0 | 全部满足；身份及12条逐卡依赖保持不变 |
+
+修改清单：T-R71 四卡、README.md、acceptance.md（.last.md 已删除、不入库）；P2N-R10/horizon_inventory.json、README.md；团队报告 T-R71 末尾追加同名节。除要求的只读 diff 检查外不执行 Git 操作；不 add/commit/merge --continue/push，合并进度与索引留待后续处理。
+
+仍未解决：F21 数据库 CLI 缺少连接环境；QFQ-1/QFQ-2 派生；行情/权息事件可见性与复杂权息、指数/行业接入覆盖；R 观察口径及账本核验。字段语义按 T-A159 执行，不再作为待裁定事项。
+
+以下保留 T-R71d 之前的历史验收，历史计数、旧结论与执行范围不代表本轮现状。
+
 ## 裁定落实验收（编排者 11-14）
 
 本轮落实基准、复权与结构止损裁定，四卡 lifecycle 保持 draft，输出仍为“候选信号”。修改范围为本目录、P2N-R10/horizon_inventory.json 及团队报告 T-R71；删除策略目录内的临时交付记录及其两处 census 登记，scope=191、身份=45、来源身份文件=23。P2N-R10 README 已与六文件登记一致，无需修改。
@@ -128,6 +174,6 @@ scripts 目录以 checker 文件名及正文中的 strategy/strategies/策略 �
 
 ## 解释边界
 
-census 当前为191个 scope 文件，仍为45个身份记录、23个源身份文件，8种变异拒绝；新增草稿没有正式导入围栏，不新增运行身份。基线未登记的55个既有辅助文件仅在 inventory 补登记。
+该历史轮 census 为191个 scope 文件，仍为45个身份记录、23个源身份文件，8种变异拒绝；新增草稿没有正式导入围栏，不新增运行身份。基线未登记的55个既有辅助文件仅在 inventory 补登记。
 
 文档 checker 不等于真实日K复测或 G1–G7；本轮策略生命周期全部为 draft。

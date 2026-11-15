@@ -467,7 +467,60 @@ T-T71b 歧义 1 里的「v2」是用例 28 追加的 **version_no=2 持仓快照
 ## 13. 用户 11-10 答卡对快照的影响（T-A142）
 
 - 日报 17:30（`daily-bars-source.md` §9.1）：REPORT 在 analyze 结束后由 `worker_tick` 推出。快照仍由 analyze 首次过闸时惰性生成；REPORT 不触发快照，也不重建快照。§11.3 的晚到规则不变：17:30 后才取到的行当日记 `daily_bars_after_asof:<code>`，当天不回填进日报，次日作为历史 bar。
-- 自动补历史（§9.2）与每批续接（§9.3）只往 daily_bars 写完成版历史行，DO NOTHING 幂等；快照按 `daily_bars_ready` 与 `build_owned_snapshot` 的既有口径读取，不新增字段，`OWNED_VERSION` 不变。
+- 自动补历史（§9.2）与每批续接（§9.3）只往 daily_bars 写完成版历史行，DO NOTHING 幂等（T-A153 C1 例外：已有行为 `tdx_local`、写入方为 mairui 时按 `multi-source-ingest.md` §4 替换）；快照按 `daily_bars_ready` 与 `build_owned_snapshot` 的既有口径读取，不新增字段，`OWNED_VERSION` 不变。
 - 开市日 17:00–17:45 不跑补历史与回填批，所以 analyze 的 17:30 读取不会与回填写入并发。
 - 静态扫描（§10 J10）照旧：新加的 REPORT 链式推送与续接代码里不得出现 build_owned_snapshot、daily_bars_ready、daily_snapshot 字样。
 - G/W/T（测试）：`test_daily_snapshot_not_a_task`（不变）；`test_late_fetch_row_used_as_history_next_day`（不变）；`test_backfill_rows_visible_next_snapshot`（新）：Given B 在 11-09 由补历史写入 3 年行 / When 以 11-10 build / Then B 的 bars 含补入的历史开市日行，且都为完成版。
+
+## 14. 回填/导入行就绪判定（T-A155）
+
+基点 origin/main `c54920b`。问题来源：`reports/T-B144.md` §5（本地栈 off 不建快照；缺当日 daily_bars.fetch 运行或当日行不在 17:10–17:30 时整只省略；回填历史行进不了快照）。引用只写函数名、用例名、章节号。
+
+**结论**：历史行（回填、补历史、C1 替换后）不需要任何 pipeline_runs 等价记录，按本节 14.1 的逐行时点规则就绪；`daily_bars_ready` 只管快照日 T 的当日例行取数，且收紧为只认例行批（14.2 唯一改动）。17:15 取数、17:30 analyze、当日行窗口、point-in-time 口径一律不变，补建、重跑、一次性 Settings 覆盖都不豁免。不新增外呼、run kind、Settings 取值、迁移。
+
+### 14.1 就绪规则（T 为快照日，d 为行的 trade_date，F 为 fetched_at，均按北京时间）
+
+| 行类别 | 就绪条件（全部满足） | 不满足时（现有 issue / 缺口） | 最早可用的快照日 |
+| --- | --- | --- | --- |
+| 当日例行 mairui（d 为 T） | 本节 14.2 口径下 `daily_bars_ready` 为真；F 在 [T 的 `FINAL_AFTER`, T 的 `ANALYZE_AS_OF`]；绑定 owner 当前 active 证书（`_mairui_unbound` 为假） | `daily_bars_not_ready`；`daily_bars_not_final:<code>`；`daily_bars_after_asof:<code>`；`owned_snapshot_licence_unbound:<code>`；整只省略，analyze 另记 `owned_source_security_missing:<code>` | T（不满足则当日不补） |
+| 历史 mairui（回填、补历史、晚到行；d 早于 T） | source 为 mairui 且绑定当前 active 证书；F 不早于 d 的 `FINAL_AFTER`（`_bar_item` 的 is_final）；F 不晚于 T 的 `ANALYZE_AS_OF`（`_include_historical`，§10 J14）。不要求 d 或 T 有运行记录 | 非完成版：留在快照原始 bars、is_final 为假，`prepare` 与 `load_inputs` 不当有效 K，求值 gaps 含 `daily_bar_missing:<date>`；F 晚于 T 截止：不入选，同样表现为缺 K；未绑定：整只 `owned_snapshot_licence_unbound:<code>` | 第一个 `ANALYZE_AS_OF` 不早于 F 的开市日（且该日当日行就绪） |
+| C1 替换行（依赖 #141） | 替换已提交（`multi-source-ingest.md` §4 结果行 committed）；替换时 source、source_licence_id、F 一并取麦蕊入参，之后与上一行同规则；不继承 tdx_local 原 F | 同上一行；未替换则按 tdx_local | 同上一行（按新 F 计） |
+| tdx_local | 永不进 owned 快照（`_load_bars` 排除，`daily-bars-tdx.md` §4；C1「日报只用麦蕊」） | 当日只有此源：`daily_bars_missing:<code>`；历史：缺 K | 无（只有被 C1 替换后按上行） |
+| source 为空的旧行 | 不入选（`_today_row`、`build_owned_snapshot`） | 同 tdx_local | 无 |
+
+- 后果（如实陈述，不在本单处理）：非完成版 mairui 行因 `upsert_daily_bars` 的 DO NOTHING 不会被后到的完成版覆盖，之后所有快照该日都缺有效 K；见 14.4 Q3。
+- 对 `reports/T-B144.md` §5 的「一次性进程覆盖 Settings」绕行：对 11-13 只会得到 `daily_bars_not_ready`，或过闸后当日行整只省略、11-14 回填的历史行因晚于 11-13 截止而不入选，重建结果无意义。**不建议执行。** 回填历史行在本地栈开启例行取数后的第一个开市日快照里自然可用。
+
+### 14.2 后端改动（唯一一项，收紧不放宽）
+
+- 改 `daily_snapshot.daily_bars_ready`：候选只取 stats 中 window_trading_days 为空（缺键或 null）的运行，即例行批（17:15 `slot_jobs` 只传 trade_date；口径同 `daily_bars_schedule.delayed_until` 的例行批）；在候选中按原顺序（started_at、finished_at 降序，owner 或全体）取最新一行再判状态。**先过滤再取最新**，使补历史、回填批（`daily_bars_outbox.enqueue` 与 `fetch_and_record` 都写同一 kind、step，stats 带窗口）既不能让 T 变就绪，也不能遮蔽 T 的例行运行。
+- 不改签名、返回值、issue 带出规则；不加字段、不加迁移。
+- 已知残余：`daily_bars_fetch_task` 与 `enqueue` 未禁止「回填批型 + 空窗口」的组合；正常入口 `daily_bars_backfill` 的 apply 必带窗口，故按窗口判定足够，是否禁止该组合另裁（14.4 Q4）。
+- 不改：`build_owned_snapshot`、`_include_historical`、`FINAL_AFTER`、`ANALYZE_AS_OF`；`workers/daily.analyze` 的 off 分支、`phase`、`analysis_task`、`report_task`；`features/pipeline.prepare`、`reports/dimensions.load_inputs`；`upsert_daily_bars`；`daily_bars_backfill` 的缺省日期与 17:00–17:45 锁；补历史去重 `daily_bars_plan.ready_for_window`（`daily-bars-source.md` §9.2、§9.3 所称的 backfill_ready，按 now 判断，不能拿来当快照闸）。`tdx_import` 的 `record_run`（step 为 tdx_local.import_ 前缀）本就不满足 `daily_bars_ready`，不改。
+
+### 14.3 测试用例清单（合成代码 A、B，虚构开市日 D0 < D1 < D2，不用真实行情）
+
+| 用例 | Given | When | Then |
+| --- | --- | --- | --- |
+| `test_ready_ignores_windowed_runs`（新） | D1 只有带窗口的 daily_bars.fetch 运行，ok 与 partial 各一组 | `daily_bars_ready`；再跑 analyze（源 fake） | 返回 (False, ())；issues 含 `daily_bars_not_ready`，不建快照 |
+| `test_windowed_run_does_not_shadow_routine_run`（新） | D1 先有例行 ok 运行，之后有带窗口运行，状态遍历 ok、partial、failed、running | `daily_bars_ready` | 均按例行运行判为真，只带出本人 universe 的例行运行 issues；另组最新例行为 failed 时为假，不回退到更早的成功行 |
+| `test_tdx_import_runs_do_not_affect_ready`（新） | D1 只有 tdx_local.import_ 运行 ok；另组另有例行 ok | `daily_bars_ready` | 前组假，后组真 |
+| `test_snapshot_includes_backfilled_history`、`test_late_fetch_row_used_as_history_next_day`（不变） | 既有夹具 | 既有 | 既有断言不动 |
+| `test_backfill_rows_visible_next_snapshot`（§13 已列，`selfchecks/test_tb128_daily_snapshot.py` 中未找到，补写） | 按 §13 | 按 §13 | 按 §13 |
+| `test_backfilled_history_invisible_before_asof`（新） | A 的 D0 行 F 晚于 D1 17:30；D1 当日行合格 | 以 D1 build 并求值；再以 D2（当日行合格）build | D1：原始 bars 无 D0，求值 gaps 含 D0 的 `daily_bar_missing`；D2：D0 入选且 is_final 为真 |
+| `test_today_window_unchanged_with_backfill_run`（新） | D1 有例行 ok；A 当日行 F 早于 17:10，B 当日行 F 晚于 17:30；另有 D1 的带窗口运行 ok | 以 D1 build | omitted 含 `daily_bars_not_final:A`、`daily_bars_after_asof:B`，与无回填运行时一致 |
+| `test_non_final_history_not_effective`（新） | A 的 D0 行 F 早于 D0 17:10；之后同键完成版 upsert | upsert，再以 D1 build、求值 | upsert 计 unchanged 或 conflict、原 F 不变；快照 bars 中 D0 的 is_final 为假；求值 gaps 含 D0 的 `daily_bar_missing` |
+| `test_tdx_excluded_then_c1_visible_next_snapshot`（新，替换段等 #141 合入） | A 的 D0 行为 tdx_local；D1 17:30 后按 C1 替换为 mairui（绑定 active 证书） | 替换前以 D1 build；替换后分别以 D1、D2 build | 替换前与替换后 D1 均不含 D0；D2 含 D0 |
+| 外呼约束（沿用） | 本节全部用例 | 既有 socket 探针与 §10 J10 静态扫描 | 麦蕊调用 0 次；`build_owned_snapshot`、`daily_bars_ready` 仍不进任务表 |
+
+### 14.4 关口与待裁定
+
+- 需用户本人批准的关口（本节不构成批准）：本地栈把 daily_bars_source 改为 mairui（即开启日常真调）；为非完成版行补取；backfill --apply；生产部署。
+- Q1 本地栈 off：**推荐维持**，等用户本人批准日常真调后再开；开启后第一个开市日 17:30 的快照即可带上已回填历史。
+- Q2 收盘后、下一开市日前「补建」并放宽 as_of：**推荐不做**。会改 `prepare` 的可见输入及由 as_of 推出的日期（因子候选、qfq 基准日），`load_inputs` 另有 cutoff 与逐行 `FINAL_AFTER` 下限，不能只改 analyze 时刻。
+- Q3 非完成版 mairui 行的同源「非完成版 → 完成版」替换：**推荐另开契约单**，先只读统计受影响行数（未验证），再仿 C1 定先写对账、条件更新与失败语义；补取本身是真调，须用户本人批准。
+- Q4 是否在 `daily_bars_fetch_task` / `enqueue` 拒绝「回填批型 + 空窗口」：**推荐暂不改**，正常入口不产生该组合；随下一张触及该处的后端单顺手加。
+
+### 14.5 未验证
+
+本节只核对仓库代码与报告，未连本地库：受影响的非完成版行数、11-13 当日行的 F 分布、回填行 F 分布均**未验证**。11-13 15:06、11-14 回填的时刻转引 `reports/T-B144.md`，本单未复测。

@@ -575,272 +575,282 @@
     {
       "path": "docs/strategies/F23-v4/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: F23-v4 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/F23-v4/check_q5_evidence_seeds.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: F23-v4 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/F23-v4/q5_boundary_draft.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: F23-v4 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/F23-v4/q5_candidate_cases.yaml",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: F23-v4 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/F23-v4/q5_l03_l05_evidence_cases.yaml",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: F23-v4 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/R-03/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: R-03 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/R-03/rehearsal_check.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: R-03 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/R-03/render_report.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: R-03 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/R-03/report_template.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: R-03 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/R-03/synthetic_filled.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: R-03 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/R-03/synthetic_input.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: R-03 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S1-7/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S1-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S1-7/asset-map.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S1-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S2-7/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S2-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S2-7/check_public_sources.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S2-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S2-7/check_result.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S2-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S2-7/public_sources.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S2-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S2-7/termination_public_subset.csv",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S2-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/S2-7/test_public_sources.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: S2-7 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-DATA-ST/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-DATA-ST present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-DATA-ST/st_ranges_sz.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-DATA-ST present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R58/judging_framework.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R58 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+    },
+    {
+      "path": "docs/strategies/T-R69/daily_retest_readiness.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R69 daily-K first-round retest readiness plan (method spec, not a card, not importable); T-A78 ①b non-identity"
     },
     {
       "path": "docs/strategies/T-R62/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/build_sample_v3.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/check_f23_v3.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/compare_v21_v3.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/f23_lexicon_v3.yaml",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/f23_v3_cases.yaml",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/fetch_manifest.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/fetch_titles.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/hit_review_v3.yaml",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/make_lexicon_v3.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/make_nonhit_review_v3.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/match_f23_v3.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/nonhit_review_v3.jsonl",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/rules_freeze_v3.yaml",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/sample_titles_v3.jsonl",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R62/sample_v3_stats.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R62 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/build_listing_history.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/build_st_history_sh.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/build_st_history_sz.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/build_termination_list.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/fetch_cninfo_per_stock.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/fetch_cninfo_st_events.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/fetch_eastmoney_cym.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/manifests/listing_history_manifest.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/manifests/p9_no_delisting_period_evidence.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/manifests/st_history_sh_manifest.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/manifests/st_history_sz_manifest.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R65/manifests/termination_manifest.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R65 present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R66b/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R66b present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R66b/crosscheck_evidence_only.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R66b present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R66b/manifests/evidence_only_crosscheck.json",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+      "note": "T-R69 census refresh: T-R66b present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
+    },
+    {
+      "path": "docs/strategies/f23_lexicon_spec.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R69 census refresh: f23_lexicon_spec.md present on origin/main 4aae38a but unregistered (merged via DS PRs); no strategy-card fence, no knowledge-card title; T-A78 ①b non-identity；T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     },
     {
       "path": "docs/strategies/T-R71/README.md",
@@ -871,11 +881,6 @@
       "path": "docs/strategies/T-R71/acceptance.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71：每日决策候选研究草稿/索引/验收；lifecycle draft，不可导入，不分配新运行身份；周期见单卡 §1"
-    },
-    {
-      "path": "docs/strategies/f23_lexicon_spec.md",
-      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R71：补登记基线既有辅助文件；不新增正式策略身份，不更改源内容"
     }
   ],
   "records": [
@@ -2528,6 +2533,10 @@
     "ruling": "编排者 T-R55 裁定：S-01 升 v2，库内 v1 审核（055105a）作废，重新导入并重跑 G1–G6",
     "change": "S-01 v2：cards/st_pullback_ma.md version_no 1→2；v1（055105a 内容）冻结为 cards/history/st_pullback_ma.v1.md（新增历史身份）；身份 44→45、源文件 22→23、historical_frozen 3→4、explicit_single short 9→10；multi 不变"
   },
+  "t_r69_refresh": {
+    "ruling": "T-R69 任务单：census 提示新文件未登记即登记",
+    "change": "scope_snapshot 130→186：登记 origin/main=4aae38a 上已合入但未登记的 55 个文件，以及本单新增的 docs/strategies/T-R69/daily_retest_readiness.md；全部为非身份文件，身份记录 45、源文件 23 不变"
+  },
   "t_r71_refresh": {
     "basis": "T-R71 用户任务：登记新增文件并保持 census；不改既有卡或 checker",
     "added_research_paths": [
@@ -2597,5 +2606,10 @@
     ],
     "identity_records_unchanged": true,
     "runtime_changed": false
+  },
+  "t_r71d_refresh": {
+    "basis": "T-A159 口径裁定及条件 C1/C2；T-R71d 用户任务",
+    "scope_files": 192,
+    "change": "保留 T-R69 与 T-R71 全部登记，55 个共同辅助路径去重并保留双方说明；合并后 scope 192（本轮交付记录不入库）；身份记录 45、源文件 23 不变"
   }
 }

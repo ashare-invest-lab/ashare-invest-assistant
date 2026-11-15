@@ -33,15 +33,15 @@ lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.m
 | 输入/字段或派生键 | 频率 | 复权与单位 | 预热/用途 | 出处与就绪度 |
 |---|---|---|---|---|
 | code、trade_date、open/high/low/close、volume、amount、pre_close、is_suspended、source | daily | 输入 none；价格元、volume 股、amount 元 | 本卡 25 根有效日 K；字段到齐后可得 | market.daily_bars（任务数据契约）；tdx hsjday 仅在源适配与校验完成后作对照，不能覆盖缺失标记 |
-| f.close_qfq、f.low_qfq；f.amount；f.market_regime_idx（F50）。MA 和动量均本地派生。 | daily | 计算价格 hfq 或 B08 事件逐日复权；额 none；状态 none；字段名口径见下文 | 本卡预热见 §22；环境另需指数预热 | docs/strategies/cards/st_pullback_ma.md §时点 / 单位 / 复权 / 预热、§strategy-card；部分可派生，尚未复测 |
-| gbbq 权息事件及因子版本 | event，按 T 截断 | 价格转换为 hfq 或 B08 事件逐日复权；额量不复权 | 覆盖指标起点至 T；不固定猜事件根数 | docs/strategies/feature_spec.md §1.3；事件可见时点、复杂公司行为与源一致性待验证 |
+| f.close_qfq、f.low_qfq；f.amount；f.market_regime_idx（F50）。MA 和动量均本地派生。 | daily | 计算价格 qfq@as_of（B08 权息事件逐日复权）；额 none；状态 none；字段名口径见下文 | 本卡预热见 §22；环境另需指数预热 | docs/strategies/cards/st_pullback_ma.md §时点 / 单位 / 复权 / 预热、§strategy-card；部分可派生，尚未复测 |
+| gbbq 权息事件及因子版本 | event，按 T 截断 | 价格转换为 qfq@as_of（B08 权息事件逐日复权）；额量不复权 | 覆盖指标起点至 T；不固定猜事件根数 | docs/strategies/feature_spec.md §1.3；事件可见时点、复杂公司行为与源一致性待验证 |
 | 上市日、ST 生效区间、上市状态/退市整理区间、终止名单及交易日历 | event/daily | none | 上市年龄按交易日历；状态须覆盖所有决策日 | docs/strategies/T-R65/README.md §①、§②、§③；仅已知子集，unknown 剔除且计数 |
 | 主基准沪深300（000300）及辅基准中证全指（000985）OHLC/收盘 | daily | none | F50 为61根；F25整体预热待复测，见 docs/strategies/T-R71/README.md §6 共用参数登记 | 团队报告 T-R72 §7 B11；接口及 tdx 对照的接入/覆盖未验证；本轮不调用接口 |
 | hf-1min（2022 年起）、tdx-min 的时间、OHLC、volume、amount、source | 1m，可选校验 | none | 不参与入场预热；仅≤T 已收完 bar 可校验伪停牌，执行回放与决策输入隔离 | 本次不把分钟覆盖假定为全市场可交易性证明；源适配待验证 |
 
-编排者 11-14 复权裁定：回测、候选信号及指标计算、入场价折算、收益与 R 统计一律用后复权（hfq），或按团队报告 T-R72 §7 B08 权息事件逐日复权。后复权固定基准不晚于历史计算起点；逐日只纳入当日已生效且当时已可见的事件，冻结 source、因子版本及旧快照，后续事件或修订不得回写过去候选信号。缺少事件可见性或复杂权息证据时标“未验证”并阻断相关求值。禁止使用以晚于信号日的时点为锚、含未来信息的前复权；前复权（qfq）仅可用于展示。收盘、均线、入场价、结构位、止损/止盈价等阈值类价格必须转换到同一 hfq 或事件逐日复权口径后比较；成交及费用账本使用实际未复权价格，成交后再按同一口径折算供后续判断。
+团队报告 T-A159「*_qfq 口径裁定」及条件 C1：以晚于信号日（如最新日）为锚的前复权仅可用于展示，不得用于候选信号或回测。*_qfq 指 qfq@as_of：以信号日 T 为锚、逐日重算、只用当时可见且已生效的权息因子，等同团队报告 T-R72 §7 B08 权息事件逐日复权，可用于候选信号、指标与回测，字段名不改。历史日 d 的价格为 raw(d)×A(d)/A(T)，T 日值等于不复权价；因子事件日期须≤T 且 available_at≤as_of，缺因子记缺口，不补 1。回测须每个历史 T 独立调用 prepare 或等价重算，不得复用末日锚定序列、拼接不同锚点末值算指标，或用后续修订的因子回写过去候选信号。同一因子版本下，固定基准 hfq 与 qfq@T 仅差正比例常数，比值、均线和结构位同尺度比较等价；绝对元价阈值（如低于 2 元）、一字板与涨跌停价一律用不复权价（none）。收盘、均线、入场价和结构止损/止盈阈值按同一 qfq@T 尺度比较。成交及费用按实际不复权价记账；入场价折算后用于同尺度比较，R 统计仍须核验现金分红、送转股数、持仓权重及费用账本，不直接混减复权价差与不复权每股费用。冻结 source、因子版本及旧快照；事件可见性或复杂权息证据缺失时标“未验证”并阻断相关求值。
 
-字段兼容：本稿保留现有 f.close_qfq、f.low_qfq、f.high_qfq、plan.entry_price_qfq、plan.stop_loss_qfq、plan.breakout_level_qfq 等字段名；这些名称与裁定的计算口径存在冲突，统一标“待架构师确认字段口径”。未确认前不得把 qfq 值直接用于信号、回测、入场价比较或 R 统计；不改字段名，也不声称 hfq 派生已实现。
+字段口径依据团队报告 T-A159：保留 f.*_qfq、plan.entry_price_qfq、ctx.cost_price_qfq、ctx.highest_close_since_entry_qfq 等现有名称，均按 qfq@as_of 使用；成交日价格按 A(成交日)/A(T) 折算。本卡 v2 无结构止损，不涉及条件 C2；入场价折算及 R 的实现仍未验证。
 
 S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖阈值原本属建议的部分仍未验证，见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
 
@@ -52,13 +52,13 @@ S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能�
 | 依赖项 | 麦蕊接口（路径模板，licence 写 `<LICENCE>`） | 对应 T-R72 编号（B0x/A0x） | 我方现状（已入库/部分/未接，依据） | 缺失时的降级或失效后果 |
 |---|---|---|---|---|
 | 北交所历史：不依赖 | `/bj/history/{code}.BJ/{period}/{adj}/<LICENCE>?st={ST}&et={ET}` | 团队报告 T-R72 §7 B01；团队报告 T-R72 §7 A33 | 未接：本卡 §4、§17 排除北交所；本轮未验证接口覆盖 | 不依赖：入场池及 F24 宽度池均排除北交所（本卡 §6、README §3 所引 feature_spec §F24）。hslt 仅 sh/sz，不能据其推断京市覆盖；未来扩池须另接 B01 并审计旧新码。 |
-| 沪深全历史日线/复权：规则必需 | `/hsstock/history/{code}.{market}/{period}/{adj}/<LICENCE>` | 团队报告 T-R72 §7 B02；团队报告 T-R72 §7 A02；团队报告 T-R72 §7 A20 | 部分：本卡 §5、README §3 只给定 market.daily_bars/tdx 输入；全历史覆盖及麦蕊定稿链未验证 | 缺日或不足 25 根有效 K 时不计算本卡 MA、20 日动量与缩量回踩，环境另需预热。不设 st/et 即请求全历史，不代表每股历史齐全；不用固定三年窗口冒充全历史。period=d，adj=n 取原价，复权沿 §5 的 hfq 或 B08 事件逐日复权；其他复权只作核验，不回写历史信号。 |
+| 沪深全历史日线/复权：规则必需 | `/hsstock/history/{code}.{market}/{period}/{adj}/<LICENCE>` | 团队报告 T-R72 §7 B02；团队报告 T-R72 §7 A02；团队报告 T-R72 §7 A20 | 部分：本卡 §5、README §3 只给定 market.daily_bars/tdx 输入；全历史覆盖及麦蕊定稿链未验证 | 缺日或不足 25 根有效 K 时不计算本卡 MA、20 日动量与缩量回踩，环境另需预热。不设 st/et 即请求全历史，不代表每股历史齐全；不用固定三年窗口冒充全历史。period=d，adj=n 取原价，复权沿 §5 的 qfq@as_of（B08 权息事件逐日复权）；其他复权只作核验，不回写历史信号。 |
 | 交易日历：共同前置 | `/tcalendar/list/{year}/<LICENCE>` | 团队报告 T-R72 §7 B03 | 未验证：本卡 §5 需要日历，README §5 尚要求冻结；未证明已入库 | 无法确认 T+1、上市年龄、交易日窗口及持有日计数则阻断相关求值；不得用自然日或已有 K 线根数替代。 |
 | 全市场快照：可选校验 | `/hsrl/ssjy/all/<LICENCE>`；`/hsrl/real/all/<LICENCE>` | 团队报告 T-R72 §7 B04；团队报告 T-R72 §7 A33 | 未验证：本卡 §6、README §3 以历史日 K 重算宽度，未声明快照已入库 | 不依赖该快照接口生成历史信号；缺失时用经审计的完整沪深日 K 与 pre_close 重算宽度，覆盖不足记 unknown。快照只校验当日截面，按主数据筛沪深 A 股并去重，不替代定稿日线或退市股历史。 |
 | 多股快照：可选校验 | `/hsrl/ssjy_more/<LICENCE>?stock_codes={codes_csv}` | 团队报告 T-R72 §7 B05 | 未验证：本卡 §5、README §3 未给定该源 | 不依赖：仅可核对持仓/自选的当日收盘状态；缺失时保留定稿日 K，状态无法核验则阻断相关标的。stock_codes 每批不超过 20；不得用当前快照回填过去。 |
 | 基础信息/历史涨跌停价：执行前置 | `/hsstock/instrument/{code}.{market}/<LICENCE>`；`/hsstock/stopprice/history/{code}.{market}/<LICENCE>?st={ST}&et={ET}` | 团队报告 T-R72 §7 B06 | 部分：本卡 §5、§17 及 README §3 的 T-R65/pre_close 仅已知子集；麦蕊链路未验证 | 缺上市日/状态/前收参考价或历史价格边界则对应规则 unknown、不生成可执行计划。既有本地规则仅在有效段、状态与 pre_close 齐全时核验；不以昨收或 gbbq 猜补除权日限价。 |
 | 财务三表 PIT/每股指标：不依赖 | `/hsstock/financial/{table}/{code}.{market}/<LICENCE>?st={ST}&et={ET}` | 团队报告 T-R72 §7 B07；团队报告 T-R72 §7 A37 | 未验证：本卡 §5、§7 无财务字段；README §2 将财务型候选延后 | 不依赖：本卡不使用质量、估值、成长财务过滤，缺失不改变既有技术规则。table=income,balance,cashflow,pershareindex；未来引入须按下述 plrq 约束，禁止用 jzrq 回填。 |
-| 股本/股东/分红：权息前置，股东不依赖 | `/hsstock/financial/{capital,topholder,flowholder,hm}/{code}.{market}/<LICENCE>`；`/hscp/jnfh/{code}/<LICENCE>` | 团队报告 T-R72 §7 B08；团队报告 T-R72 §7 A37 | 部分：本卡 §5、README §3 已给定 gbbq；事件可见性及麦蕊链路未验证 | 复权必须有截至 T 可见且已生效的权息证据；可继续用经验证 gbbq，不能假设近年分红接口覆盖全部复杂权息。两源均无法核验则 hfq 或 B08 事件逐日复权 失效、阻断相关求值；不依赖股东排名/估值分母，不据缺失另改规则。 |
+| 股本/股东/分红：权息前置，股东不依赖 | `/hsstock/financial/{capital,topholder,flowholder,hm}/{code}.{market}/<LICENCE>`；`/hscp/jnfh/{code}/<LICENCE>` | 团队报告 T-R72 §7 B08；团队报告 T-R72 §7 A37 | 部分：本卡 §5、README §3 已给定 gbbq；事件可见性及麦蕊链路未验证 | 复权必须有截至 T 可见且已生效的权息证据；可继续用经验证 gbbq，不能假设近年分红接口覆盖全部复杂权息。两源均无法核验则 qfq@as_of（B08 权息事件逐日复权）失效、阻断相关求值；不依赖股东排名/估值分母，不据缺失另改规则。 |
 | 公告/问董秘：产品否决前置 | `/hsstock/{announcement,interactiveqa}/{code}/<LICENCE>?st={ST}&et={ET}&lt={N}` | 团队报告 T-R72 §7 B09 | 未接：本卡 §14、README §4 明确本轮无公告输入，N-01 为 unknown | 技术候选可登记；公告风险未核验时 N-01 保持 unknown、买入草案由 KEY_DATA_MISSING 阻断。公告只有日期保守次交易日生效；问董秘不依赖且不能替代风险公告正文。 |
 | 资金流：不依赖 | `/hsstock/history/transaction/{code}/<LICENCE>?st={ST}&et={ET}`；`/hsstock/history/transaction/{YYYYMMDD}/{code}/<LICENCE>` | 团队报告 T-R72 §7 B10 | 未验证：本卡 §5、§7 无资金流输入；README §2 将 W-03 延后 | 不依赖：本卡使用成交额量价条件，缺失不影响原规则，不以成交额冒称净流入，也不把资金流缺日补零。 |
 | 指数基准/环境：规则及验证前置 | `/hsindex/list/<LICENCE>`；`/hsindex/history/{index}.{market}/{period}/<LICENCE>`；`/hsindex/real/time/{index}.{market}/<LICENCE>` | 团队报告 T-R72 §7 B11；团队报告 T-R72 §7 A02 | 未验证：本卡 §5、§11 和 README §3、§7 的 tdx 指数仍待确认；麦蕊链路未验证 | F50（本卡 V1）；RC3 仍读 F25 所需日线缺失则环境 unknown，不能默认震荡；记录缺口并按本卡 §7、§14 处理。指数列表核代码/市场/证券类型，历史 period=d、路径无 adj；实时接口不替代定稿日线。主基准沪深300（000300）、辅基准中证全指（000985）；选择依据为编排者 11-14 裁定，接入/覆盖未验证；行业超额仍未验证。 |
@@ -101,7 +101,7 @@ T 日盘后确认所有核心条件及过滤；无否决且关键输入完整才
 
 ## 11. 验证与待验证项
 
-当前 validation_summary：window 未执行；oos_result 未验证；trade_log_ref 为 null；无收益、触发率或覆盖率实测。先核日 K 来源覆盖、历史退市股、ST/上市状态覆盖、交易日历与 hfq 或 B08 事件逐日复权，再做原规则的 fixtures、触发/覆盖统计和可成交性分解。研究统计与产品 G6 区分，G6 不计算收益。来源：docs/strategies/validation.md §0、§1、§4.1；docs/strategies/card_promotion_gates.md §3.6。
+当前 validation_summary：window 未执行；oos_result 未验证；trade_log_ref 为 null；无收益、触发率或覆盖率实测。先核日 K 来源覆盖、历史退市股、ST/上市状态覆盖、交易日历与 qfq@as_of（B08 权息事件逐日复权），再做原规则的 fixtures、触发/覆盖统计和可成交性分解。研究统计与产品 G6 区分，G6 不计算收益。来源：docs/strategies/validation.md §0、§1、§4.1；docs/strategies/card_promotion_gates.md §3.6。
 
 复测需覆盖满足、不满足、缺数据、环境分歧、停牌或涨跌停、可卖量为零等场景，具体夹具尚未编写。主基准沪深300（000300）与辅基准中证全指（000985）分别统计并注明 B11 数据版本，接入与覆盖未验证；行业超额一律“未验证”，待 B12 接入后按申万一级历史成员及对应指数收益核验，不能以主辅大盘结果充当行业结果。样本外与参数邻域方案见 README §5，不在本稿声称门槛通过。
 
@@ -188,7 +188,7 @@ T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实�
 
 ## 23. 审计、差异与未决
 
-这是当前分支 v2 的对照草稿，不是 T-R59 提及但本分支没有的 v3。保留绝对强势阈值，不伪造截面池、N_min 或 rank_pct 实现。入场价折算与 R 统计采用 hfq 或 B08 事件逐日复权，现有 plan.entry_price_qfq 等字段待架构师确认字段口径，参考实现仍未验证；不以此稿重启 v2 晋级。 T-R71 只形成可审阅文字草稿；lifecycle 始终为 draft。G1–G7 未执行，本次文档 checker 的通过不能替代它们。来源：docs/strategies/card_promotion_gates.md §0、§3、§4。
+这是当前分支 v2 的对照草稿，不是 T-R59 提及但本分支没有的 v3。保留绝对强势阈值，不伪造截面池、N_min 或 rank_pct 实现。入场价折算与 R 统计采用 qfq@as_of（B08 权息事件逐日复权），现有 plan.entry_price_qfq 等字段按团队报告 T-A159 的 qfq@as_of 口径，参考实现仍未验证；不以此稿重启 v2 晋级。 T-R71 只形成可审阅文字草稿；lifecycle 始终为 draft。G1–G7 未执行，本次文档 checker 的通过不能替代它们。来源：docs/strategies/card_promotion_gates.md §0、§3、§4。
 
 ## 24. 合规文案
 
