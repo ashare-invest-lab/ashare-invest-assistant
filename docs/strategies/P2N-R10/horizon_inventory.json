@@ -269,7 +269,7 @@
     {
       "path": "docs/strategies/T-R28/test_check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides; T-R77 offline subprocess coverage for skipped_no_db, --require-db, override and hash-tamper rejection, including python -O"
     },
     {
       "path": "docs/strategies/T-R31/checklist_reconcile.md",
@@ -385,7 +385,7 @@
     {
       "path": "docs/strategies/check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger)"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger); T-R77 validates locked thresholds before skipped_no_db (ready=null, unverified); --require-db preserves missing-DB failure; F21 remains declared"
     },
     {
       "path": "docs/strategies/check_p2n01_dimension_mapping.py",
