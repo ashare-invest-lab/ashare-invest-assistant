@@ -157,11 +157,11 @@ function quoteGaps(s: SecSpec): Gap[] {
 }
 
 // ---------------- 行情 / 自选 / 持仓 ----------------
-export const QUOTES: QuoteItem[] = SPECS.map((s) => ({
+export const QUOTES = SPECS.map((s) => ({
   security_code: s.code, name: s.name, price: f2(s.price), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100),
   volume: String(s.volume_lots * 100), amount: f2(s.volume_lots * 100 * s.price), t: s.data_as_of,
   data_status: s.data_status, data_as_of: s.data_as_of, gaps: quoteGaps(s),
-}));
+})) satisfies QuoteItem[];
 
 export const WATCHLIST: WatchlistResponse = {
   items: SPECS.filter((s) => s.in_watchlist).map((s, i): WatchlistItem => ({

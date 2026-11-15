@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { hashKey, keepPreviousData, useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { apiGet } from './client';
 import { useCursorPages } from '../lib/cursorPaging';
+import { CODE_RE } from '../lib/securityCode';
 import type { BarAdjust, BarFreq, SectorSort } from './enums';
 import type { Bar, BarsResponse, MarketOverview, QuoteItem } from './types';
 import type {
@@ -9,8 +10,7 @@ import type {
 } from './marketTypes';
 
 const enc = encodeURIComponent;
-/** 证券代码格式（契约 §1：6 位代码 + .SH/.SZ/.BJ；指数同格式） */
-export const CODE_RE = /^\d{6}\.(SH|SZ|BJ)$/;
+export { CODE_RE } from '../lib/securityCode';
 
 export const mk = {
   profile: (code: string) => ['security', code] as const,
