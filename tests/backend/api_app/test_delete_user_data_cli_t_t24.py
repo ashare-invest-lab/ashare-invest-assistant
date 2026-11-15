@@ -219,7 +219,8 @@ def _footprint(sql: Callable[..., Any], uid: str) -> dict[str, int]:
 
 
 @pytest.fixture
-def victim(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any], sql: Callable[..., Any]) -> SimpleNamespace:
+def victim(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any], sql: Callable[..., Any],
+           authdb: SimpleNamespace) -> SimpleNamespace:
     """目标用户：已登录（Redis 有会话）、设置过证书、被管理员暂停（审计 + 暂停记录），另有一位旁观用户。"""
     s = session()
     lic = fake_licence()
@@ -230,7 +231,10 @@ def victim(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any], 
     by = session()
     blic = fake_licence()
     assert put(Rec(by), blic).status_code == 202
-    return SimpleNamespace(s=s, uid=s.user.id, lic=lic, admin=admin, by=by, blic=blic)
+    # 自建可被 purge_redis 的 needles 命中的合成条目，不依赖其它文件留下流。
+    ingest_request_id = authdb.redis.xadd("ingest:requests", {"user_id": str(s.user.id)})
+    return SimpleNamespace(s=s, uid=s.user.id, lic=lic, admin=admin, by=by, blic=blic,
+                           ingest_request_id=ingest_request_id)
 
 
 def test_cli_bad_uuid_and_unknown_user(cli: SimpleNamespace, capsys: pytest.CaptureFixture[str]) -> None:
@@ -374,6 +378,8 @@ def test_cli_execute_purges_and_anonymizes(cli: SimpleNamespace, victim: SimpleN
     assert kept and all(uid not in d and "T-T24 理由文本" not in d for (d,) in kept)
     assert victim.s.client.get(f"{API}/me").status_code == 401, "会话应被吊销"
     assert list(authdb.redis.scan_iter(match=f"*{uid}*")) == []
+    assert authdb.redis.xrange("ingest:requests", min=victim.ingest_request_id,
+                              max=victim.ingest_request_id) == [], "目标用户的合成流条目应被删除"
     assert _footprint(sql, victim.by.user.id) == by_before, "旁观用户数据不得受影响"
     assert leak_count(victim.lic, r.text) == 0 and leak_count(victim.blic, r.text) == 0
     # 再跑一次：用户已不存在 → 拒绝

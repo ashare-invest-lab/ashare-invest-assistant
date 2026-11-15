@@ -85,6 +85,7 @@ tests:
   - {"file": "tests/backend/unit/test_daily_bars_window_fetch_c2.py", "group": "parallel", "keywords": ["window->batch_fetch.world", "tmp_path", "fake transport", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_snapshot_impl_b.py", "group": "serial_pg", "keywords": ["b_db->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
   - {"file": "tests/backend/unit/test_db_metadata.py", "group": "parallel", "keywords": ["SQLAlchemy metadata read-only", "DDL compile only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_domain_portfolio_cov_t6.py", "group": "parallel", "keywords": ["autouse deny_network rejects socket.connect/create_connection", "app.domain.portfolio only", "synthetic data; no external resources"], "unverified": false}
   - {"file": "tests/backend/unit/test_expected_json.py", "group": "parallel", "keywords": ["read-only synthetic fixtures/expected JSON"], "unverified": false}
   - {"file": "tests/backend/unit/test_fixtures_fmt_a.py", "group": "parallel", "keywords": ["subprocess generate --check read-only", "generate --out tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_g7_board_in_universe_prod_t_t66.py", "group": "serial_pg", "keywords": ["o61_engine", "PGHOST", "create_engine real PG", "template database"], "unverified": false}
@@ -132,6 +133,7 @@ tests:
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
+  - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "parallel", "keywords": ["socket.connect/create_connection monkeypatch denies all connections", "synthetic /tmp paths", "no real PG/redis or docker/services"], "unverified": false}
   - {"file": "tests/backend/unit/test_verify_licence_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG", "Redis fake", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_verify_licence_t_b145.py", "group": "parallel", "keywords": ["world overrides imported helper world", "MagicMock engine/FakeRedis", "tmp_path", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_worker_healthcheck_offline.py", "group": "parallel", "keywords": ["fake Redis/runner", "deny_network monkeypatch", "runpy with restored sys.argv"], "unverified": false}
