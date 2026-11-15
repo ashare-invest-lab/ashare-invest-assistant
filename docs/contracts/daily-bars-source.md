@@ -949,7 +949,7 @@ C1/C2 行数与应有交易日估计的比值分别为 1.0015、0.9997，支持�
 - `tb140_history_load.render_insert_sql` 生成的直接 INSERT 产物、`apply_daily_bars` 的参数化 INSERT、`tb140_history_backfill.run_batch` 的 SQL 产物／持久化回调、`tb140_history_supervisor` 的持久化链均待迁移；须停用 BJ 直接写表产物与执行能力，改经公共入口。不能只给各旁路补局部门闩就保留独立写实现。
 - `src/backend/probes/tb143_load_day.sql` 及 `tb143_day_load_runner.ps1` 的执行链待迁移；若保留 staging SQL，只能写临时表，不得直接写目标行情表。runner 每个新会话默认未确认，不得传递上一次子进程的放行开关；会话确认不能授权其执行独立目标表 INSERT。
 - `mairui-licence-bind` CLI（`src/backend/app/cli/mairui_licence_bind.py` 的 `bind`、`rollback`）→ `update_mairui_source_licence_id` 是已存在的独立 UPDATE 函数，绑定、改绑和回滚均待迁移。即使仅改 `source_licence_id`、即使与 upsert 位于同一文件，也不满足唯一入口；须将写操作收口到 `upsert_daily_bars` 并在所有 BJ UPDATE 前执行准入，完成前阻断相应 BJ 绑定／改绑／回滚写入支持。
-- `deploy/scripts/db-restore-drill.sh` → `deploy/db/drill/sample-data.sql` 的直接写表演练链待迁移；当前使用临时容器与隔离演练库，样例模型按 `sample-schema.sql` 使用 `security_id`，不是业务表的 `code` 映射，不能算作合法 BJ 生产入口。隔离用途不构成直接写目标行情表的生产例外，完成收口与验收前无 BJ 写入支持。
+- `deploy/scripts/db-restore-drill.sh` → `deploy/db/drill/sample-data.sql` 的直接写表演练链待迁移；当前使用临时容器与隔离演练库，样例模型按 `sample-schema.sql` 使用 `security_id`，不是业务表的 `code` 映射，不能算作合法 BJ 生产入口。隔离用途不构成直接写目标行情表的生产例外，完成收口与验收前无 BJ 写入支持。（本条由 §10.12 第 3 条修订。）
 - `src/backend/probes/tb143_pg_selfcheck.sh` 的直接 seed 与调用 load_day SQL 的链也待迁移，当前仅用于自建临时 PG 自检；其执行链不得转为生产 BJ 旁路。`src/backend/selfchecks`、`tests/backend` 中的 seed、UPDATE、DELETE、TRUNCATE 等 DML 仅属隔离测试，fake seed 仅限隔离库，不能产生生产 BJ 放行凭证，也不算生产支持入口。
 - 拟新增的 `tb143_reconcile_load`、`repo.insert`、`apply_insert_artifact` 不得引入独立写实现，须经公共入口；产物重读跨进程不继承放行。已存在的 `apply_insert_offline` 仅为内存模拟，同样接受反例验收，不能将模拟结果当生产确认。
 - tdx_local 自身就是股量，受门闩约束不意味着再做单位转换；用于提供对照的离线读取不要求先写 BJ 库存。
@@ -959,17 +959,17 @@ C1/C2 行数与应有交易日估计的比值分别为 1.0015、0.9997，支持�
 
 复核基线为当前本地 `origin/main` 的短 SHA `08331bd`；通过 `git show origin/main:<path>` 与 `git grep origin/main` 核实，未联网。范围为 `src/backend/app`、`src/backend/probes`、`deploy/db/drill`、`deploy/scripts`、`src/backend/selfchecks` 与 `tests/backend` 中的相关写入实现、执行链和隔离测试。
 `/workspace/team/reports/T-B149.md` 涉及的 #151/#163 仅为「分支记录，未核验，不作为 main 状态」。入口存在性、BJ 门闩、收口状态与平台验收分别记录；本次只做源码复核，不宣称运行过功能验收。
-表内 `test_ta172_` 测试名均为待新增的契约要求，不声称已存在或已通过。「唯一入口」表示公共入口本身或调用链已走公共入口，仍须补齐 BJ 门闩与验收；「待迁移」一律阻断对应 BJ 写入支持，包含当前在隔离环境执行的工具链。
+表内 `test_ta172_` 测试名均为待新增的契约要求，不声称已存在或已通过。「唯一入口」表示公共入口本身或调用链已走公共入口，仍须补齐 BJ 门闩与验收；「待迁移」一律阻断对应 BJ 写入支持，包含当前在隔离环境执行的工具链。第四种状态「未落地」及演练两行的修订状态见 §10.12 第 3、4 条。
 
-| 入口 | main 是否存在/写入类型 | BJ 门闩是否实现 | 收口状态（唯一入口/待迁移/隔离测试） | 验收测试名 | 已验证平台与结果 |
+| 入口 | main 是否存在/写入类型 | BJ 门闩是否实现 | 收口状态（唯一入口/待迁移/隔离测试/未落地） | 验收测试名 | 已验证平台与结果 |
 | --- | --- | --- | --- | --- | --- |
 | `marketdata.daily_bars.upsert_daily_bars` | 已存在，INSERT / ON CONFLICT DO NOTHING；对账后条件 UPDATE 替换 tdx_local | 未实现 | 唯一入口；全部来源 BJ 门闩与替换前判定待验收 | `test_ta172_upsert_daily_bars_bj_gate_all_sources` | 仅 main 源码复核；BJ 功能／平台未验证 |
 | `app.ingest.daily_bars` | 已存在，调用 `upsert_daily_bars` | 未实现（依赖公共入口） | 唯一入口（经 upsert）；规范化不放行 | `test_ta172_ingest_daily_bars_uses_bj_gate` | 仅 main 源码复核；BJ 功能／平台未验证 |
 | `app.cli.tdx_import` | 已存在，`DbDeps.write` 调用 `upsert_daily_bars`，传入股量 | 未实现（依赖公共入口） | 唯一入口（经 upsert）；tdx_local 同受准入、股量不再 ×100 | `test_ta172_tdx_import_bj_gate_shares_unchanged` | 仅 main 源码复核；BJ 功能／平台未验证 |
 | `marketdata.daily_bars.fetch_and_record` | 已存在，经 `_run_fetch` 调用 `upsert_daily_bars` | 未实现（依赖公共入口） | 唯一入口（经 upsert）；未确认 BJ 不落库 | `test_ta172_fetch_and_record_uses_bj_gate` | 仅 main 源码复核；BJ 功能／平台未验证 |
 | `mairui-licence-bind` → `update_mairui_source_licence_id` | 已存在，绑定／改绑／回滚的独立元数据 UPDATE | 未实现 | 待迁移；三类 UPDATE 均须收口并在 BJ 更新前准入 | `test_ta172_licence_bind_rebind_rollback_bj_gate` | 仅 main 源码复核；三类 BJ UPDATE 未验证 |
-| `tb143_reconcile_load --apply` | main 不存在，拟新增；分支记录未核验 | main 未实现 | 待迁移（拟新增链须经 upsert，dry-run 不放行） | `test_ta172_reconcile_apply_bj_gate` | main 无此入口；平台未验证 |
-| `repo.insert`（reconcile） | main 不存在，拟新增；分支记录未核验 | main 未实现 | 待迁移（拟新增链须经 upsert，不得另设直接写函数） | `test_ta172_repo_insert_no_bypass` | main 无此入口；平台未验证 |
+| `tb143_reconcile_load --apply` | main 不存在，拟新增；分支记录未核验 | main 未实现 | 未落地（§10.12 第 4 条；落地即按待迁移验收，拟新增链须经 upsert，dry-run 不放行） | `test_ta172_reconcile_apply_bj_gate` | main 无此入口；平台未验证 |
+| `repo.insert`（reconcile） | main 不存在，拟新增；分支记录未核验 | main 未实现 | 未落地（§10.12 第 4 条；落地即按待迁移验收，拟新增链须经 upsert，不得另设直接写函数） | `test_ta172_repo_insert_no_bypass` | main 无此入口；平台未验证 |
 | `tb140_history_load.render_insert_sql` | 已存在，生成可独立执行的直接 INSERT 产物 | 未实现 | 待迁移；停用 BJ 直接写表产物，SQL 仅可写临时表 | `test_ta172_render_insert_sql_bj_gate` | 仅 main 源码复核；产物执行未验证 |
 | `tb140_history_load.apply_daily_bars` | 已存在，参数化 executemany 直接 INSERT | 未实现 | 待迁移；须改经 upsert | `test_ta172_apply_daily_bars_bj_gate` | 仅 main 源码复核；BJ 写库未验证 |
 | `tb140_history_load.apply_insert_artifact` | main 不存在，拟新增；分支记录未核验 | main 未实现 | 待迁移（拟新增链须经 upsert，重读不继承放行） | `test_ta172_apply_insert_artifact_bj_gate` | main 无此入口；平台未验证 |
@@ -978,8 +978,8 @@ C1/C2 行数与应有交易日估计的比值分别为 1.0015、0.9997，支持�
 | `tb140_history_supervisor.run_supervised` | 已存在，持久化回调直接调用 `apply_daily_bars` | 未实现 | 待迁移；恢复或子进程不继承确认 | `test_ta172_supervisor_persistence_bj_gate` | 仅 main 源码复核；BJ 持久化未验证 |
 | `src/backend/probes/tb143_load_day.sql` | 已存在，COPY 到临时 day_stage 后直接 INSERT 目标表 | 未实现 | 待迁移；保留 SQL 仅可写临时表，目标表写入改经 upsert | `test_ta172_load_day_sql_session_bj_gate` | 仅 main 源码复核；真实 SQL 会话未验证 |
 | `src/backend/probes/tb143_day_load_runner.ps1` | 已存在，按年新建 psql 会话执行 load_day SQL | 未实现 | 待迁移；不得传递旧放行或执行目标表旁路 | `test_ta172_day_load_runner_new_session_bj_gate` | 仅 main 源码复核；Windows／真实会话未验证 |
-| `deploy/db/drill/sample-data.sql` | 已存在，按 security_id 聚合直接 INSERT 同名演练表 | 未实现；无合法 BJ code 映射 | 待迁移（当前隔离演练）；不提供 BJ 生产支持 | `test_ta172_drill_sample_data_bj_gate` | 仅 main 源码复核；演练／BJ 未运行验收 |
-| `deploy/scripts/db-restore-drill.sh` | 已存在，临时容器／演练库建样例 schema 后执行 sample-data SQL | 未实现；隔离不产生生产准入 | 待迁移（当前隔离演练链）；不算生产支持入口 | `test_ta172_restore_drill_no_production_bj_support` | 仅 main 源码复核；恢复演练未运行 |
+| `deploy/db/drill/sample-data.sql` | 已存在，按 security_id 聚合直接 INSERT 同名演练表 | 未实现；无合法 BJ code 映射 | 隔离测试（演练例外，保留直接 DML，§10.12 第 3 条）；不提供 BJ 生产支持 | `test_ta172_drill_sample_data_bj_gate` | 仅 main 源码复核；演练／BJ 未运行验收 |
+| `deploy/scripts/db-restore-drill.sh` | 已存在，临时容器／演练库建样例 schema 后执行 sample-data SQL | 未实现；隔离不产生生产准入 | 隔离测试（演练例外，保留直接 DML，§10.12 第 3 条）；不算生产支持入口 | `test_ta172_restore_drill_no_production_bj_support` | 仅 main 源码复核；恢复演练未运行 |
 | `src/backend/probes/tb143_pg_selfcheck.sh` | 已存在，临时 PG 直接 seed，并执行 load_day SQL | 未实现；fake seed 不产生生产准入 | 待迁移（当前隔离自检链）；不得成为生产旁路 | `test_ta172_pg_selfcheck_isolated_seed_only` | 仅 main 源码复核；临时 PG 自检未运行 |
 | `src/backend/selfchecks` 隔离 DML（清单见下） | 已存在，直接 seed／UPDATE／DELETE／TRUNCATE；含失败场景 DDL | 未实现生产 BJ 门闩；不用于生产准入 | 隔离测试；仅限隔离库，不算生产支持入口 | `test_ta172_selfcheck_dml_isolated_only` | 仅 main 源码复核；隔离库测试未运行 |
 | `tests/backend` 隔离 DML（清单见下） | 已存在，直接 seed／UPDATE／DELETE／TRUNCATE；含动态隔离 schema／触发器 | 未实现生产 BJ 门闩；不用于生产准入 | 隔离测试；fake seed 不生成生产凭证 | `test_ta172_test_dml_no_production_confirmation` | 仅 main 源码复核；数据库测试未运行 |
@@ -998,7 +998,7 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
 
 ### 10.12 可信确认材料、tb143 SQL 定位与演练链（T-A180）
 
-状态：架构师裁定（T-A180），tb143 部分依编排者裁定。本节第 3 条修订 §10.10「唯一写入路径与旁路」中的演练链条款和 §10.11 的两行演练链，第 4 条修订 §10.11 的两行拟新增入口；其余不放宽 §10.10、§10.11 的任何要求。
+状态：架构师裁定（T-A180），tb143 部分依编排者裁定。本节第 2 条把 §10.11 中 load_day SQL、runner、pg_selfcheck 三行的验收口径收紧为「只 staging／启动即拒绝」；第 3 条修订 §10.10「唯一写入路径与旁路」中的演练链条款和 §10.11 的两行演练链；第 4 条修订 §10.11 的两行拟新增入口并新增「未落地」状态；其余不放宽 §10.10、§10.11 的任何要求。
 
 **1. 可信确认材料（T-A179 残项 R1）**
 
@@ -1007,7 +1007,8 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
 - 函数自行从字节解析：麦蕊 v 按十进制文本解析，不经 float；tdx 股量由离线文件解析；来源由实际使用的解析器决定。
 - 可信锚是一份「原始响应哈希清单」，按 sha256 绑定接口族、代码和请求范围。该清单由编排者交架构师审定后入库，生产调用方不能修改。
   - 既有可信原始响应（如 T-B86、F21 的响应记录）可以经审定后补入清单；
-  - 后续新取数的响应在收到时登记，同样经审定后才生效。
+  - 后续新取数的响应在收到时登记，同样经审定后才生效；新取数本身仍按 §10.10 取证顺序第 3 条，须用户本人批准（真调麦蕊是硬红线）。
+- 清单只是可信锚，不是放行凭证；每个进程或会话仍须按 §10.10 的确认作用域重新确认，不从清单或其他持久文件继承放行。
 - 清单通过参数注入确认函数（生产传审定清单，测试传隔离清单），不得用环境变量或全局开关切换。
 - 清单为空或不含所需条目时确认不可达，BJ 继续阻断。tdx 文件的 sha256 和只读路径记入确认审计。
 - 验收：#194 的 `pairs()` 和 `confirm`、`revoke`、`setup_scenario` 及子进程正控改用标注为合成的原始字节夹具和隔离清单，并保留全部精度、停牌、日期和撤销反例。数值反例须先具备有效清单条目，避免只测到哈希拒绝。另补三个反控：
@@ -1019,7 +1020,7 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
 
 - `src/backend/probes/tb143_load_day.sql` 只写会话临时表，不对目标行情表执行任何 DML，以 ROLLBACK 结束。沪深与北交所一样处理；目标表写入只经 `upsert_daily_bars`。
 - `tb143_day_load_runner.ps1`、`tb143_pg_selfcheck.sh` 的旧直写路径启动即拒绝并非零退出，保留本地产物。拒绝信息须给出可执行的替代命令：通达信导入用 `python -m app.cli daily-bars-import-tdx`（`app.cli.tdx_import`）。
-- `app.cli.tdx_import` 经 `run_import`→`DbDeps.write`→`upsert_daily_bars` 写库，可读根目录下 sh/sz/bj 的 lday/*.day。用户授权 t1110u 的导入走该入口，但仍受范围、日历、窗口和 BJ 门闩约束。runner 停用不算 Windows 部署必然失败，也不算 Windows 已验收。
+- `app.cli.tdx_import` 经 `run_import`→`DbDeps.write`→`upsert_daily_bars` 写库，可读根目录下 sh/sz/bj 的 lday/*.day。用户授权 t1110u 的导入走该入口：只导 A 股，只追加、不覆盖麦蕊行，仍受日历、窗口和 BJ 门闩约束；绕开门闩按误放处理。runner 停用不算 Windows 部署必然失败，也不算 Windows 已验收。
 - 原 SQL 承担的整批保护须在 Python 写入路径中补齐：同一事务内先校验整批（日期边界、已有麦蕊区间、跨年），再调用 `upsert_daily_bars`，最后核对麦蕊行计数未变；任一步失败整批回滚。
 - 逐入口验收：
   - `test_ta172_load_day_sql_session_bj_gate`：断言只写临时表；
@@ -1037,6 +1038,9 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
   - 目标只能是演练容器和演练库；
   - 指向非演练目标或直连模式时拒绝。
 
-**4. 拟新增入口**
+**4. 拟新增入口与「未落地」状态**
 
-`tb143_reconcile_load --apply` 与 `repo.insert` 在 main 中不存在，本轮也不新增。§10.11 对应两行改为「未落地」：模块不存在不构成旁路；一旦存在，即按原行强制验收，并须经 `upsert_daily_bars` 写入。此口径只适用于这两行，不扩及已存在的 `apply_insert_artifact`。
+- 在 §10.11 三态之外新增第四种收口状态「未落地」：入口在 main 中不存在，本轮也不新增。不存在不构成旁路；一旦出现，即按「待迁移」强制阻断并按原行验收，须经 `upsert_daily_bars` 写入。
+- `tb143_reconcile_load --apply` 与 `repo.insert` 两行改为「未落地」。
+- 此状态只适用于这两行，不扩及同为拟新增的 `apply_insert_artifact`，后者仍按 §10.11 原行（待迁移）验收。
+- 演练两行（第 3 条）改为「隔离测试（演练例外，保留直接 DML）」。§10.11「待迁移一律阻断」那句不再适用于这两行；它们仍不提供 BJ 写入支持，也不产生确认凭证。
