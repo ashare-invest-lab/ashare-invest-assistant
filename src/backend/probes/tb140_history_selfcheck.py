@@ -114,7 +114,7 @@ def test_normalize_and_units() -> None:
 
 def test_validation_rejects() -> None:
     # 窗口外跳过，不入库、不伪造
-    rows, rejects = ld.normalize_history("000001", [_bar(t="2020-01-01"), _bar(t="2026-11-14")])
+    rows, rejects = ld.normalize_history("000001", [_bar(t="2020-01-01"), _bar(t="2026-11-14")], st=ld.HIST_ST, et=ld.HIST_ET)
     assert rows == []
     assert {r["reason"] for r in rejects} == {"date_out_of_window"}
     # OHLC 矛盾
@@ -325,7 +325,7 @@ def test_success_and_redaction() -> None:
         now, sleep, sleeps, box = _clock([])
         buf = io.StringIO()
         with redirect_stdout(buf):
-            summary = bf.run_batch(
+            summary = bf.run_batch(st="20231113", et="20261113",
                 codes_file=ws["codes"],
                 licence_file=ws["lic"],
                 counter_path=ws["counter"],
