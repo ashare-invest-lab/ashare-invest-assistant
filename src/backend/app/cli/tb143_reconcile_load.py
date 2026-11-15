@@ -13,16 +13,21 @@ import os
 import re
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import AbstractContextManager, contextmanager, suppress
-from datetime import date
+from contextlib import AbstractContextManager, contextmanager
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Protocol, TextIO, cast
 from zipfile import BadZipFile, ZipFile
 
 import psycopg
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIConnection, DBAPICursor
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.pool import NullPool, PoolProxiedConnection
 
-from app.bj_offline_volume import CodeReject, _bj_write_unconfirmed, qualified_code
+from app.bj_offline_volume import _bj_write_unconfirmed
 from app.cli.tb143_export import DAY_COLUMNS
 from app.cli.tb143_inputs import InputKeys, Inputs, prepare
 from app.ingest.tdx_history import DayRefusal, iter_day_zip
@@ -33,17 +38,11 @@ from app.ingest.tdx_local import (
     is_a_share,
     reconcile,
 )
+from app.marketdata.daily_bars import DailyBar, DailyBarsResult, upsert_daily_bars
 
 Key = tuple[str, date, str]
 FIELDS = DAY_COLUMNS[3:]
 CHUNK = 2000
-INSERT_SQL = """
-INSERT INTO market.daily_bars
-(code, trade_date, adj_type, open, high, low, close, volume, amount,
- source, pre_close, is_suspended, source_licence_id, fetched_at)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'tdx_local',NULL,NULL,NULL,now())
-ON CONFLICT (code, trade_date, adj_type) DO NOTHING
-"""
 KEY_SQL = """
 SELECT d.code, d.trade_date, d.adj_type, d.source,
        d.open, d.high, d.low, d.close, d.volume, d.amount
@@ -72,11 +71,44 @@ class Repository(Protocol):
     def close(self) -> None: ...
 
 
+class _BorrowedConnection(PoolProxiedConnection):
+    """只借用外层连接的游标；适配器不能结束事务或关闭连接。"""
+
+    def __init__(self, conn: psycopg.Connection[tuple[Any, ...]]) -> None:
+        self.dbapi_connection = cast(DBAPIConnection, conn)
+
+    @property
+    def is_valid(self) -> bool:
+        return self.dbapi_connection is not None
+
+    def cursor(self, *args: object, **kwargs: object) -> DBAPICursor:
+        if self.dbapi_connection is None:
+            raise ValueError("borrowed_connection_closed")
+        return self.dbapi_connection.cursor(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.dbapi_connection, name)
+
+    def close(self) -> None:
+        self.dbapi_connection = None
+
+    def invalidate(self, e: BaseException | None = None, soft: bool = False) -> None:
+        self.close()
+
+    def commit(self) -> None:
+        raise RuntimeError("transaction_owned_by_repository")
+
+    def rollback(self) -> None:
+        # SQLAlchemy 在执行异常时也会自动 rollback；实际回滚留给外层上下文。
+        pass
+
+
 class PgRepository:
     """仅连接调用方指定实例；apply 锁住写入者，保证候选主键可作回滚依据。"""
 
     def __init__(self, dsn: str) -> None:
         self.conn: psycopg.Connection[tuple[Any, ...]] = psycopg.connect(dsn, autocommit=True)
+        self.last_blocked_bj_unconfirmed = 0
 
     @contextmanager
     def transaction(self, apply: bool) -> Iterator[None]:
@@ -118,9 +150,47 @@ class PgRepository:
         return result
 
     def insert(self, rows: Sequence[tuple[object, ...]]) -> int:
-        with self.conn.cursor() as cursor:
-            cursor.executemany(INSERT_SQL, rows)
-            return cursor.rowcount
+        self.last_blocked_bj_unconfirmed = 0
+        if not rows:
+            return 0
+        if self.conn.info.transaction_status != psycopg.pq.TransactionStatus.INTRANS:
+            raise ValueError("insert_requires_active_transaction")
+        bars = []
+        for row in rows:
+            bar = parse_row(dict(zip(DAY_COLUMNS, map(str, row), strict=True)))
+            bars.append(
+                DailyBar(
+                    code=bar.code,
+                    trade_date=bar.trade_date,
+                    adj_type="none",
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    pre_close=None,
+                    volume=bar.volume,
+                    amount=bar.amount,
+                    is_suspended=None,
+                )
+            )
+        # 仅创建方言/编译器，不 checkout 连接，避免方言初始化的探测及 rollback。
+        engine = create_engine("postgresql+psycopg://", poolclass=NullPool)
+        # psycopg 已开启事务；禁止 SQLAlchemy autobegin/reconnect，由外层独占事务所有权。
+        with Connection(
+            engine,
+            connection=_BorrowedConnection(self.conn),
+            _allow_autobegin=False,
+            _allow_revalidate=False,
+        ) as conn:
+            stats = upsert_daily_bars(
+                conn,
+                DailyBarsResult(bars=bars),
+                source="tdx_local",
+                licence_id=None,
+                fetched_at=datetime.now(UTC),
+            )
+            self.last_blocked_bj_unconfirmed = stats.blocked_bj_unconfirmed
+            return stats.inserted
 
     def close(self) -> None:
         self.conn.close()
@@ -344,12 +414,8 @@ def _batch(
                     rows: list[tuple[object, ...]] = []
                     for row in csv.DictReader(stream):
                         bar = parse_row(row)
-                        # 共用确认状态；前缀复用同模块的归属规则，防止 BJ 错标后缀绕过。
-                        code = bar.code
-                        if not code.endswith(".BJ"):
-                            with suppress(CodeReject):
-                                code = qualified_code(code[:6])
-                        if _bj_write_unconfirmed({"code": code}):
+                        # 提前统计与记日志；最终写入仍受 upsert 的统一门闩约束。
+                        if _bj_write_unconfirmed({"code": bar.code}):
                             counts["blocked_bj_unconfirmed"] += 1
                             detail(
                                 log,
@@ -361,9 +427,15 @@ def _batch(
                         rows.append(values(bar))
                         if len(rows) >= CHUNK:
                             inserted += repo.insert(rows)
+                            counts["blocked_bj_unconfirmed"] += getattr(
+                                repo, "last_blocked_bj_unconfirmed", 0
+                            )
                             rows.clear()
                     if rows:
                         inserted += repo.insert(rows)
+                        counts["blocked_bj_unconfirmed"] += getattr(
+                            repo, "last_blocked_bj_unconfirmed", 0
+                        )
             report["after"] = after_counts = repo.counts(batch_keys)
             if before_counts["mairui"] != after_counts["mairui"]:
                 raise ValueError("mairui_count_changed")
@@ -375,7 +447,7 @@ def _batch(
             ):
                 raise ValueError("insert_count_mismatch")
         report.update(status="committed" if apply else "dry_run", inserted=inserted)
-    except (psycopg.Error, OSError, ValueError, csv.Error) as exc:
+    except (psycopg.Error, SQLAlchemyError, OSError, ValueError, csv.Error) as exc:
         # 连接异常文本可能含 DSN；仅输出异常类型/自定义原因，不输出数据库消息。
         reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         report.update(status="failed", error=reason, inserted=0)

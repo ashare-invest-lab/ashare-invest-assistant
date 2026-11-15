@@ -18,6 +18,7 @@ from sqlalchemy.engine import Connection
 
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
+from app.bj_offline_volume import _bj_write_unconfirmed
 from app.common.errors import AppError
 from app.config import Settings
 from app.db.tables.market import daily_bars, securities, trading_calendar
@@ -102,6 +103,7 @@ class UpsertStats:
     replaced: int = 0
     _replacement_results: tuple[dict[str, object], ...] = field(default=(), repr=False)
     _reconcile_sink: ReconcileSink | None = field(default=None, repr=False, compare=False)
+    blocked_bj_unconfirmed: int = 0
 
     def reconcile_after_transaction(self, *, committed: bool) -> None:
         """事务拥有者在提交成功或回滚后调用；不能把 UPDATE 成功当成提交成功。"""
@@ -330,6 +332,8 @@ def upsert_daily_bars(
 ) -> UpsertStats:
     """追加日线，麦蕊可在对账成功后条件替换 tdx_local。
 
+    所有来源共用 BJ 量单位门闩；未确认行在构造写语句前排除，
+    通过 blocked_bj_unconfirmed 计数，不记为冲突或写入失败。
     默认不替换并保留原冲突计数。启用替换须由调用方显式提供 sink，
     sink 必须同步持久化，失败须抛异常。
     本函数不提交调用方事务；事务拥有者须在事务结束后调用返回值的
@@ -349,7 +353,9 @@ def upsert_daily_bars(
     if not result.bars:
         return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
-    ordered = sorted(result.bars, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
+    allowed = [bar for bar in result.bars if not _bj_write_unconfirmed({"code": bar.code})]
+    blocked_bj_unconfirmed = len(result.bars) - len(allowed)
+    ordered = sorted(allowed, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
     for offset in range(0, len(ordered), UPSERT_BATCH_ROWS):
         chunk = ordered[offset : offset + UPSERT_BATCH_ROWS]
         values = [
@@ -447,6 +453,7 @@ def upsert_daily_bars(
         replaced=replaced,
         _replacement_results=tuple(replacement_results),
         _reconcile_sink=reconcile_sink,
+        blocked_bj_unconfirmed=blocked_bj_unconfirmed,
     )
 
 

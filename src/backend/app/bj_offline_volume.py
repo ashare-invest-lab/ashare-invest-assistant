@@ -162,4 +162,7 @@ def confirm_bj_offline_volume_units(
 
 
 def _bj_write_unconfirmed(row: Mapping[str, Any]) -> bool:
-    return not _bj_offline_volume_codes and str(row.get("code", "")).endswith(".BJ")
+    if _bj_offline_volume_codes:
+        return False
+    code = str(row.get("code", ""))
+    return code.endswith(".BJ") or code.startswith(_BJ)
