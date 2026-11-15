@@ -117,3 +117,5 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+# 用户机同步最新 main 时在仓库内创建的 git worktree（T-O80）
+.worktrees/

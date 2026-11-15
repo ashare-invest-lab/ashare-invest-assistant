@@ -34,6 +34,8 @@ from app.db.tables.licences import data_licence_events, user_data_licence_status
 from app.ingest import ip_limit as ipl
 from app.ingest import netguard as ng
 from app.ingest.core import Call, IngestCore
+from app.ingest.mode import VERIFY_OFFLINE_REASON, verification_is_offline
+from app.ingest.scheduler import Dispatch
 from app.ingest.state import Priority, Transition
 from app.ingest.upstream import Signal, classify
 from app.schemas.enums import DataLicenceStatus, DataLicenceTier
@@ -46,6 +48,7 @@ EGRESS_DENIED_CODES = frozenset(
         "core_unavailable",
         "licence_unavailable",
         "core_denied",
+        VERIFY_OFFLINE_REASON,
     }
 )
 ADMIT_BUDGET_S = 2.8
@@ -352,6 +355,7 @@ def _row_active_licence(
     licence_id: uuid.UUID,
     user_id: uuid.UUID,
     now: dt.datetime,
+    verify: bool = False,
 ) -> tuple[DataLicenceTier, DataLicenceStatus, dt.date | None]:
     row = conn.execute(
         select(
@@ -367,7 +371,12 @@ def _row_active_licence(
     ).first()
     if row is None or row.deleted_at is not None:
         raise EgressDenied("licence_unavailable")
-    if row.status != DataLicenceStatus.ACTIVE.value:
+    # T-B141: verify_licence may run while still pending_verification (or re-test
+    # an already-active row). Non-verify callers still require active.
+    allowed = {DataLicenceStatus.ACTIVE.value}
+    if verify:
+        allowed.add(DataLicenceStatus.PENDING_VERIFICATION.value)
+    if row.status not in allowed:
         raise EgressDenied("licence_unavailable")
     if row.paused_until is not None and row.paused_until > now:
         raise EgressDenied("licence_unavailable")
@@ -399,6 +408,7 @@ def _admit(
     user_id: uuid.UUID,
     now: dt.datetime,
     deadline: float,
+    verify: bool = False,
 ) -> tuple[DataLicenceTier, DataLicenceStatus, dt.date | None]:
     """Single connection, single transaction, one lock (T-A91 M-b)."""
     remain = deadline - time.monotonic()
@@ -418,7 +428,7 @@ def _admit(
             conn.execute(text(f"SET LOCAL statement_timeout = '{remain_ms}ms'"))
             ipl.acquire_ip_limit_lock(conn, user_id)
             tier, status, expires_on = _row_active_licence(
-                conn, licence_id=licence_id, user_id=user_id, now=now
+                conn, licence_id=licence_id, user_id=user_id, now=now, verify=verify
             )
             core.upsert(
                 licence_id,
@@ -445,6 +455,17 @@ def _admit(
     return tier, status, expires_on
 
 
+def _settle_failed_call(
+    core: IngestCore, dispatched: Dispatch[Call], clock: Callable[[], dt.datetime], *, verify: bool
+) -> None:
+    """Transport failed: normal calls go through ``core.complete``; T-B141 verify calls only
+    release the slot (no status transition)."""
+    if verify:
+        core.scheduler.release(dispatched.licence_id)
+    else:
+        core.complete(dispatched, Signal.NETWORK, clock())
+
+
 def mairui_get(
     *,
     lease: EgressLease | None,
@@ -459,9 +480,18 @@ def mairui_get(
     stop: Path,
     halt: Path,
     transport: Callable[[str, str], tuple[int, object]] = _https_get,
+    verify: bool = False,
 ) -> EgressResult:
-    """Admit via IngestCore then call ``transport``. Order is fixed (contract §7.11.5)."""
+    """Admit via IngestCore then call ``transport``. Order is fixed (contract §7.11.5).
+
+    ``verify=True``（T-B141，只供 ``verify_licence`` 消费者）：准入放行
+    ``pending_verification``；103/429 照常写 HALT；不经 ``core.complete`` 改证书状态，
+    结果由消费者按最小语义落库（成功才 ``active``，其余保持原状态）。
+    """
     from app.ingest.daily_lists import DailyHaltError, limited
+
+    if verify and verification_is_offline():
+        raise EgressDenied(VERIFY_OFFLINE_REASON)
 
     t0 = time.monotonic()
     deadline = t0 + ADMIT_BUDGET_S
@@ -480,12 +510,13 @@ def mairui_get(
         user_id=user_id,
         now=now,
         deadline=deadline,
+        verify=verify,
     )
     mem_status = core.state(licence_id).status
     if mem_status in _STRICT_STATUSES:
         raise EgressDenied("licence_unavailable")
 
-    call = Call(endpoint=path)
+    call = Call(endpoint=path, verify=verify)
     core.submit(licence_id, priority, call)
     dispatched = core.next_call(now)
     if (
@@ -507,11 +538,11 @@ def mairui_get(
         ):
             status_code, body = transport(path, secret)
     except ng.EgressBlocked:
-        core.complete(dispatched, Signal.NETWORK, clock())
+        _settle_failed_call(core, dispatched, clock, verify=verify)
         raise DailyHaltError("transport_or_response_failed_no_retry") from None
     except BaseException as exc:
         # L-c: BaseException (KeyboardInterrupt / CancelledError) must complete too.
-        core.complete(dispatched, Signal.NETWORK, clock())
+        _settle_failed_call(core, dispatched, clock, verify=verify)
         if isinstance(exc, DailyHaltError):
             raise
         if isinstance(exc, Exception):
@@ -526,6 +557,13 @@ def mairui_get(
         signal = Signal.INVALID
     else:
         signal = classify(status_code, body)
+
+    if verify:
+        # T-B141：103/429 已在上面写 HALT，503 在此写 HALT；不改证书状态，交给消费者落库。
+        core.scheduler.release(licence_id)
+        if status_code == 503 or signal in {Signal.RATE_LIMITED, Signal.DATA_MISSING}:
+            _write_halt(halt)
+        return EgressResult(status=status_code, body=body, signal=signal, transitions=[])
 
     # T-A89 M-2: 102 / INVALID — persist to DB BEFORE complete; write fail → M-c.
     if signal == Signal.INVALID:

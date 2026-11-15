@@ -326,7 +326,7 @@ def test_wrong_pipeline_identity_is_rejected_without_mutating_that_run(world):
 @pytest.mark.parametrize("paused", [False, True])
 def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, source, paused):
     module = implementation()
-    from app.ingest import daily_lists, runtime
+    from app.ingest import daily_lists, runtime, verify_licence
     from app.workers import ingest as worker
 
     monkeypatch.setattr(fetcher, "DAILY_BARS_BATCH_LIMIT", 0)
@@ -342,6 +342,8 @@ def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, 
     monkeypatch.setattr(runtime, "get_ingest_core", lambda: SimpleNamespace(engine=engine))
     monkeypatch.setattr(runtime, "tick_ingest_core", lambda: events.append("core"))
     monkeypatch.setattr(daily_lists, "tick", lambda *a, **k: events.append("lists"))
+    # T-B141: the verify consumer is hooked after the lists tick (stubbed: no Redis/DB here).
+    monkeypatch.setattr(verify_licence, "tick", lambda *a, **k: events.append("verify"))
     actual_tick = module.tick
 
     def observed_tick(arg):
@@ -360,6 +362,9 @@ def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, 
     )
     worker.write_heartbeat(settings)
     assert events.count("bars") == int(source == "mairui" and not paused)
+    assert events.count("verify") == int(not paused)
+    if not paused:
+        assert events.index("lists") < events.index("verify")
     assert events[-2:] == ["core", "closed"]
 
 

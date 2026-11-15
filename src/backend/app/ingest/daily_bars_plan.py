@@ -16,6 +16,17 @@ from app.marketdata.daily_snapshot import FINAL_AFTER
 from app.master.vendor import licence_available
 
 BEIJING = ZoneInfo("Asia/Shanghai")
+# 默认生效；推导出处：契约 §9.3（T-A150 / PR #131）；2000×2s≈67min，取整 75min。
+# 2 秒依据 t1080s3653、t1088s3682；单次耗时未经实测，故待实测校准。
+# 含 22:45:00，编排者已裁定。
+BACKFILL_LATEST_START = dt.time(22, 45)
+
+
+def backfill_start_blocked(now: dt.datetime) -> bool:
+    """Compare only the Beijing clock; the guard resets naturally at midnight."""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(BEIJING).time() >= BACKFILL_LATEST_START
 
 
 class DailyBarsPlanError(ValueError):
