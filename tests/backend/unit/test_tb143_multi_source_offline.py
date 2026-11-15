@@ -27,6 +27,7 @@ from sqlalchemy import CheckConstraint, MetaData, Table
 from sqlalchemy.dialects.postgresql import dialect
 from sqlalchemy.schema import CreateTable
 
+from app.cli import tb143_export
 from app.db.base import NAMING_CONVENTION
 from app.db.tables.market import ex_rights_events, minute_file_catalog
 from app.ingest.gbbq import (
@@ -46,7 +47,6 @@ from app.ingest.minute_catalog import (
 )
 from app.ingest.tdx_history import DayRefusal, iter_day_zip
 from app.ingest.tdx_local import DAY_LAYOUT, LC_LAYOUT, ParseResult, encode_lc_date
-from probes import tb143_export
 
 # 完全虚构的格式表，仅供往返构造；禁止替换为真实 pytdx 密钥。
 _rng = random.Random(143)
@@ -412,7 +412,7 @@ def test_lc_catalog_invalid_file_refused(rel, kind, data):
 
 
 def test_msi_minute_not_written_to_pg():
-    probes = Path(tb143_export.__file__).parent
+    probes = Path(__file__).resolve().parents[3] / "src/backend/probes"
     sql = "\n".join(
         (probes / name).read_text() for name in ("tb143_load_day.sql", "tb143_load_meta.sql")
     )
