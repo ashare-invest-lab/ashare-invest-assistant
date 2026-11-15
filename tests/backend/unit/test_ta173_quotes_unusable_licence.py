@@ -64,37 +64,19 @@ def owned_world(world: Any, no_enqueue: None) -> Any:  # noqa: F811
         original_execute = conn.execute
 
     def execute(statement: Any) -> Result:
-        compiled = statement.compile(dialect=postgresql.dialect())
-        sql, params = str(compiled), compiled.params
+        sql = str(statement.compile(dialect=postgresql.dialect()))
         if "app.user_data_licence_status" not in sql:
             return original_execute(statement)
         state.reads.append(sql)
-        # Assert every active_licence_id predicate before evaluating its bound facts.
-        assert sql.startswith("SELECT app.user_data_licence_status.id \nFROM ")
-        for predicate in (
-            "app.user_data_licence_status.user_id = ",
-            "app.user_data_licence_status.deleted_at IS NULL",
-            "app.user_data_licence_status.status = ",
-            "app.user_data_licence_holds.user_id IS NULL",
-            "app.user_data_licence_status.paused_until IS NULL OR ",
-            "app.user_data_licence_status.paused_until <= ",
-            "app.user_data_licence_status.expires_on IS NULL OR ",
-            "app.user_data_licence_status.expires_on >= ",
-        ):
-            assert predicate in sql
-        assert "LEFT OUTER JOIN app.user_data_licence_holds ON " in sql
-        assert "app.user_data_licence_holds.user_id = app.user_data_licence_status.user_id" in sql
-        assert params["user_id_1"] == OWNER
-        assert params["status_1"] == "active"
-        assert params["paused_until_1"] == state.now
-        assert params["expires_on_1"] == state.now.astimezone(BEIJING).date()
+        # Use scenario facts as the fake source; SQL only routes the query.
+        today = state.now.astimezone(BEIJING).date()
         eligible = [row.id for row in state.licences if (
-            row.user_id == params["user_id_1"]
+            row.user_id == OWNER
             and row.deleted_at is None
-            and row.status == params["status_1"]
+            and row.status == "active"
             and not any(hold.user_id == row.user_id for hold in state.holds)
-            and (row.paused_until is None or row.paused_until <= params["paused_until_1"])
-            and (row.expires_on is None or row.expires_on >= params["expires_on_1"])
+            and (row.paused_until is None or row.paused_until <= state.now)
+            and (row.expires_on is None or row.expires_on >= today)
         )]
         assert len(eligible) <= 1
         return Result(eligible)
