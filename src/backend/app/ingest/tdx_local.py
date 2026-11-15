@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, field, replace
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final, Literal, TypeGuard
 from zoneinfo import ZoneInfo
 
 from app.db.base import MONEY
@@ -328,6 +328,11 @@ def kind_dirs(root: Path, kind: Kind, exclude: Set[str] = frozenset()) -> dict[s
 SecurityOf = Callable[[str], "tuple[str, str | None] | None"]
 
 
+def is_a_share(info: tuple[str, str | None] | None) -> TypeGuard[tuple[str, str | None]]:
+    """复用证券主数据资格判断；不维护另一份代码段名单。"""
+    return info is not None and info[0] == "stock"
+
+
 def scan(
     root: Path,
     kind: Kind,
@@ -355,7 +360,7 @@ def scan(
                 result.skipped[SKIP_NORMALIZE] += 1
                 continue
             info = security_of(code)
-            if info is None or info[0] != "stock":
+            if not is_a_share(info):
                 result.skipped[SKIP_NON_A_SHARE] += 1
                 continue
             if info[1] != "listed":
