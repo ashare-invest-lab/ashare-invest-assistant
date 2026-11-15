@@ -3,7 +3,7 @@
 
 Only the first approved pre-ratchet main commit uses the reviewed 4c02 counts.
 Later baselines use validated main push artifacts. Only main events may recover
-through a bounded first-parent history; PR events remain exact-base.
+through a bounded first-parent history; PR and merge-group events remain exact-base.
 """
 from __future__ import annotations
 
@@ -45,6 +45,11 @@ def base_identity(event: dict, env: dict) -> tuple[str, str]:
         if base["repo"]["full_name"] != repo or base["ref"] != "main":
             raise ValueError("Only this repository's trusted main base is accepted")
         sha = base["sha"]
+    elif kind == "merge_group":
+        group = event["merge_group"]
+        if group["base_ref"] != "refs/heads/main":
+            raise ValueError("Only the trusted main merge group base is accepted")
+        sha = group.get("base_sha", "")
     elif kind == "push" and env["GITHUB_REF"] == "refs/heads/main":
         sha = event["before"]
     elif kind == "workflow_dispatch" and env["GITHUB_REF"] == "refs/heads/main":

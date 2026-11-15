@@ -186,7 +186,10 @@ if vol_exists "$imp"; then
   [ "${n:-x}" = 0 ] || refuse "导入卷 $imp 里有 ${n:-?} 个文件（用主密钥派生密钥加密的原始交割单）"
 fi
 if vol_exists "$pg"; then
-  cid="$("${DOCKER[@]}" ps -q --filter "volume=$pg" | head -n 1)"
+  cid="$("${DOCKER[@]}" ps -q --filter "volume=$pg" --filter status=running | head -n 1)"
+  if [ -n "$cid" ] && [ "$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$cid" 2>/dev/null)" != true ]; then
+    cid=""
+  fi
   [ -n "$cid" ] || refuse "数据卷 $pg 已存在、但没有运行中的 postgres 挂着它，无法确认是空库（可先 docker start 原 postgres 容器——docker ps -a --filter volume=$pg——再重试）"
   # 判定“库里有数据”（评审 75c233b n1/n2）：4 张表的行数 + app.llm_providers 里非空的 api_key_ciphertext（系统级密文，
   # users 为空时也可能存在）。表或列不存在算 0。会话强制只读：PGOPTIONS default_transaction_read_only=on，

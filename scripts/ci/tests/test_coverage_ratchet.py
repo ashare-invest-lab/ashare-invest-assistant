@@ -1,6 +1,9 @@
 """Coverage policy counterexamples use synthetic counts, no services or network."""
 import io
 import json
+import os
+import subprocess
+import sys
 import zipfile
 from copy import deepcopy
 from pathlib import Path
@@ -143,6 +146,30 @@ def test_event_base_is_main_not_pr_head():
         loader.base_identity(event, {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "pull_request"})
 
 
+def test_merge_group_base_is_main_not_queue_head():
+    base = "b" * 40
+    event = {"merge_group": {"base_ref": "refs/heads/main", "base_sha": base,
+                             "head_sha": "a" * 40}}
+    env = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group",
+           "GITHUB_REF": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
+    assert loader.base_identity(event, env) == ("owner/repo", base)
+
+
+@pytest.mark.parametrize("base_ref", ["refs/heads/develop", "main", "refs/tags/main", ""])
+def test_merge_group_rejects_non_main_base(base_ref):
+    with pytest.raises(ValueError, match="trusted main"):
+        loader.base_identity({"merge_group": {"base_ref": base_ref, "base_sha": "b" * 40}},
+                             {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group"})
+
+
+@pytest.mark.parametrize("fields", [{}, {"base_sha": "0" * 40}, {"base_sha": ""},
+                                   {"base_sha": "b" * 39}, {"base_sha": "g" * 40}])
+def test_merge_group_rejects_missing_or_invalid_base_sha(fields):
+    with pytest.raises(ValueError, match="Missing trusted base commit"):
+        loader.base_identity({"merge_group": {"base_ref": "refs/heads/main", **fields}},
+                             {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group"})
+
+
 def archive(record):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as stream:
@@ -277,17 +304,80 @@ def test_wait_timeout_and_invalid_artifact_fail_without_fallback(monkeypatch):
     sleep.assert_not_called()
 
 
-def test_wait_job_precedes_backend_without_spending_backend_test_budget():
+def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     import yaml
 
     path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
-    assert jobs["backend"]["needs"] == "coverage-base"
-    # T-O80：backend 因 30 分钟整分取消上调到 45；等待 coverage-base 仍用自己的 35 分钟，不占用 backend 预算。
-    assert jobs["backend"]["timeout-minutes"] == 45
+    backend = jobs["backend"]
+    assert "if" not in ready and "if" not in backend  # Required on merge_group too.
+    assert "needs" not in backend
+    # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
+    assert backend["timeout-minutes"] == 75
+    assert backend["name"] == "backend (ruff, mypy, pytest+coverage)"
+    assert ready["name"] == "trusted main coverage readiness"
     assert ready["timeout-minutes"] == 35
     assert ready["permissions"] == {"contents": "read", "actions": "read"}
     commands = [step["run"] for step in ready["steps"] if "run" in step]
     assert len(commands) == 1 and "--wait-for-main-seconds 1800" in commands[0]
     assert "pytest" not in commands[0] and "rerun" not in commands[0]
+    steps = backend["steps"]
+    freezes = [i for i, step in enumerate(steps)
+               if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
+    assert len(freezes) == 1
+    freeze_index = freezes[0]
+    pytest_index = next(i for i, step in enumerate(steps) if step.get("name") == "pytest + 覆盖率")
+    ratchet_index = next(i for i, step in enumerate(steps) if step.get("id") == "coverage_ratchet")
+    assert pytest_index < freeze_index == ratchet_index - 1
+    frozen = steps[freeze_index]
+    assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
+                             '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"')
+    assert frozen["if"] == steps[ratchet_index]["if"]
+    assert frozen["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert not frozen.get("continue-on-error", False)
+
+
+@pytest.mark.parametrize("exit_code,with_ini", [(0, True), (1, True), (5, False)])
+def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkeypatch, exit_code, with_ini):
+    import yaml
+
+    path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
+    backend = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend"]
+    command = next(step["run"] for step in backend["steps"] if step.get("name") == "pytest + 覆盖率")
+    dirs = ["src/backend/tests", "tests/backend", "tests/replay"]
+    for directory in dirs + ["src/backend/.venv/bin", "bin", "runner temp"]:
+        (tmp_path / directory).mkdir(parents=True, exist_ok=True)
+    if with_ini:
+        (tmp_path / "tests/pytest.ini").touch()
+    runner_temp = tmp_path / "runner temp"
+    python = tmp_path / "src/backend/.venv/bin/python"
+    python.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "if sys.argv[1:] == ['scripts/ci/observe_template_connections.py']:\n"
+        "    sys.exit(23)  # Observer failure must not replace pytest's exit.\n"
+        "assert os.environ['PYTHONPATH'] == 'src/backend'\n"
+        "Path(os.environ['RUNNER_TEMP'], 'argv.json').write_text(json.dumps(sys.argv[1:]))\n"
+        f"sys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+    uv = tmp_path / "bin/uv"
+    uv.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", str(uv.parent) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
+    for name in ("PYTEST_COV_VERSION", "REQUESTS_VERSION", "URLLIB3_VERSION"):
+        monkeypatch.setenv(name, "test-only")
+    result = subprocess.run(["bash", "-c", command], cwd=tmp_path, capture_output=True, text=True, timeout=10)
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads((runner_temp / "argv.json").read_text(encoding="utf-8")) == [
+        "-m", "pytest", "-p", "scripts.ci.pytest_safe_failures",
+        *(["-c", "tests/pytest.ini"] if with_ini else []), *dirs,
+        "--durations=30", "--durations-min=0.5",
+        "--cov=src/backend/app", "--cov-report=term-missing:skip-covered",
+        f"--cov-report=json:{runner_temp}/coverage.json",
+        f"--junitxml={runner_temp}/backend-pytest.xml",
+    ]
