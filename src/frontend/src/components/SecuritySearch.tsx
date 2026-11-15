@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react';
-import { AutoComplete, Input } from 'antd';
+import { App, AutoComplete, Input } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../api/client';
 import { QUOTE_MISSING_TEXT, QUOTE_MISSING_TIP, searchErrorText } from '../lib/searchText';
-import { CODE_RE, SEARCH_Q_MAX, searchQLength, useSecuritySearch } from '../api/marketQueries';
+import { SEARCH_Q_MAX, searchQLength, useSecuritySearch } from '../api/marketQueries';
+import { completeSecurityCode } from '../lib/securityCode';
 import { LISTING_STATUS, MATCH_KIND, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../i18n/labels';
 
 /**
  * 顶栏证券搜索（契约 v0.2.8 §7.3 /securities/search，最多 20 条，按服务端 match_kind 层级排序，前端不重排）：
- * 选中或回车完整代码 → /stocks/:code。命中曾用名（含曾用名的拼音首字母，v0.2.9 内 #33 ②）/旧代码/拼音首字母时显示命中原文。
+ * 选中或回车代码（六位股票代码补交易所后缀）→ /stocks/:code。命中曾用名（含曾用名的拼音首字母，v0.2.9 内 #33 ②）/旧代码/拼音首字母时显示命中原文。
  * v0.2.9 #41：输入防抖 250 ms；429 按 details.retry_after_s 暂停发请求，到点后自动重查当前输入。
  */
 export function SecuritySearch() {
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   useEffect(() => {
@@ -37,12 +39,18 @@ export function SecuritySearch() {
     const t = setTimeout(() => setCooldown(null), cooldown.s * 1000);
     return () => clearTimeout(t);
   }, [cooldown]);
-  const tooLong = q.length > 0 && searchQLength(q) > SEARCH_Q_MAX;
+  const currentQuery = q === text.trim();
+  const tooLong = searchQLength(text) > SEARCH_Q_MAX;
+  const invalid = () => void message.info('请输入有效的证券代码或选择搜索结果');
   const go = (code: string) => {
+    const canonical = completeSecurityCode(code);
+    if (!canonical) { invalid(); return; }
     setText('');
-    navigate(`/stocks/${code}`);
+    setQ('');
+    navigate(`/stocks/${canonical}`);
   };
-  const options = (res.data?.items ?? []).map((h) => ({
+  // 防抖期间隐藏上一输入的结果，避免回车或点击误进旧证券。
+  const options = (currentQuery ? res.data?.items ?? [] : []).map((h) => ({
     value: h.security_code,
     label: (
       <span className="search-opt" data-testid={`search-hit-${h.security_code}`} data-match={h.match_kind}>
@@ -58,9 +66,9 @@ export function SecuritySearch() {
     ),
   }));
   const status = tooLong ? `搜索词最多 ${SEARCH_Q_MAX} 个字符`
-    : err ? searchErrorText(err)
-    : q && cooldown ? `搜索过于频繁，请 ${cooldown.s} 秒后再试`
-    : q && res.isSuccess ? '无匹配证券' : null;
+    : currentQuery && err ? searchErrorText(err)
+    : text.trim() && cooldown ? `搜索过于频繁，请 ${cooldown.s} 秒后再试`
+    : currentQuery && q && res.isSuccess ? '无匹配证券' : null;
   return (
     <AutoComplete
       value={text}
@@ -76,10 +84,14 @@ export function SecuritySearch() {
         prefix={<SearchOutlined />}
         placeholder="代码/简称"
         aria-label="证券搜索"
-        onPressEnter={() => {
-          const v = text.trim().toUpperCase();
-          if (CODE_RE.test(v)) go(v);
-          else if (options.length === 1) go(options[0].value);
+        onPressEnter={(e) => {
+          if (e.nativeEvent.isComposing) return;
+          const v = text.normalize('NFKC').trim().toUpperCase();
+          if (!v) return;
+          const code = completeSecurityCode(v);
+          if (code) go(code);
+          else if (!/^\d/.test(v) && !tooLong && currentQuery && res.isSuccess && !res.isFetching && options.length === 1) go(options[0].value);
+          else invalid();
         }}
       />
     </AutoComplete>
