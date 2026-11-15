@@ -93,16 +93,20 @@ describe('M1 证书状态横幅自动刷新', () => {
 describe('M2 缺数 / 过期原因：可见、可键盘查看、证书不可用的示例', () => {
   beforeEach(() => setMockLicence(uid(2), { status: 'expired' }));
 
-  it('个股档案：行情、分时空图、各页签都说明 data_licence_unavailable，并给设置链接', async () => {
+  it('个股档案：行情、默认日K与分时、各页签都说明 data_licence_unavailable，并给设置链接', async () => {
     const router = renderAt('/stocks/600000.SH');
     const qn = await screen.findByTestId('quote-gap-note');
     expect(qn).toHaveAttribute('data-status', 'stale');
     expect(qn).toHaveTextContent(LICENCE_GAP);
     expect(qn).toHaveTextContent('示例');
     expect(within(qn).getByTestId('gap-licence-link')).toHaveAttribute('href', '/settings/data-licence');
-    // 分时：没有可用缓存 → unavailable，空图写明原因
+    // 默认日K保留过期缓存；手动切分时后无可用缓存，空图写明原因
     const cn = await screen.findByTestId('chart-gap-note');
-    expect(cn).toHaveAttribute('data-status', 'unavailable');
+    expect(cn).toHaveAttribute('data-status', 'stale');
+    expect(cn).toHaveTextContent(LICENCE_GAP);
+    expect(await screen.findByTestId('kline')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('分时'));
+    await waitFor(() => expect(screen.getByTestId('chart-gap-note')).toHaveAttribute('data-status', 'unavailable'));
     expect(await screen.findByTestId('chart-empty')).toHaveTextContent(`无分时数据（停牌或尚未开盘）：${LICENCE_GAP}`);
     for (const tab of ['financials', 'fund-flow', 'factors', 'announcements']) {
       await act(async () => router.navigate(`/stocks/600000.SH?tab=${tab}`));

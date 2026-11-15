@@ -217,14 +217,16 @@ def test_authentication_or_transport_failure_is_not_hidden_by_ancestry(history, 
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "pull_request"])
+@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "pull_request", "merge_group"])
 def test_cli_allows_main_events_to_recover_but_pr_remains_exact(
     history, tmp_path, monkeypatch, capsys, event_name,
 ):
     _, (first, _, third) = history
     actions = Actions()
     actions.put(first)
-    event = {"before": third, "pull_request": {
+    event = {"before": third, "merge_group": {
+        "base_ref": "refs/heads/main", "base_sha": third, "head_sha": "a" * 40,
+    }, "pull_request": {
         "base": {"sha": third, "ref": "main", "repo": {"full_name": REPO}},
         "head": {"sha": "a" * 40},
     }}
@@ -234,12 +236,13 @@ def test_cli_allows_main_events_to_recover_but_pr_remains_exact(
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
     monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
     monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
-    monkeypatch.setenv("GITHUB_REF", "refs/pull/7/merge" if event_name == "pull_request"
-                       else "refs/heads/main")
+    refs = {"pull_request": "refs/pull/7/merge",
+            "merge_group": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
+    monkeypatch.setenv("GITHUB_REF", refs.get(event_name, "refs/heads/main"))
     monkeypatch.setattr(loader, "api_reader", lambda repo: actions)
     monkeypatch.setattr(sys, "argv", ["loader", "--output", str(output)])
     result = loader.main()
-    if event_name == "pull_request":
+    if event_name in {"pull_request", "merge_group"}:
         assert result == 1 and not output.exists()
         assert all(third in call for call in actions.calls)
     else:

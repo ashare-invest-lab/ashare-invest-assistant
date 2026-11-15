@@ -1,0 +1,88 @@
+{
+  "scope": "Six accepted public responses fetched for R-R1; hashes bind the offline audit to these exact bytes.",
+  "sources": [
+    {
+      "id": "szse_name_change",
+      "file": "szse_name_change.xlsx",
+      "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=SSGSGMXX&TABKEY=tab2",
+      "publisher": "深圳证券交易所：上市公司简称变更",
+      "fetched_at": "2026-11-15T07:58:47.9902766+00:00",
+      "http_status": 200,
+      "bytes": 287548,
+      "sha256": "a6a785daa7319d71f52252505a03892f256f381421362cffcb1b5d74e9f221b8"
+    },
+    {
+      "id": "szse_termination",
+      "file": "szse_termination.xlsx",
+      "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=1793_ssgs&TABKEY=tab2",
+      "publisher": "深圳证券交易所：终止上市公司",
+      "fetched_at": "2026-11-15T07:58:51.3422830+00:00",
+      "http_status": 200,
+      "bytes": 10983,
+      "sha256": "bc8f56e80cd27d0d705d3488ce5d54f1f853f5e069eff17f73b67c626191cf4d"
+    },
+    {
+      "id": "sse_current_main",
+      "file": "sse_current_main_final.json",
+      "url": "https://query.sse.com.cn/sseQuery/commonQuery.do?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&STOCK_TYPE=1&COMPANY_STATUS=2%2C4%2C5%2C7%2C8&type=inParams&isPagination=true&pageHelp.pageSize=10000&pageHelp.pageNo=1&pageHelp.beginPage=1&pageHelp.endPage=1&pageHelp.cacheSize=1",
+      "publisher": "上海证券交易所：主板A股列表",
+      "fetched_at": "2026-11-15T08:01:52.8338077+00:00",
+      "http_status": 200,
+      "bytes": 1944421,
+      "sha256": "5b9680e18cfa9d54987018204fb28fe96c67a9274bcd71bf14aa90c66f55fbed"
+    },
+    {
+      "id": "sse_current_star",
+      "file": "sse_current_star_final.json",
+      "url": "https://query.sse.com.cn/sseQuery/commonQuery.do?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&STOCK_TYPE=8&COMPANY_STATUS=2%2C4%2C5%2C7%2C8&type=inParams&isPagination=true&pageHelp.pageSize=10000&pageHelp.pageNo=1&pageHelp.beginPage=1&pageHelp.endPage=1&pageHelp.cacheSize=1",
+      "publisher": "上海证券交易所：科创板列表",
+      "fetched_at": "2026-11-15T08:01:57.6991547+00:00",
+      "http_status": 200,
+      "bytes": 716448,
+      "sha256": "ff4bdbe9b3aa4f7bae37878b7572089fcb4c937d0f6741d85b7163611a28e938"
+    },
+    {
+      "id": "sse_termination_main",
+      "file": "sse_termination_main_final.json",
+      "url": "https://query.sse.com.cn/sseQuery/commonQuery.do?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&STOCK_TYPE=1&COMPANY_STATUS=3&type=inParams&isPagination=true&pageHelp.pageSize=10000&pageHelp.pageNo=1&pageHelp.beginPage=1&pageHelp.endPage=1&pageHelp.cacheSize=1",
+      "publisher": "上海证券交易所：主板终止上市列表",
+      "fetched_at": "2026-11-15T08:05:07.888830+00:00",
+      "http_status": 200,
+      "bytes": 156390,
+      "sha256": "884c42a68be2dfdc70866f41654ddb3e5210ea5364b75cc534f103c5ab0f3637"
+    },
+    {
+      "id": "sse_termination_star",
+      "file": "sse_termination_star.json",
+      "url": "https://query.sse.com.cn/commonQuery.do?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&STOCK_TYPE=8&COMPANY_STATUS=3&isPagination=true&pageHelp.pageSize=10000&pageHelp.pageNo=1&pageHelp.beginPage=1&pageHelp.cacheSize=1&pageHelp.endPage=1",
+      "publisher": "上海证券交易所：科创板终止上市列表",
+      "fetched_at": "2026-11-15T08:00:40.1202905+00:00",
+      "http_status": 200,
+      "bytes": 3800,
+      "sha256": "6950940c3b86b6bc362a9ccb4a449c3b46622b291d0f7aaa3ec0ba1bf2acff83"
+    }
+  ],
+  "archived_public_inputs": {
+    "old_szse_name_change": {
+      "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=SSGSGMXX&TABKEY=tab2",
+      "file_name": "szse_name_change_20261110.xlsx",
+      "sha256": "9291117adc1eb566a9edb1ee2a93c6813d8defea41d0c1845123799ced56a109",
+      "evidence": "T-R65 st_history_sz_manifest.json登记的原公开文件，字节SHA已核等"
+    },
+    "old_szse_termination": {
+      "url": "https://www.szse.cn/api/report/ShowReport?SHOWTYPE=xlsx&CATALOGID=1793_ssgs&TABKEY=tab2",
+      "file_name": "szse_delist.xlsx",
+      "sha256": "6915b3a1e1ba5606bcb9b45a96e55c85630b497dbdb906291cdc05375d20d11b",
+      "evidence": "T-R65 termination_manifest.json登记的原公开文件，字节SHA已核等"
+    }
+  },
+  "reference_files": {
+    "T-R65/manifests/st_history_sz_manifest.json": "2071b597a2e8f25f8c6c58be8eba78637771b539bc8221c172be43c334facbea",
+    "T-R65/manifests/termination_manifest.json": "88d488a328999caa61317b679dbc1f5b646629fe1fafb90a8ada103f47f42e28",
+    "T-R65/manifests/listing_history_manifest.json": "dd30f0b3899c90744f31c61700d8b369c0f32bd4099c9cca0292ae56d248b07d",
+    "security_master.md": "65b3c2af58d65bf654239128492f3b9e7ca604a8162b636b833d1a009313aad7",
+    "T-DATA-ST/README.md": "86f6925dd0ffc746d35160d9fc0d476c148b17b36da6e56c8226d8dca163cffe",
+    "S2-7/termination_public_subset.csv": "2b836ce9a30f90cd02c9013e10b351025c413f1db32082ee1cf33ecf9273a00e"
+  },
+  "fetch_note": "本任务共发12次公开GET；采用上述6份规范输入。另5份空结果与1份被规范参数版本替代的响应仅留仓库外原证，不作为名单。"
+}

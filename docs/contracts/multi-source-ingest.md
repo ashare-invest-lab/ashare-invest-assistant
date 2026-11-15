@@ -40,6 +40,7 @@
 - 资格：沿用日契 §3.3 第 1 步，只收 `securities` 中 type 为 stock 的代码。分钟线文件层含退市股（§5 C3）；日线入库仍按此资格。
 
 ### 2.2 日期与时区
+- PN-03 日历主源、补齐与缺口约束见 [trading-calendar-exrights.md](trading-calendar-exrights.md) §2–§3、§6；本节已裁定口径不变。
 - 日线写 `trade_date`（date）。分钟（PG 的 `ts` 与 parquet 的 `timestamp`）一律按 Asia/Shanghai 解释，表示 **bar 结束时刻**（`market.minute_bars` 列注释、DS `splice.SCHEMA`）。
 - 麦蕊日线 `t`：官方示例为 `YYYY-MM-DD 00:00:00`，T-B140 实际返回 `YYYY-MM-DD`，两种都要接受，只允许时间部分为 00:00:00（`_trade_date` 目前只认后者，按 §5 C9 补）。
 - .day：YYYYMMDD（`parse_day_bytes`、DS `data.DailyArchive.records`）。.lc1 / .lc5：年 = d 整除 2048 加 2004，月 = (d 模 2048) 整除 100，日 = (d 模 2048) 模 100；时间 = 当日零点加分钟数（`decode_lc_date`、DS `splice.decode_lc1`）。
@@ -63,6 +64,7 @@
 - 分钟量合计与日量本来就差几十股（通达信自身如此，T-DATA-SRC），不做「合计等于日量」的强校验（分契 §1.2）。
 
 ### 2.5 复权
+- PN-03 事件可见性、qfq@as_of 与 §3.4 的 available_at 缺口见 [trading-calendar-exrights.md](trading-calendar-exrights.md) §4、§8、§11；本节未验证算法不因此启用。
 - 三张行情表只存不复权原始价，日线 adj_type 为 none（日契 §2、分契 §1.1）。不读、不存任何 qfq / hfq 序列。
 - 因子统一由 gbbq 算，按 DS `data.load_gbbq` 与 `retest_plan.md` §2.4：
   - 只收 category 为 1（除权除息）且 market 为 0（SZ）或 1（SH）的事件，代码按 GBK 解码；
@@ -186,7 +188,7 @@
 | C5 | 日契 §2 由麦蕊 pc 推因子；库无权息表 | gbbq 统一算（§2.5）；新建 `market.ex_rights_events`（§3.4）；gbbq 因子实现落地前，日契 §2、源契 §6 Q2、快照契约 §2 的缺口口径照旧 |
 | C6 | `tdx_local._quantize` 为 ROUND_HALF_EVEN | 分钟价按 DS 用 ROUND_HALF_UP（只在半分边界有差，如 10.125 → 10.13） |
 | C7 | 分契 §1.2 分钟默认要求 bj、可 `,exclude-bj` | .lc1、.lc5、HF 都不导北交所；日线 bj .day 照日契导入 |
-| C8 | 库日历只有 2026 | 按 `sessions.merged_calendar` 补 2022 起历史日历，另开单 |
+| C8 | 库日历只有 2026 | 按 `sessions.merged_calendar` 补 2022 起历史日历，另开单；实施拆分见 [trading-calendar-exrights.md](trading-calendar-exrights.md) §10–§11（建议沿用 S05 / T-B153） |
 | C9 | `_trade_date`（`tb140_history_load`，未合入 main）只认 `YYYY-MM-DD`、`YYYYMMDD` | 保留这两种，加认 `YYYY-MM-DD 00:00:00`，时间部分非零拒绝 |
 | C10 | 源契 §7 ④ 停牌占位行 OHLC、量额全空 | 麦蕊停牌行按源原样写（平价 OHLC、零量额），下游以 is_suspended 为准；不回写已有行 |
 | C11 | `parse_lc_bytes` 无 13:00 处理 | 采用 DS `relabel_1300`（§2.3） |

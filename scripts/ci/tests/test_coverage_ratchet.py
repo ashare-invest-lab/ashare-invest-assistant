@@ -146,6 +146,30 @@ def test_event_base_is_main_not_pr_head():
         loader.base_identity(event, {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "pull_request"})
 
 
+def test_merge_group_base_is_main_not_queue_head():
+    base = "b" * 40
+    event = {"merge_group": {"base_ref": "refs/heads/main", "base_sha": base,
+                             "head_sha": "a" * 40}}
+    env = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group",
+           "GITHUB_REF": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
+    assert loader.base_identity(event, env) == ("owner/repo", base)
+
+
+@pytest.mark.parametrize("base_ref", ["refs/heads/develop", "main", "refs/tags/main", ""])
+def test_merge_group_rejects_non_main_base(base_ref):
+    with pytest.raises(ValueError, match="trusted main"):
+        loader.base_identity({"merge_group": {"base_ref": base_ref, "base_sha": "b" * 40}},
+                             {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group"})
+
+
+@pytest.mark.parametrize("fields", [{}, {"base_sha": "0" * 40}, {"base_sha": ""},
+                                   {"base_sha": "b" * 39}, {"base_sha": "g" * 40}])
+def test_merge_group_rejects_missing_or_invalid_base_sha(fields):
+    with pytest.raises(ValueError, match="Missing trusted base commit"):
+        loader.base_identity({"merge_group": {"base_ref": "refs/heads/main", **fields}},
+                             {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group"})
+
+
 def archive(record):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as stream:
@@ -287,6 +311,7 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     backend = jobs["backend"]
+    assert "if" not in ready and "if" not in backend  # Required on merge_group too.
     assert "needs" not in backend
     # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
     assert backend["timeout-minutes"] == 75
