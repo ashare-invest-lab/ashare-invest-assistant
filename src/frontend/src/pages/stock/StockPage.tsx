@@ -84,7 +84,7 @@ function StockBody({ profile }: { profile: SecurityProfile }) {
     <div className="page-scroll stock-page" data-testid="stock-page">
       <StockHeader profile={profile} />
       <div className="stock-top">
-        <PriceChartPanel code={code} initial={profile.suspended ? 'd' : '1m'} height={392} />
+        <PriceChartPanel code={code} initial="d" height={392} />
         <div className="stock-side">
           <ProfilePanel profile={profile} />
           <HorizonPanel code={code} />

@@ -5,7 +5,7 @@
  * 类型负例：由 `tsc --noEmit -p tsconfig.test.json` 验证（app 配置排除测试文件，跑它不能消耗 @ts-expect-error）。
  * 负例必须直接对真实类型赋值字面 null；不得使用 `asNull(): T` / `never` 之类强转 helper（RV-11 P2-1）。
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -196,6 +196,7 @@ describe('③ 两处 slice 崩溃回归（真实组件路径，全部显式合�
 
   /** 两条真实 slice 行都被走到、且结果符合契约：minute 空态 + quote 已被头部消费 + 昨收未采纳 10.02 */
   async function expectBothSlicePathsReached() {
+    fireEvent.click(within(await screen.findByTestId('price-chart')).getByText('分时'));
     // ① minute 响应被消费并走过 PriceChartPanel.tradeDate（null 时点不取交易日）
     const empty = await screen.findByTestId('chart-empty', {}, { timeout: 15_000 });
     expect(empty.textContent).toMatch(/无分时数据/);
@@ -250,6 +251,7 @@ describe('③ 两处 slice 崩溃回归（真实组件路径，全部显式合�
     const head = await screen.findByTestId('stock-head', {}, { timeout: 15_000 });
     await waitFor(() => expect(head.textContent).toContain('10.24'), { timeout: 12_000 });
     // 等 minute 消费完成（chart-empty 来自 minute 响应），再断言前收未被采纳
+    fireEvent.click(within(screen.getByTestId('price-chart')).getByText('分时'));
     await screen.findByTestId('chart-empty', {}, { timeout: 12_000 });
     expect(head.textContent).not.toContain('9.80');
   });
