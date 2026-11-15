@@ -22,7 +22,7 @@ DB, REDIS, INSTRUMENTS = tb70.DB, tb70.REDIS, tb70.INSTRUMENTS
 def tt21_integration(
     tmp_path: Path,
 ) -> Iterator[tuple[Any, TestClient, TestClient, uuid.UUID, uuid.UUID]]:
-    if not Path("/tmp/tb70-pg-socket/.s.PGSQL.5432").exists():
+    if not (Path(tb70.RESOURCES.pg_socket) / ".s.PGSQL.5432").exists():
         pytest.fail("T-T21专用隔离PG未就绪，不跳过或回退共享库")
     engine = create_engine(DB)
     with engine.begin() as conn:

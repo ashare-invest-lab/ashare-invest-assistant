@@ -51,7 +51,7 @@ def tt71b_integration(tmp_path: Path) -> Iterator[Any]:
     from app.replay.baseline import require_isolated
     from sqlalchemy import create_engine
 
-    if not P("/tmp/tb70-pg-socket/.s.PGSQL.5432").exists():
+    if not (P(tb70.RESOURCES.pg_socket) / ".s.PGSQL.5432").exists():
         pytest.fail("dedicated networkless T-B70 PostgreSQL not provisioned")
     migrations = P(tb70.__file__).resolve().parents[1] / "migrations"
     engine = create_engine(tb70.DB)
