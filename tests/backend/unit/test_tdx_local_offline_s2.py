@@ -132,9 +132,8 @@ def test_daily_rejects_only_invalid_record(
 @pytest.mark.parametrize(
     ("changes", "reason"),
     [
-        ({"date": 0}, "invalid_date"),
-        ({"minute": 0}, "invalid_minute"),
-        ({"minute": 1441}, "invalid_minute"),
+        # 契约 §3.2；评审 ②：日期/分钟非法改测整文件拒绝，
+        # 已迁入 test_tt81_multi_source_contract.py::test_minute_rejects_whole_file。
         ({"high": float("inf")}, "non_finite"),
         ({"amount": float("nan")}, "non_finite"),
         ({"high": 1e20}, "out_of_range"),
@@ -147,8 +146,8 @@ def test_minute_rejects_only_invalid_record(
     changes: dict[str, Any], reason: str
 ) -> None:
     result = tdx.parse_lc_bytes(CODE, minute(**changes) + minute(), "lc1")
-    assert result.rejected == Counter({reason: 1})
-    assert len(result.bars) == 1
+    assert result.rejected == Counter({reason: 1}), "契约 §3.2；评审 ②：数值异常仍逐记录拒绝"
+    assert len(result.bars) == 1, "契约 §3.2；评审 ②：数值异常不得连带拒绝合法记录"
 
 
 def test_truncated_files_and_wrong_minute_kind() -> None:

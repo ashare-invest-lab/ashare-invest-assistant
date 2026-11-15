@@ -2,7 +2,7 @@
 
 - 业务 schema 只有 app / market / ops / evaluation；
 - 主键/约束名由 NAMING_CONVENTION 生成（pk_<表名>），``alembic check`` 依赖其稳定；
-- 时间列一律 timestamptz；带精度的 numeric 一律 numeric(20,4)；
+- 时间列一律 timestamptz；带精度的 numeric 为 numeric(20,4)，权息每股数值为 numeric(20,6)；
 - 枚举列用 text + CHECK，CHECK 取值不得含单引号；表定义能在 PostgreSQL 方言下编译出 DDL。
 """
 
@@ -38,20 +38,40 @@ def test_tables_registered_in_known_schemas():
 
 
 def test_primary_keys_named_by_convention():
-    bad = [t.fullname for t in TABLES if t.primary_key.name != f"pk_{t.name}" or not t.primary_key.columns]
+    bad = [
+        t.fullname
+        for t in TABLES
+        if t.primary_key.name != f"pk_{t.name}" or not t.primary_key.columns
+    ]
     assert not bad
 
 
 def test_timestamps_are_timestamptz():
-    bad = [f"{t.fullname}.{c.name}" for t in TABLES for c in t.columns
-           if isinstance(c.type, DateTime) and not c.type.timezone]
+    bad = [
+        f"{t.fullname}.{c.name}"
+        for t in TABLES
+        for c in t.columns
+        if isinstance(c.type, DateTime) and not c.type.timezone
+    ]
     assert not bad
 
 
-def test_numeric_precision_is_20_4_or_unbounded():
-    bad = [f"{t.fullname}.{c.name}" for t in TABLES for c in t.columns
-           if isinstance(c.type, Numeric) and c.type.precision is not None
-           and (c.type.precision, c.type.scale) != (20, 4)]
+def test_numeric_precision_matches_contract():
+    # 契约 §3.4：四个每股权息值为六位小数，其余仍遵循 MONEY。
+    event_columns = {"cash_per_share", "rights_price", "bonus_ratio", "rights_ratio"}
+    bad = [
+        f"{t.fullname}.{c.name}"
+        for t in TABLES
+        for c in t.columns
+        if isinstance(c.type, Numeric)
+        and c.type.precision is not None
+        and (c.type.precision, c.type.scale)
+        != (
+            (20, 6)
+            if t.fullname == "market.ex_rights_events" and c.name in event_columns
+            else (20, 4)
+        )
+    ]
     assert not bad
 
 
@@ -63,8 +83,12 @@ def test_all_tables_compile_to_postgres_ddl():
 
 
 def test_check_constraints_are_named():
-    bad = [t.fullname for t in TABLES for c in t.constraints
-           if isinstance(c, CheckConstraint) and not c.name]
+    bad = [
+        t.fullname
+        for t in TABLES
+        for c in t.constraints
+        if isinstance(c, CheckConstraint) and not c.name
+    ]
     assert not bad
 
 
@@ -80,7 +104,12 @@ def test_one_of_and_array_subset_helpers():
 
 
 def test_union_keeps_first_seen_order():
-    assert base.union(["blue", "green"], _Color, ["green", "pink"]) == ["blue", "green", "red", "pink"]
+    assert base.union(["blue", "green"], _Color, ["green", "pink"]) == [
+        "blue",
+        "green",
+        "red",
+        "pink",
+    ]
 
 
 def test_column_helpers():
@@ -92,6 +121,14 @@ def test_column_helpers():
     assert base.uuid_col("u").foreign_keys == set()
     pk = base.pk_uuid()
     assert pk.primary_key and "gen_random_uuid" in str(pk.server_default.arg)
-    for helper in (base.day, base.txt, base.num, base.integer, base.boolean, base.jsonb,
-                   base.text_array, base.uuid_array):
+    for helper in (
+        base.day,
+        base.txt,
+        base.num,
+        base.integer,
+        base.boolean,
+        base.jsonb,
+        base.text_array,
+        base.uuid_array,
+    ):
         assert helper("c", nullable=False).nullable is False
