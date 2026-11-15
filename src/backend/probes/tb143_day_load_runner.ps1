@@ -129,7 +129,7 @@ try {
     } | Sort-Object)
     Write-Log "CSV count=$($csvs.Count)"
     if ($csvs.Count -eq 0) { throw '没有 day_YYYY.csv' }
-    $candidates = 0L; $inserted = 0L; $skipped = 0L
+    $candidates = 0L; $inserted = 0L; $skipped = 0L; $skippedBj = 0L
     for ($i = 0; $i -lt $csvs.Count; $i++) {
         $csv = $csvs[$i]; $year = $csv.Substring(4, 4)
         Write-Log "YEAR $year START；此前成功年份已独立提交。"
@@ -141,11 +141,19 @@ try {
             }
         })
         if ($counts.Count -ne 1) { throw "YEAR $year 已提交，但 candidates/inserted/skipped 解析失败" }
+        $blocked = @($script:dockerOutput | ForEach-Object {
+            if ([string]$_ -match '^\s*blocked_bj_unconfirmed\s*\|\s*(\d+)\s*$') {
+                [long]$Matches[1]
+            }
+        })
+        if ($blocked.Count -ne 1) { throw "YEAR $year 已提交，但 BJ 阻断计数解析失败" }
+        $skippedBj += $blocked[0]
         $candidates += $counts[0].Candidates; $inserted += $counts[0].Inserted; $skipped += $counts[0].Skipped
         Write-Log "YEAR $year COMMITTED candidates=$($counts[0].Candidates) inserted=$($counts[0].Inserted) skipped=$($counts[0].Skipped)"
         if ($i -lt $csvs.Count - 1) { Start-Sleep -Seconds $PauseSeconds }
     }
     Write-Log "TOTAL candidates=$candidates inserted=$inserted skipped=$skipped"
+    if ($skippedBj -gt 0) { throw 'BJ 未确认，保留本地产物供确认后续跑。' }
     $allYearsSucceeded = $true
 } catch {
     $exitCode = 1

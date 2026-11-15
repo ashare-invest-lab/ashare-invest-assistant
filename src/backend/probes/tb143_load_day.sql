@@ -38,11 +38,14 @@ CREATE TEMP VIEW mairui_count AS
   SELECT count(*) AS n FROM market.daily_bars
   WHERE source = 'mairui' AND trade_date < (SELECT before_date FROM load_params);
 CREATE TEMP TABLE mairui_before ON COMMIT DROP AS SELECT * FROM mairui_count;
-CREATE TEMP TABLE load_counts (candidates bigint, inserted bigint, skipped bigint) ON COMMIT DROP;
+CREATE TEMP TABLE load_counts (
+  candidates bigint, inserted bigint, skipped bigint, blocked_bj bigint
+) ON COMMIT DROP;
 DO $$
 DECLARE
   v_inserted bigint;
   v_total bigint;
+  v_blocked_bj bigint;
   v_bj_confirmed boolean;
 BEGIN
   IF (SELECT b.n FROM mairui_before AS b) <> 0 THEN
@@ -56,7 +59,7 @@ BEGIN
       OR coalesce(lower(p.is_suspended::text) IN ('1', 'true'), false)) AS excluded
     FROM pg_temp.tb143_bj_volume_pairs AS p
   )
-  SELECT EXISTS (SELECT 1 FROM pairs WHERE NOT excluded
+  SELECT EXISTS (SELECT 1 FROM pairs WHERE NOT excluded AND mairui_v > 0 AND volume > 0
     GROUP BY trade_date HAVING count(DISTINCT code) >= 20)
     AND coalesce(bool_and(coalesce(
     p.code ~ '^(43[0-9]|83[0-9]|87[0-9]|920)[0-9]{3}[.]BJ$'
@@ -69,6 +72,10 @@ BEGIN
     AND (p.excluded OR (p.volume = trunc(p.volume) AND p.mairui_v * 100 = p.volume)),
     false)), false)
   INTO v_bj_confirmed FROM pairs AS p;
+  SELECT count(*) INTO v_blocked_bj FROM day_stage AS s
+  WHERE NOT v_bj_confirmed AND (
+    s.code ~ '[.]BJ$' OR s.code ~ '^(43[0-9]|83[0-9]|87[0-9]|920)[0-9]{3}'
+  );
   INSERT INTO market.daily_bars (
     code, trade_date, adj_type, open, high, low, close, volume, amount,
     source, pre_close, is_suspended, source_licence_id, fetched_at
@@ -82,7 +89,7 @@ BEGIN
   ), false)
   ON CONFLICT (code, trade_date, adj_type) DO NOTHING;
   GET DIAGNOSTICS v_inserted = ROW_COUNT;
-  INSERT INTO load_counts VALUES (v_total, v_inserted, v_total - v_inserted);
+  INSERT INTO load_counts VALUES (v_total, v_inserted, v_total - v_inserted, v_blocked_bj);
 END $$;
 CREATE TEMP TABLE mairui_after ON COMMIT DROP AS SELECT * FROM mairui_count;
 DO $$
@@ -97,4 +104,5 @@ END $$;
 SELECT 'before' AS stage, * FROM mairui_before
 UNION ALL SELECT 'after', * FROM mairui_after;
 SELECT candidates, inserted, skipped FROM load_counts;
+SELECT 'blocked_bj_unconfirmed' AS reason, blocked_bj FROM load_counts;
 COMMIT;

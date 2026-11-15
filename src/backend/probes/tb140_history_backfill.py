@@ -640,8 +640,6 @@ def run_batch(
                 summary["http_status"] = engine.last_http_status
             if close_engine:
                 engine.close()
-        # 上面逻辑有误：close_engine=False 且不是 own_engine 时不应关闭
-        # 重新整理：仅当 close_engine 为真时关闭（自建默认 True）
         deleted = delete_licence_file(licence_file)
         summary["licence_deleted"] = deleted
         summary["total"] = state.get("total")

@@ -165,12 +165,15 @@ def main(argv: list[str] | None = None) -> int:
                     summ["calls"] += 1
                     f.write(json.dumps({"code": c, "mkt": mkt(c), "at": now(), "status": s, "n": len(b) if isinstance(b, list) else None, "body": b}, ensure_ascii=False) + "\n")
                     f.flush()
+                    if history_load._bj_write_unconfirmed({"code": f"{c}.{mkt(c)}"}):
+                        summ.setdefault("blocked_bj_unconfirmed", []).append(c)
+                        continue
                     st.setdefault("done_history", []).append(c)
                     st.setdefault("history_windows", {})[c] = {"st": start.isoformat() if start else None, "et": end.isoformat() if end else None}
                     save_counter(st)
-            summ["remaining"] = len([c for c in codes if c not in set(st["done_history"])])
+            summ["remaining"] = len([c for c in codes if c not in st.get("done_history", [])])
         sess.close()
-        return 0
+        return 1 if summ.get("blocked_bj_unconfirmed") else 0
     except Halt as e:
         summ["halt"] = str(e)
         return 1

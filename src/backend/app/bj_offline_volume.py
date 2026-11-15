@@ -9,7 +9,6 @@ from decimal import Decimal, InvalidOperation
 _bj_offline_volume_codes: frozenset[str] = frozenset()
 
 # 公开交易所代码段 + 本批 codes_ashare.txt 实际前缀。
-# 不用 startswith("6"/"9") 这种宽泛规则（既有 tb140_daily_bars.mkt 会把 920 判成 SH）。
 _SH = ("600", "601", "603", "605", "688", "689")
 _SZ = ("000", "001", "002", "003", "300", "301", "302")
 _BJ = ("430", "431", "432", "433", "434", "435", "436", "437", "438", "439",
@@ -77,14 +76,8 @@ def confirm_bj_offline_volume_units(
 ) -> frozenset[str]:
     """用调用方提供的本地对照确认 BJ 量单位；纯计算，不读取文件、出网或连库。
 
-    每项为 {"mairui": 原始行, "tdx_local": 本地行}：原始行须含 code/t/v，
-    本地行须含 code/trade_date/volume/source。代码须为同一合法 .BJ 标准码，
-    日期须相同，source 须为 tdx_local，且原始 v（手）×100 精确等于 volume（股）。
-    不自动转码；排除停牌及零量后，同一共同交易日至少 20 只不同代码才通过，返回确认代码集。
-
-    模块在进程内默认未确认；成功后允许各写入口写 BJ（不限于样本代码）。
-    每次调用先撤销旧确认，失败抛 RowReject，不能跨调用累加样本或沿用旧确认。
-    确认不从产物恢复；新进程调用 Python 写入入口仍须先离线确认。
+    同一共同交易日至少 20 个合法 BJ 码，两侧均非停牌且量为正，手×100 精确等于股。
+    每次先撤销旧确认；成功后进程内允许 BJ（不限样本码），确认不从产物恢复。
     """
     global _bj_offline_volume_codes
     _bj_offline_volume_codes = frozenset()
