@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import socket
+import subprocess
+import sys
 import uuid
 from contextlib import nullcontext
 from decimal import Decimal
@@ -24,6 +26,17 @@ OWNER, OTHER = uuid.UUID(int=711), uuid.UUID(int=712)
 CODE, ETF = "999991.SH", "999992.SH"
 LICENCE = uuid.UUID(int=713)
 NOW = dt.datetime(2041, 5, 6, 16, 5, tzinfo=dt.UTC)
+
+
+def test_aggregates_service_import_succeeds_in_fresh_process() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "from app.aggregates.service import select_account"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def bar(**values: Any) -> SimpleNamespace:

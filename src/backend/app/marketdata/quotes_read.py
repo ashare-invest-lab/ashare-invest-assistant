@@ -5,14 +5,16 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Row, select
 
 from app.common.errors import AppError, ErrorCode
 from app.db.tables.market import daily_bars, securities
-from app.marketdata.daily_snapshot import BEIJING, active_licence_id
 from app.marketdata.subresource_read import DecimalText, Gap, Shape
 from app.schemas.enums import DataStatus, GapReason, SecurityType
+
+BEIJING = ZoneInfo("Asia/Shanghai")
 
 
 class QuoteItem(Shape):
@@ -61,6 +63,9 @@ def _daily_closes(
 
 
 def read_quotes(conn: Connection, owner: uuid.UUID, codes: tuple[str, ...]) -> QuotesResponse:
+    # daily_snapshot -> daily_bars -> aggregates.service also imports this reader.
+    from app.marketdata.daily_snapshot import active_licence_id
+
     rows = conn.execute(
         select(securities.c.code, securities.c.name, securities.c.type).where(
             securities.c.code.in_(codes)
