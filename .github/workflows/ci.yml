@@ -61,7 +61,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-    timeout-minutes: 30
+    # T-O80：四次 backend 中途取消（111a2 / 118首 / 1d9d2c3 / 49e9333）都在 timeout-minutes: 30
+    # 整分处被取消（conclusion=cancelled，无取消 actor，非并发组）。慢次 pytest+覆盖率约 28 分钟，
+    # 自检约 0.4 分钟，合计顶满 30 分钟；同 SHA 重跑约 21 分钟。提到 45，给慢次留余量。不是 OOM/runner 丢失。
+    timeout-minutes: 45
     # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL；T-O67：A2–A31 读 PGHOST 等，均指向本 job 内建 PG（ci-only）。
     services:
       db:

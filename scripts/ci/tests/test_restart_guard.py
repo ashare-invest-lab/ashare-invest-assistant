@@ -1,0 +1,167 @@
+"""Offline restart guard checks; marker commands never operate a real stack."""
+
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[3]
+PS_SCRIPT = REPO / "deploy/scripts/restart-guard.ps1"
+POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+
+
+def test_restart_guard_bash() -> None:
+    script = Path(__file__).with_suffix(".sh")
+    result = subprocess.run(
+        ["bash", str(script)], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "restart guard selftest: 11 passed" in result.stdout
+
+
+def test_restart_guard_powershell_syntax() -> None:
+    raw = PS_SCRIPT.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf"), "Windows PowerShell 5.1 needs BOM for Chinese source"
+    source = raw.decode("utf-8-sig")
+    assert source.startswith("#Requires -Version 5.1\n")
+    if POWERSHELL:
+        result = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-NonInteractive", "-Command",
+             "$tokens=$null; $errors=$null; "
+             "[void][System.Management.Automation.Language.Parser]::ParseFile("
+             "$env:GUARD_PS_SOURCE,[ref]$tokens,[ref]$errors); "
+             "if ($errors.Count) { $errors; exit 1 }"],
+            env={**os.environ, "GUARD_PS_SOURCE": str(PS_SCRIPT)},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return
+
+    # Limited offline syntax check, not a substitute for the PowerShell parser:
+    # tokenize comments/strings, then check delimiter balance and PS7-only tokens.
+    tokens = re.findall(
+        r"#[^\n]*|'(?:''|[^'])*'|\"(?:`[\s\S]|[^`\"])*\"|[()\[\]{}]|[^\s'\"()\[\]{}#]+|['\"]",
+        source,
+    )
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack = []
+    code = []
+    for token in tokens:
+        if token.startswith("#"):
+            continue
+        assert token not in ("'", '"'), "Unterminated PowerShell string"
+        if token.startswith(("'", '"')):
+            continue
+        code.append(token)
+        if token in pairs:
+            stack.append(pairs[token])
+        elif token in pairs.values():
+            assert stack and stack.pop() == token, "Unbalanced PowerShell delimiter"
+    assert not stack, "Unclosed PowerShell delimiter"
+    assert not any(op in " ".join(code) for op in ("??", "?.", "&&", "||"))
+
+
+@pytest.mark.parametrize("runtime", ["bash", "powershell"])
+@pytest.mark.parametrize(
+    "content,owner,status",
+    [
+        ('{"task":"T-B85","status":"paused"}', "T-B85", "paused"),
+        ('{\n "owner":"T-DS85",\n "state":"running"\n}', "T-DS85", "running"),
+        ('{"owner":"T-DS85","state":"paused"}', "T-DS85", "paused"),
+        ('{"task":"T-B85","status":"running"}', "T-B85", "running"),
+        ("task=T-B85 status=paused\n", "T-B85", "paused"),
+        ("owner=T-DS85\r\nstate=running\r\n", "T-DS85", "running"),
+        ("owner='T DS85'\nstate=paused", "T DS85", "paused"),
+        ('task="T B85" status=running', "T B85", "running"),
+        ('{"task":"T-B85","owner":"other","status":"paused","state":"running"}', "T-B85", "paused"),
+        ('{"task":"T-B85","note":"DO_NOT_PRINT"}', "T-B85", "未知"),
+        ('{"status":"paused","note":"DO_NOT_PRINT"}', "未知", "paused"),
+        ('{"task":"T-B85","status":null}', "T-B85", "未知"),
+        ('{"task":"T-B85",', "未知", "未知"),
+        ("T-B85\nDO_NOT_PRINT", "T-B85", "未知"),
+        ("", "未知", "未知"),
+    ],
+)
+def test_lock_metadata_still_blocks(tmp_path: Path, runtime: str, content: str, owner: str, status: str) -> None:
+    if runtime == "powershell" and not POWERSHELL:
+        pytest.skip("No pwsh/powershell; runtime verification required on Windows")
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+    (lock_dir / "backfill.lock").write_text(content, encoding="utf-8")
+    marker = tmp_path / "executed"
+    env = {**os.environ, "GUARD_TEST_MARKER": str(marker)}
+    if runtime == "bash":
+        cmd = ["bash", str(PS_SCRIPT.with_suffix(".sh")), "--lock-dir", str(lock_dir),
+               "--then", 'touch "$GUARD_TEST_MARKER"']
+    else:
+        cmd = [POWERSHELL, "-NoProfile", "-NonInteractive", "-File", str(PS_SCRIPT),
+               "-LockDir", str(lock_dir), "-Then", "Set-Content -LiteralPath $env:GUARD_TEST_MARKER -Value executed"]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not marker.exists()
+    assert f"backfill.lock | 持锁任务：{owner} | 修改时间：" in result.stdout
+    assert f"状态：{status}" in result.stdout
+    assert "DO_NOT_PRINT" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("runtime", ["bash", "powershell"])
+def test_directory_metadata_combines_owner_and_info(tmp_path: Path, runtime: str) -> None:
+    if runtime == "powershell" and not POWERSHELL:
+        pytest.skip("No pwsh/powershell; runtime verification required on Windows")
+    directory = tmp_path / "backfill.lock"
+    directory.mkdir()
+    (directory / "owner").write_text("T-B85\n", encoding="utf-8")
+    (directory / "info").write_text('{"status":"paused"}', encoding="utf-8")
+    if runtime == "bash":
+        cmd = ["bash", str(PS_SCRIPT.with_suffix(".sh")), "--lock-dir", str(tmp_path)]
+    else:
+        cmd = [POWERSHELL, "-NoProfile", "-NonInteractive", "-File", str(PS_SCRIPT), "-LockDir", str(tmp_path)]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "持锁任务：T-B85" in result.stdout and "状态：paused" in result.stdout
+
+
+@pytest.mark.skipif(not POWERSHELL, reason="No pwsh/powershell; static syntax check only")
+def test_restart_guard_powershell_runtime(tmp_path: Path) -> None:
+    lock_dir = tmp_path / "runtime with spaces"
+    lock_dir.mkdir()
+    marker = tmp_path / "marker"
+    env = {**os.environ, "AIA_RUNTIME_LOCK_DIR": str(lock_dir), "GUARD_TEST_MARKER": str(marker)}
+    then = "Set-Content -LiteralPath $env:GUARD_TEST_MARKER -Value executed"
+
+    def run(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [POWERSHELL, "-NoProfile", "-NonInteractive", "-File", str(PS_SCRIPT), *args],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+
+    result = run("-Then", then)
+    assert result.returncode == 0 and marker.exists(), result.stdout + result.stderr
+    assert "无回填锁，可以重启" in result.stdout
+    marker.unlink()
+    (lock_dir / "mairui-backfill.lock").write_text("T-B84\nDO_NOT_PRINT\n", encoding="utf-8")
+    for name, metadata in (("owner.lock", "owner"), ("info.lock", "info"), ("empty.lock", None)):
+        directory = lock_dir / name
+        directory.mkdir()
+        if metadata:
+            (directory / metadata).write_text(f"T-{metadata}\nDO_NOT_PRINT\n", encoding="utf-8")
+    (lock_dir / "unrelated.txt").write_text("DO_NOT_PRINT", encoding="utf-8")
+    result = run("-Then", then)
+    assert result.returncode == 3 and not marker.exists(), result.stdout + result.stderr
+    for expected in ("mairui-backfill.lock | 持锁任务：T-B84", "owner.lock | 持锁任务：T-owner",
+                     "info.lock | 持锁任务：T-info", "empty.lock | 持锁任务：未知", "修改时间："):
+        assert expected in result.stdout
+    assert "DO_NOT_PRINT" not in result.stdout + result.stderr
+    clear = tmp_path / "clear"
+    clear.mkdir()
+    result = run("-LockDir", str(clear), "-Then", then)
+    assert result.returncode == 0 and marker.exists(), result.stdout + result.stderr
+    marker.unlink()
+    result = run("-LockDir", str(tmp_path / "missing"), "-Then", then)
+    assert result.returncode == 0 and marker.exists(), result.stdout + result.stderr
+    assert "锁目录不存在" in result.stdout and "无回填锁，可以重启" in result.stdout
+    result = run("-LockDir", str(clear), "-Then", "exit 17")
+    assert result.returncode == 17, result.stdout + result.stderr

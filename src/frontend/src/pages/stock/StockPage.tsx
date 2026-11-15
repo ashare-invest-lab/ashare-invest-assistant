@@ -92,14 +92,15 @@ function StockBody({ profile }: { profile: SecurityProfile }) {
   );
 }
 
+// HTTP /quotes 的无来源响应会返回 t=null；没有行情交易日就不能把日K或分时前收认作今日行情。
 function todayBar(bars: Bar[] | undefined, q: QuoteItem | null | undefined) {
   const last = bars?.[bars.length - 1];
-  return last && q && last.t.slice(0, 10) === q.t.slice(0, 10) ? last : null;
+  return last && q?.t && last.t.slice(0, 10) === q.t.slice(0, 10) ? last : null;
 }
 
 /** 1m 响应顶层 pre_close（契约 v0.2.6 Bar 响应）；只在与行情同一交易日时使用 */
 function intradayPreClose(res: BarsResponse | undefined, q: QuoteItem | null | undefined) {
-  if (!res?.pre_close || !q) return null;
+  if (!res?.pre_close || !q?.t) return null;
   // A-12/F-14：data_as_of 可为 null（无数据时点），不能直接 slice；取不到交易日就不认这个前收
   const stamp = res.items[0]?.t ?? res.data_as_of;
   if (!stamp) return null;
@@ -133,11 +134,11 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
     ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{tb.high}</span> : '—'],
     ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{tb.low}</span> : '—'],
     ['昨收', preClose ?? '—'],
-    ['成交量', q ? `${fmtAmount(Number(q.volume) / 100)}手` : '—'],
+    ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—'],
     ['成交额', q ? fmtAmount(q.amount) : '—'],
-    ['换手率', q && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
-    ['总市值', q && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
-    ['流通市值', q && float ? fmtAmount(capOf(q.price, float)) : '—'],
+    ['换手率', q?.volume != null && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
+    ['总市值', q?.price != null && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
+    ['流通市值', q?.price != null && float ? fmtAmount(capOf(q.price, float)) : '—'],
   ];
   return (
     <header className="stock-head" data-testid="stock-head">
@@ -154,9 +155,9 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price}</span>
+          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price ?? '—'}</span>
           <span className={`mono ${pctClass(q.change_pct)}`}>
-            {preClose && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}({signed(q.change_pct)}%)
+            {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
           </span>
           <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip>
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />

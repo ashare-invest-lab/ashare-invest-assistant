@@ -36,8 +36,22 @@ FROZEN_PROBES = (
     "tb81_evidence.py",
     "tb86_history.py",
     "tb86_offline.py",
+    "tb140_daily_bars.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    "tb140_history_backfill.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    "tb140_history_load.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    "tb140_history_selfcheck.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    "tb140_history_supervisor.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
 )
-HTTP_PROBES = frozenset({"common.py", "tb81.py", "tb86_history.py"})
+HTTP_PROBES = frozenset(
+    {
+        "common.py",
+        "tb81.py",
+        "tb86_history.py",
+        "tb140_daily_bars.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_backfill.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_selfcheck.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    }
+)
 
 # S6 registry: every AST hit at 41e517a (probes as contracted; selfchecks include
 # two files the prose examples omitted but that already existed at the freeze).
@@ -238,6 +252,18 @@ def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
                             hit_name = alias.name
                             break
                 if hit_name:
+                    # 用户授权 t1063u/t1165u：脚本自有 HOST 常量，非 egress 私有导入；
+                    # 与 test_ta91 对 Name HOST 的处理对齐。
+                    if (
+                        hit_name == "HOST"
+                        and rel in {
+                            "probes/tb140_daily_bars.py",
+                            "probes/tb140_history_backfill.py",
+                            "probes/tb140_history_selfcheck.py",
+                        }
+                        and not isinstance(node, ast.ImportFrom)
+                    ):
+                        continue
                     if is_a28:
                         continue
                     # selfchecks/tests may not read private names (except A28-negative)
@@ -353,7 +379,7 @@ def test_tb116d_a1s_tree_is_clean() -> None:
 
 
 def test_tb116d_a1s_s1_new_probe_and_http_combo_are_red(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Positive S1: file outside the frozen 24, and a non-HTTP probe with domain+HTTP, are red."""
+    """Positive S1: file outside the frozen 29, and a non-HTTP probe with domain+HTTP, are red."""
     new_file = BACKEND / "probes" / "_a1s_fake_extra.py"
     # Do not write into the real tree; evaluate the rule against a virtual set.
     frozen = set(FROZEN_PROBES)
@@ -441,5 +467,5 @@ def test_tb116d_daily_bars_seam_exact_registration(tmp_path: Path, relative: str
 def test_tb116d_a1s_frozen_probe_count() -> None:
     names = sorted(p.name for p in (BACKEND / "probes").glob("*.py"))
     assert names == sorted(FROZEN_PROBES)
-    assert len(FROZEN_PROBES) == 24
-    assert len(HTTP_PROBES) == 3
+    assert len(FROZEN_PROBES) == 29
+    assert len(HTTP_PROBES) == 6
