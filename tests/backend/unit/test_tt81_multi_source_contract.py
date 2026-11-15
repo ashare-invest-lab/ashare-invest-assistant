@@ -10,8 +10,8 @@ probes.tb140_history_load.validate_bar(row, code, st=..., et=...) 及字典返�
 未验证：app.ingest.gbbq、app.ingest.minute_catalog 的包路径与公开函数签名
 未在契约指定；ref_price、CatalogEntry、effective_range、check_overlap、
 hf_entries_from_manifest 参照本地 origin/be/T-B143 的只读源码线索。
-未验证：compute_adjust_factors 名称、参数、返回结构是待后端确认的测试接缝，
-契约 §2.5 只规定算法，尚未指定生产入口；不得以测试实现替代此入口。
+未验证：契约 §2.5 只规定算法，尚未指定生产入口；compute_adjust_factors
+名称、参数、返回结构对齐 #141 的 4f11f81，不以测试实现替代生产入口。
 未验证：parse_*、scan、run_import 的参数和 ParseResult 返回结构沿用 main；
 run_import 在契约中没有给出函数名。写库入口沿用源契 §1 的 upsert_daily_bars。
 """
@@ -21,12 +21,14 @@ from __future__ import annotations
 import builtins
 import datetime as dt
 import importlib
+import inspect
 import io
 import json
 import os
 import socket
 import struct
 import sys
+from collections import Counter
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from pathlib import Path
 from unittest.mock import Mock
@@ -143,7 +145,9 @@ def test_lc_volume_is_shares(kind: str) -> None:
 
 @pytest.mark.parametrize("hands,shares", [("7.5", "750"), ("0.01", "1")])
 def test_mairui_daily_hands_to_shares(hands: str, shares: str) -> None:
-    validate = entry("probes.tb140_history_load", "validate_bar", "§2.4、§3.1")
+    # 评审 ② 前两例：此入口归 #142；缺模块时跳过，股数断言保持不变。
+    module = pytest.importorskip("probes.tb140_history_load", reason="随 #142 合入生效")
+    validate = module.validate_bar
     # 未验证：模块路径、参数顺序和返回结构来自 T-B140i 源码，契约未定义。
     row = {
         "t": "2026-08-07",
@@ -204,6 +208,30 @@ def test_lc1_refuses_invalid_file_labels(minutes: tuple[int, ...]) -> None:
     result = parse(CODE, lc_bytes(minutes), "lc1")
     assert not result.bars and result.rejected, (
         "契约 §2.3、§3.2：11:30/13:00 并存、重复、非法标签或分钟数 ≥1440 应拒绝文件"
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_date,minute,reason",
+    [
+        (0, 571, "invalid_date"),
+        ((2026 - 2004) * 2048 + 807, 0, "invalid_minute"),
+        ((2026 - 2004) * 2048 + 807, 1441, "invalid_minute"),
+        ((2026 - 2004) * 2048 + 807, 1440, "invalid_minute"),
+    ],
+)
+def test_minute_rejects_whole_file(raw_date: int, minute: int, reason: str) -> None:
+    # 评审 ② 后三例及 1440 边界；从旧记录级参数表迁移，按契约 §3.2 整文件拒绝。
+    parse = entry(TDX, "parse_lc_bytes", "§3.2；评审 ②")
+    invalid = struct.pack(
+        "<HHfffffII", raw_date, minute, 10.0, 10.0, 10.0, 10.0, 7000.0, 700, 0
+    )
+    # 两侧都有合法记录，既检查清空已解析行，也检查不保留后续行。
+    result = parse(CODE, lc_bytes((571,)) + invalid + lc_bytes((572,)), "lc1")
+    assert result.file_rejected, "契约 §3.2；评审 ②：日期或分钟非法须标记整文件拒绝"
+    assert result.bars == [], "契约 §3.2；评审 ②：整文件拒绝不能留下任何合法行"
+    assert result.rejected == Counter({reason: 1}), (
+        "契约 §3.2；评审 ②：拒绝原因及次数须准确"
     )
 
 
@@ -315,7 +343,9 @@ def test_existing_mairui_is_append_only(tmp_path: Path) -> None:
     ), "契约 §4：通达信冲突必须留下对账差异"
 
 
-def test_mairui_late_arrival_requires_replacement() -> None:
+@pytest.fixture
+def mairui_tdx_collision():
+    """未验证：#141 的日线类型与 SQLAlchemy 响应接缝；只回放同键数据库响应。"""
     module = "app.marketdata.daily_bars"
     upsert = entry(module, "upsert_daily_bars", "§4、§5 C1、§7")
     make_bar = entry(module, "DailyBar", "§3.1、§4")
@@ -332,22 +362,89 @@ def test_mairui_late_arrival_requires_replacement() -> None:
     )
     existing = dict(vars(incoming), source="tdx_local", close=Decimal("12.00"))
     # 仅回放数据库响应，不解释 SQL，不在替身内实现冲突合并或来源优先级。
-    response = Mock()
-    response.all.return_value = []
-    response.mappings.return_value = [existing]
+    insert_response = Mock()
+    insert_response.all.return_value = []
+    select_response = Mock()
+    select_response.mappings.return_value = [existing]
+    update_response = Mock()
+    update_response.mappings.return_value = [{"code": CODE}]
     connection = Mock()
-    connection.execute.return_value = response
+    connection.execute.side_effect = [insert_response, select_response, update_response]
+    return upsert, connection, make_result(bars=(incoming,))
+
+
+def test_mairui_late_arrival_requires_replacement(mairui_tdx_collision) -> None:
+    upsert, connection, result = mairui_tdx_collision
+    records = []
     stats = upsert(
         connection,
-        make_result(bars=(incoming,)),
+        result,
         source="mairui",
         licence_id=None,
         fetched_at=dt.datetime(2026, 8, 8, tzinfo=dt.UTC),
+        reconcile_sink=records.append,
     )
     assert getattr(stats, "replaced", None) == 1, (
         "契约 §4、§5 C1：麦蕊后到应替换 tdx_local；UpsertStats.replaced 应计 1"
     )
     assert stats.conflicts == 0, "契约 §4：合法替换不计 conflict"
+    assert any(
+        row.get("kind") == "replaced_tdx_local"
+        and row.get("code") == CODE
+        and row.get("trade_date") == DAY.isoformat()
+        and row.get("field") == "close"
+        and row.get("existing_source") == "tdx_local"
+        and row.get("incoming_source") == "mairui"
+        and Decimal(row["existing_value"]) == Decimal("12.00")
+        and Decimal(row["incoming_value"]) == Decimal("12.01")
+        for row in records
+    ), "契约 §4 第 1 步、§7；评审 ① B1：替换必须先留下旧值、新值及来源的对账行"
+
+
+def test_mairui_without_reconcile_sink_does_not_update(mairui_tdx_collision) -> None:
+    upsert, connection, result = mairui_tdx_collision
+    # 评审 ① B1：故意不传 sink，覆盖生产入口实际采用的默认路径。
+    stats = upsert(
+        connection,
+        result,
+        source="mairui",
+        licence_id=None,
+        fetched_at=dt.datetime(2026, 8, 8, tzinfo=dt.UTC),
+    )
+    assert all(
+        "UPDATE" not in str(call.args[0]).upper()
+        for call in connection.execute.call_args_list
+    ), "契约 §4 第 1 步；评审 ① B1：未配置对账落盘不得 UPDATE（含冲突更新）"
+    assert stats.inserted == 0 and stats.conflicts == 1, (
+        "评审 ① B1：未配 sink 时保留 DO NOTHING / conflict；差异同键计 1 次冲突"
+    )
+    assert getattr(stats, "replaced", 0) == 0, "评审 ① B1：未配 sink 不得计为替换"
+    parameter = inspect.signature(upsert).parameters.get("reconcile_sink")
+    assert parameter is not None and parameter.default is None, (
+        "评审 ① B1：reconcile_sink 参数默认必须为 None"
+    )
+
+
+def test_mairui_reconcile_sink_failure_does_not_update(mairui_tdx_collision) -> None:
+    upsert, connection, result = mairui_tdx_collision
+    failure = OSError("合成对账落盘失败")
+    sink = Mock(side_effect=failure)
+    # 契约 §4 第 1 步、§7；评审 ① B1：落盘失败必须向事务边界抛出，且不能先 UPDATE。
+    with pytest.raises(OSError, match="合成对账落盘失败") as caught:
+        upsert(
+            connection,
+            result,
+            source="mairui",
+            licence_id=None,
+            fetched_at=dt.datetime(2026, 8, 8, tzinfo=dt.UTC),
+            reconcile_sink=sink,
+        )
+    assert caught.value is failure, "评审 ① B1：sink 的异常须原样向上抛"
+    assert sink.call_count == 1, "契约 §4 第 1 步：首笔落盘失败即终止替换"
+    assert all(
+        "UPDATE" not in str(call.args[0]).upper()
+        for call in connection.execute.call_args_list
+    ), "契约 §4 第 1 步；评审 ① B1：sink 异常前后均不得执行 UPDATE"
 
 
 def test_minute_sources_use_disjoint_date_segments() -> None:
@@ -403,9 +500,9 @@ def test_gbbq_reference_price() -> None:
 
 @pytest.mark.parametrize("scenario", ["单一快照且不偷看未来", "缺少前收", "参考价非正"])
 def test_gbbq_adjustment_factors(scenario: str) -> None:
-    calculate = entry(GBBQ, "compute_adjust_factors", "§2.5、§5 C5、§7（入口未验证）")
-    # 未验证：此函数名、参数名、事件字典及结果结构尚待契约补齐；不假装为既定 API。
-    # 每股红利 2 元，12 元前收对应 10 元参考价，后复权因子应为常量 1.2。
+    calculate = entry(GBBQ, "compute_adjust_factors", "§2.5、§5 C5、§7（签名未验证）")
+    # 未验证：函数名、参数、事件字典及结果结构对齐 #141@4f11f81，契约未定义 API。
+    # 契约 §2.5 的算法：每股红利 2 元，12 元前收对应 10 元参考价，后复权因子为 1.2。
     snapshot = "a" * 64
     event = dict(
         code=CODE,
