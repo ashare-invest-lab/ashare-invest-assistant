@@ -5,7 +5,7 @@
 set -euo pipefail
 # 旧断言要求 SQL 直写目标表；暂时拒绝运行，避免把 staging 当成完成装载。
 # 保留隔离测试正文供 T-T94 迁移，不绕过/放宽其断言。
-printf '%s\n' 'REFUSED: legacy SQL load selfcheck awaits public Python writer migration; use python -m app.cli daily-bars-import-tdx（通达信日线导入）或 python -m probes.tb143_day_load --csv <CSV> --before <DATE>（年度 CSV 经公共 writer）' >&2
+printf '%s\n' 'REFUSED: legacy SQL load selfcheck awaits public Python writer migration; use python -m app.cli daily-bars-import-tdx（通达信日线导入）或 python -m app.cli.tb143_day_load --csv <CSV> --before <DATE>（年度 CSV 经公共 writer）' >&2
 exit 1
 
 pgbin=${PG_BIN:-/usr/lib/postgresql/17/bin}

@@ -5,18 +5,24 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
 
 import psycopg
+from sqlalchemy.dialects.postgresql import dialect
+from sqlalchemy.engine import Connection
+from sqlalchemy.sql import ClauseElement
 
+from app.bj_offline_volume import RowReject
 from app.marketdata.daily_bars import (
     UPSERT_BATCH_ROWS,
     DailyBar,
     DailyBarsResult,
     upsert_daily_bars,
 )
-from probes.tb140_history_load import _WriterConnection, to_psycopg_dsn
 
 _BEFORE = "INSERT INTO load_params VALUES (:'before'::date);"
 _COPY = "COPY day_stage FROM :'csv' WITH (FORMAT csv, HEADER true, ENCODING 'UTF8');"
@@ -24,12 +30,52 @@ _MAIRUI = """SELECT count(*), count(*) FILTER (WHERE trade_date < %s)
              FROM market.daily_bars WHERE source = 'mairui'"""
 
 
-def load_day(conn: psycopg.Connection, csv_path: Path, before: date) -> dict[str, int]:
+def to_psycopg_dsn(url: str) -> str:
+    """把 SQLAlchemy 风格 ``postgresql+psycopg://`` 转成 psycopg 可用的 ``postgresql://``。
+
+    算法出处：``src/backend/app/api/v1/health.py`` 的 ``_psycopg_dsn``。
+    不打印、不记录传入值。
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise RowReject("db_url_invalid")
+    scheme, sep, rest = url.partition("://")
+    if sep and "+" in scheme:
+        scheme = scheme.split("+", 1)[0]
+    return f"{scheme}{sep}{rest}"
+
+
+class _WriterConnection:
+    """在调用方的 psycopg 事务上执行公共 writer 的 SQLAlchemy 语句；不拥有连接。"""
+
+    def __init__(self, conn: psycopg.Connection[tuple[Any, ...]]) -> None:
+        self.conn = conn
+
+    def execute(self, statement: ClauseElement) -> SimpleNamespace:
+        pg_dialect = dialect()  # type: ignore[no-untyped-call]  # 第三方构造器未标注类型。
+        compiled = statement.compile(
+            dialect=pg_dialect, compile_kwargs={"render_postcompile": True},
+        )
+        with self.conn.cursor() as cursor:
+            cursor.execute(str(compiled), compiled.params)
+            names = [column.name for column in cursor.description] if cursor.description else []
+            rows = [
+                dict(zip(names, row, strict=False)) if not isinstance(row, Mapping) else dict(row)
+                for row in cursor.fetchall()
+            ] if names else []
+        return SimpleNamespace(all=lambda: [SimpleNamespace(**row) for row in rows],
+                               mappings=lambda: rows)
+
+
+def load_day(
+    conn: psycopg.Connection[tuple[Any, ...]], csv_path: Path, before: date,
+) -> dict[str, int]:
     """拥有整年事务；已有行不覆盖，未确认 BJ 跳过，其他合法行仍提交。"""
     if int(conn.info.transaction_status) != 0:
         raise ValueError("connection_transaction_already_active")
     # 只分割受版本控制的固定语句；路径从不进入 SQL，日期使用绑定参数。
-    sql = Path(__file__).with_name("tb143_load_day.sql").read_text(encoding="utf-8")
+    sql = (Path(__file__).resolve().parents[2] / "probes" / "tb143_load_day.sql").read_text(
+        encoding="utf-8",
+    )
     setup, rest = sql.split(_BEFORE)
     stage, validate = rest.split(_COPY)
     counts = {"candidates": 0, "inserted": 0, "skipped": 0, "blocked_bj_unconfirmed": 0}
@@ -45,7 +91,7 @@ def load_day(conn: psycopg.Connection, csv_path: Path, before: date) -> dict[str
                     copy.write(chunk)
             cur.execute(validate)
             cur.execute(_MAIRUI, (before,))
-            mairui_before, historical = cur.fetchone()
+            mairui_before, historical = cast(tuple[int, int], cur.fetchone())
             if historical:
                 raise ValueError("before 之前已有麦蕊行，拒绝加载")
         stamp = datetime.now(UTC)
@@ -60,7 +106,7 @@ def load_day(conn: psycopg.Connection, csv_path: Path, before: date) -> dict[str
                     pre_close=None, is_suspended=None,
                 ) for r in batch]
                 stats = upsert_daily_bars(
-                    _WriterConnection(conn), DailyBarsResult(bars=bars),
+                    cast(Connection, _WriterConnection(conn)), DailyBarsResult(bars=bars),
                     source="tdx_local", licence_id=None, fetched_at=stamp,
                 )
                 counts["candidates"] += len(bars)
@@ -87,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         # 驱动异常可能含连接串或输入数据；只报告类型，不输出敏感原文。
         print(f"REFUSED: {type(exc).__name__}; keep input artifacts; "
               "修复输入或运行环境后重试 "
-              "python -m probes.tb143_day_load --csv <CSV> --before <DATE>",
+              "python -m app.cli.tb143_day_load --csv <CSV> --before <DATE>",
               file=sys.stderr)
         return 1
     print("candidates|inserted|skipped")
@@ -95,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"blocked_bj_unconfirmed|{counts['blocked_bj_unconfirmed']}")
     if counts["blocked_bj_unconfirmed"] > 0:
         print("INCOMPLETE: keep input artifacts; BJ 仍须通过公共 writer 确认门闩；"
-              "满足条件后重试 python -m probes.tb143_day_load --csv <CSV> --before <DATE>")
+              "满足条件后重试 python -m app.cli.tb143_day_load --csv <CSV> --before <DATE>")
         return 1
     print("COMPLETED")
     return 0

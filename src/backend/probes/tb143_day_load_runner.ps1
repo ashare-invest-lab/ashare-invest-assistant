@@ -143,7 +143,7 @@ try {
         $oldPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'
-            $loadOutput = @(& $python -m probes.tb143_day_load --csv $localCsv --before $Before 2>&1)
+            $loadOutput = @(& $python -m app.cli.tb143_day_load --csv $localCsv --before $Before 2>&1)
             $loadExit = $LASTEXITCODE
         } finally { $ErrorActionPreference = $oldPreference; Pop-Location }
         foreach ($line in $loadOutput) { Write-Log ([string]$line) }
@@ -170,7 +170,7 @@ try {
     $allYearsSucceeded = $true
 } catch {
     $exitCode = 1
-    Write-Log "ERROR stopped_year=$year；此前已提交年份保留。$($_.Exception.Message)；修复上述问题并校验 SHA256 后，可在 src/backend 运行 python -m probes.tb143_day_load --csv <CSV> --before <DATE>（年度 CSV 经公共 writer，BJ 仍须通过确认门闩）；通达信日线导入用 python -m app.cli daily-bars-import-tdx。"
+    Write-Log "ERROR stopped_year=$year；此前已提交年份保留。$($_.Exception.Message)；修复上述问题并校验 SHA256 后，可在 src/backend 运行 python -m app.cli.tb143_day_load --csv <CSV> --before <DATE>（年度 CSV 经公共 writer，BJ 仍须通过确认门闩）；通达信日线导入用 python -m app.cli daily-bars-import-tdx。"
 } finally {
     try {
         if ($allYearsSucceeded) { Invoke-Docker @('exec', $Container, 'rm', '-rf', '/tmp/tb143d') }
