@@ -17,7 +17,7 @@ PROBES = ROOT / "src/backend/probes"
 SELFCHECKS = ROOT / "src/backend/selfchecks"
 DOCKERIGNORE = ROOT / "deploy/docker/backend.Dockerfile.dockerignore"
 
-# 41e517a 冻结的 24 个 probes/*.py（含子路径相对 probes/）
+# 冻结的 25 个 probes/*.py（含子路径相对 probes/）：41e517a 原有 24 个，新增 1 个为 t1063u/t1165u 授权登记。
 PROBES_FROZEN = frozenset(
     {
         "_helpers.py",
@@ -44,6 +44,8 @@ PROBES_FROZEN = frozenset(
         "tb81_evidence.py",
         "tb86_history.py",
         "tb86_offline.py",
+        # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_load.py",
     }
 )
 PROBES_HTTP_MAIRUI_ALLOW = frozenset({"common.py", "tb81.py", "tb86_history.py"})
@@ -233,7 +235,7 @@ def _socket_attrs(tree: ast.AST) -> set[str]:
 
 
 def test_a1s_s1_tree_frozen_list_and_http_allow() -> None:
-    """负例：41e517a 冻结 24 文件存在且仅 3 个允许域名+HTTP；app 不导入 probes；dockerignore 不含 probes 白名单。"""
+    """负例：冻结 25 文件（含 t1063u/t1165u 授权登记）存在且仅 3 个允许域名+HTTP；app 不导入 probes；dockerignore 不含 probes 白名单。"""
     present = {str(p.relative_to(PROBES)) for p in PROBES.rglob("*.py") if p.is_file()}
     extra = present - PROBES_FROZEN
     missing = PROBES_FROZEN - present

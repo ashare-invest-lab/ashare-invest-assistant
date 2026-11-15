@@ -36,6 +36,8 @@ FROZEN_PROBES = (
     "tb81_evidence.py",
     "tb86_history.py",
     "tb86_offline.py",
+    # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    "tb140_history_load.py",
 )
 HTTP_PROBES = frozenset({"common.py", "tb81.py", "tb86_history.py"})
 
@@ -353,7 +355,7 @@ def test_tb116d_a1s_tree_is_clean() -> None:
 
 
 def test_tb116d_a1s_s1_new_probe_and_http_combo_are_red(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Positive S1: file outside the frozen 24, and a non-HTTP probe with domain+HTTP, are red."""
+    """Positive S1: file outside the frozen 25, and a non-HTTP probe with domain+HTTP, are red."""
     new_file = BACKEND / "probes" / "_a1s_fake_extra.py"
     # Do not write into the real tree; evaluate the rule against a virtual set.
     frozen = set(FROZEN_PROBES)
@@ -441,5 +443,5 @@ def test_tb116d_daily_bars_seam_exact_registration(tmp_path: Path, relative: str
 def test_tb116d_a1s_frozen_probe_count() -> None:
     names = sorted(p.name for p in (BACKEND / "probes").glob("*.py"))
     assert names == sorted(FROZEN_PROBES)
-    assert len(FROZEN_PROBES) == 24
+    assert len(FROZEN_PROBES) == 25
     assert len(HTTP_PROBES) == 3
