@@ -31,40 +31,24 @@ import stat
 import sys
 import time
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-if __package__:
-    from .tb140_history_load import (
-        CodeReject,
-        RowReject,
-        market_of,
-        parse_window,
-        plan_history_expansion,
-        requestable_history_codes,
-        normalize_history,
-        qualified_code,
-        render_insert_sql,
-        resolve_active_licence,
-        write_normalized,
-    )
-else:
-    from tb140_history_load import (
-        CodeReject,
-        RowReject,
-        market_of,
-        parse_window,
-        plan_history_expansion,
-        requestable_history_codes,
-        normalize_history,
-        qualified_code,
-        render_insert_sql,
-        resolve_active_licence,
-        write_normalized,
-    )
+from tb140_history_load import (
+    HIST_ET,
+    HIST_ST,
+    CodeReject,
+    RowReject,
+    market_of,
+    normalize_history,
+    qualified_code,
+    render_insert_sql,
+    resolve_active_licence,
+    write_normalized,
+)
 
 HOST = "api.mairuiapi.com"
 BATCH_CAP = 2000
@@ -262,22 +246,15 @@ def business_limited(status: int, body: Any) -> bool:
     return False
 
 
-def _history_route(code: str, token: str, st: str | date | None, et: str | date | None) -> str:
-    code = code.strip()
-    market = market_of(code)
-    start, end = parse_window(st, et)
-    query = urlencode({key: day.isoformat().replace("-", "") for key, day in (("st", start), ("et", end)) if day is not None})
-    route = "bj" if market == "BJ" else "hsstock"
-    path = f"/{route}/history/{qualified_code(code)}/d/n/{token}"
-    return path + ("?" + query if query else "")
+def history_path(code: str, secret: str, st: str, et: str) -> str:
+    mkt = market_of(code)
+    token = quote(secret, safe="")
+    return f"/hsstock/history/{code}.{mkt}/d/n/{token}?st={st}&et={et}"
 
 
-def history_path(code: str, secret: str, st: str | date | None = None, et: str | date | None = None) -> str:
-    return _history_route(code, quote(secret, safe=""), st, et)
-
-
-def history_path_log(code: str, st: str | date | None = None, et: str | date | None = None) -> str:
-    return _history_route(code, "***", st, et)
+def history_path_log(code: str, st: str, et: str) -> str:
+    mkt = market_of(code)
+    return f"/hsstock/history/{code}.{mkt}/d/n/***?st={st}&et={et}"
 
 
 def open_connection(timeout: float = 40.0) -> http.client.HTTPSConnection:
@@ -404,11 +381,7 @@ class Backfill:
                 raise TransportFailure(type(exc).__name__) from None
             raise Halt("transport_or_internal_failure_no_retry") from None
 
-    def call_history(self, state: dict[str, Any], secret: str, code: str, st: str | date | None = None, et: str | date | None = None) -> tuple[int, Any]:
-        path = history_path(code, secret, st, et)  # 参数错误发生在记账、建连之前
-        accepted, _ = requestable_history_codes([code])
-        if not accepted:
-            raise Halt("旧码不请求")
+    def call_history(self, state: dict[str, Any], secret: str, code: str, st: str, et: str) -> tuple[int, Any]:
         self._refuse_if_stopped(state)
         while True:
             self._wait_interval()
@@ -420,6 +393,7 @@ class Backfill:
             try:
                 if self.conn is None:
                     self.conn = self._open_conn()
+                path = history_path(code, secret, st, et)
                 status, body, preview = request_once(self.conn, path)
                 if status != 200 or business_limited(status, body):
                     if status != 200:
@@ -478,9 +452,6 @@ def _safe_persist(
     summary["db_count_before"] = stats.get("count_before")
     summary["db_count_after"] = stats.get("count_after")
     summary["db_inserted"] = stats.get("inserted")
-    summary["db_replaced"] = stats.get("replaced", 0)
-    if stats.get("blocked_bj_unconfirmed"):
-        summary["db_blocked_bj_unconfirmed"] = stats["blocked_bj_unconfirmed"]
 
 
 def run_batch(
@@ -492,8 +463,8 @@ def run_batch(
     run_dir: Path,
     max_calls: int = BATCH_CAP,
     interval: float = DEFAULT_INTERVAL,
-    st: str | date | None = None,
-    et: str | date | None = None,
+    st: str = HIST_ST.strftime("%Y%m%d"),
+    et: str = HIST_ET.strftime("%Y%m%d"),
     licence_ids: list[str] | None = None,
     connection_factory: Callable[[], Any] | None = None,
     sleeper: Callable[[float], None] = time.sleep,
@@ -503,10 +474,6 @@ def run_batch(
     close_engine: bool = True,
     persist_rows: Callable[[list[dict[str, Any]]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    try:
-        start, end = parse_window(st, et)
-    except RowReject as exc:
-        raise Halt(str(exc)) from None
     if max_calls < 1 or max_calls > BATCH_CAP:
         raise Halt("batch_cap_invalid")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -528,7 +495,6 @@ def run_batch(
     state: dict[str, Any] = {}
     written_rows: list[dict[str, Any]] = []
     calls_before = 0
-    persist_attempted = False
     try:
         state = load_counter(counter_path)
         if engine is None:
@@ -552,9 +518,7 @@ def run_batch(
         elif licence_file is not None and licence_file.exists():
             # 调用方已把证书读入内存时，仍清掉残留临时文件
             delete_licence_file(licence_file)
-        codes, skipped = requestable_history_codes(load_codes(codes_file))
-        summary["skipped_codes"] = skipped
-        summary["expansion_plan"] = plan_history_expansion(state, ledger_path=counter_path, st=start, et=end)
+        codes = load_codes(codes_file)
         done = {str(x) for x in state.get("done_history") or []}
         todo = [c for c in codes if c not in done][:max_calls]
         summary["todo"] = len(todo)
@@ -563,24 +527,20 @@ def run_batch(
         summary["licence_bind"] = bind_note
         sql_names: list[str] = []
         for code in todo:
-            _status, body = engine.call_history(state, local_secret, code, start, end)
+            _status, body = engine.call_history(state, local_secret, code, st, et)
             try:
-                rows, rejects = normalize_history(code, body, st=start, et=end)
+                rows, rejects = normalize_history(code, body)
             except (RowReject, CodeReject) as exc:
                 engine._persist_halt(state, f"payload_invalid:{exc}")
                 raise Halt(f"payload_invalid:{exc}") from None
             qcode = qualified_code(code)
-            write_normalized(bars_dir / f"{qcode}.json", code, rows, rejects, st=start, et=end)
+            write_normalized(bars_dir / f"{qcode}.json", code, rows, rejects)
             sql_path = sql_dir / f"{qcode}.sql"
             sql_path.write_text(render_insert_sql(rows, lid, bind_note=bind_note), encoding="utf-8")
             sql_names.append(str(sql_path.name))
             if not state.get("done_history"):
                 state["done_history"] = []
             state["done_history"].append(code)
-            state.setdefault("history_windows", {})[code] = {
-                "st": start.isoformat() if start else None,
-                "et": end.isoformat() if end else None,
-            }
             atomic_save(counter_path, state)
             summary["done"] += 1
             summary["written_bars"] += len(rows)
@@ -595,12 +555,11 @@ def run_batch(
         summary["sql"] = sql_names
         summary["remaining"] = len([c for c in codes if c not in set(state.get("done_history") or [])])
         if persist_rows is not None:
-            persist_attempted = True
             _safe_persist(persist_rows, written_rows, engine, state, summary)
         return summary
     except Halt as exc:
         summary["halt"] = str(exc)
-        if persist_rows is not None and written_rows and engine is not None and not persist_attempted:
+        if persist_rows is not None and written_rows and engine is not None:
             try:
                 _safe_persist(persist_rows, written_rows, engine, state, summary)
             except Halt as db_exc:
@@ -643,8 +602,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-dir", type=Path, required=True, help="原始与 SQL 只写这里，勿放仓库内")
     p.add_argument("--max", type=int, default=BATCH_CAP)
     p.add_argument("--interval", type=float, default=DEFAULT_INTERVAL, help="请求间隔秒，默认 1，小于 0.2 拒绝")
-    p.add_argument("--st", default=None)
-    p.add_argument("--et", default=None)
+    p.add_argument("--st", default=HIST_ST.strftime("%Y%m%d"))
+    p.add_argument("--et", default=HIST_ET.strftime("%Y%m%d"))
     p.add_argument(
         "--licence-id",
         action="append",

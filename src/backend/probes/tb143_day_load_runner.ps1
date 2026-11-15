@@ -6,9 +6,6 @@
     --eligible-codes <资格集> --before <日期> --split-by-year --out <输出目录> `
     --generator <app/cli/tb143_export.py 的 git blob SHA>。
 将生成的年度 CSV 与 tb143_load_day.sql 打包并生成清单后，才运行本 runner。
-每年使用新 psql 会话，默认跳过未确认 BJ（计入 skipped），沪深照常提交。
-BJ 确认须在同一 psql 会话提供至少 20 个不同合法 BJ 码的离线对照：同码同日、
-source=tdx_local、原始手量 v×100 精确等于整数股量，全部通过；本 runner 不提供强制放行参数。
 #>
 [CmdletBinding()]
 param(
