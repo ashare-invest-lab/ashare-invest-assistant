@@ -104,7 +104,7 @@ cmd_plan() {
   echo "顺序：0023、合成旧通知、备份、非空旧事件门、alembic head、与 heads 对照、timescale、apply-roles 与 verify-roles 各两遍、保留校验。"
   echo "signal_events 非 0 则停。不升级、不删行。T-B92 没有已验收交付。"
   echo "rehearse-neg：另一库插入两条合法旧事件，期望升级失败且版本与计数不变。退出 2 表示阻塞仍在，不是升级成功。"
-  echo "deploy 需要 AIA_CLOSEOUT_DEPLOY=1。self-check 即使继承该开关也只模拟。up.sh 已含迁移、timescale-apply、db-roles 和 --wait；之后才是 db-roles 容器内 verify-roles、nginx -t、HTTP 与 8 服务状态。失败即停。不重复迁移。"
+  echo "deploy 需要 AIA_CLOSEOUT_DEPLOY=1。self-check 即使继承该开关也只模拟。up.sh 先用 --exit-code-from 完成迁移、timescale-apply、db-roles，再用 --wait 等待常驻服务；之后才是 db-roles 容器内 verify-roles、nginx -t、HTTP 与 8 服务状态。失败即停。不重复迁移。"
 }
 
 cmd_merge() {

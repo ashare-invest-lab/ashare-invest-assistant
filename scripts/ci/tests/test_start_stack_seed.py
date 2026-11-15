@@ -25,6 +25,16 @@ case "$1" in
     exit 0 ;;
   up)
     echo "UP $*" >>"$log"
+    case "${!#}" in
+      migrate|timescale-apply|db-roles)
+        # A selected one-shot service has no dependent service to tell --wait
+        # that exiting 0 is success. Simulate that failure and foreground rc.
+        if [[ " $* " == *" --wait "* ]]; then exit 1; fi
+        if [[ " $* " == *" --exit-code-from ${!#} "* ]] && [ "${FAKE_JOB_SERVICE:-}" = "${!#}" ]; then
+          exit "${FAKE_JOB_RC:-0}"
+        fi
+        ;;
+    esac
     exit 0 ;;
   run)
     echo "RUN $*" >>"$log"
@@ -51,6 +61,12 @@ FAKE_DOCKER = r"""#!/usr/bin/env bash
 echo "DOCKER $*" >>"$FAKE_DIR/docker.log"
 cmd="$1"
 shift
+if [ "$cmd" = "compose" ]; then
+  bash "$FAKE_DIR/bin/compose-stub.sh" "$@"
+  rc=$?
+  echo "RESULT compose rc=$rc" >>"$FAKE_DIR/docker.log"
+  exit "$rc"
+fi
 # docker info
 if [ "$cmd" = "info" ]; then exit 0; fi
 if [ "$cmd" != "exec" ]; then exit 0; fi
@@ -85,8 +101,10 @@ def fake(tmp_path: Path) -> Path:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     compose = bindir / "compose.sh"
-    compose.write_text(FAKE_COMPOSE, encoding="utf-8")
+    # Bypass the real compose wrapper: never read .env or any secret files.
+    compose.write_text('#!/usr/bin/env bash\nexec docker compose "$@"\n', encoding="utf-8")
     compose.chmod(0o755)
+    (bindir / "compose-stub.sh").write_text(FAKE_COMPOSE, encoding="utf-8")
     docker = bindir / "docker"
     docker.write_text(FAKE_DOCKER, encoding="utf-8")
     docker.chmod(0o755)
@@ -262,3 +280,48 @@ def test_crlf_output_is_accepted_and_starts_worker(fake: Path, out: str) -> None
     log = _compose_log(fake)
     assert _seed_run(log)
     assert _worker_up(log)
+
+
+def test_one_shot_jobs_use_exit_codes_and_only_daemons_wait(fake: Path) -> None:
+    r = _run(fake, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    commands = [line.removeprefix("DOCKER compose ") for line in
+                (fake / "docker.log").read_text(encoding="utf-8").splitlines()
+                if line.startswith("DOCKER compose up ")]
+    assert len(commands) == 5, commands
+    assert commands[0].endswith("--no-deps postgres redis")
+    assert commands[-1].endswith("--no-deps api worker beat ingest signal-rt nginx")
+    for command in (commands[0], commands[-1]):
+        assert "--wait" in command.split() and "-d" in command.split()
+    for command, service in zip(commands[1:4], ("migrate", "timescale-apply", "db-roles")):
+        assert command.split() == ["up", "--build", "--no-deps", "--exit-code-from", service, service]
+    log = _compose_log(fake)
+    assert log.index("UP up --build --no-deps --exit-code-from db-roles") < log.index("RUN run")
+    assert _receipt(fake) == "engine_policy_seed_inserted=1\n"
+
+
+@pytest.mark.parametrize("service", ["migrate", "timescale-apply", "db-roles"])
+@pytest.mark.parametrize("rc", [1, 7])
+def test_one_shot_failure_stops_all_later_steps(fake: Path, service: str, rc: int) -> None:
+    r = _run(fake, "--apply", FAKE_JOB_SERVICE=service, FAKE_JOB_RC=str(rc))
+    assert r.returncode == rc, r.stdout + r.stderr
+    assert f"{service} 退出码为 {rc}" in r.stderr
+    log = _compose_log(fake)
+    assert not _seed_run(log)
+    assert not _worker_up(log)
+    assert _receipt(fake) is None
+    jobs = ["migrate", "timescale-apply", "db-roles"]
+    for later in jobs[jobs.index(service) + 1:]:
+        assert not any(line.startswith("UP ") and line.endswith(f" {later}") for line in log.splitlines())
+    calls = (fake / "docker.log").read_text(encoding="utf-8")
+    assert f"RESULT compose rc={rc}" in calls
+
+
+def test_dry_run_describes_foreground_one_shot_jobs(fake: Path) -> None:
+    r = _run(fake)
+    assert r.returncode == 0, r.stderr
+    for service in ("migrate", "timescale-apply", "db-roles"):
+        line = next(line for line in r.stderr.splitlines() if f"--exit-code-from {service} {service}" in line)
+        assert "--wait" not in line and " -d " not in line
+    assert _compose_log(fake) == ""
+    assert not (fake / "docker.log").exists()

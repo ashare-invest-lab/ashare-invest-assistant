@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, select, tuple_
+from sqlalchemy import Select, func, insert, or_, select, tuple_, update
 
 from app.api.v1.auth import RESERVED_USERNAMES, USERNAME_RE
 from app.auth import invites, service
@@ -21,12 +21,14 @@ from app.auth.deps import (
     EngineDep,
     RedisDep,
     SettingsDep,
+    StoreDep,
     client_ip,
     current_admin,
     ip_hash,
 )
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
+from app.config import Settings
 from app.db.tables.users import account_reviews, audit_logs, invite_codes, login_attempts, users
 from app.licences import ingest_status
 from app.schemas.enums import AccountStatus
@@ -41,6 +43,20 @@ router = APIRouter(
 
 NOTE_MAX = 200
 _SCOPE = "admin:invites"
+_USER_TRANSITIONS = {
+    ("pending", "approved"): ("approve", "user.approved"),
+    ("pending", "rejected"): ("reject", "user.rejected"),
+    ("approved", "disabled"): ("disable", "user.disabled"),
+    ("rejected", "approved"): ("approve", "user.approved"),
+    ("disabled", "approved"): ("enable", "user.enabled"),
+}
+
+
+class AdminUserPatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["approved", "rejected", "disabled"]
+    reason: Annotated[str, Field(max_length=NOTE_MAX)] | None = None
 
 
 class InviteIn(BaseModel):
@@ -145,19 +161,8 @@ def create_invite(
     )
 
 
-@router.get("/users")
-def list_users(
-    admin: AdminDep,
-    settings: SettingsDep,
-    engine: EngineDep,
-    page: Annotated[PageParams, Depends(page_params)],
-    status: AccountStatus | None = None,
-    q: str | None = None,
-) -> dict[str, Any]:
-    """契约 §7.9：只读审核列表；仅投影公开管理字段，审计 IP 摘要不出库。"""
-    del admin
-    query = (q or "").strip()
-    scope = f"admin:users:{status or ''}:{query}"
+def _admin_users_query() -> Select[Any]:
+    """GET/PATCH 共用 AdminUser 投影；审计 IP 摘要不出库。"""
     c = users.c
     # 注册审计只用于同 IP 提示；没有地域事实时保持 null，不推断地域。
     registrations = (
@@ -190,7 +195,7 @@ def list_users(
         .correlate(users)
         .scalar_subquery()
     )
-    stmt = (
+    return (
         select(
             c.id,
             c.username,
@@ -211,6 +216,37 @@ def list_users(
         )
         .where(c.deleted_at.is_(None), c.status.in_([s.value for s in AccountStatus]))
     )
+
+
+def _admin_user_view(row: Any, settings: Settings) -> dict[str, Any]:  # noqa: ANN401
+    item = dict(row._mapping)
+    item.update(
+        id=str(row.id),
+        created_at=_bj(row.created_at),
+        reviewed_at=service.bj(row.reviewed_at),
+        last_login_at=service.bj(row.last_login_at),
+        register_ip_region=None,
+        same_ip_flag=row.same_ip_registrations
+        > settings.business.auth.admin.same_ip_highlight_threshold,
+    )
+    return item
+
+
+@router.get("/users")
+def list_users(
+    admin: AdminDep,
+    settings: SettingsDep,
+    engine: EngineDep,
+    page: Annotated[PageParams, Depends(page_params)],
+    status: AccountStatus | None = None,
+    q: str | None = None,
+) -> dict[str, Any]:
+    """契约 §7.9：只读审核列表；仅投影公开管理字段。"""
+    del admin
+    query = (q or "").strip()
+    scope = f"admin:users:{status or ''}:{query}"
+    c = users.c
+    stmt = _admin_users_query()
     if status is not None:
         stmt = stmt.where(c.status == status)
     if query:
@@ -242,20 +278,75 @@ def list_users(
         scope=scope,
         settings=settings,
     )
-    items = []
-    for row in raw.items:
-        item = dict(row._mapping)
-        item.update(
-            id=str(row.id),
-            created_at=_bj(row.created_at),
-            reviewed_at=service.bj(row.reviewed_at),
-            last_login_at=service.bj(row.last_login_at),
-            register_ip_region=None,
-            same_ip_flag=row.same_ip_registrations
-            > settings.business.auth.admin.same_ip_highlight_threshold,
-        )
-        items.append(item)
+    items = [_admin_user_view(row, settings) for row in raw.items]
     return {"items": items, "next_cursor": raw.next_cursor}
+
+
+@router.patch("/users/{id}")
+def patch_user(
+    id: str,
+    body: AdminUserPatchIn,
+    request: Request,
+    admin: AdminDep,
+    settings: SettingsDep,
+    engine: EngineDep,
+    store: StoreDep,
+) -> dict[str, Any]:
+    """契约 §7.9：串行审核同一账号，状态、审核历史与审计一并提交。"""
+    try:
+        user_id = uuid.UUID(id)
+    except ValueError as exc:
+        raise AppError(ErrorCode.NOT_FOUND) from exc
+    if user_id == admin.user_id:
+        raise AppError(ErrorCode.INVALID_STATE_TRANSITION)
+    reason = None if body.reason is None else (body.reason.strip() or None)
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(users.c.status)
+            .where(users.c.id == user_id, users.c.deleted_at.is_(None))
+            .with_for_update()
+        ).first()
+        if row is None:
+            raise AppError(ErrorCode.NOT_FOUND)
+        transition = _USER_TRANSITIONS.get((row.status, body.status))
+        if transition is None:
+            raise AppError(ErrorCode.INVALID_STATE_TRANSITION)
+        if reason is None and (body.status in {"rejected", "disabled"} or row.status == "disabled"):
+            raise AppError(
+                ErrorCode.VALIDATION_ERROR,
+                details={"fields": [{"field": "reason", "issue": "required"}]},
+            )
+        review_action, audit_action = transition
+        now = service.now_utc()
+        conn.execute(
+            update(users)
+            .where(users.c.id == user_id)
+            .values(status=body.status, reviewed_at=now, reviewed_by=admin.user_id)
+        )
+        conn.execute(
+            insert(account_reviews).values(
+                user_id=user_id,
+                admin_id=admin.user_id,
+                action=review_action,
+                reason=reason,
+                created_at=now,
+            )
+        )
+        service.audit(
+            conn,
+            action=audit_action,
+            actor_id=admin.user_id,
+            actor_role=admin.user.role,
+            target_type="user",
+            target_id=str(user_id),
+            detail={"old_status": row.status, "new_status": body.status},
+            ip_hash=ip_hash(settings, client_ip(request, settings)),
+        )
+        result = conn.execute(_admin_users_query().where(users.c.id == user_id)).one()
+        item = _admin_user_view(result, settings)
+    if body.status in {"rejected", "disabled"}:
+        store.revoke_user(str(user_id))
+    return item
 
 
 @router.get("/invites")

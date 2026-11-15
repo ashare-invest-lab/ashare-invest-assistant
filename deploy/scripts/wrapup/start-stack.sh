@@ -20,6 +20,18 @@ up_one() {
   "$COMPOSE" up -d --build --wait --wait-timeout "${UP_WAIT_TIMEOUT:-300}" "$@"
 }
 
+# Keep the named service container for service_completed_successfully dependencies.
+# --wait requires running/healthy; a one-shot job must instead finish with rc=0.
+up_job() {
+  local service="$1" rc=0
+  wrapup_log "compose up --build --no-deps --exit-code-from $service $service"
+  "$COMPOSE" up --build --no-deps --exit-code-from "$service" "$service" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    wrapup_log "ERROR: $service 退出码为 $rc：立即停止，不启动后续服务"
+    exit "$rc"
+  fi
+}
+
 # migrate / db-roles 之后、启动 worker 之前。只认 stdout 整段为
 # engine_policy_seed_inserted=0 或 1；写入本轮 DEST 收据。冲突、非 0、无法解析则不启 worker、不删行。
 wrapup_seed_engine_policy() {
@@ -77,9 +89,9 @@ if ! wrapup_need_apply "按顺序启动/重建栈（保留数据卷，不 down -
   wrapup_log "  1. $COMPOSE up -d --build --wait --no-deps postgres redis"
   wrapup_log "  2. 只读 alembic_version；若已是 0029 则比对 ingest_private/触发器/函数（T-A70）"
   wrapup_log "  3. db-precheck-0017.sh（只读）"
-  wrapup_log "  4. $COMPOSE up -d --build --wait --no-deps migrate"
-  wrapup_log "  5. $COMPOSE up -d --build --wait --no-deps timescale-apply"
-  wrapup_log "  6. $COMPOSE up -d --build --wait --no-deps db-roles"
+  wrapup_log "  4. $COMPOSE up --build --no-deps --exit-code-from migrate migrate"
+  wrapup_log "  5. $COMPOSE up --build --no-deps --exit-code-from timescale-apply timescale-apply"
+  wrapup_log "  6. $COMPOSE up --build --no-deps --exit-code-from db-roles db-roles"
   wrapup_log "  7. engine_policy seed（保留默认 entrypoint；只认 inserted=0 或 1，写入本轮 DEST）"
   wrapup_log "  8. $COMPOSE up -d --build --wait --no-deps api worker beat ingest signal-rt nginx"
   wrapup_seed_engine_policy
@@ -110,9 +122,9 @@ fi
 wrapup_check_alembic_0029 "$pgc" "$pgdb"
 "${WRAPUP_DB_PRECHECK:-$AIA_ROOT/deploy/scripts/db-precheck-0017.sh}" --container "$pgc" --db "$pgdb"
 
-up_one --no-deps migrate
-up_one --no-deps timescale-apply
-up_one --no-deps db-roles
+up_job migrate
+up_job timescale-apply
+up_job db-roles
 wrapup_seed_engine_policy
 up_one --no-deps api worker beat ingest signal-rt nginx
 "$COMPOSE" ps -a | wrapup_redact
