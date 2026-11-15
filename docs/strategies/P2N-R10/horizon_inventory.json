@@ -896,6 +896,11 @@
       "path": "docs/strategies/golden/T-R73_README.md",
       "scope_role": "synthetic_golden_or_helper_not_strategy",
       "note": "T-R73【虚构】PN-06 四卡合成端到端 golden；不是策略身份或生产实现"
+    },
+    {
+      "path": "docs/strategies/T-R74/param_audit.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
     }
   ],
   "records": [
@@ -2639,5 +2644,16 @@
     "identity_records_unchanged": true,
     "runtime_changed": false,
     "change": "scope 192→195；身份45、来源身份文件23、records/stats均不变"
+  },
+  "t_r74_refresh": {
+    "basis": "T-R74 用户任务：四卡参数出处审计与最小复测方案",
+    "previous_scope_files": 195,
+    "scope_files": 196,
+    "added_paths": [
+      "docs/strategies/T-R74/param_audit.md"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 195→196；身份45、来源身份文件23、records/stats不变"
   }
 }
