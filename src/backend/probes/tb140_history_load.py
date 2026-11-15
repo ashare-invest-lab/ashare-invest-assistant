@@ -164,7 +164,7 @@ def confirm_bj_offline_volume_units(
     日期须相同，source 须为 tdx_local，且原始 v（手）×100 精确等于 volume（股）。
     不自动转码；全部对照一致且至少涵盖 20 只不同代码才通过，返回确认代码集。
 
-    模块在进程内默认未确认；成功后允许两个写入口写 BJ（不限于样本代码）。
+    模块在进程内默认未确认；成功后允许各写入口写 BJ（不限于样本代码）。
     每次调用先撤销旧确认，失败抛 RowReject，不能跨调用累加样本或沿用旧确认。
     确认不从产物恢复；新进程调用 Python 写入入口仍须先离线确认。
     """
@@ -455,20 +455,30 @@ def apply_insert_offline(
     existing: set[tuple[str, str, str]],
     rows: Sequence[dict[str, Any]],
 ) -> dict[str, int]:
-    """内存模拟 ON CONFLICT DO NOTHING，不连库。"""
+    """内存模拟 ON CONFLICT DO NOTHING，不连库。
+
+    未确认 BJ 行不进入模拟表，返回 blocked_bj_unconfirmed 计数；沪深行照常处理。
+    """
     table = set(existing)
     inserted = 0
     skipped = 0
+    blocked_bj = 0
     for row in rows:
         if row.get("source") != SOURCE or row.get("adj_type") != ADJ_TYPE:
             raise RowReject("source_or_adj_forged")
+        if _bj_write_unconfirmed(row):
+            blocked_bj += 1
+            continue
         key = (str(row["code"]), str(row["trade_date"]), ADJ_TYPE)
         if key in table:
             skipped += 1
             continue
         table.add(key)
         inserted += 1
-    return {"inserted": inserted, "skipped_existing": skipped, "total": len(table)}
+    result = {"inserted": inserted, "skipped_existing": skipped, "total": len(table)}
+    if blocked_bj:
+        result["blocked_bj_unconfirmed"] = blocked_bj
+    return result
 
 
 def write_normalized(
