@@ -244,7 +244,7 @@ export function DailyReportPage() {
           <Alert
             className="gap-alert" type="warning" showIcon data-testid="report-gaps"
             title={`数据缺口 ${r.gaps.length} 项（缺失不臆测；相关维度标为“未知”）`}
-            description={<ul className="gap-grid report-gap-list">{r.gaps.map((g) => <li key={g.key}><Tag>{GAP_REASON[g.reason]}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}</ul>}
+            description={<details className="report-gap-details" data-testid="report-gap-details"><summary>查看全部 {r.gaps.length} 项缺口与来源说明</summary><ul className="gap-grid report-gap-list">{r.gaps.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{GAP_REASON[g.reason]}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}</ul></details>}
           />
         </section>
       ) : null}
