@@ -135,3 +135,65 @@ PN-06 的 T-B163、T-T87 见 [post-close-synthetic-loop.md](post-close-synthetic
 | Q5 正常 owned 路径尚无因子输入 | `build_owned_snapshot` 的 `_instrument` 未携带 factors，`analyze` 取 instrument 的 factors，缺省空列表。推荐 T-B162 接通受可见性约束的因子证据到不可变快照/等价输入，T-B163 复用；PN-06 不通过改写已存快照或伪造 prepare 返回值宣称全绿。具体接口与版本固化方案未验证，待裁定 |
 
 日历主源、qfq 锚定、§14 就绪收紧、T-B151 同源替换归属、北交所单位前置及本人批准关口均已裁定，不在本节重开。
+
+## 12. 受影响可执行入口与逐项验收
+
+按 TEAM-RULES「11-15 01:05 治理升格」L-042/L-043 追加入口清单，不拆本契约、不重复正文。下列测试名均为待实现的离线验收，**全部未验证**，不代表本次运行通过；§7 的函数场景不能替代 CLI、probe、Windows 或 SQL 原入口验收。标为未验证的旁路亦不得据此宣称符合 PN-03。
+
+统一输入 S 与 §7、PN-06 §7/§12 共用：虚构 A/B（含仅供离线解析的 920 前缀代码）、D0<D1<D2、跨年开休市及缺自然日两组日历、合成 OHLC、固定北京时钟、同一快照及早到/晚到/无 available_at 事件。JSON、ZIP、CSV、SQL stage 都从 S 派生；格式需要具体日期时只映射夹具日期，另以旧 Before 常量构造边界两侧，绝不取真实行情。所有写入仅限隔离临时存储；外呼和真实行访问为零。真调麦蕊、对真实库 --apply、通达信真实全量导入仍须用户本人批准，见 §9。
+
+以下路径中的 `app/` 均指 `src/backend/app/`；同名函数按路径区分。表中验收名后缀对应下表完整测试名，不能以同一行之外的新入口结果代替。
+
+| 类型 | 标识 | 与本契约的关系 | 验收后缀 / 状态 | 不得替代 |
+| --- | --- | --- | --- | --- |
+| 函数 | `app/aggregates/calendar.py` 的 `seed_calendar` | §2–§3 全自然日播种；当前可覆盖 is_open | `seed_calendar`；未验证 | 仅验证 JSON 合法 |
+| 函数 | `app/aggregates/calendar.py` 的 `market_clock` | §3 北京日期、休市与缺覆盖 | `market_clock`；未验证 | 播种成功 |
+| 函数 | `app/reports/service.py` 的 `covered` | §3 当日覆盖前置 | `covered`；未验证 | market_clock 用例 |
+| 函数 | `app/marketdata/daily_snapshot.py` 的 `_sessions` | §3 窗口不能缺自然日 | `sessions`；未验证 | 当日 covered 用例 |
+| 函数 | `app/marketdata/daily_snapshot.py` 的 `build_owned_snapshot` | §3、§4 日历及因子输入缺口 | `owned_snapshot`；未验证 | _sessions 单测 |
+| 函数 | `app/features/pipeline.py` 的 `prepare` | §4 可见性、qfq@as_of、缺因子 | `prepare`；未验证 | 导入事件成功 |
+| CLI | `python -m app.cli calendar-seed`（`app/cli/calendar_seed.py` 的 `main` 亦可直调） | 当前只读 `config/trading_calendar.json`；默认 dry-run，--apply 才写库，非完整 merged_calendar | `calendar_seed_cli`；未验证 | seed_calendar 单测、验证年历成功 |
+| CLI | `python -m app.cli.tb143_export gbbq` | §4 导出事件快照；输出无 available_at | `gbbq_cli`；未验证 | 解码函数单测 |
+| CLI | `python -m app.cli.tb143_export day` | §2–§3 日线核对输入；可传 --before，不定义日历 | `day_cli`；未验证 | 新日历合并测试 |
+| SQL | `src/backend/probes/tb143_load_meta.sql` | §4 gbbq→market.ex_rights_events；当前 stage 无 available_at | `load_meta_sql`；未验证 | gbbq CLI 或 prepare 单测 |
+| Windows | `src/backend/probes/tb143_day_load_runner.ps1` | 只导日线，不改日历；默认 Before 为 2023-11-13，仍是旧截止日入口（L-020/L-043） | `day_runner_ps1`；未验证 | PN-03/C1 取消截止日的新入口测试 |
+| SQL | `src/backend/probes/tb143_load_day.sql` | 只导日线，不补日历；强制 trade_date 小于传入 before | `load_day_sql`；未验证 | PS1 调用成功、新 CLI 无截止日测试 |
+| 研究脚本 | `docs/strategies/calendar/build_trading_calendar_2026.py` | 仅生成年份预公告文件，不能证明 C8 历史已补齐；本单不改/运行该目录 | `research_calendar`；未验证 | calendar-seed 验证成功 |
+| probe | `src/backend/probes/tb143_pg_selfcheck.sh` | 自建临时 PG 并执行两份 SQL，含权息表；无业务日历/available_at 验收 | `pg_selfcheck`；未验证 | 旧自检 PASS、新函数测试 |
+| HTTP | `GET /today`（`app/api/v1/aggregates.py` 的 `today`） | §3 market_clock 的接口传播 | `today_http`；未验证 | service.today 或 market_clock 单测 |
+| HTTP | `GET /terminal`（`app/api/v1/aggregates.py` 的 `terminal`） | 同一业务时钟的另一路由 | `terminal_http`；未验证 | /today 路由测试 |
+| HTTP | `GET /market/overview`（`app/api/v1/aggregates.py` 的 `overview`） | 同一业务时钟的市场读取 | `overview_http`；未验证 | /today 路由测试 |
+
+| 测试名 | Given | When | Then |
+| --- | --- | --- | --- |
+| `test_pn03_entry_seed_calendar` | S 的已核对覆盖与冲突候选 | 经播种接线调用 seed_calendar | 覆盖内开休市齐全；冲突在写入前拒绝，不以函数可覆盖为授权 |
+| `test_pn03_entry_market_clock` | S 的休市、缺日及等价时区瞬时 | 分组调用原函数 | 休市找前开市日；缺日/覆盖外报 calendar_not_covered，时区等价 |
+| `test_pn03_entry_covered` | S 的开市、休市、未知日 | 分别调用 covered | 真、假及带 CALENDAR_NOT_COVERED issue 的错误三者区分 |
+| `test_pn03_entry_sessions` | S 的完整/缺日窗口 | 调用 _sessions | 完整只取开市日；缺自然日返回缺覆盖，不按星期补 |
+| `test_pn03_entry_owned_snapshot` | S 的窗口缺日或因子未接通 | 调用原快照及消费路径 | 保留日历/因子缺口，不改存档 JSON 制造成功 |
+| `test_pn03_entry_prepare` | S 的可见、晚到、无时点因子及 BJ 无因子组 | 各 T 调用 prepare | 仅可见版本入选，T 锚等于 raw；缺因子为空并留 gap，不补 1 |
+| `test_pn03_entry_calendar_seed_cli` | S 映射为仅 2026 预公告 JSON，另有 merged_calendar 冲突组 | 经命令分派和模块 main 分别 dry-run；隔离库验证 --apply 接线 | 默认零写入；单年校验不报 C8 补齐；冲突不得静默覆盖，缺守卫则验收失败并保持未验证 |
+| `test_pn03_entry_gbbq_cli` | S 派生的合成事件包与匹配/不匹配摘要，解码依赖用合成替身 | 执行原 gbbq 子命令，不加载真实密钥 | 摘要错误拒绝；成功保留版本；无 available_at 仍不能进入可见因子 |
+| `test_pn03_entry_day_cli` | S 派生 ZIP，日期跨旧截止边界 | 原 day 子命令分别不传/显式传 --before | 无参数不暗截；显式窗口与拒绝/跳过计数可审阅，不提升日历覆盖 |
+| `test_pn03_entry_load_meta_sql` | S 派生 CSV、临时表及重复事件 | 在隔离 PG 执行原 SQL 后接可见性检查 | 版本可追溯且重复不增；stage 无时点只留缺口，registered_at 不自动冒充 available_at |
+| `test_pn03_entry_day_runner_ps1` | S 的跨截止年度包与隔离命令替身 | 运行原 PS1 默认及显式 Before 两组 | 揭示默认 2023-11-13 及每次 SQL 参数；无声明截断即失败，不报 PN-03/C1 已取消截止日 |
+| `test_pn03_entry_load_day_sql` | S 的 before 前、等于、晚于边界 CSV | 在隔离 PG 分组执行原 SQL | 旧边界拒绝整批且无静默丢行；窗口须显式声明，不报取消截止日通过，不写日历 |
+| `test_pn03_entry_research_calendar` | S 的年份映射与历史缺口 | 在临时副本隔离执行原生成逻辑 | 单年输出不冒充 merged_calendar/C8；不得写回 docs/strategies 或业务库 |
+| `test_pn03_entry_pg_selfcheck` | S 派生临时 PG 数据与同一事件版本 | 通过原自检入口执行并检查其覆盖范围 | SQL 证据可追溯；不因现有 PASS 宣称日历补齐或事件可见性已验收 |
+| `test_pn03_entry_today_http` | S 的缺日/已知休市两组 | 本地请求 GET /today | 缺覆盖错误不吞成休市；已知休市沿原协议，无外呼 |
+| `test_pn03_entry_terminal_http` | 同一 S | 本地请求 GET /terminal | 独立验证缺覆盖与休市传播，不借 /today 结果 |
+| `test_pn03_entry_overview_http` | 同一 S | 本地请求 GET /market/overview | 独立验证缺覆盖与休市传播，不借 /today 结果 |
+
+检索补列的间接日历消费者如下，**逐个未验证**，不能用上述直接入口用例宣称通过；后续均须以 S 单独记录原入口的缺覆盖/可见性结果。它们不因不在本单实现范围而被视为不存在。
+
+| 类型 | 标识与关系 | 状态 / 不得替代 |
+| --- | --- | --- |
+| 函数/任务 | `app/marketdata/daily_bars.py` 的 `backfill_window_days`、`fetch_and_record`、`daily_bars_fetch_task`；`app/ingest/daily_bars_plan.py` 的 `window_days`、`ready_for_window`：取数窗口 | 各入口未验证；不得用 _sessions 单测替代 |
+| CLI | `python -m app.cli daily-bars-backfill`、`python -m app.cli daily-bars-import-tdx` 及 `app/cli/tdx_import.py` 的 `recommended_until`：日历推导窗口 | 各入口未验证；不得用新 day CLI 测试替代 |
+| 函数/任务 | `app/workers/daily.py` 的 `phase`；`app/workers/jobs.py` 的 `slot_jobs`；`app/signals/service.py` 的 `calendar_state`；`app/tracking/service.py` 的 `calendar`、`run_one`：阶段/到期日 | 各入口未验证；不得用 market_clock 单测替代 |
+| 函数 | `app/marketdata/owned_daily_read.py` 的 `OwnedDailyBarsReader.read`；`app/api/v1/portfolio.py` 的 `previous_open_day`；`app/reports/comparison.py` 的 `apply`；`app/reports/dimensions.py` 的 `financial_pit`：价格/比较日/可见日 | 各入口未验证；不得用 prepare 单测替代 |
+| 函数/HTTP | `app/marketdata/dataset_queries.py` 的 `validate_dataset_query`；`app/api/v1/security_fund_flows.py` 的 `validate_range`、`GET /securities/{code}/fund-flows`：覆盖校验 | 各入口未验证；不得用 /market/overview 测试替代 |
+| 函数/任务 | `app/risk/rc1.py` 的 `load`、`assess`；`app/risk/worker.py` 的 `task`；`app/plans/worker.py` 的 `check`、`task`；`app/feedback/pause.py` 的 `apply_receipt`、`resume_due`：日历风控/恢复 | 各入口未验证；不得用 PN-06 风控新测试替代 |
+| 函数/任务 | `app/intraday/engine.py` 的 `session`、`compute`；`app/importing/pipeline.py` 的 `_calendar`、`load_context`；`app/master/mairui_snapshot.py` 的 `apply_delivery`、`latest_visible_flags`：盘中/导入/主数据 | 各入口未验证，不接入本次离线成功声明；不得用盘后新测试替代 |
+| 函数/任务 | `app/ingest/verify_licence.py` 的 `process_verify_intent`、`tick`：验证年历不写业务日历 | 各入口未验证且禁真调；不得用验证成功代替 C8 |
+| probe | `src/backend/probes/tb81_evidence.py` 的 `analyze`；`src/backend/probes/p13_analyze.py` 的 `analyze`：单份日历/研究可见性 | 各入口未验证；旧固定窗口或研究日历结果不证明业务覆盖 |

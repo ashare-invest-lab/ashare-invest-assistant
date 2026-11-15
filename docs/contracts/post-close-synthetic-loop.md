@@ -135,3 +135,97 @@ fake 已用于 `test_analyze_fake_bars_produces_evaluations`，daily_bars 的来
 | Q5 全绿闭环如何界定 | 推荐指满足既有规则的合成模拟实例贯通五段且留足证据；允许既有模拟门禁保持不可实盘执行，不把全绿解释为策略晋级。D1/D2 跟踪痕迹和单独到期缺基准用例分别验收，不强求 D2 完成所有周期 |
 
 日历主源、qfq@as_of、§14 收紧、T-B151 边界及本人批准关口均沿已裁定口径，不在此重开。
+
+## 12. 受影响可执行入口与逐项验收
+
+按 L-043 补全入口；统一输入 S 见 [trading-calendar-exrights.md](trading-calendar-exrights.md) §12，沿本契约 §7 增加两合成 owner、例行/窗口/回填/tdx_import 批、完成/非完成/晚到行、可见/缺失因子和模拟跟踪到期组。每种格式均由同一 S 派生，各入口独立调用并留结果；不能以新入口测试代替旧入口。入口表列测试名后缀，对应下表的 `test_pn06_entry_*`；**全部待实现、未验证**，现有 §7 用例与旧 selfcheck PASS 均不构成逐入口已通过。
+
+`app/` 均指 `src/backend/app/`。只定义离线合成验收，不运行真实调度；HTTP 仅本地请求，SQL 仅隔离临时库，PS1 仅临时包和隔离命令替身，取数 transport/模型/通知禁止外呼。真调麦蕊、对真实库 --apply、通达信真实全量导入须用户本人批准（§9）。旧 probe 未验证前不得接入本闭环；这是契约使用限制，本补丁未修改脚本或调度来实施停用。
+
+| 类型 | 标识 | 与本契约的关系 | 验收后缀 / 状态 | 不得替代 |
+| --- | --- | --- | --- | --- |
+| 函数 | `app/marketdata/daily_snapshot.py` 的 `daily_bars_ready` | §3 例行批筛选及 owner | `ready`；未验证 | 预置 ready 或取数成功 |
+| 函数 | `app/marketdata/daily_snapshot.py` 的 `build_owned_snapshot` | §3 来源、完成版、截止与不可变快照 | `snapshot`；未验证 | ready 单测 |
+| 任务 | `app/marketdata/daily_bars.py` 的 `daily_bars_fetch_task` | §2 任务参数及运行记录 | `fetch_task`；未验证 | fetch_and_record 单测 |
+| 函数 | `app/marketdata/daily_bars.py` 的 `fetch_and_record` | §2 合成写入与批型 | `fetch_record`；未验证 | 新 consumer 测试 |
+| 函数 | `app/workers/daily.py` 的 `analyze` | §3→§4 ready 后惰性构建 | `analyze`；未验证 | 预置快照求值 |
+| 函数 | `app/workers/daily.py` 的 `phase` | §3/§5 分 owner 阶段事务及失败 | `phase`；未验证 | analyze 单测 |
+| 任务 | `app/workers/daily.py` 的 `analysis_task` | ANALYZE 原任务包装入口 | `analysis_task`；未验证 | 直调 phase |
+| 任务 | `app/workers/daily.py` 的 `report_task` | §5 REPORT 原任务入口 | `report_task`；未验证 | reports.service.build 单测 |
+| 任务 | `app/workers/daily.py` 的 `recover_task` | §5 失败/中断恢复入队 | `recover_task`；未验证 | 正常 phase 成功 |
+| 函数 | `app/features/pipeline.py` 的 `prepare` | §4 可见因子与特征 gap | `prepare`；未验证 | stub 特征结果 |
+| 函数 | `app/features/evaluation.py` 的 `evaluate_snapshot` | §4 真正消费快照求值 | `evaluate_snapshot`；未验证 | prepare 单测 |
+| 函数 | `app/workers/assembly.py` 的 `conclusion` | §4 信号与风控证据 | `conclusion`；未验证 | 求值成功 |
+| 函数 | `app/risk/rc1.py` 的 `assess` | §4 风控及状态未知 | `assess`；未验证 | apply_risk 单测 |
+| 函数 | `app/suggestions/risk.py` 的 `apply_risk` | §4 风控作用于原策略动作 | `apply_risk`；未验证 | assess 单测 |
+| 函数 | `app/workers/assembly.py` 的 `archive_conclusions` | §5 归档接线 | `archive_conclusions`；未验证 | archive 单测 |
+| 函数 | `app/suggestions/service.py` 的 `archive` | §5 建议不可变及 owner | `archive`；未验证 | 仅检查日报存在 |
+| 函数 | `app/reports/service.py` 的 `build` | §5 缺口日报与修订 | `report_build`；未验证 | report_task 入队成功 |
+| 函数 | `app/aggregates/service.py` 的 `today` | §5 日报状态与缺口投影 | `today_service`；未验证 | /today 状态码成功 |
+| 任务 | `app/tracking/worker.py` 的 `tracking_task` | §6 跟踪任务选择 owner | `tracking_task`；未验证 | run_one 单测 |
+| 函数 | `app/tracking/service.py` 的 `run_one` | §6 消费建议版本并存跟踪 | `run_one`；未验证 | evaluate 单测 |
+| 函数 | `app/tracking/engine.py` 的 `evaluate` | §6 到期、缺基准及模拟结果 | `tracking_evaluate`；未验证 | 新闭环全绿用例 |
+| HTTP | `GET /today`（`app/api/v1/aggregates.py` 的 `today`） | §5 原协议、认证 owner 与时钟 | `today_http`；未验证 | service.today 单测 |
+| HTTP | `GET /daily-reports`（`app/api/v1/daily_reports.py` 的 `listing`） | §5 日报分页读取 | `reports_list_http`；未验证 | /today 测试 |
+| HTTP | `GET /daily-reports/{date}`（`app/api/v1/daily_reports.py` 的 `detail`） | §5 归档详情及旧投影 | `report_detail_http`；未验证 | 日报列表测试 |
+| CLI | `python -m app.cli daily-bars-backfill`（`app/cli/daily_bars_backfill.py` 的 `main`） | 默认 dry-run，--apply 只入队，不自行取数 | `backfill_cli`；未验证 | daily_bars_fetch_task 单测 |
+| CLI | `python -m app.cli daily-bars-import-tdx`（`app/cli/tdx_import.py` 的 `daily_main`） | 写 tdx_local/导入审计不等于例行 ready；永不进 owned | `tdx_cli`；未验证 | 新 source 过滤单测 |
+| CLI | `python -m app.cli.tb143_export day` | 旧 SQL/PS1 上游 CSV 与 before 窗口 | `day_cli`；未验证 | 新导入 CLI 测试 |
+| probe | `src/backend/probes/tb140_daily_bars.py` 的 `main` / `mkt`（latest20、ssjy_all、history） | 真调旧入口；mkt 将 920 误判 SH，历史默认旧窗口 | `tb140_daily_bars`；未验证，禁止接入闭环 | market_of、old_buggy_mkt 副本或新路由测试 |
+| probe | `src/backend/probes/tb140_history_load.py` 的 `normalize_history` / `apply_daily_bars` | 规范化/写 mairui 来源，不自动证明例行 ready | `history_load`；未验证 | market_of 单测 |
+| probe | `src/backend/probes/tb140_history_backfill.py` 的 `main` / `run_batch` | 旧回填、固定历史范围及 transport | `history_backfill`；未验证，禁真调 | 新 backfill CLI 测试 |
+| probe | `src/backend/probes/tb140_history_selfcheck.py` 的 `main` | 存在；含旧 mkt 规则副本，未执行旧脚本原入口 | `history_selfcheck`；未验证 | selfcheck PASS 代替旧 mkt 验收 |
+| probe | `src/backend/probes/tb140_history_supervisor.py` 的 `main` / `run_supervised` | 存在；跨批续接、写库与运行归属 | `history_supervisor`；未验证，禁真调 | run_batch 单测 |
+| Windows | `src/backend/probes/tb143_day_load_runner.ps1` | 默认 Before 为 2023-11-13；只导日线不补日历，不制造例行批 | `day_runner_ps1`；未验证 | PN-03/C1 新入口无截止测试 |
+| SQL | `src/backend/probes/tb143_load_day.sql` | before 强制边界；写 tdx_local，不应使 ready 误判 | `load_day_sql`；未验证 | PS1 成功、tdx CLI 测试 |
+| SQL | `src/backend/probes/tb143_load_meta.sql` | 因子上游事件；stage 无 available_at | `load_meta_sql`；未验证 | prepare 的合成因子通过 |
+| probe | `src/backend/probes/tb143_pg_selfcheck.sh` | 两份 SQL 原入口合成自检；不含闭环 ready | `pg_selfcheck`；未验证 | 旧 PASS 代替 ready/owned 验收 |
+| 任务 | `app/workers/jobs.py` 的 `worker_tick` / `slot_jobs` / `beat_slots` | 原任务分派、17:15/17:30 与 REPORT/TRACKING 入队 | `worker_dispatch`；未验证 | 直调各任务函数 |
+| 函数 | `app/marketdata/daily_bars_outbox.py` 的 `enqueue` | 当前取数任务的 outbox 交接 | `outbox`；未验证 | fetch_and_record 单测 |
+| 任务 | `app/ingest/daily_bars_consumer.py` 的 `process` / `tick` / `wake_delayed` | 当前消费、例行/回填批归属与续接 | `consumer`；未验证 | 旧 probe 或 fetch_task 单测 |
+
+下表测试名前缀完整写出；一行含多个包装/子入口时须逐个参数化调用原入口，独立记录结果，不以共享下游通过代替包装入口验收。
+
+| 测试名 | Given | When | Then |
+| --- | --- | --- | --- |
+| `test_pn06_entry_ready` | S 仅窗口/回填/导入批，另组最新例行失败 | 直接调用 daily_bars_ready | 不就绪，不回退旧成功；合格例行单独验证，不 monkeypatch ready |
+| `test_pn06_entry_snapshot` | S 的时点边界、tdx_local 及缺日/缺因子组 | 调用 build_owned_snapshot 并消费 | owned 排除 tdx_local/非完成/晚到行，缺口保留，因子未接通不伪造全绿 |
+| `test_pn06_entry_fetch_task` | S 的例行/窗口参数，含回填批型加空窗口 | 调用原任务，接隔离 outbox/transport | 批型审计准确；非法组合拒绝，写入不冒充就绪 |
+| `test_pn06_entry_fetch_record` | S 的 fake 输入及失败组 | 调用 fetch_and_record | 仅写合成行、运行与 issues，失败保留，不伪装 mairui |
+| `test_pn06_entry_analyze` | S ready 真/假两组 | 调用 analyze | 仅过闸后构建；缺口日报可用，不预置或事后改快照 |
+| `test_pn06_entry_phase` | S 两 owner、未知日及中途异常 | 分别执行 ANALYZE/REPORT phase | owner 隔离；缺日不当休市；失败记录保留，重复幂等 |
+| `test_pn06_entry_analysis_task` | 同一 S 的 ready 真/假组 | 调原 analysis_task | ANALYZE 接线与 owner/date 传递可核，不绕 ready |
+| `test_pn06_entry_report_task` | S 的缺口分析产物 | 调原 report_task | 产生缺口日报，不能造建议或吞 issues |
+| `test_pn06_entry_recover_task` | S 的中断阶段与固定恢复时钟、隔离队列 | 调原 recover_task 两次并消费 | 恢复意图可追踪且防重复；消费仍过 ready，不回写已完成旧建议 |
+| `test_pn06_entry_prepare` | S 的早到/晚到/缺因子及停牌组 | 原 prepare 计算各 T | qfq@as_of、null/gap 与尺度正确，不补 1 |
+| `test_pn06_entry_evaluate_snapshot` | S 的真实构建快照及规则版本 | 调原 evaluate_snapshot | 消费真实 prepare 产物，保留缺口，不 stub 求值 |
+| `test_pn06_entry_conclusion` | S 的求值证据、未知交易状态 | 调原 conclusion | 证据与风险可追溯，未知不判可执行，策略动作不改写 |
+| `test_pn06_entry_assess` | S 的模拟持仓、现金及缺价格/状态组 | 调原 assess | 风险与解除条件可读，不以缺数判安全 |
+| `test_pn06_entry_apply_risk` | 同一 S 的原动作、风险结果及 gaps | 调原 apply_risk | 风险限制保留，原策略动作与 gap 不被抹掉 |
+| `test_pn06_entry_archive_conclusions` | S 的原 conclusion 产物 | 调原 archive_conclusions 两次 | owner、证据及版本串联，业务归档幂等 |
+| `test_pn06_entry_archive` | S 的建议版本与晚到修订 | 调原 archive 后读取旧版本 | 旧指纹不变，模拟标志保留，不跨 owner |
+| `test_pn06_entry_report_build` | S 的完整/缺口产物 | 调原 reports.service.build 并重复 | 冻结证据与修订不被覆盖；有日报不代表数据完整 |
+| `test_pn06_entry_today_service` | S 的无报告/building/partial 组 | 调原 aggregates.service.today | 沿既有状态协议并保留缺口，不将 ready 展示解读为全链完整 |
+| `test_pn06_entry_tracking_task` | S 两 owner 建议及固定到期时钟 | 调原 tracking_task | 任务选择与跟踪痕迹隔离，无行情/基准外呼 |
+| `test_pn06_entry_run_one` | S 的建议版本、到期/未到期/缺基准组 | 调原 run_one | 等待/排除原因及建议版本可追踪，不改旧建议 |
+| `test_pn06_entry_tracking_evaluate` | S 的模拟成交窗口与缺基准组 | 调原 tracking.engine.evaluate | 按原周期产模拟结果或缺口，不造收益/完整统计 |
+| `test_pn06_entry_today_http` | S 两 owner 及缺日/缺口日报 | 本地请求 GET /today | 认证隔离、时钟错误与缺口保留，成功响应不冒充闭环完整 |
+| `test_pn06_entry_reports_list_http` | S 两 owner、多修订与分页组 | 本地请求 GET /daily-reports | 列表不串 owner，分页与已有状态协议一致 |
+| `test_pn06_entry_report_detail_http` | S 的冻结日报及旧组件时点 | 本地请求 GET /daily-reports/{date} | 详情只投影已冻结证据，不查询晚到输入回写旧报告 |
+| `test_pn06_entry_backfill_cli` | S 的日历和隔离队列 | 经命令分派/模块 main dry-run；隔离替身验证 --apply 分支 | 默认零入队/取数；apply 仅回填入队，消费不使例行 ready 变真 |
+| `test_pn06_entry_tdx_cli` | S 派生 .day 文件且无例行批 | 经命令分派/原 daily_main 离线导入后调 ready 和快照 | tdx_import 成功不使 daily_bars_ready 变真；tdx_local 永不进入 owned |
+| `test_pn06_entry_day_cli` | S 派生跨旧截止 ZIP | 调原 day 子命令有/无 --before 两组 | 显式窗口与计数可读，不暗截、不写例行成功批 |
+| `test_pn06_entry_tb140_daily_bars` | S 的虚构 920 代码及旧窗口两侧日期 | 仅隔离提取原文件 mkt 定义求值，并静态检查 main 各子命令；不导入/执行其密钥或真调逻辑 | 记录原 mkt 误判与旧截止风险，仍未验证、禁止接入；不得用 market_of 或规则副本宣称修复 |
+| `test_pn06_entry_history_load` | S 的合成响应、冲突行与隔离连接 | 分别调用原 normalize_history、apply_daily_bars 后判 ready | 来源/时点与冲突可追溯；历史落库不自动成为例行就绪证据 |
+| `test_pn06_entry_history_backfill` | S 的模拟响应、虚构窗口及 STOP/限流组 | 分别调用原 main/run_batch，全部依赖接离线替身 | 原窗口显式可审阅；遇熔断停，不真调、不读真实凭据，不报例行 ready |
+| `test_pn06_entry_history_selfcheck` | S 替身及 socket 禁网 | 经原 main 核对各自检覆盖对象 | 自检结果只归所调原入口；old_buggy_mkt 副本不证明旧脚本 mkt 已通过 |
+| `test_pn06_entry_history_supervisor` | S 的跨批、失败、续接及隔离存储 | 分别调用原 main/run_supervised，接离线连接与时钟 | 续接/批型/失败可追溯，回填不误作例行，不读真实凭据 |
+| `test_pn06_entry_day_runner_ps1` | S 的跨旧截止年度包、隔离 docker/psql 替身 | 执行原 PS1 默认/显式 Before 两组并查 ready | 默认 2023-11-13 须声明，未声明截断即失败；不写日历或例行成功批，不宣称 PN-03/C1 取消截止通过 |
+| `test_pn06_entry_load_day_sql` | S 派生 before 前/等于/之后 CSV 与无例行批临时库 | 执行原 SQL 后调用 ready/owned | 边界拒绝整批不静默丢行；tdx_local 不进 owned，ready 不因导入变真 |
+| `test_pn06_entry_load_meta_sql` | S 的事件 CSV 无 available_at | 隔离执行原 SQL 后接因子消费 | 注册成功不等于历史可见；因子缺口继续阻断可执行结论 |
+| `test_pn06_entry_pg_selfcheck` | S 派生临时 PG 输入 | 经原自检入口执行并接 ready/owned 检查 | 自检导入成功不使 ready 变真；原脚本无此断言时保留未验证 |
+| `test_pn06_entry_worker_dispatch` | S 固定 17:15/17:30、原任务表和隔离队列 | 分别调用 slot_jobs、beat_slots、worker_tick | 取数→ANALYZE→REPORT/TRACKING 接线可追踪；ready/快照不被直接调度，失败链可见 |
+| `test_pn06_entry_outbox` | S 的例行/回填入队参数与重复请求 | 调原 enqueue | 批型、owner、窗口保留，入队不冒充取数完成/ready |
+| `test_pn06_entry_consumer` | S 的例行/回填消息、完成/失败/延迟组 | 分别调用原 process、tick、wake_delayed，transport 禁网 | 运行记录及续接归属准确；回填不升格例行，外呼尝试为零 |
+
+补检的旁路入口亦逐个标为**未验证**：`app/risk/evaluation.py` 的 `assessed`、`app/suggestions/risk.py` 的 `evaluate_risk`（conclusion 下游风控）；`app/signals/service.py` 的 `write_candidate`（信号持久化）；`app/reports/service.py` 的 `latest`（日报读取）；`app/tracking/api.py` 的 `GET /suggestions/{identifier}/tracking`、`GET /strategies/{strategy_id}/versions/{version_id}/tracking`（跟踪读取）。后续各用 S 独立验收，不以本节盘后调用代替。`python -m app.workers.beat`、`python -m app.workers.worker`、`python -m app.workers.ingest` 的进程启动入口同为未验证，不能以 worker_tick/consumer 单测宣称真实调度已验收。
