@@ -14,7 +14,14 @@ def plan(files, config):
     """Return (files, estimated seconds) for each shard, in shard order."""
     # Whole files only. Every shard is its own runner and runs one worker, so serial_* files
     # from tests/ci-groups.yaml never share PG, ports or files with a concurrent test.
-    units = [[path] for path in sorted(set(files))]
+    remaining = set(files)
+    units = []
+    for group in config.get("colocate", []):  # hidden cross-file dependencies stay in one shard
+        members = sorted(remaining.intersection(group))
+        if members:
+            units.append(members)
+            remaining.difference_update(members)
+    units.extend([path] for path in sorted(remaining))
     weighted = [(sum(config["weights"].get(path, 1.0) for path in unit), unit)
                 for unit in units]
     overhead = config.get("shard_overhead_seconds", {})

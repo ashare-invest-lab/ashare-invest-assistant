@@ -5,6 +5,13 @@
     "serial_pg": 65
   },
   "_max_skipped_source": "main run 43725507492（c6a79d0）JUnit：serial_pg 组 1190 passed / 65 skipped / 0 failed；跳过原因均为接口未实现或部署期角色/口令目录，非缺 PG。上调须在 PR 写明理由。",
+  "colocate": [
+    [
+      "tests/backend/unit/test_ta87_m1_a1_a24_t_t50.py",
+      "tests/backend/unit/test_ta95_r6_g1_g3_t_t61.py"
+    ]
+  ],
+  "_colocate_source": "隐性跨文件依赖须同片（片内按收集顺序执行）：t_t50 的 _ensure_tpl 创建 tt51_tpl，t_t61 的 engine 以它为模板；分开后 t_t61 三例「无法在目标实例上创建临时库」跳过（PR #192 run 43728842867 由 serial_pg 跳过守卫拦下）。",
   "shard_overhead_seconds": {
     "1": 45
   },

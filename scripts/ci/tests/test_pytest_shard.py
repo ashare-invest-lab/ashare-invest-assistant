@@ -19,6 +19,9 @@ def test_plan_deterministic_union_overhead_and_unknown_files():
     assigned = [path for members, _ in plan for path in members]
     assert sorted(assigned) == sorted(files)
     assert len(assigned) == len(set(assigned))
+    config["colocate"] = [["a.py", "d.py"]]
+    plan = pytest_shard.plan(files, config)
+    assert any({"a.py", "d.py"} <= set(members) for members, _ in plan)
 
 
 def test_plugin_reports_full_collection_and_deselects(tmp_path, monkeypatch):
@@ -76,7 +79,7 @@ def write_reports(tmp_path, reports):
 
 
 @pytest.mark.parametrize("invalid", ["empty", "missing", "duplicate", "omission", "file-twice", "overlap",
-                                     "collection", "unlisted", "multi-worker"])
+                                     "collection", "unlisted", "multi-worker", "colocate-split"])
 def test_union_rejects_invalid_reports(tmp_path, capsys, invalid):
     args, reports = union_inputs(tmp_path)
     if invalid == "empty":
@@ -97,6 +100,10 @@ def test_union_rejects_invalid_reports(tmp_path, capsys, invalid):
         reports[1]["files"] = ["tests/backend/z.py"]
     elif invalid == "multi-worker":
         reports[0]["workers"] = 4
+    elif invalid == "colocate-split":
+        config = tmp_path / "config.json"
+        config.write_text(json.dumps({"shards": 2, "weights": {},
+                                      "colocate": [["tests/backend/a.py", "tests/backend/c.py"]]}))
     assert check_shard_union.main(args + write_reports(tmp_path, reports)) == 1
     assert "::error" in capsys.readouterr().out
 

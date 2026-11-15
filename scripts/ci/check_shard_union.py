@@ -46,6 +46,9 @@ def main(argv=None):
                     raise ValueError(f"{path} selected by shards {owners[path]} and {report['shard']}")
                 owners[path] = report["shard"]
             union.update(map(stable_id, report["selected"]))
+        for group in config.get("colocate", []):
+            if len({owners[path] for path in group if path in owners}) > 1:
+                raise ValueError(f"colocated files split across shards: {group}")
         if union != baseline:
             diff = (union - baseline) + (baseline - union)
             raise ValueError(f"selected union differs from baseline: {sorted(diff)[:5]}")
