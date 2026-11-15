@@ -132,7 +132,7 @@ tests:
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
-  - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "serial_shared", "keywords": ["T-O100 临时登记：main 6270179（#164）新增，待测试在 #190 正式分组", "socket.connect monkeypatch 拒连", "/tmp 合成路径字符串"], "unverified": true}
+  - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "serial_shared", "keywords": ["T-O100 临时登记：main 6270179（#164）新增，待测试在 #190 正式分组", "socket.connect monkeypatch 拒连", "/tmp 合成路径字符串"], "unverified": true, "reason": "T-O100 临时登记，未逐项核实资源风险；按未验证留在串行组，由测试在 #190 确认"}
   - {"file": "tests/backend/unit/test_verify_licence_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG", "Redis fake", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_verify_licence_t_b145.py", "group": "parallel", "keywords": ["world overrides imported helper world", "MagicMock engine/FakeRedis", "tmp_path", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_worker_healthcheck_offline.py", "group": "parallel", "keywords": ["fake Redis/runner", "deny_network monkeypatch", "runpy with restored sys.argv"], "unverified": false}
