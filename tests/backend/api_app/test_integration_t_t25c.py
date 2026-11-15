@@ -175,9 +175,10 @@ def _side_effects(sql: Callable[..., Any], authdb: SimpleNamespace, uid: str, t0
 @pytest.mark.parametrize("status", ["quota_exceeded", "ip_limited", "active"])
 def test_cooldown_delete_then_resubmit_same_licence_keeps_state(session: Callable[..., SimpleNamespace],
                                                                 sql: Callable[..., Any], authdb: SimpleNamespace,
-                                                                status: str) -> None:
+                                                                status: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """冷却中（quota_exceeded / ip_limited / active 且 paused_until 未到期）DELETE，再于到期前 PUT 同一证书
     → 202，恢复删除前的 status 与 paused_until，不入队验证。契约规定的是 202 + 恢复，而不是错误码。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     _require_cooldown(sql)
     s = session()
     call, lic = Rec(s), fake_licence()
@@ -198,8 +199,10 @@ def test_cooldown_delete_then_resubmit_same_licence_keeps_state(session: Callabl
 
 
 def test_cooldown_resubmit_different_licence_verifies(session: Callable[..., SimpleNamespace], sql: Callable[..., Any],
-                                                      authdb: SimpleNamespace) -> None:
+                                                      authdb: SimpleNamespace,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
     """对照：冷却中删除后换成不同证书 → 照常 pending_verification 并入队一次验证。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     _require_cooldown(sql)
     s = session()
     call = Rec(s)
@@ -214,8 +217,10 @@ def test_cooldown_resubmit_different_licence_verifies(session: Callable[..., Sim
 
 
 def test_cooldown_resubmit_after_expiry_verifies(session: Callable[..., SimpleNamespace], sql: Callable[..., Any],
-                                                 authdb: SimpleNamespace) -> None:
+                                                 authdb: SimpleNamespace,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
     """对照：保留的指纹到 paused_until 为止；到期后再提交同一证书 → 正常验证（把到期时间改到过去模拟）。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     _require_cooldown(sql)
     s = session()
     call, lic = Rec(s), fake_licence()
@@ -309,9 +314,11 @@ def test_cooldown_boundary_put_paused_until_not_expired(offset: dt.timedelta, va
 
 
 def test_resume_repeated_is_idempotent(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any],
-                                       sql: Callable[..., Any], authdb: SimpleNamespace) -> None:
+                                       sql: Callable[..., Any], authdb: SimpleNamespace,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
     """pause → resume ×3：第一次恢复（pending_verification、入队一次验证、暂停记录解除）；之后每次 204、
     状态与库行不变，不再入队验证，不新增事件 / 通知 / 暂停记录 / 证书行；审计部分见 O_F22_IDEMP。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     s = session()
     _t23.require_v028(s.client, _t23.O_B03D)
     call, admin = Rec(s), Rec(session(mkuser(role="admin")))

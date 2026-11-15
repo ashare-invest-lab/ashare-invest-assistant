@@ -716,9 +716,11 @@ def _admin_pause(acall: Rec, uid: str, pause: bool) -> None:
 
 
 def test_11_pause_put_delete_test_resume(session: Callable[..., SimpleNamespace], mkuser: Callable[..., Any],
-                                          sql: Callable[..., Any], authdb: SimpleNamespace) -> None:
+                                          sql: Callable[..., Any], authdb: SimpleNamespace,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
     """第 11 条：暂停中 PUT → 202 paused_by_admin、不入队验证；DELETE 后 GET 仍 paused_by_admin，再 PUT 仍暂停；
     POST /test → 409 DATA_LICENCE_UNAVAILABLE{status: paused_by_admin}；resume → pending_verification 且入队验证。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     s = session()
     require_v028(s.client, O_B03D)
     call, admin = Rec(s), Rec(session(mkuser(role="admin")))
@@ -769,8 +771,10 @@ def test_11_pause_delete_resume_is_not_set(session: Callable[..., SimpleNamespac
 # =============================== 第 12 条：重复 PUT 同一证书 ===============================
 @pytest.mark.parametrize("status", ["quota_exceeded", "ip_limited"])
 def test_12_repeat_put_keeps_cooldown_state(session: Callable[..., SimpleNamespace], sql: Callable[..., Any],
-                                            authdb: SimpleNamespace, status: str) -> None:
+                                            authdb: SimpleNamespace, status: str,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
     """第 12 条：quota_exceeded / ip_limited 时重复 PUT 同一证书 → 202，状态与 paused_until 不变，同一行（licence_id 不变），不入队验证。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     s = session()
     require_v028(s.client, O_B03D)
     call, lic = Rec(s), fake_licence()
@@ -789,8 +793,10 @@ def test_12_repeat_put_keeps_cooldown_state(session: Callable[..., SimpleNamespa
 
 
 def test_12_repeat_put_active_with_future_paused_until_kept(session: Callable[..., SimpleNamespace], sql: Callable[..., Any],
-                                                            authdb: SimpleNamespace) -> None:
+                                                            authdb: SimpleNamespace,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
     """第 12 条：active 且 paused_until 未到期 → 重复 PUT 保留 active 与 paused_until，不验证。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     s = session()
     require_v028(s.client, O_B03D)
     call, lic = Rec(s), fake_licence()
@@ -806,8 +812,10 @@ def test_12_repeat_put_active_with_future_paused_until_kept(session: Callable[..
 
 
 def test_12_repeat_put_invalid_goes_pending_and_verifies(session: Callable[..., SimpleNamespace], sql: Callable[..., Any],
-                                                         authdb: SimpleNamespace) -> None:
+                                                         authdb: SimpleNamespace,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
     """第 12 条：invalid 时重复 PUT 同一证书 → pending_verification，并入队一次验证。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     s = session()
     require_v028(s.client, O_B03D)
     call, lic = Rec(s), fake_licence()
