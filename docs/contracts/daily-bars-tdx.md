@@ -8,9 +8,9 @@
 - 通达信只做三件事：
   1. **交叉核对**：与已有麦蕊行逐字段比对，差异另行记录，不改任何一条原记录；
   2. **麦蕊回填起点以前的历史**：实际只有约 2021-08 到麦蕊 3 年回填起点之间、约 2.3 年，只供策略复测；
-  3. **兜底**：麦蕊回填被拒（103、429、退市股 503 之类）的代码与日期，用通达信补，仍只供研究，不进日报链路。本期只做到「核对 CLI 能列出这些代码与日期在通达信里有没有数据」；真要把兜底行写进重叠期，会与 §3.4 的截止规则冲突，按 §7 U-T2 的保守默认另开单，本期不写。
+  3. **兜底**：麦蕊回填被拒（103、429、退市股 503 之类）的代码与日期，用通达信补，仍只供研究，不进日报链路。本期只做到「核对 CLI 能列出这些代码与日期在通达信里有没有数据」；~~真要把兜底行写进重叠期，会与 §3.4 的截止规则冲突，按 §7 U-T2 的保守默认另开单，本期不写~~（T-A153 C1 取消截止日后，兜底行可直接导入，麦蕊日后补到时按 §2 替换）。
 - 导入是离线 CLI，不出网，不读证书，不需要单 D。
-- 与麦蕊 3 年回填的重叠期（约 3 年）**只做交叉核对，不写入**（§3.4）。
+- ~~与麦蕊 3 年回填的重叠期只做交叉核对，不写入~~ 已取消（T-A153 裁定 C1，编排者 2026-11-14，见 `multi-source-ingest.md` §4、§5）：通达信可导全部历史；重叠期麦蕊后到时替换 `tdx_local` 行，替换前先写对账明细。
 
 ### 1.1 数据现状（据编排者 2026-11-10 只读扫描，架构未核实）
 
@@ -26,8 +26,8 @@
 - 一条记录只来自一个源，不混写。主键 (code, trade_date, adj_type) 不改。
 - 同键冲突：
   - 已有任何行（mairui、tdx_local、fake）时，通达信导入一律 DO NOTHING；同键不同值计入 `daily_bar_conflict` 统计与核对报告，不覆盖。
-  - 已有 `tdx_local` 行、麦蕊后到：见 §7 U-T1。保守默认是麦蕊写入同样 DO NOTHING，于是该键保留通达信行；为保证「日报只用麦蕊」，快照侧按 §4 排除 `tdx_local`，并且源契约 §9.2 的 `backfill_ready` 不把 `tdx_local` 行算作已就绪。
-- 复权按麦蕊口径：库里只存不复权；复权因子按麦蕊口径由前收（pc）推出。通达信没有可靠前收，所以只有通达信行的区间推不出因子，按 Q2 保守规则记 `adjust_factor_missing`，不补 1。
+  - 已有 `tdx_local` 行、麦蕊后到：麦蕊替换该行（T-A153 裁定 C1，编排者 2026-11-14，见 `multi-source-ingest.md` §4、§5），这是唯一允许的跨源替换；先按 §5 比对并写对账明细，再在同一事务里更新整行（source 改为 mairui），对账明细写失败则不替换。替换前的过渡期内，为保证「日报只用麦蕊」，快照侧按 §4 排除 `tdx_local`，并且源契约 §9.2 的 `backfill_ready` 不把 `tdx_local` 行算作已就绪。
+- 复权按麦蕊口径：库里只存不复权；复权因子按麦蕊口径由前收（pc）推出（T-A153 C5 起改为由 gbbq 统一算，见 `multi-source-ingest.md` §2.5；gbbq 因子实现落地前，本条与源契 §6 Q2 的缺口口径照旧）。通达信没有可靠前收，所以只有通达信行的区间推不出因子，按 Q2 保守规则记 `adjust_factor_missing`，不补 1。
 - 单位：
   - 价格：股票为整数 ÷100，到分；基金、债 ÷1000 的品种不导入（§3 只留 stock）；
   - 成交量：.day 个股为股，契约统一为股，直接写入（麦蕊侧 ×100 的规则不变）；
@@ -55,7 +55,7 @@
 - 参数（都不写死）：
   - `--root`：容器内挂载根目录，必填；其下须有 sh/lday、sz/lday、bj/lday，缺任一即拒绝；
   - `--audit-dir`：容器内**可写**目录，必填，用于落盘 sha256 清单与核对结果；不得位于 `--root` 之下；
-  - `--until`：截止日期 D，必填（§3.4）；
+  - `--until`：截止日期，可选，缺省为文件内最晚日期（§3.4 已取消截止日 D）；
   - `--from`：起始日期，可选，缺省为文件内最早日期；
   - `--scope`：owned（默认，只导 `daily_universe` 里的代码）或 market（受源契约 §9.6 的 `RESEARCH_MARKET_SCOPE_ENABLED` 把关）。
     - T-A149 同步（be/T-B133 = 7d161ad，`_scope`）：语法为 `owned` 或 `market`，后面可接 `,exclude-bj`。其他写法在参数解析阶段报错，退出码 2，零写入，审计目录不写任何文件。
@@ -66,7 +66,7 @@
   2. **自己生成 sha256 清单**：对第 1 步留下的每个文件算 sha256，写成清单落盘到 `--audit-dir`（文件名含本次运行的北京时间与 run 编号）。清单每行为「sha256、字节数、相对路径」，末行为文件数与清单自身的 sha256。dry-run 也生成清单。
   3. **复跑比对**：`--audit-dir` 里若已有上一次清单，逐项比对，输出新增、删除、变化的文件数。通达信客户端会在收盘后往 .day 追加新行，所以「变化」不算错误，只记录；比对结果与清单 sha256 写进 pipeline_runs。
   4. **防读到半截文件**：解析完一个文件后再算一次 sha256，与第 2 步不同即视为导入中被改写，该文件拒绝并计数，整次运行为 partial；不影响其他文件。
-  5. 校验 D；解析与单位自检；按 `UPSERT_BATCH_ROWS` 分批写入 trade_date 在 [from, D] 内的行。
+  5. 校验 `--from`、`--until`（若给出）；解析与单位自检；按 `UPSERT_BATCH_ROWS` 分批写入 trade_date 在 [from, until] 内的行（T-A153 C1：不再有截止日 D，until 缺省为文件内最晚日期）。
 - 解析：每条 32 字节，小端 `<IIIIIfII`；日期非法、高低价矛盾、价格为 0 的记录拒绝并计数。
 - 记录级拒绝原因（T-A148 追加，按 be/T-B135 = 4e0ae7b 同步；`parse_day_bytes`、`_quantize`）：
   - 口径：
@@ -87,7 +87,7 @@
 - 幂等：写入只经 `upsert_daily_bars`，DO NOTHING；同样参数重复运行，第二次 inserted 为 0、行数不变。一次性动作，可重复运行。
 - 记录：每次运行写一条 pipeline_runs，stats 含清单 sha256、文件数、导入行数、跳过数（按原因）、冲突数、拒绝数、复跑比对计数；不写宿主路径。
   - T-A149 修订（T-B133 11:07 裁定 ①，取代上句的「每次运行」）：**dry-run 不写 pipeline_runs**。dry-run 用只读连接，结束时回滚；只有 `--apply` 在写入的同一事务里由 `DbDeps.record_run` 写一条：kind 为 daily_batch，step 为 `tdx_local.import_day`（分钟线为 `tdx_local.import_lc1`、`tdx_local.import_lc5`），status 为 ok 或 partial。dry-run 的统计只打印到标准输出（键=值逐行，末行为 dry-run 或 applied），并落在审计目录的清单与对账报告里。用例：`test_tdx_cli_generates_manifest`（断言 dry-run 时 runs 为空）。
-- 拒绝的输出：标准输出一行 `refused: <原因>`，退出码 1，零写入。日线 dry-run 另打印一行 `recommended_until=<D>`。
+- 拒绝的输出：标准输出一行 `refused: <原因>`，退出码 1，零写入。~~日线 dry-run 另打印一行 `recommended_until=<D>`~~（截止日 D 已取消，T-A153 C1）。
 
 **导入时的落盘文件（T-A149 同步，`run_import`）**
 - 清单：`tdx-<kind>-manifest-<北京时间，形如 20261110T153000>-<run 编号>.txt`，kind 为 day、lc1 或 lc5。
@@ -102,10 +102,11 @@
   - 这份报告与 §5 的 `daily-bars-crosscheck-tdx` 报告是两种文件：§5 以麦蕊为对象、有 missing_* 两类，属单 T2，尚未实现。T2 实现时字段名再统一（T-A147 建议 S5）。
 - 不出网：模块不得 import 任何 egress 或 transport。
 
-### 3.4 截止日期 D（推荐不变）
+### 3.4 截止日期 D（已取消（T-A153 裁定 C1，编排者 2026-11-14，见 `multi-source-ingest.md` §4、§5））
 
-- D 为麦蕊 3 年回填起点的前一个开市日。起点 = 以 `_default_trade_date` 为 trade_date、`backfill_window_days(conn, trade_date, 3)` 窗口的第一个开市日；dry-run 打印推荐值，`--until` 晚于它即拒绝。
+- 以下为原文，仅留档，不再执行：D 为麦蕊 3 年回填起点的前一个开市日。起点 = 以 `_default_trade_date` 为 trade_date、`backfill_window_days(conn, trade_date, 3)` 窗口的第一个开市日；dry-run 打印推荐值，`--until` 晚于它即拒绝。
 - 理由同 T-A142：整段导入会让通达信先写入重叠期，麦蕊后到时 DO NOTHING，快照又排除 `tdx_local`，持仓的日报历史窗口会出现缺口。重叠期交给交叉核对 CLI。
+- 取消理由：麦蕊后到可替换 `tdx_local` 行，日报历史窗口不会因通达信先写而留缺口；交叉核对 CLI 保留。
 
 ### 3.5 Windows 与容器
 
@@ -146,7 +147,7 @@
 | # | 内容 | 保守默认 |
 | --- | --- | --- |
 | U-T0 | 是否同意把通达信 vipdoc 下的 lday（及分钟线目录）只读挂进容器并导入（T-A143 按未答处理；目录本身用户已给出，§1.1） | 不挂载，不导入 |
-| U-T1 | 同一键已有通达信行、麦蕊后到时，是否让麦蕊替换。用户说「以麦蕊为准」，但主键一键一行，DO NOTHING 会让先到的通达信行留下 | 麦蕊也 DO NOTHING，快照排除 `tdx_local`，日报不受影响；需要替换时另开单（替换前先写核对报告） |
+| U-T1 | 同一键已有通达信行、麦蕊后到时，是否让麦蕊替换。用户说「以麦蕊为准」，但主键一键一行，DO NOTHING 会让先到的通达信行留下 | 已裁定（T-A153 裁定 C1，编排者 2026-11-14，见 `multi-source-ingest.md` §4、§5）：麦蕊替换 `tdx_local` 行，替换前先写对账明细；快照仍排除 `tdx_local` |
 | U-T2 | 「兜底」补的行是否允许进入日报的历史窗口 | 不允许，只供研究 |
 
 ## 8. 验收（G/W/T）
@@ -160,8 +161,8 @@
 - `test_tdx_file_changed_during_import_rejected`（新）：Given 打桩让某文件解析前后的 sha256 不同 / Then 该文件拒绝并计数，运行为 partial，其他文件照常导入。
 - `test_tdx_root_missing_lday_rejected`（新）：Given `--root` 下缺 bj/lday / Then 退出码非 0，零写入。
 - `test_tdx_audit_dir_must_be_writable_and_outside_root`（新）：Given `--audit-dir` 不可写，或位于 `--root` 之下 / Then 拒绝。
-- `test_tdx_rows_after_until_not_imported`（新）：Given 文件含 D 之后的记录 / When `--apply --until D` / Then 库里该代码最大 trade_date 不晚于 D。
-- `test_tdx_until_after_mairui_window_start_rejected`（新）：Given `--until` 晚于由 `backfill_window_days` 推出的麦蕊回填起点的前一开市日 / Then 拒绝；dry-run 打印推荐 D。
+- `test_tdx_rows_after_until_not_imported`（新）：Given 文件含 `--until` 之后的记录 / When `--apply --until <日期>` / Then 库里该代码最大 trade_date 不晚于该日期。
+- ~~`test_tdx_until_after_mairui_window_start_rejected`~~：删除（T-A153 裁定 C1 取消截止日 D）。
 - `test_tdx_import_rerun_idempotent`（新）：Given 同一目录、同样参数运行两次 / Then 第二次 inserted 为 0，表行数不变。
 - `test_tdx_import_readonly_mount`（保留，改写）：Given `--root` 为只读目录（测试里以 chmod 去掉写权限模拟），进程对它没有写权限 / When `--apply` / Then 成功；`--root` 内容与 mtime 不变，清单只出现在 `--audit-dir`。
 - `test_tdx_parse_record_layout`（新，不连库）：Given 一条构造的 32 字节记录（虚构代码 000001.SZ）/ Then 日期、OHLC ÷100、成交额 float32、成交量正确。
