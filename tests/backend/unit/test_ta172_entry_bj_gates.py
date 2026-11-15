@@ -299,8 +299,8 @@ def test_ta172_load_day_sql_session_bj_gate(scenario):
     creates = re.findall(r'\bCREATE\s+((?:TEMP(?:ORARY)?\s+)?TABLE)\b', code, re.I)
     if any(not kind.upper().startswith("TEMP") for kind in creates):
         issues.append("§10.12 SQL cannot create persistent tables")
-    if not re.search(r'\bROLLBACK\s*;\s*$', code, re.I) or re.search(r'\bCOMMIT\s*;', code, re.I):
-        issues.append("§10.12 staging session must end in ROLLBACK, never COMMIT")
+    if re.search(r'\bCOMMIT\b(?!\s+DROP\b)', code, re.I):
+        issues.append("§10.12 staging SQL cannot COMMIT; load_day owns the transaction")
     if scenario == "bj_default_blocked":
         if re.search(r"v_bj_confirmed\s*(?::=|boolean\s+default)\s*true", text, re.I):
             issues.append("§10.10 new SQL session cannot start confirmed")
@@ -355,11 +355,51 @@ def startup_refusal_findings(text, *, powershell):
 def test_ta172_day_load_runner_new_session_bj_gate(scenario):
     _, issues = setup_scenario(scenario)
     text = source("src/backend/probes/tb143_day_load_runner.ps1")
-    if "tb143_load_day.sql" in text:
-        issues += sql_findings(source("src/backend/probes/tb143_load_day.sql"), scenario)
-    if re.search(r"[\"'](?:confirmed|bj_confirmed)=1", text, re.I):
+    code = re.sub(r'<#.*?#>', '', text, flags=re.S)
+    code = '\n'.join(line for line in code.splitlines() if not line.lstrip().startswith('#'))
+    if re.search(r'\b(?:confirmed|bj_confirmed)\s*=\s*[\"\x27]?1\b', code, re.I):
         issues.append("§10.10 new runner session inherits boolean admission")
-    issues += startup_refusal_findings(text, powershell=True)
+    annual = re.search(
+        r'for\s*\(\$i\s*=\s*0;\s*\$i\s*-lt\s*\$csvs\.Count;[^\n]+\)\s*\{'
+        r'(?P<body>.*?)Write-Log\s+"TOTAL', code, re.S | re.I)
+    if annual is None or not re.search(
+        r'&\s*\$python\s+-m\s+app\.cli\.tb143_day_load\s+'
+        r'--csv\s+\$localCsv\s+--before\s+\$Before\b', annual['body'], re.I
+    ):
+        issues.append("§10.12 each annual CSV must start python -m app.cli.tb143_day_load")
+    if re.search(r'\bpsql\b|\bInvoke-Sqlcmd\b', code, re.I) or TARGET_DML.search(code):
+        issues.append("§10.12 runner must not execute package SQL or direct target DML")
+    if not re.search(r'if\s*\(\$loadExit\s*-ne\s*0\)\s*\{\s*throw\b', code, re.I):
+        issues.append("§10.12 Python failure must stop annual loading")
+    if not re.search(r'\}\s*catch\s*\{\s*\$exitCode\s*=\s*[1-9]\d*', code, re.I) or not re.search(
+        r'\bexit\s+\$exitCode\s*$', code, re.I
+    ):
+        issues.append("§10.12 runner failure must exit nonzero")
+    # Both container and local artifact cleanup must be conditional on every year succeeding.
+    if not re.search(r'\$allYearsSucceeded\s*=\s*\$false', code, re.I) or not re.search(
+        r'Write-Log\s+"TOTAL[^\n]*\n\s*\$allYearsSucceeded\s*=\s*\$true', code, re.I
+    ):
+        issues.append("§10.12 artifact cleanup may be enabled only after all years succeed")
+    container_cleanup = re.search(
+        r'if\s*\(\$allYearsSucceeded\)\s*\{\s*Invoke-Docker\s+@\('
+        r"'exec',\s*\$Container,\s*'rm',\s*'-rf',\s*'/tmp/tb143d'\)", code, re.I
+    )
+    local_cleanup = re.search(
+        r'if\s*\(\$allYearsSucceeded\s+-and\s+\$exitCode\s+-eq\s*0\)\s*\{'
+        r"(?P<body>.*?)\}\s*else\s*\{\s*Write-Log\s+'KEEP local", code, re.S | re.I
+    )
+    if not container_cleanup or not local_cleanup or not re.search(
+        r'\bRemove-Item\s+-LiteralPath\s+\$file\.FullName', local_cleanup['body'], re.I
+    ):
+        issues.append("§10.12 failed runner must retain container and local artifacts")
+    if "失败保留文件" not in text:
+        issues.append("§10.12 runner must describe retaining files on failure")
+    if "python -m app.cli daily-bars-import-tdx" not in code:
+        issues.append("§10.12 runner errors must give python -m app.cli daily-bars-import-tdx")
+    if scenario == "blocked_not_ok" and not re.search(
+        r'if\s*\(\$skippedBj\s*-gt\s*0\)\s*\{\s*throw\b', code, re.I
+    ):
+        issues.append("§10.10/B5 BJ blocked rows must stop loading and keep artifacts")
     fail_findings(issues)
 
 

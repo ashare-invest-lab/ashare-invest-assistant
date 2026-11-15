@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
-import importlib
 import io
 import re
 import uuid
@@ -55,12 +54,11 @@ def _create_offline_schema(pg_conn):
 
 @pytest.fixture
 def python_day_batch(pg_url, monkeypatch):
-    """同一隔离事务中的真实公共 writer；不模拟校验、写入或回滚。"""
-    from sqlalchemy import create_engine, event
-    from sqlalchemy.engine import make_url
+    """独立 schema；入口持有真实事务，另一个自动提交连接负责夹具和快照。"""
+    import psycopg
 
     from app.marketdata import daily_bars as writer
-    from app.cli import tdx_import
+    from app.cli import tb143_day_load
 
     calls = []
     inside_public_writer = False
@@ -78,53 +76,57 @@ def python_day_batch(pg_url, monkeypatch):
         return call["stats"]
 
     monkeypatch.setattr(writer, "upsert_daily_bars", observed)
-    monkeypatch.setattr(tdx_import, "upsert_daily_bars", observed)
-    engine = create_engine(make_url(pg_url).set(drivername="postgresql+psycopg"))
-    try:
-        with engine.connect() as conn, conn.begin():
-            raw_conn = conn.connection.driver_connection
-            schema = _create_offline_schema(raw_conn)
-            conn = conn.execution_options(schema_translate_map={"market": schema})
+    monkeypatch.setattr(tb143_day_load, "upsert_daily_bars", observed)
+    dsn = tb143_day_load.to_psycopg_dsn(pg_url)
+    with psycopg.connect(dsn, autocommit=True) as setup_conn:
+        with setup_conn.transaction():
+            schema = _create_offline_schema(setup_conn)
 
-            @event.listens_for(conn, "before_cursor_execute")
-            def no_target_bypass(_conn, _cursor, statement, _parameters, _context, _many):
+        class IsolatedCursorMixin:
+            def execute(self, statement, *args, **kwargs):
+                # 原入口不经过 SQLAlchemy Connection；在真正发送给 PG 的游标层
+                # 替代 before_cursor_execute 守卫，并把固定 market schema 路由到夹具。
+                assert isinstance(statement, str), "不可绕过测试的 SQL schema 隔离与 DML 守卫"
+                statement = re.sub(r'(?<![\w"])"?market"?\.', f'"{schema}".', statement)
                 if re.search(
-                    r'\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?|MERGE\s+INTO)'
-                    r'\s+(?:[\w\"]+\.)?"?daily_bars\b', statement, re.I
+                    r'\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?|MERGE\s+INTO|COPY)'
+                    r'\s+(?:ONLY\s+)?(?:[\w\"]+\.)?"?daily_bars\b', statement, re.I
                 ):
                     assert inside_public_writer, "目标日线 DML 必须实际由 upsert_daily_bars 执行"
+                return super().execute(statement, *args, **kwargs)
 
-            yield raw_conn, schema, conn, calls
-            conn.rollback()
-    finally:
-        engine.dispose()
+        class IsolatedCursor(IsolatedCursorMixin, psycopg.Cursor):
+            pass
+
+        class IsolatedServerCursor(IsolatedCursorMixin, psycopg.ServerCursor):
+            pass
+
+        try:
+            with psycopg.connect(dsn, cursor_factory=IsolatedCursor) as conn:
+                conn.server_cursor_factory = IsolatedServerCursor
+                assert conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+                yield setup_conn, schema, conn, calls
+        finally:
+            setup_conn.execute(f'DROP SCHEMA "{schema}" CASCADE')
 
 
-def _load_day_batch(conn, *, before="2025-01-01", extra_day=None):
-    """§10.12 待实现接口：函数名/参数尚未由契约定死，须与后端核对。
-
-    app.cli.tdx_import.load_day_batch(conn, bars, *, before, fetched_at)
-    接收 SQLAlchemy Connection 和 DailyBar 列表；本 helper 只造合成输入。
-    整批校验/事务/公共 writer/计数守卫必须全由被测入口负责。
-    """
-    try:
-        load = importlib.import_module("app.cli.tdx_import")
-    except ModuleNotFoundError as exc:
-        pytest.fail(f"§10.12 Python 整批入口缺失（未验证）：{exc.name}")
-    entry = getattr(load, "load_day_batch", None)
-    assert callable(entry), "§10.12 缺少 app.cli.tdx_import.load_day_batch（函数名未验证）"
-    from app.marketdata.daily_bars import DailyBar
+def _load_day_batch(conn, tmp_path, *, before="2025-01-01", extra_day=None):
+    """只生成年度 CSV；整批校验、事务、公共 writer 和计数守卫均走真实入口。"""
+    from app.cli.tb143_day_load import load_day
 
     rows = [["600999.SH", "2024-01-02", "none", 12.34, 12.34, 12.34, 12.34, 700, 8638]]
     rows.extend(extra_day or [])
-    bars = [DailyBar(
-        code=row[0], trade_date=dt.date.fromisoformat(row[1]), adj_type=row[2],
-        open=Decimal(str(row[3])), high=Decimal(str(row[4])), low=Decimal(str(row[5])),
-        close=Decimal(str(row[6])), volume=Decimal(str(row[7])), amount=Decimal(str(row[8])),
-        pre_close=None, is_suspended=None,
-    ) for row in rows]
-    return entry(conn, bars, before=dt.date.fromisoformat(before),
-                 fetched_at=dt.datetime(2031, 1, 2, 13, tzinfo=dt.UTC))
+    csv_path = tmp_path / "day_2024.csv"
+    with csv_path.open("w", encoding="utf-8", newline="") as stream:
+        csv.writer(stream).writerows([
+            ["code", "trade_date", "adj_type", "open", "high", "low", "close", "volume", "amount"],
+            *rows,
+        ])
+    assert conn.info.transaction_status == 0, "load_day 必须在无活动事务的连接上进入"
+    try:
+        return load_day(conn, csv_path, dt.date.fromisoformat(before))
+    finally:
+        assert conn.info.transaction_status == 0, "load_day 必须完成提交或失败回滚"
 
 
 def _daily_rows(conn, schema, *, mairui_only=False):
@@ -237,7 +239,7 @@ def _load(
 
 
 @pytest.mark.parametrize("preload", [False, True])
-def test_msi_existing_mairui_never_overwritten(python_day_batch, preload):
+def test_msi_existing_mairui_never_overwritten(python_day_batch, tmp_path, preload):
     pg_conn, offline_schema, conn, calls = python_day_batch
     # Populate every protected field, so the full-row snapshot is not all NULLs.
     pg_conn.execute(f'''
@@ -261,12 +263,12 @@ def test_msi_existing_mairui_never_overwritten(python_day_batch, preload):
                       'hf/x.parquet', repeat('a', 64), 240, 'hf_1m', repeat('c', 40), now());
         ''')
     mairui_before = _daily_rows(pg_conn, offline_schema, mairui_only=True)
-    _load_day_batch(conn)
+    _load_day_batch(conn, tmp_path)
     assert pg_conn.execute(
         f"SELECT close, source FROM \"{offline_schema}\".daily_bars WHERE trade_date='2025-01-02'"
     ).fetchone() == (12, "mairui")
     assert calls, "整批写入必须实际经过 upsert_daily_bars"
-    assert all(call["conn"] is conn for call in calls), "必须使用同一事务连接"
+    assert all(call["conn"].conn is conn for call in calls), "公共 writer 适配器必须使用同一事务连接"
     assert all(call["kwargs"]["source"] == "tdx_local" for call in calls)
     rows = [(sum(len(call["result"].bars) for call in calls),
              sum(call["stats"].inserted for call in calls),
@@ -349,20 +351,23 @@ def test_msi_catalog_one_source_per_stock_day(pg_conn, offline_schema, conflict)
 @pytest.mark.parametrize(
     "before,extra_day,reason",
     [
-        ("2024-01-02", None, "日期必须"),
-        ("2026-01-01", None, "已有麦蕊行"),
+        ("2024-01-02", None, "日线日期必须全部小于 before，拒绝加载"),
+        ("2026-01-01", None, "before 之前已有麦蕊行，拒绝加载"),
         (
             "2025-01-01",
             [["600999.SH", "2023-01-02", "none", 12.34, 12.34, 12.34, 12.34, 700, 8638]],
-            "只能加载一年",
+            "每次只能加载一年的日线 CSV",
         ),
     ],
 )
-def test_day_load_refuses_invalid_batch(python_day_batch, before, extra_day, reason):
+def test_day_load_refuses_invalid_batch(python_day_batch, tmp_path, before, extra_day, reason):
+    import psycopg
+
     pg_conn, offline_schema, conn, calls = python_day_batch
     original = _daily_rows(pg_conn, offline_schema)
-    with pytest.raises(ValueError, match=reason):
-        _load_day_batch(conn, before=before, extra_day=extra_day)
+    error = ValueError if "已有麦蕊行" in reason else psycopg.errors.RaiseException
+    with pytest.raises(error, match=reason):
+        _load_day_batch(conn, tmp_path, before=before, extra_day=extra_day)
     assert not calls, "整批日期边界/已有麦蕊区间/跨年校验必须先于公共 writer"
     assert pg_conn.execute(f'SELECT count(*) FROM "{offline_schema}".daily_bars').fetchone() == (1,)
     assert _daily_rows(pg_conn, offline_schema) == original
@@ -384,7 +389,7 @@ def test_catalog_path_constraints(pg_conn, offline_schema, rel):
             )
 
 
-def test_load_mairui_count_change_rolls_back(python_day_batch):
+def test_load_mairui_count_change_rolls_back(python_day_batch, tmp_path):
     """合成触发器意外新增麦蕊行时，行数断言必须拒绝并回滚本次加载。"""
     pg_conn, offline_schema, conn, calls = python_day_batch
 
@@ -402,9 +407,9 @@ def test_load_mairui_count_change_rolls_back(python_day_batch):
           EXECUTE FUNCTION "{offline_schema}".unexpected_mairui();
     ''')
     original = _daily_rows(pg_conn, offline_schema)
-    with pytest.raises(ValueError, match="麦蕊行数前后必须"):
-        _load_day_batch(conn)
-    assert calls and all(call["conn"] is conn for call in calls)
+    with pytest.raises(ValueError, match="麦蕊行数变化，回滚本年加载"):
+        _load_day_batch(conn, tmp_path)
+    assert calls and all(call["conn"].conn is conn for call in calls)
     assert sum(call["stats"].inserted for call in calls) == 1, "必须真实触发公共 writer INSERT"
     assert pg_conn.execute(f'SELECT count(*) FROM "{offline_schema}".daily_bars').fetchone() == (1,)
     assert _daily_rows(pg_conn, offline_schema) == original
