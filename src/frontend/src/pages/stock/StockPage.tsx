@@ -1,4 +1,5 @@
 import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
+import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError } from '../../api/client';
 import { ENUMS } from '../../api/enums';
@@ -10,6 +11,7 @@ import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../compone
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { StockErrorBoundary } from './StockErrorBoundary';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
 import { AddToResearch } from '../../features/research/AddToResearch';
@@ -20,6 +22,19 @@ type TabKey = (typeof TABS)[number];
 
 /** /stocks/:code 个股档案（plan §2.4）：行情头 + 深色分时/日K/周K + 周期分类 + 财务/资金/因子/公告外链 */
 export function StockPage() {
+  const { code = '' } = useParams();
+  const client = useQueryClient();
+  return (
+    <StockErrorBoundary key={code} onRetry={() => {
+      // 连同档案缓存标为过期，重挂载后重新读取本证券的数据。
+      void client.invalidateQueries({ predicate: (q) => q.queryKey[1] === code.trim().toUpperCase() });
+    }}>
+      <StockPageContent />
+    </StockErrorBoundary>
+  );
+}
+
+function StockPageContent() {
   const { code: raw = '' } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
