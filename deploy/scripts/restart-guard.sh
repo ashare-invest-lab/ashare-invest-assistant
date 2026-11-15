@@ -26,13 +26,39 @@ while (($#)); do
 done
 
 # Never follow a lock or metadata symlink into unrelated files.
-first_line() {
-  local line=''
-  if [[ -f "$1" && ! -L "$1" ]]; then
-    { IFS= read -r line < "$1"; } 2>/dev/null || true
-  fi
-  line="${line%$'\r'}"
-  printf '%s' "${line:-未知}"
+lock_metadata() {
+  [[ -f "$1" && ! -L "$1" ]] || return 0
+  # Only selected metadata is displayed; never evaluate lock contents as shell.
+  python3 - "$1" <<'PY' 2>/dev/null || true
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8-sig") as source:
+    text = source.read()
+
+def value(item):
+    return " ".join(item.split()) if isinstance(item, str) else ""
+
+try:
+    fields = json.loads(text)
+except ValueError:
+    fields = {}
+if not isinstance(fields, dict):
+    fields = {}
+if not text.lstrip().startswith(("{", "[")):
+    for match in re.finditer(
+        r'''(?:^|\s)(task|owner|status|state)\s*=\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s]+))''', text
+    ):
+        fields.setdefault(match[1], next(part for part in match.groups()[1:] if part is not None))
+owner = value(fields.get("task")) or value(fields.get("owner"))
+first = text.splitlines()[0] if text.splitlines() else ""
+if not owner and not text.lstrip().startswith(("{", "[")) and "=" not in first:
+    owner = value(first)
+status = value(fields.get("status")) or value(fields.get("state"))
+print(owner or "未知")
+print(status or "未知")
+PY
 }
 
 if [[ ! -e "$lock_dir" && ! -L "$lock_dir" ]]; then
@@ -45,18 +71,24 @@ else
   locks=("$lock_dir"/*.lock)
   for lock in "${locks[@]}"; do
     owner='未知'
+    status='未知'
     if [[ ! -L "$lock" ]]; then
       if [[ -d "$lock" ]]; then
         for metadata in owner info; do
-          owner="$(first_line "$lock/$metadata")"
-          [[ "$owner" == '未知' ]] || break
+          details="$(lock_metadata "$lock/$metadata")"
+          parsed_owner="${details%%$'\n'*}"
+          parsed_status="${details#*$'\n'}"
+          [[ "$owner" != '未知' || -z "$parsed_owner" ]] || owner="$parsed_owner"
+          [[ "$status" != '未知' || -z "$parsed_status" ]] || status="$parsed_status"
         done
       else
-        owner="$(first_line "$lock")"
+        details="$(lock_metadata "$lock")"
+        owner="${details%%$'\n'*}"
+        status="${details#*$'\n'}"
       fi
     fi
     modified="$(stat -c '%y' -- "$lock" 2>/dev/null || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S %z' -- "$lock" 2>/dev/null || printf '未知')"
-    printf '锁：%s | 持锁任务：%s | 修改时间：%s\n' "${lock##*/}" "$owner" "$modified"
+    printf '锁：%s | 持锁任务：%s | 修改时间：%s | 状态：%s\n' "${lock##*/}" "${owner:-未知}" "$modified" "${status:-未知}"
   done
   if ((${#locks[@]})); then
     printf '%s\n' '存在回填锁，拒绝重启、重建或 down' >&2
