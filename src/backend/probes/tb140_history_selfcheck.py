@@ -10,6 +10,7 @@ import stat
 import sys
 import tempfile
 from contextlib import redirect_stdout
+from datetime import date
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -241,6 +242,38 @@ class FakePg:
         self.closed = False
         self.fail_insert = False
         self.dsns: list[str] = []
+
+    def execute(self, statement: Any) -> Any:
+        # 公共 writer 的 SQLAlchemy 假连接；沿用原有表、事务与故障注入。
+        from types import SimpleNamespace
+        from sqlalchemy.dialects.postgresql import dialect
+
+        sql = str(statement.compile(dialect=dialect()))
+        params = statement.compile(dialect=dialect()).params
+        self.statements.append(sql)
+        columns = ("code", "trade_date", "adj_type", "open", "high", "low", "close",
+                   "pre_close", "volume", "amount", "is_suspended", "source", "source_licence_id")
+        result = []
+        if getattr(statement, "is_insert", False):
+            if self.fail_insert:
+                raise RuntimeError("insert failed dsn=postgresql://mock-should-not-log")
+            for name in params:
+                if not name.startswith("code_m"):
+                    continue
+                suffix = name[len("code"):]
+                row = {column: params[column + suffix] for column in columns}
+                key = tuple(str(row[column]) for column in columns[:3])
+                if key not in self.table:
+                    self.table[key] = tuple(str(row[c]) if c in ("trade_date", "source_licence_id")
+                                            and row[c] is not None else row[c] for c in columns)
+                    result.append(row)
+        else:
+            for values in self.table.values():
+                row = dict(zip(columns, values))
+                row["trade_date"] = date.fromisoformat(row["trade_date"])
+                result.append(row)
+        return SimpleNamespace(all=lambda: [SimpleNamespace(**row) for row in result],
+                               mappings=lambda: result)
 
     def transaction(self) -> Any:
         return _FakeTx(self)

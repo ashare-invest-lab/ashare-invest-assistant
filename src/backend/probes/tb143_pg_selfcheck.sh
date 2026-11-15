@@ -3,6 +3,10 @@
 # bash src/backend/probes/tb143_pg_selfcheck.sh
 # PG_BIN=/path/to/postgresql/17/bin bash src/backend/probes/tb143_pg_selfcheck.sh
 set -euo pipefail
+# 旧断言要求 SQL 直写目标表；暂时拒绝运行，避免把 staging 当成完成装载。
+# 保留隔离测试正文供 T-T94 迁移，不绕过/放宽其断言。
+printf '%s\n' 'REFUSED: legacy SQL load selfcheck awaits public Python writer migration' >&2
+exit 1
 
 pgbin=${PG_BIN:-/usr/lib/postgresql/17/bin}
 probes=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

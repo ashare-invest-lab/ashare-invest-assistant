@@ -16,14 +16,21 @@ import os
 import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+from psycopg import Connection as PsycopgConnection
+from sqlalchemy.dialects.postgresql import dialect
 
 from app.bj_offline_volume import (
     CodeReject, RowReject, _QUALIFIED_RE, _bj_write_unconfirmed, _is_suspended,
     _trade_date, confirm_bj_offline_volume_units, market_of, qualified_code,
+)
+from app.marketdata.daily_bars import (
+    DailyBar, DailyBarsResult, daily_bar_write_allowed, upsert_daily_bars,
 )
 
 HIST_ST = date(2023, 11, 13)
@@ -262,36 +269,30 @@ def render_insert_sql(
     *,
     bind_note: str,
 ) -> str:
-    """生成非替换路径的幂等 INSERT；有 tdx 重叠时拒绝离线 SQL 执行。
+    """生成临时 staging 与 JSON 数据载荷，不携带目标表 DML 或持久化许可。
 
-    产物通过 apply_insert_artifact 读取载荷并复用 apply_daily_bars，支持受审计替换。
-    直接用 psql 执行只允许非替换路径；重叠时必须走 Python 的持久化对账和事务后回执。
-    licence_id 必须是已裁定值，不在渲染时查库。
-    BJ 未经 confirm_bj_offline_volume_units 确认时只记录阻断注释，不生成其写入载荷
-    或 SQL；混合批次中的沪深行仍可生成 INSERT。
+    目标表只能通过 apply_insert_artifact 在消费进程内重新检查门闩后写入。
     """
+    bind_note = " ".join(bind_note.splitlines())
     material = list(rows)
     for row in material:
         row_insert_params(row, licence_id)
-    writable = [row for row in material if not _bj_write_unconfirmed(row)]
+    writable = [row for row in material if daily_bar_write_allowed(str(row["code"]))]
     blocked_bj = len(material) - len(writable)
     blocked_note = (
         f"-- BJ INSERT blocked: bj_offline_volume_units_unconfirmed ({blocked_bj} rows); "
         "call confirm_bj_offline_volume_units first.\n"
     ) if blocked_bj else ""
-    material = writable
-    if blocked_bj and not material:
-        return blocked_note
     payload = json.dumps({"bars": material, "licence_id": licence_id}, ensure_ascii=False, default=str)
-    lookup = ACTIVE_LICENCE_SQL.replace("\n", "\n-- ")
+    material = writable
     lines = [
         "-- T-B140c artifact: apply_insert_artifact uses audited conditional replacement.",
-        "-- Direct psql execution only supports non-replacement INSERT ON CONFLICT DO NOTHING.",
+        "-- Direct psql execution stages data only; it never writes market.daily_bars.",
         APPLY_PAYLOAD_PREFIX + payload,
         f"-- bind_note={bind_note}",
         "\\set ON_ERROR_STOP on",
         "BEGIN;",
-        f"-- active licence lookup (apply-time, for operator check):\n-- {lookup}",
+        "CREATE TEMP TABLE tb140_daily_bars_stage (LIKE market.daily_bars INCLUDING ALL) ON COMMIT DROP;",
     ]
     if not material:
         lines.extend(["-- no rows", "COMMIT;"])
@@ -300,22 +301,7 @@ def render_insert_sql(
         "code,trade_date,adj_type,open,high,low,close,pre_close,"
         "volume,amount,is_suspended,source,source_licence_id"
     )
-    keys = ",\n".join(
-        "(" + ",".join(_sql_literal(row[key]) for key in ("code", "trade_date", "adj_type")) + ")"
-        for row in material
-    )
-    lines.extend([
-        "-- Fail closed on replacement: use the audited Python writer for these keys.",
-        "DO $tb149_guard$ BEGIN",
-        "IF EXISTS (SELECT 1 FROM market.daily_bars AS b JOIN (VALUES",
-        keys,
-        ") AS incoming(code, trade_date, adj_type) ON b.code = incoming.code",
-        "AND b.trade_date = incoming.trade_date::date AND b.adj_type = incoming.adj_type",
-        "WHERE b.source = 'tdx_local') THEN",
-        "RAISE EXCEPTION 'tdx_local overlap requires audited conditional UPDATE via apply_daily_bars';",
-        "END IF; END $tb149_guard$;",
-    ])
-    lines.append(f"INSERT INTO market.daily_bars ({cols}) VALUES")
+    lines.append(f"INSERT INTO pg_temp.tb140_daily_bars_stage ({cols}) VALUES")
     values: list[str] = []
     lic = "NULL"
     if licence_id is not None:
@@ -364,7 +350,8 @@ def apply_insert_offline(
     for row in rows:
         if row.get("source") != SOURCE or row.get("adj_type") != ADJ_TYPE:
             raise RowReject("source_or_adj_forged")
-        if _bj_write_unconfirmed(row):
+        row_insert_params(row, None)
+        if not daily_bar_write_allowed(str(row["code"])):
             blocked_bj += 1
             continue
         key = (str(row["code"]), str(row["trade_date"]), ADJ_TYPE)
@@ -435,14 +422,6 @@ def load_normalized(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-INSERT_DAILY_BARS_SQL = (
-    "INSERT INTO market.daily_bars ("
-    "code, trade_date, adj_type, open, high, low, close, pre_close, "
-    "volume, amount, is_suspended, source, source_licence_id"
-    ") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-    "ON CONFLICT (code, trade_date, adj_type) DO NOTHING"
-)
-
 COUNT_DAILY_BARS_SQL = "SELECT count(*) FROM market.daily_bars"
 
 
@@ -496,22 +475,6 @@ def row_insert_params(row: dict[str, Any], licence_id: str | None) -> tuple[Any,
     )
 
 
-# 来源与字段必须可证实；不能从计数推断已有行的来源。
-SELECT_EXISTING_BAR_SQL = """
-SELECT count(*) OVER () AS row_count, source, open, high, low, close, pre_close,
-       volume, amount, is_suspended
-FROM market.daily_bars WHERE code = %s AND trade_date = %s AND adj_type = %s
-""".strip()
-
-REPLACE_TDX_LOCAL_SQL = """
-UPDATE market.daily_bars
-SET open = %s, high = %s, low = %s, close = %s, pre_close = %s,
-    volume = %s, amount = %s, is_suspended = %s, source = %s,
-    source_licence_id = %s, fetched_at = now()
-WHERE code = %s AND trade_date = %s AND adj_type = %s AND source = 'tdx_local'
-""".strip()
-
-
 def jsonl_reconcile_sink(path: Path) -> Callable[[dict[str, Any]], None]:
     """每条记录追加、flush 到磁盘后才返回；失败向事务边界传播。"""
     path = path.resolve()
@@ -523,34 +486,21 @@ def jsonl_reconcile_sink(path: Path) -> Callable[[dict[str, Any]], None]:
     return sink
 
 
-def _replacement_records(old: Mapping[str, Any], row: Mapping[str, Any], replacement_id: str) -> list[dict[str, Any]]:
-    common = {
-        "replacement_id": replacement_id, "code": row["code"],
-        "trade_date": str(row["trade_date"]), "adj_type": row["adj_type"], "ts": None,
-        "existing_source": "tdx_local", "incoming_source": SOURCE,
-    }
-    records = []
-    for field in ("open", "high", "low", "close", "pre_close", "volume", "amount", "is_suspended"):
-        existing, incoming = old.get(field), row.get(field)
-        tolerance = Decimal(0)
-        if field != "is_suspended":
-            existing = _decimal(existing, field) if existing is not None else None
-            incoming = _decimal(incoming, field) if incoming is not None else None
-            if field in ("open", "high", "low", "close", "pre_close"):
-                existing = existing.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if existing is not None else None
-                incoming = incoming.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if incoming is not None else None
-            if field == "amount":
-                tolerance = max(Decimal(1), abs(existing or Decimal(0)) * Decimal("2.4e-7"))
-        same = existing == incoming
-        if not same and field != "is_suspended" and existing is not None and incoming is not None:
-            same = abs(existing - incoming) <= tolerance
-        if not same:
-            records.append(dict(common, kind="replaced_tdx_local", field=field,
-                                existing_value=str(existing) if existing is not None else None,
-                                incoming_value=str(incoming) if incoming is not None else None,
-                                tolerance=str(tolerance)))
-    return records or [dict(common, kind="replaced_tdx_local_same", field="*",
-                            existing_value=dict(old), incoming_value=dict(row), tolerance="0")]
+class _WriterConnection:
+    """在调用方的 psycopg 事务上执行公共 writer 的 SQLAlchemy 语句；不拥有连接。"""
+
+    def __init__(self, conn: Any) -> None:
+        self.conn = conn
+
+    def execute(self, statement: Any) -> Any:
+        compiled = statement.compile(dialect=dialect(), compile_kwargs={"render_postcompile": True})
+        with self.conn.cursor() as cursor:
+            cursor.execute(str(compiled), compiled.params)
+            names = [column.name for column in cursor.description] if cursor.description else []
+            rows = [dict(zip(names, row)) if not isinstance(row, Mapping) else dict(row)
+                    for row in cursor.fetchall()] if names else []
+        return SimpleNamespace(all=lambda: [SimpleNamespace(**row) for row in rows],
+                               mappings=lambda: rows)
 
 
 def apply_daily_bars(
@@ -560,26 +510,36 @@ def apply_daily_bars(
     *, reconcile_sink: Callable[[dict[str, Any]], None] | None = None,
     reconcile_path: Path = Path("tb140_history_reconcile.jsonl"),
 ) -> dict[str, int]:
-    """INSERT 保持 DO NOTHING；仅在持久化对账成功后条件替换 tdx_local。
-
-    默认对账写当前运行目录 tb140_history_reconcile.jsonl；可显式指定路径或持久化 sink。
-
-    对账失败回滚；结果记录在本函数拥有的事务结束后写入。缺少事务接口时拒绝替换。
-    不建连接、不加载应用或数据库依赖，允许注入假连接。
-    BJ 未经 confirm_bj_offline_volume_units 确认时不进入写入参数，返回
-    blocked_bj_unconfirmed 计数；混合批次中的沪深行仍按原规则处理。
-    """
-    writable_rows = [row for row in rows if not _bj_write_unconfirmed(row)]
-    blocked_bj = len(rows) - len(writable_rows)
-    material = [row_insert_params(row, licence_id) for row in writable_rows]
-    outcomes: list[dict[str, Any]] = []
+    """通过公共 writer 写入；拥有事务并在提交/回滚后记录替换结果。"""
+    material = [row_insert_params(row, licence_id) for row in rows]
+    bars = [DailyBar(
+        code=params[0], trade_date=date.fromisoformat(str(params[1])), adj_type=params[2],
+        **{name: None if value is None else Decimal(str(value)) for name, value in
+           zip(("open", "high", "low", "close", "pre_close", "volume", "amount"), params[3:10])},
+        is_suspended=params[10],
+    ) for params in material]
     sink = reconcile_sink or jsonl_reconcile_sink(reconcile_path)
-    # 不能把外层事务中的 savepoint 释放误记成 committed。
+    pending: dict[str, dict[str, Any]] = {}
+
+    def audit(record: dict[str, Any]) -> None:
+        if record["kind"] == "replace_result":
+            record = dict(record, replace_result=record["value"],
+                          existing_source="tdx_local", incoming_source=SOURCE)
+        sink(record)
+        identity = str(record["replacement_id"])
+        if str(record["kind"]).startswith("replaced_tdx_local"):
+            pending[identity] = {key: record[key] for key in
+                                 ("replacement_id", "code", "trade_date", "adj_type")}
+        elif record["kind"] == "replace_result":
+            pending.pop(identity, None)
+
     status = getattr(getattr(conn, "info", None), "transaction_status", 0)
     if status is not None and int(status) != 0:
         raise RowReject("connection_transaction_already_active")
     tx = getattr(conn, "transaction", None)
-    transactional = callable(tx) or callable(getattr(conn, "commit", None))
+    if not callable(tx):
+        raise RowReject("connection_transaction_required")
+    writer_conn = _WriterConnection(conn) if isinstance(conn, PsycopgConnection) else conn
 
     def count() -> int:
         with conn.cursor() as cur:
@@ -587,76 +547,28 @@ def apply_daily_bars(
             fetched = cur.fetchone()
             return int(fetched[0]) if fetched is not None else 0
 
-    def run() -> dict[str, int]:
-        before = count()
-        replaced = 0
-        if material:
-            with conn.cursor() as cur:
-                cur.executemany(INSERT_DAILY_BARS_SQL, material)
-                if transactional:
-                    for row, params in zip(writable_rows, material):
-                        cur.execute(SELECT_EXISTING_BAR_SQL, params[:3])
-                        fetchall = getattr(cur, "fetchall", None)
-                        if callable(fetchall):
-                            candidates = fetchall()
-                        else:
-                            fetched = cur.fetchone()
-                            candidates = [fetched] if fetched is not None else []
-                        candidates = [dict(item) if isinstance(item, Mapping) else
-                                      dict(zip(("row_count", "source", "open", "high", "low", "close", "pre_close", "volume", "amount", "is_suspended"), item))
-                                      for item in candidates]
-                        old = next((item for item in candidates
-                                    if item.get("source") == "tdx_local"
-                                    and all(str(item.get(key, row[key])) == str(row[key])
-                                            for key in ("code", "trade_date", "adj_type"))), None)
-                        if old is None:
-                            continue
-                        replacement_id = str(uuid.uuid4())
-                        outcome = {"kind": "replace_result", "replacement_id": replacement_id,
-                                   "code": row["code"], "trade_date": str(row["trade_date"]),
-                                   "adj_type": row["adj_type"], "existing_source": "tdx_local",
-                                   "incoming_source": SOURCE, "value": "rolled_back"}
-                        for record in _replacement_records(old, row, replacement_id):
-                            sink(record)
-                            if outcome not in outcomes:
-                                outcomes.append(outcome)
-                        cur.execute(REPLACE_TDX_LOCAL_SQL, params[3:] + params[:3])
-                        changed = max(0, int(cur.rowcount))
-                        replaced += changed
-                        outcome["value"] = "committed" if changed else "skipped"
-        after = count()
-        result = {"count_before": before, "count_after": after, "inserted": after - before}
-        if blocked_bj:
-            result["blocked_bj_unconfirmed"] = blocked_bj
-        if replaced or reconcile_sink is not None:
-            result["replaced"] = replaced
-        return result
-
-    def finish(rolled_back: bool = False) -> None:
-        for outcome in outcomes:
-            value = "rolled_back" if rolled_back else outcome["value"]
-            sink(dict(outcome, value=value, replace_result=value))
-
     try:
-        if callable(tx):
-            with tx():
-                result = run()
-        elif transactional:
-            try:
-                result = run()
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
-        else:
-            result = run()
+        with tx():
+            before = count()
+            stats = upsert_daily_bars(
+                writer_conn, DailyBarsResult(bars=bars), source=SOURCE,
+                licence_id=uuid.UUID(licence_id) if licence_id is not None else None,
+                fetched_at=datetime.now(UTC), reconcile_sink=audit,
+            )
+            after = count()
     except BaseException as exc:
         try:
-            finish(rolled_back=True)
+            for record in list(pending.values()):
+                audit(dict(record, kind="replace_result", value="rolled_back"))
         except BaseException:
             exc.add_note("replace_result_write_failed")
         raise
-    finish()
+    stats.reconcile_after_transaction(committed=True)
+    result = {"count_before": before, "count_after": after, "inserted": stats.inserted}
+    if stats.blocked_bj_unconfirmed:
+        result["blocked_bj_unconfirmed"] = stats.blocked_bj_unconfirmed
+    if stats.replaced or reconcile_sink is not None:
+        result["replaced"] = stats.replaced
     return result
 
 
@@ -704,7 +616,7 @@ def apply_insert_artifact(
 ) -> dict[str, int]:
     """只读取生成产物的 JSON 载荷，复用审计写入器；绝不直接执行文件中的 SQL。
 
-    SQL 和此入口的非替换路径均保留 DO NOTHING；替换使用相同的对账、条件更新和回执。
+    载荷不携带许可；旧文件中的 SQL 也不执行，消费时重新检查当前进程的门闩。
     默认对账文件放产物旁，避免依赖进程工作目录。
     """
     payloads = [line[len(APPLY_PAYLOAD_PREFIX):] for line in path.read_text(encoding="utf-8").splitlines()
