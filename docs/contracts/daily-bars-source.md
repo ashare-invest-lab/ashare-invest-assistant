@@ -995,3 +995,48 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
 应分别记录实现 SHA、平台、测试名、通过／失败／跳过；Linux 假连接通过不能填写成 Windows 或真实 SQL 会话通过。
 所有待迁移链完成收口与逐入口验收前不提供 BJ 写入支持；唯一入口的 BJ 门闩验收未完成也保持阻断。分支历史通过数不得替代当前 main 结果。
 本次交付仅为契约同步：门闩实现、旁路及独立 UPDATE 收口、可信原始对照、独立进程／SQL 会话和 Windows 验收仍待后续任务完成。
+
+### 10.12 可信确认材料、tb143 SQL 定位与演练链（T-A180）
+
+状态：架构师裁定（T-A180），tb143 部分依编排者裁定。本节第 3 条修订 §10.10「唯一写入路径与旁路」中的演练链条款和 §10.11 的两行演练链，第 4 条修订 §10.11 的两行拟新增入口；其余不放宽 §10.10、§10.11 的任何要求。
+
+**1. 可信确认材料（T-A179 残项 R1）**
+
+- 现状：`confirm_bj_offline_volume_units` 仍接受调用方已解析的 code/t/v 和 source 标签，不满足本条。改造完成前该接口不得作为生产确认依据，BJ 继续阻断。
+- 改造后，输入为「确认材料包」：每只代码一份麦蕊 `/bj/history` 原始响应字节（接口族、代码、请求范围），以及一份 tdx_local 离线文件字节（.day 或 CSV）和其中的记录定位。调用方给出的已解析字段和 source 一律不作依据。
+- 函数自行从字节解析：麦蕊 v 按十进制文本解析，不经 float；tdx 股量由离线文件解析；来源由实际使用的解析器决定。
+- 可信锚是一份「原始响应哈希清单」，按 sha256 绑定接口族、代码和请求范围。该清单由编排者交架构师审定后入库，生产调用方不能修改。
+  - 既有可信原始响应（如 T-B86、F21 的响应记录）可以经审定后补入清单；
+  - 后续新取数的响应在收到时登记，同样经审定后才生效。
+- 清单通过参数注入确认函数（生产传审定清单，测试传隔离清单），不得用环境变量或全局开关切换。
+- 清单为空或不含所需条目时确认不可达，BJ 继续阻断。tdx 文件的 sha256 和只读路径记入确认审计。
+- 验收：#194 的 `pairs()` 和 `confirm`、`revoke`、`setup_scenario` 及子进程正控改用标注为合成的原始字节夹具和隔离清单，并保留全部精度、停牌、日期和撤销反例。数值反例须先具备有效清单条目，避免只测到哈希拒绝。另补三个反控：
+  - 只给已解析对加自填 source，应拒绝；
+  - sha256 不在清单中，应拒绝；
+  - 字节被改动一位，应拒绝。
+
+**2. tb143 SQL 只做 staging（编排者裁定）**
+
+- `src/backend/probes/tb143_load_day.sql` 只写会话临时表，不对目标行情表执行任何 DML，以 ROLLBACK 结束。沪深与北交所一样处理；目标表写入只经 `upsert_daily_bars`。
+- `tb143_day_load_runner.ps1`、`tb143_pg_selfcheck.sh` 的旧直写路径启动即拒绝并非零退出，保留本地产物。拒绝信息须给出可执行的替代命令：通达信导入用 `python -m app.cli daily-bars-import-tdx`（`app.cli.tdx_import`）。
+- `app.cli.tdx_import` 经 `run_import`→`DbDeps.write`→`upsert_daily_bars` 写库，可读根目录下 sh/sz/bj 的 lday/*.day。用户授权 t1110u 的导入走该入口，但仍受范围、日历、窗口和 BJ 门闩约束。runner 停用不算 Windows 部署必然失败，也不算 Windows 已验收。
+- 原 SQL 承担的整批保护须在 Python 写入路径中补齐：同一事务内先校验整批（日期边界、已有麦蕊区间、跨年），再调用 `upsert_daily_bars`，最后核对麦蕊行计数未变；任一步失败整批回滚。
+- 逐入口验收：
+  - `test_ta172_load_day_sql_session_bj_gate`：断言只写临时表；
+  - `test_ta172_day_load_runner_new_session_bj_gate`、`test_ta172_pg_selfcheck_isolated_seed_only`：断言启动即拒绝、非零退出、保留产物、给出替代命令；不得要求为过测保留不可达分支，也不得只匹配不可达正文中的字符串；
+  - `test_tb143_multi_source_pg.py` 的 `test_msi_existing_mairui_never_overwritten`、`test_day_load_refuses_invalid_batch`、`test_load_mairui_count_change_rolls_back`（共 6 个参数例）改为验 Python 整批写入路径。须保留来源和全字段不变、三类无效批拒绝、触发器计数反例回滚这些语义，不得删除用例，也不得只断言目标表未变；
+  - `app.cli.tdx_import`：沿用 `daily-bars-tdx.md` 的验收。
+
+**3. 恢复演练链为隔离例外**
+
+- `deploy/db/drill/sample-data.sql` 与 `deploy/scripts/db-restore-drill.sh` 只在带 `aia.drill` 标签的一次性容器和演练库中执行。样例按 `security_id` 建模，不含北交所代码，也没有 `code` 列映射。恢复演练需要真实表数据，因此保留其直接 DML。
+- 该链不是生产入口，不提供 BJ 写入支持，也不产生确认凭证。
+- 脚本须拒绝非演练目标：执行 SQL 前核对容器带 `aia.drill` 标签、库名为演练库；不得经直连模式绕过容器。
+- 验收：`test_ta172_drill_sample_data_bj_gate`、`test_ta172_restore_drill_no_production_bj_support` 改为断言以下三点，不再要求只 staging：
+  - 样例中没有北交所代码，也没有 `code` 列映射；
+  - 目标只能是演练容器和演练库；
+  - 指向非演练目标或直连模式时拒绝。
+
+**4. 拟新增入口**
+
+`tb143_reconcile_load --apply` 与 `repo.insert` 在 main 中不存在，本轮也不新增。§10.11 对应两行改为「未落地」：模块不存在不构成旁路；一旦存在，即按原行强制验收，并须经 `upsert_daily_bars` 写入。此口径只适用于这两行，不扩及已存在的 `apply_insert_artifact`。
