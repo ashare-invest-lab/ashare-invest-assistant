@@ -1,8 +1,17 @@
 -- 每次仅加载一年的 CSV，每次调用独立提交；本脚本不调用元数据加载脚本。
 -- psql -v csv=/服务端可读/day_2022.csv -v before=2023-01-01 -f tb143_load_day.sql
+-- 默认跳过未确认 BJ，计入 skipped，沪深照常提交；不接受 confirmed 布尔参数。
+-- 需放行时，在本 psql 会话先按下列结构创建并填充 TEMP tb143_bj_volume_pairs。
+-- mairui_* 为离线原始 code/t/v；其余列为本地 code/trade_date/volume/source。
+-- 至少 20 个不同合法 .BJ 码；同码同日、source=tdx_local、非负有限 v*100=整数股量，
+-- 全部对照通过才允许写 BJ（不限样本码）。每次重新校验；新会话须重新提供对照。
 \set ON_ERROR_STOP on
 BEGIN;
 SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+CREATE TEMP TABLE IF NOT EXISTS pg_temp.tb143_bj_volume_pairs (
+  mairui_code text, mairui_t date, mairui_v numeric,
+  code text, trade_date date, volume numeric, source text
+) ON COMMIT PRESERVE ROWS;
 CREATE TEMP TABLE load_params (before_date date NOT NULL) ON COMMIT DROP;
 INSERT INTO load_params VALUES (:'before'::date);
 CREATE TEMP TABLE day_stage (
@@ -31,11 +40,24 @@ DO $$
 DECLARE
   v_inserted bigint;
   v_total bigint;
+  v_bj_confirmed boolean;
 BEGIN
   IF (SELECT b.n FROM mairui_before AS b) <> 0 THEN
     RAISE EXCEPTION 'before 之前已有麦蕊行，拒绝加载';
   END IF;
   SELECT count(*) INTO v_total FROM day_stage AS s;
+  -- 不保存可复用的确认位；对照不足或任意一项不符（含 NULL）均关闭门闩。
+  SELECT count(DISTINCT p.code) >= 20 AND coalesce(bool_and(coalesce(
+    p.code ~ '^(43[0-9]|83[0-9]|87[0-9]|920)[0-9]{3}[.]BJ$'
+    AND p.mairui_code = p.code AND p.mairui_t = p.trade_date
+    AND isfinite(p.mairui_t) AND isfinite(p.trade_date)
+    AND p.source = 'tdx_local'
+    AND p.mairui_v::text NOT IN ('NaN', 'Infinity', '-Infinity')
+    AND p.volume::text NOT IN ('NaN', 'Infinity', '-Infinity')
+    AND p.mairui_v >= 0 AND p.volume >= 0
+    AND p.volume = trunc(p.volume) AND p.mairui_v * 100 = p.volume,
+    false)), false)
+  INTO v_bj_confirmed FROM pg_temp.tb143_bj_volume_pairs AS p;
   INSERT INTO market.daily_bars (
     code, trade_date, adj_type, open, high, low, close, volume, amount,
     source, pre_close, is_suspended, source_licence_id, fetched_at
@@ -43,6 +65,10 @@ BEGIN
   SELECT s.code, s.trade_date, s.adj_type, s.open, s.high, s.low, s.close, s.volume, s.amount,
     'tdx_local', NULL, NULL, NULL, now()
   FROM day_stage AS s
+  WHERE v_bj_confirmed OR NOT coalesce((
+    s.code ~ '[.]BJ$'
+    OR s.code ~ '^(43[0-9]|83[0-9]|87[0-9]|920)[0-9]{3}'
+  ), false)
   ON CONFLICT (code, trade_date, adj_type) DO NOTHING;
   GET DIAGNOSTICS v_inserted = ROW_COUNT;
   INSERT INTO load_counts VALUES (v_total, v_inserted, v_total - v_inserted);
