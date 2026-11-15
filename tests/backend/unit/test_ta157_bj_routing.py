@@ -3,7 +3,9 @@
 未验证：契约没有命名错后缀统计入口；对应测试只验证 §10.3 的只读 SQL 方案，
 不声称覆盖生产统计工具。扩窗规划/账本的新入口也未命名；只观察已命名 run_batch
 对旧完成记录的输出，不猜新的函数或账本字段。
-未验证：成交量手换股开关没有契约参数名；只测 VOL_MULT 的 ×100，不猜默认开关。
+T-A158 第 5 项/plan-next §7.8：BJ 写库前须至少 20 只 tdx_local 离线量单位对算通过。
+未验证：契约未命名生产对算入口及证据传递接口；测试内对算仅为夹具判据，
+不冒充生产门闩，只观察现有 render_insert_sql / apply_daily_bars 的写入行为。
 未验证：apply_daily_bars 的对账配置接口未命名；沿用现有签名，观察实际 SQL、
 jsonl 落盘和事务，不给它臆造 reconcile_sink 等参数。
 """
@@ -916,27 +918,131 @@ def test_ta157_wrong_suffix_read_only(api):
     assert tuple(db.fields) == VALUE_COLUMNS
 
 
-def test_ta157_bj_volume_lots_to_shares(api, tmp_path):
-    row = bar(code="920997.BJ")
-    accepted = api.load.validate_bar(row, "920997.BJ")
+@pytest.fixture
+def bj_volume_pairs():
+    """20 只虚构 BJ 股票；mairui 为手，独立合成的 tdx_local 为股，价额为元。"""
+    pairs = []
+    for offset in range(20):
+        code = f"{920801 + offset}.BJ"
+        lots = 2 + offset
+        shares = 200 + offset * 100
+        pairs.append(
+            {
+                "mairui": bar(code=code, v=str(lots), a=str(shares * 10)),
+                "tdx_local": {
+                    "code": code,
+                    "trade_date": "2026-11-13",
+                    "adj_type": "none",
+                    "open": "10",
+                    "high": "10",
+                    "low": "10",
+                    "close": "10",
+                    "pre_close": "10",
+                    "volume": shares,
+                    "amount": str(shares * 10),
+                    "is_suspended": False,
+                    "source": "tdx_local",
+                },
+            }
+        )
+    return pairs
+
+
+def offline_bj_volume_matches(pairs):
+    """测试内离线判据，非生产入口；只累计同码同日且 v×100 一致的不同股票。"""
+    matched = set()
+    for pair in pairs:
+        mairui, tdx = pair["mairui"], pair["tdx_local"]
+        assert mairui["code"] == tdx["code"]
+        assert mairui["t"] == tdx["trade_date"]
+        assert tdx["source"] == "tdx_local"
+        assert tdx["code"].endswith(".BJ")
+        if Decimal(mairui["v"]) * 100 == Decimal(tdx["volume"]):
+            matched.add(tdx["code"])
+    return matched
+
+
+def observe_unverified_bj_writes(load, rows, label):
+    """不在假库内实现门闩，不过滤输入；两个真实写入入口都必须自行拒绝。"""
+    problems = []
+    try:
+        sql = load.render_insert_sql(rows, None, bind_note="pending_bind")
+    except load.RowReject:
+        pass
+    else:
+        check(
+            problems,
+            not (
+                re.search(r"(?im)^INSERT\s+INTO\s+market\.daily_bars\b", sql)
+                and any(row["code"] in sql for row in rows)
+            ),
+            f"{label}: render_insert_sql 未满足 20 只一致对算仍生成 BJ INSERT",
+        )
+    db = MemoryDB()
+    try:
+        stats = load.apply_daily_bars(db, rows)
+    except load.RowReject:
+        stats = {"inserted": 0}
+    check(
+        problems,
+        not db.rows
+        and stats["inserted"] == 0
+        and not any(
+            sql.lstrip().upper().startswith("INSERT") for sql, _ in db.statements
+        ),
+        f"{label}: apply_daily_bars 未满足 20 只一致对算仍向假库插入 BJ 行",
+    )
+    return problems
+
+
+def test_ta157_bj_volume_lots_to_shares(api, tmp_path, bj_volume_pairs):
+    row = bj_volume_pairs[0]["mairui"]
+    accepted = api.load.validate_bar(row, "920801.BJ")
     assert (
         accepted is not None and api.load.VOL_MULT == 100 and accepted["volume"] == 200
     )
     assert accepted["close"] == "10" and accepted["amount"] == "2000"
-    rows, rejects = api.load.normalize_history("920997", [row])
+    rows, rejects = api.load.normalize_history("920801", [row])
     assert rows == [accepted] and rejects == []
+    assert_invalid_fields(api.load, "920801.BJ")
+
+    matched = offline_bj_volume_matches(bj_volume_pairs)
+    assert len(matched) == len(bj_volume_pairs) == 20
+    assert accepted["code"] in matched
+    assert accepted["volume"] == bj_volume_pairs[0]["tdx_local"]["volume"]
+    # 测试内对算仅验证夹具；生产对算/证据接口未命名，不据此断言写库放行。
     path = tmp_path / "normalized.json"
-    api.load.write_normalized(path, "920997", rows, rejects)
+    api.load.write_normalized(path, "920801", rows, rejects)
     assert api.load.load_normalized(path) == rows
-    sql = api.load.render_insert_sql(rows, None, bind_note="pending_bind")
-    assert "920997.BJ" in sql and "INSERT INTO market.daily_bars" in sql
-    db = MemoryDB()
-    stats = api.load.apply_daily_bars(db, rows)
-    assert stats["inserted"] == 1
-    stored = db.rows[("920997.BJ", "2026-11-13", "none")]
-    assert stored["volume"] == 200 and stored["source"] == "mairui"
-    assert db.events == ["begin", "commit"]
-    assert_invalid_fields(api.load, "920997.BJ")
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "inconsistent"),
+    [(0, False), (1, False), (19, False), (20, True)],
+    ids=["unchecked", "only-1", "only-19", "unit-mismatch"],
+)
+def test_ta158_bj_write_requires_offline_volume_check(
+    api, bj_volume_pairs, sample_count, inconsistent
+):
+    comparisons = deepcopy(bj_volume_pairs[:sample_count])
+    if inconsistent:
+        # 20 只中仅一只本地量仍为 2；其余 19 只均一致也不得放行。
+        comparisons[0]["tdx_local"]["volume"] = 2
+    matched = offline_bj_volume_matches(comparisons)
+    assert len(matched) == (sample_count - int(inconsistent))
+    assert not (len(comparisons) >= 20 and len(matched) == len(comparisons))
+    rows = []
+    for pair in bj_volume_pairs:
+        raw = pair["mairui"]
+        normalized, rejects = api.load.normalize_history(raw["code"][:6], [raw])
+        assert rejects == [] and len(normalized) == 1
+        assert normalized[0]["volume"] == pair["tdx_local"]["volume"]
+        rows.extend(normalized)
+    # 对算失败后仍调用现有入口，以暴露生产缺失的门闩；不能由测试跳过写入造绿。
+    problems = observe_unverified_bj_writes(
+        api.load, rows, f"离线对算 {sample_count} 只，单位不一致={inconsistent}"
+    )
+    assert not problems, problems
 
 
 def test_ta157_old_window_not_complete(api, tmp_path, capsys):
