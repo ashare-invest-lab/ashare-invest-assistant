@@ -6,7 +6,9 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from scripts.ci import check_shard_union, merge_junit, pytest_shard
+import check_shard_union  # scripts/ci 由 conftest 加入 sys.path（与其他自测一致）
+import merge_junit
+import pytest_shard
 
 
 def test_plan_deterministic_union_overhead_and_unknown_files():
@@ -154,7 +156,7 @@ def test_merge_junit_preserves_suites_and_case_details(tmp_path):
 
 
 def test_serial_skips_guard(tmp_path, capsys):
-    from scripts.ci import check_serial_skips
+    import check_serial_skips
 
     groups = tmp_path / "g.yaml"
     groups.write_text('version: 1\ntests:\n  - {"file": "tests/backend/api_app/test_pg.py", "group": "serial_pg"}\n'
