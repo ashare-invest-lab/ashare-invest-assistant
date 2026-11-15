@@ -54,6 +54,7 @@
 - 麦蕊 1 分钟：标签是开始还是结束、有没有 09:30 根，**未验证**（分契 §1.1）。核实前不平移、不合并。
 
 ### 2.4 价格、成交量、成交额
+- BJ 写库准入统一以 [daily-bars-source.md](daily-bars-source.md) §10（T-A172）为准；本节单位换算不构成放行。
 - 库内价、量、额都是 MONEY = Numeric(20,4)（`app/db/base.py`）。
 - 价格：.day 为 uint32 ÷ 100（`DAY_PRICE_DIVISOR`）。.lc1 / .lc5 为 float32 元，**不 ÷100**，按 0.01 **ROUND_HALF_UP**（DS `splice.decode_lc1`；按 §5 C6，main 的 ROUND_HALF_EVEN 不用于分钟价）。HF 为 float64 元，DS 不另舍入，parquet 原值保存。麦蕊原值写入。
 - 成交量统一为**股**：麦蕊日线 v 是手，×100（T003 GAP2；`validate_bar`；T-T81 全库额 ÷（量 × 收）中位 1.0002）。.day、.lc1、.lc5、HF 本来就是股，不乘。麦蕊 1 分钟 v 的单位官方文档没写，**未验证**，核实前不写麦蕊分钟量。
@@ -85,6 +86,8 @@
 「记录拒绝」沿用日契 §3.3 的记录级拒绝（`invalid_date`、`non_finite`、`out_of_range`、高低价矛盾、价格为 0），只拒该条、计数、不置 partial；「文件拒绝」置 partial，其他文件照常。
 
 ### 3.1 入库：日线（`market.daily_bars`，记 D）
+
+BJ 日线映射后的写库确认及入口约束见 [daily-bars-source.md](daily-bars-source.md) §10（T-A172），本表不单独授予放行。
 
 | 源 × 源字段 | 库列 | 换算 | 精度 / 量化 | 拒绝条件 |
 | --- | --- | --- | --- | --- |
@@ -225,6 +228,8 @@ DS 数据在用户电脑 F:\ashare-invest-assistant\data\。T-B143 开工第一�
 - `test_msi_no_network`：Given 打桩 `egress.mairui_get` / Then 离线导入全程调用 0 次。
 
 ## 8. 未验证
+
+BJ 小样本单位证据与批次写库确认的边界、逐入口未验证状态见 [daily-bars-source.md](daily-bars-source.md) §10（T-A172）。
 
 - BJ 路由两只 920 样本小窗口已验证（T-B146b），834682 旧码返回 503；920682 挂接改码前历史、成交量单位为手已验证（`reports/T-B146c.md`，小样本；单位核对仅 1 只 1 日）。全体 BJ 覆盖、920 完整上市以来区间、字段同构仍未验证；第 3 项仅为本批至少到 6116 行未见截断，单次上限与分页机制仍未验证。判据见 [daily-bars-source.md](daily-bars-source.md) §10.7–§10.8（T-A157b）。
 - §3.3 目录表列名与主键、§3.4 数值列精度（本契约约定）。
