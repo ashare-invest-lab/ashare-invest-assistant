@@ -54,6 +54,9 @@ def _daily_closes(
             *(v[field].is_not(None) for field in ("open", "high", "low", "close")),
             # Filter before DISTINCT ON so an unclosed day falls back to an older close.
             v.trade_date <= latest_close_date,
+            # Compare instants: a later day's intraday backfill is still eligible.
+            v.fetched_at
+            >= (v.trade_date + dt.time(15)).self_group().op("AT TIME ZONE")("Asia/Shanghai"),
             v.fetched_at <= now,
         )
         .order_by(v.code, v.trade_date.desc())

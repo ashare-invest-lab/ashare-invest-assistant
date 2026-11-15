@@ -11,6 +11,7 @@ from contextlib import nullcontext
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import FastAPI
@@ -103,6 +104,8 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             assert params["adj_type_1"] == "none"
             assert params["source_licence_id_1"] == LICENCE
             assert params["trade_date_1"] == state.latest_close_date
+            assert params["trade_date_2"] == dt.time(15)
+            assert params["param_1"] == "Asia/Shanghai"
             assert params["fetched_at_1"] == state.now
             for field in ("open", "high", "low", "close"):
                 assert f"market.daily_bars.{field} IS NOT NULL" in rendered
@@ -112,6 +115,11 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 assert f"market.daily_bars.{field} = " in rendered
             for field in ("trade_date", "fetched_at"):
                 assert f"market.daily_bars.{field} <= " in rendered
+            assert (
+                "market.daily_bars.fetched_at >= "
+                "((market.daily_bars.trade_date + %(trade_date_2)s::TIME WITHOUT TIME ZONE) "
+                "AT TIME ZONE %(param_1)s::VARCHAR)"
+            ) in rendered
             assert "SELECT DISTINCT ON (market.daily_bars.code)" in rendered
             assert "ORDER BY market.daily_bars.code, market.daily_bars.trade_date DESC" in rendered
             eligible = [
@@ -124,6 +132,9 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 and row.is_suspended is False
                 and all(getattr(row, f) is not None for f in ("open", "high", "low", "close"))
                 and row.trade_date <= params["trade_date_1"]
+                and row.fetched_at >= dt.datetime.combine(
+                    row.trade_date, params["trade_date_2"], ZoneInfo(params["param_1"])
+                )
                 and row.fetched_at <= params["fetched_at_1"]
             ]
             latest: dict[str, Any] = {}
@@ -338,7 +349,10 @@ def test_missing_or_nonpositive_pre_close_has_no_change_pct(world: Any, pre_clos
 
 
 def test_only_latest_eligible_bound_mairui_bar_is_used(world: Any) -> None:
-    newer = {"trade_date": dt.date(2041, 5, 6), "close": Decimal("999")}
+    newer = {
+        "trade_date": dt.date(2041, 5, 6), "close": Decimal("999"),
+        "fetched_at": dt.datetime(2041, 5, 6, 9, 5, tzinfo=dt.UTC),
+    }
     world.state.bars = [
         bar(),
         bar(trade_date=dt.date(2041, 5, 4), close=Decimal("1")),
@@ -348,7 +362,7 @@ def test_only_latest_eligible_bound_mairui_bar_is_used(world: Any) -> None:
         bar(**newer, source_licence_id=None),
         bar(**newer, adj_type="qfq"),
         bar(trade_date=dt.date(2041, 5, 8)),
-        bar(**newer, fetched_at=NOW + dt.timedelta(seconds=1)),
+        bar(**{**newer, "fetched_at": NOW + dt.timedelta(seconds=1)}),
     ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["price"] == "7.8750"
@@ -368,7 +382,14 @@ def test_only_latest_eligible_bound_mairui_bar_is_used(world: Any) -> None:
     ],
 )
 def test_incomplete_latest_bar_falls_back_or_reports_no_source(world: Any, invalid: Any) -> None:
-    world.state.bars = [bar(trade_date=dt.date(2041, 5, 6), **invalid), bar()]
+    world.state.bars = [
+        bar(
+            trade_date=dt.date(2041, 5, 6),
+            fetched_at=dt.datetime(2041, 5, 6, 9, 5, tzinfo=dt.UTC),
+            **invalid,
+        ),
+        bar(),
+    ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "stale" and item["price"] == "7.8750"
     world.state.bars.pop()
@@ -442,6 +463,7 @@ def test_intraday_complete_bar_falls_back_to_closed_day(
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "stale"
     assert item["t"] == "2041-05-06T15:00:00+08:00"
+    assert item["data_as_of"] == "2041-05-07T09:00:00+08:00"
     assert dt.datetime.fromisoformat(item["t"]) <= world.state.now
     world.state.bars.remove(historical)
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
@@ -450,8 +472,39 @@ def test_intraday_complete_bar_falls_back_to_closed_day(
     assert item["price"] is None and item["t"] is None
 
 
-@pytest.mark.parametrize("minute", [0, 1])
-def test_today_close_is_eligible_at_or_after_beijing_1500(world: Any, minute: int) -> None:
+@pytest.mark.parametrize("hour,minute,second", [(1, 0, 0), (6, 59, 59)])
+def test_intraday_fetch_is_not_a_close_even_after_beijing_1500(
+    world: Any, hour: int, minute: int, second: int
+) -> None:
+    world.state.now = dt.datetime(2041, 5, 7, 7, 1, tzinfo=dt.UTC)
+    world.state.latest_close_date = dt.date(2041, 5, 7)
+    previous = bar(
+        trade_date=dt.date(2041, 5, 6),
+        fetched_at=dt.datetime(2041, 5, 6, 9, 5, tzinfo=dt.UTC),
+    )
+    world.state.bars = [
+        bar(
+            trade_date=dt.date(2041, 5, 7),
+            close=Decimal("999"),
+            fetched_at=dt.datetime(2041, 5, 7, hour, minute, second, tzinfo=dt.UTC),
+        ),
+        previous,
+    ]
+    item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
+    assert item["data_status"] == "stale" and item["price"] == "7.8750"
+    assert item["t"] == "2041-05-06T15:00:00+08:00"
+    assert item["data_as_of"] == "2041-05-06T17:05:00+08:00"
+    world.state.bars.remove(previous)
+    item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
+    assert item["data_status"] == "unavailable"
+    assert item["gaps"][0]["reason"] == "no_source"
+    assert all(item[key] is None for key in ("price", "t", "data_as_of"))
+
+
+@pytest.mark.parametrize("minute,fetch_minute", [(0, 0), (1, 0), (1, 1)])
+def test_today_close_is_eligible_at_or_after_beijing_1500(
+    world: Any, minute: int, fetch_minute: int
+) -> None:
     world.state.now = dt.datetime(2041, 5, 7, 7, minute, tzinfo=dt.UTC)
     world.state.latest_close_date = dt.date(2041, 5, 7)
     world.state.bars = [
@@ -459,10 +512,11 @@ def test_today_close_is_eligible_at_or_after_beijing_1500(world: Any, minute: in
         bar(
             trade_date=dt.date(2041, 5, 7),
             close=Decimal("8.1250"),
-            fetched_at=dt.datetime(2041, 5, 7, 1, 0, tzinfo=dt.UTC),
+            fetched_at=dt.datetime(2041, 5, 7, 7, fetch_minute, tzinfo=dt.UTC),
         ),
     ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "stale" and item["price"] == "8.1250"
     assert item["t"] == "2041-05-07T15:00:00+08:00"
+    assert item["data_as_of"] == f"2041-05-07T15:{fetch_minute:02d}:00+08:00"
     assert dt.datetime.fromisoformat(item["t"]) <= world.state.now
