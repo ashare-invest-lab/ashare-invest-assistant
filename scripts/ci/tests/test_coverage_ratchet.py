@@ -287,10 +287,16 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     backend = jobs["backend"]
-    assert "needs" not in backend
-    # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
-    assert backend["timeout-minutes"] == 75
+    assert backend["needs"] == ["backend-lint", "backend-mypy", "backend-tests"]
+    assert backend["if"] == "${{ always() }}"
+    assert backend["timeout-minutes"] == 45
     assert backend["name"] == "backend (ruff, mypy, pytest+coverage)"
+    shards = jobs["backend-tests"]
+    assert shards["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4, 5, 6]}}
+    assert shards["timeout-minutes"] == 30
+    assert shards["name"] == "backend tests (shard ${{ matrix.shard }}/6)"
+    assert jobs["backend-lint"]["name"] == "backend lint (ruff)"
+    assert jobs["backend-mypy"]["name"] == "backend typecheck (mypy --strict)"
     assert ready["name"] == "trusted main coverage readiness"
     assert ready["timeout-minutes"] == 35
     assert ready["permissions"] == {"contents": "read", "actions": "read"}
@@ -302,9 +308,9 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
     assert len(freezes) == 1
     freeze_index = freezes[0]
-    pytest_index = next(i for i, step in enumerate(steps) if step.get("name") == "pytest + 覆盖率")
+    merge_index = next(i for i, step in enumerate(steps) if "coverage combine" in step.get("run", ""))
     ratchet_index = next(i for i, step in enumerate(steps) if step.get("id") == "coverage_ratchet")
-    assert pytest_index < freeze_index == ratchet_index - 1
+    assert merge_index < freeze_index == ratchet_index - 1
     frozen = steps[freeze_index]
     assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
                              '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"')
@@ -318,7 +324,7 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     import yaml
 
     path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
-    backend = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend"]
+    backend = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend-tests"]
     command = next(step["run"] for step in backend["steps"] if step.get("name") == "pytest + 覆盖率")
     dirs = ["src/backend/tests", "tests/backend", "tests/replay"]
     for directory in dirs + ["src/backend/.venv/bin", "bin", "runner temp"]:
@@ -334,6 +340,8 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
         "if sys.argv[1:] == ['scripts/ci/observe_template_connections.py']:\n"
         "    sys.exit(23)  # Observer failure must not replace pytest's exit.\n"
         "assert os.environ['PYTHONPATH'] == 'src/backend'\n"
+        "assert os.environ['AIA_SHARD_REPORT'] == str(Path(os.environ['RUNNER_TEMP'], 'shard-report.json'))\n"
+        "assert os.environ['COVERAGE_FILE'] == str(Path(os.environ['RUNNER_TEMP'], 'coverage-shard-3.data'))\n"
         "Path(os.environ['RUNNER_TEMP'], 'argv.json').write_text(json.dumps(sys.argv[1:]))\n"
         f"sys.exit({exit_code})\n",
         encoding="utf-8",
@@ -344,15 +352,17 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     uv.chmod(0o755)
     monkeypatch.setenv("PATH", str(uv.parent) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
+    monkeypatch.setenv("AIA_SHARD_INDEX", "3")
+    monkeypatch.setenv("AIA_SHARD_TOTAL", "6")
     for name in ("PYTEST_COV_VERSION", "REQUESTS_VERSION", "URLLIB3_VERSION"):
         monkeypatch.setenv(name, "test-only")
     result = subprocess.run(["bash", "-c", command], cwd=tmp_path, capture_output=True, text=True, timeout=10)
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert json.loads((runner_temp / "argv.json").read_text(encoding="utf-8")) == [
         "-m", "pytest", "-p", "scripts.ci.pytest_safe_failures",
+        "-p", "scripts.ci.pytest_shard",
         *(["-c", "tests/pytest.ini"] if with_ini else []), *dirs,
         "--durations=30", "--durations-min=0.5",
         "--cov=src/backend/app", "--cov-report=term-missing:skip-covered",
-        f"--cov-report=json:{runner_temp}/coverage.json",
-        f"--junitxml={runner_temp}/backend-pytest.xml",
+        f"--junitxml={runner_temp}/backend-pytest-shard-3.xml",
     ]
