@@ -10,19 +10,64 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Get-LockFirstLine {
+function Get-MetadataValue {
+    param($Value)
+    if ($Value -is [string]) { return ([regex]::Replace($Value, '\s+', ' ')).Trim() }
+    return ''
+}
+
+function Get-LockMetadata {
     param([string]$Path)
+    $result = [PSCustomObject]@{ Owner = '未知'; Status = '未知' }
     try {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         # Reparse points (including junctions) must not expose unrelated files.
         if (-not $item.PSIsContainer -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            $line = Get-Content -LiteralPath $Path -TotalCount 1 -Encoding UTF8 -ErrorAction Stop
-            if (-not [string]::IsNullOrEmpty($line)) { return $line }
+            $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop
+            if ([string]::IsNullOrEmpty($text)) { return $result }
+            $fields = @{}
+            try {
+                $json = ConvertFrom-Json -InputObject $text -ErrorAction Stop
+                foreach ($name in @('task', 'owner', 'status', 'state')) {
+                    if ($null -ne $json -and $null -ne $json.PSObject.Properties[$name]) {
+                        $fields[$name] = $json.$name
+                    }
+                }
+            } catch {
+                # Invalid JSON still holds the lock; report unknown metadata.
+            }
+            if ($text.TrimStart() -notmatch '^[\{\[]') {
+                $pattern = '(?:^|\s)(task|owner|status|state)\s*=\s*(?:"([^"\r\n]*)"|''([^''\r\n]*)''|([^\s]+))'
+                foreach ($match in [regex]::Matches($text, $pattern)) {
+                    $name = $match.Groups[1].Value
+                    if (-not $fields.ContainsKey($name)) {
+                        foreach ($index in @(2, 3, 4)) {
+                            if ($match.Groups[$index].Success) {
+                                $fields[$name] = $match.Groups[$index].Value
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            foreach ($name in @('task', 'owner')) {
+                $value = Get-MetadataValue $fields[$name]
+                if ($value) { $result.Owner = $value; break }
+            }
+            $first = ($text -split '\r?\n', 2)[0]
+            if ($result.Owner -eq '未知' -and $text.TrimStart() -notmatch '^[\{\[]' -and $first -notmatch '=') {
+                $value = Get-MetadataValue $first
+                if ($value) { $result.Owner = $value }
+            }
+            foreach ($name in @('status', 'state')) {
+                $value = Get-MetadataValue $fields[$name]
+                if ($value) { $result.Status = $value; break }
+            }
         }
     } catch {
         # Missing, empty or unreadable metadata never makes a lock disappear.
     }
-    return '未知'
+    return $result
 }
 
 try {
@@ -35,18 +80,22 @@ try {
         $locks = @(Get-ChildItem -LiteralPath $LockDir -Force -Filter '*.lock' -ErrorAction Stop)
         foreach ($lock in $locks) {
             $owner = '未知'
+            $status = '未知'
             if (-not ($lock.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 if ($lock.PSIsContainer) {
                     foreach ($metadata in @('owner', 'info')) {
-                        $owner = Get-LockFirstLine -Path (Join-Path $lock.FullName $metadata)
-                        if ($owner -ne '未知') { break }
+                        $details = Get-LockMetadata -Path (Join-Path $lock.FullName $metadata)
+                        if ($owner -eq '未知') { $owner = $details.Owner }
+                        if ($status -eq '未知') { $status = $details.Status }
                     }
                 } else {
-                    $owner = Get-LockFirstLine -Path $lock.FullName
+                    $details = Get-LockMetadata -Path $lock.FullName
+                    $owner = $details.Owner
+                    $status = $details.Status
                 }
             }
             $modified = $lock.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
-            Write-Output ("锁：{0} | 持锁任务：{1} | 修改时间：{2}" -f $lock.Name, $owner, $modified)
+            Write-Output ("锁：{0} | 持锁任务：{1} | 修改时间：{2} | 状态：{3}" -f $lock.Name, $owner, $modified, $status)
         }
         if ($locks.Count -gt 0) {
             [Console]::Error.WriteLine('存在回填锁，拒绝重启、重建或 down')

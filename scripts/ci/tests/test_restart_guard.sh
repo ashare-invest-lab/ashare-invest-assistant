@@ -29,9 +29,19 @@ run_guard --then 'printf executed > "$GUARD_TEST_MARKER"'
 expect_rc 3
 [[ ! -e "$GUARD_TEST_MARKER" ]] || fail '有锁仍执行 --then'
 [[ "$output" == *'mairui-backfill.lock | 持锁任务：T-B84 | 修改时间：'* ]] || fail '缺少锁信息'
+[[ "$output" == *'状态：未知'* ]] || fail '无状态字段未报告未知'
 [[ "$output" =~ 修改时间：[0-9]{4}-[0-9]{2}-[0-9]{2} ]] || fail '未显示修改时间'
 [[ "$output" != *DO_NOT_PRINT_SECOND_LINE* ]] || fail '读取了第二行'
-ok '回填文件锁退出 3 且阻止 --then，仅输出首行和修改时间'
+ok '回填文件锁退出 3 且阻止 --then，输出任务、修改时间和未知状态'
+
+for content in '{"task":"T-B85","status":"paused"}' 'owner=T-B85 status=paused'; do
+  printf '%s\n' "$content" > "$AIA_RUNTIME_LOCK_DIR/mairui-backfill.lock"
+  run_guard --then 'printf executed > "$GUARD_TEST_MARKER"'
+  expect_rc 3
+  [[ ! -e "$GUARD_TEST_MARKER" && "$output" == *'持锁任务：T-B85'* && "$output" == *'状态：paused'* ]] || fail 'paused 锁未保留阻断或未解析元数据'
+  ok "paused 锁仍拒绝：$content"
+done
+printf 'T-B84\nDO_NOT_PRINT_SECOND_LINE\n' > "$AIA_RUNTIME_LOCK_DIR/mairui-backfill.lock"
 
 mkdir "$AIA_RUNTIME_LOCK_DIR/owner.lock" "$AIA_RUNTIME_LOCK_DIR/info.lock" "$AIA_RUNTIME_LOCK_DIR/empty.lock"
 printf 'T-OWNER\r\nDO_NOT_PRINT_SECOND_LINE\n' > "$AIA_RUNTIME_LOCK_DIR/owner.lock/owner"

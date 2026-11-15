@@ -25,7 +25,7 @@ hash 只在本地 `git rev-parse`，对象不在本地就停止，不 fetch。
 
 `rehearse` 直接退出 2，不启动 8 个服务，也不调用 docker。
 `deploy` 只有 `AIA_CLOSEOUT_DEPLOY=1` 才继续。`self-check` 自己置位内部标记：即使环境里已经有 `AIA_CLOSEOUT_DEPLOY=1`，也不会调用 `db-backup.sh` 或 `up.sh`。
-`up.sh` 已经包含迁移、timescale-apply、db-roles 和 `--wait`。其后的 `verify-roles` 用 `compose.sh run --no-deps --entrypoint bash db-roles` 在现有 db-roles 容器模式里执行。非 0 即停，不跑 nginx 或 HTTP。不重复迁移。
+`up.sh` 先用 `--exit-code-from` 依次完成迁移、timescale-apply、db-roles，再用 `--wait` 等待常驻服务。其后的 `verify-roles` 用 `compose.sh run --no-deps --entrypoint bash db-roles` 在现有 db-roles 容器模式里执行。非 0 即停，不跑 nginx 或 HTTP。不重复迁移。
 
 ## 清单条件
 

@@ -19,7 +19,7 @@ def test_restart_guard_bash() -> None:
         ["bash", str(script)], capture_output=True, text=True, timeout=30
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "restart guard selftest: 9 passed" in result.stdout
+    assert "restart guard selftest: 11 passed" in result.stdout
 
 
 def test_restart_guard_powershell_syntax() -> None:
@@ -62,6 +62,66 @@ def test_restart_guard_powershell_syntax() -> None:
             assert stack and stack.pop() == token, "Unbalanced PowerShell delimiter"
     assert not stack, "Unclosed PowerShell delimiter"
     assert not any(op in " ".join(code) for op in ("??", "?.", "&&", "||"))
+
+
+@pytest.mark.parametrize("runtime", ["bash", "powershell"])
+@pytest.mark.parametrize(
+    "content,owner,status",
+    [
+        ('{"task":"T-B85","status":"paused"}', "T-B85", "paused"),
+        ('{\n "owner":"T-DS85",\n "state":"running"\n}', "T-DS85", "running"),
+        ('{"owner":"T-DS85","state":"paused"}', "T-DS85", "paused"),
+        ('{"task":"T-B85","status":"running"}', "T-B85", "running"),
+        ("task=T-B85 status=paused\n", "T-B85", "paused"),
+        ("owner=T-DS85\r\nstate=running\r\n", "T-DS85", "running"),
+        ("owner='T DS85'\nstate=paused", "T DS85", "paused"),
+        ('task="T B85" status=running', "T B85", "running"),
+        ('{"task":"T-B85","owner":"other","status":"paused","state":"running"}', "T-B85", "paused"),
+        ('{"task":"T-B85","note":"DO_NOT_PRINT"}', "T-B85", "未知"),
+        ('{"status":"paused","note":"DO_NOT_PRINT"}', "未知", "paused"),
+        ('{"task":"T-B85","status":null}', "T-B85", "未知"),
+        ('{"task":"T-B85",', "未知", "未知"),
+        ("T-B85\nDO_NOT_PRINT", "T-B85", "未知"),
+        ("", "未知", "未知"),
+    ],
+)
+def test_lock_metadata_still_blocks(tmp_path: Path, runtime: str, content: str, owner: str, status: str) -> None:
+    if runtime == "powershell" and not POWERSHELL:
+        pytest.skip("No pwsh/powershell; runtime verification required on Windows")
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+    (lock_dir / "backfill.lock").write_text(content, encoding="utf-8")
+    marker = tmp_path / "executed"
+    env = {**os.environ, "GUARD_TEST_MARKER": str(marker)}
+    if runtime == "bash":
+        cmd = ["bash", str(PS_SCRIPT.with_suffix(".sh")), "--lock-dir", str(lock_dir),
+               "--then", 'touch "$GUARD_TEST_MARKER"']
+    else:
+        cmd = [POWERSHELL, "-NoProfile", "-NonInteractive", "-File", str(PS_SCRIPT),
+               "-LockDir", str(lock_dir), "-Then", "Set-Content -LiteralPath $env:GUARD_TEST_MARKER -Value executed"]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert not marker.exists()
+    assert f"backfill.lock | 持锁任务：{owner} | 修改时间：" in result.stdout
+    assert f"状态：{status}" in result.stdout
+    assert "DO_NOT_PRINT" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("runtime", ["bash", "powershell"])
+def test_directory_metadata_combines_owner_and_info(tmp_path: Path, runtime: str) -> None:
+    if runtime == "powershell" and not POWERSHELL:
+        pytest.skip("No pwsh/powershell; runtime verification required on Windows")
+    directory = tmp_path / "backfill.lock"
+    directory.mkdir()
+    (directory / "owner").write_text("T-B85\n", encoding="utf-8")
+    (directory / "info").write_text('{"status":"paused"}', encoding="utf-8")
+    if runtime == "bash":
+        cmd = ["bash", str(PS_SCRIPT.with_suffix(".sh")), "--lock-dir", str(tmp_path)]
+    else:
+        cmd = [POWERSHELL, "-NoProfile", "-NonInteractive", "-File", str(PS_SCRIPT), "-LockDir", str(tmp_path)]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "持锁任务：T-B85" in result.stdout and "状态：paused" in result.stdout
 
 
 @pytest.mark.skipif(not POWERSHELL, reason="No pwsh/powershell; static syntax check only")
