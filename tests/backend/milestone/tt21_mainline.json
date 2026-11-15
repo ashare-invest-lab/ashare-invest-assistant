@@ -1,9 +1,9 @@
 {
-  "baseline": "6190fbb17057094843e22d2e7a7935c9a270c770",
+  "baseline": "18e27b3aadc3bd3fb21e829f1a97c25498cbf0d2",
   "main_migration_baseline": "465e02046fa8d971897603742497444f884e89a2",
-  "expected_head": "0035",
-  "previous_baseline": "dcf734d",
-  "purpose": "Original 33-file PR89 6190fbb snapshot matches main 465e020 at 0034. PR104 candidate 4b350762 adds only 0035, approved by Chief 2026-11-13 01:17 MST; this does not assert PR104 is merged. Updating requires a new reviewed manifest commit.",
+  "expected_head": "0036",
+  "previous_baseline": "6190fbb17057094843e22d2e7a7935c9a270c770",
+  "purpose": "PR141 be/T-B143 candidate 18e27b3 adds 0036 after the previously pinned 0035 graph. Pin the complete candidate migration graph for T-T81c; this does not assert PR141 is merged. main_migration_baseline retains the historical main reference. Updating requires a new reviewed manifest commit.",
   "migrations": [
     {
       "migration_file": "0001_baseline.py",
@@ -140,6 +140,10 @@
     {
       "migration_file": "0035_c2_daily_bars_outbox.py",
       "sha256_checksum": "772adeaddbfe2768fea46e12ed3f820f034d9843d9aaf8106678f703ae1e37b7"
+    },
+    {
+      "migration_file": "0036_tb143_ex_rights_minute_catalog.py",
+      "sha256_checksum": "efdbfbf5a34d381b29c43c468b36ed45ee2761e70f582cf33bff8ab0412ede5e"
     }
   ]
 }

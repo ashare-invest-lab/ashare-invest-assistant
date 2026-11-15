@@ -21,6 +21,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Identity,
     Index,
+    Numeric,
     PrimaryKeyConstraint,
     SmallInteger,
     Table,
@@ -384,6 +385,55 @@ daily_bars = Table(
     schema=MARKET,
     comment="hypertable（trade_date，chunk 1 年）",
 )
+
+# 契约 §3.3、§3.4 的字段与主键为约定（未验证）；两张表均不建 hypertable。
+ex_rights_events = Table(
+    "ex_rights_events",
+    metadata,
+    txt("code", nullable=False),
+    day("ex_date", nullable=False),
+    Column("cash_per_share", Numeric(20, 6), nullable=False),
+    Column("rights_price", Numeric(20, 6), nullable=False),
+    Column("bonus_ratio", Numeric(20, 6), nullable=False),
+    Column("rights_ratio", Numeric(20, 6), nullable=False),
+    txt("source", nullable=False),
+    txt("snapshot_sha256", nullable=False),
+    _now("registered_at"),
+    PrimaryKeyConstraint("code", "ex_date", "snapshot_sha256"),
+    one_of("source", ["tdx_gbbq"]),
+    CheckConstraint("snapshot_sha256 ~ '^[0-9a-f]{64}$'", name="snapshot_sha256_hex"),
+    schema=MARKET,
+)
+
+minute_file_catalog = Table(
+    "minute_file_catalog",
+    metadata,
+    txt("source", nullable=False),
+    txt("code", nullable=False),
+    txt("kind", nullable=False),
+    day("date_from", nullable=False),
+    day("date_to", nullable=False),
+    txt("rel_path", nullable=False),
+    txt("sha256", nullable=False),
+    Column("row_count", BigInteger, nullable=False),
+    txt("splice_segment", nullable=False),
+    txt("generator", nullable=False),
+    _now("registered_at"),
+    PrimaryKeyConstraint("source", "code", "kind", "rel_path"),
+    one_of("source", ["hf_1min", "tdx_local"]),
+    one_of("kind", ["1m", "5m"]),
+    one_of("splice_segment", ["hf_1m", "vipdoc_1m", "lc5"]),
+    CheckConstraint("sha256 ~ '^[0-9a-f]{64}$'", name="sha256_hex"),
+    CheckConstraint("row_count >= 0", name="row_count_nonnegative"),
+    CheckConstraint("date_from <= date_to", name="date_order"),
+    CheckConstraint(
+        "rel_path NOT LIKE '/%' AND position(chr(92) in rel_path) = 0 "
+        "AND rel_path !~ '(^|/)[.][.](/|$)' AND position(':' in rel_path) = 0",
+        name="rel_path_safe",
+    ),
+    schema=MARKET,
+)
+
 
 quotes_snapshot = Table(
     "quotes_snapshot",

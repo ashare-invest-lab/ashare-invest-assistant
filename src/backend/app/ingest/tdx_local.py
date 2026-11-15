@@ -21,8 +21,8 @@ import re
 import struct
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence, Set
-from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass, field, replace
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Final, Literal
 from zoneinfo import ZoneInfo
@@ -108,6 +108,7 @@ class TdxBar:
 class ParseResult:
     bars: list[TdxBar] = field(default_factory=list)
     rejected: Counter[str] = field(default_factory=Counter)
+    file_rejected: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,14 +142,14 @@ class Manifest:
 # ---------------------------------------------------------------- 记录解析
 
 
-def _quantize(value: float, q: Decimal) -> Decimal | None:
+def _quantize(value: float, q: Decimal, *, rounding: str | None = None) -> Decimal | None:
     """量化 float32 值；量化报错或超出写库列 MONEY 的整数位时返回 None（裁定②，按记录拒绝）。
 
     「极大」只以实际会不会出错为准：Decimal 默认精度下 quantize 抛 InvalidOperation，或整数位
     超过 ``MONEY``（Numeric(20,4)，market 各 K 线表价/额列）的 precision - scale；不另设阈值。
     """
     try:
-        result = Decimal(repr(float(value))).quantize(q)
+        result = Decimal(repr(float(value))).quantize(q, rounding=rounding)
     except InvalidOperation:
         return None
     if result.adjusted() + 1 > _MONEY_INT_DIGITS:
@@ -215,26 +216,40 @@ def parse_day_bytes(code: str, data: bytes) -> ParseResult:
 
 
 def parse_lc_bytes(code: str, data: bytes, kind: Kind) -> ParseResult:
-    """.lc1 / .lc5：分钟数为当日零点起、bar 结束时刻（T-B133 真实样本核对：首根 09:31/09:35）。"""
+    """分钟结束标签；非法标签整文件拒绝，lc1 按 DS relabel_1300 修复完整日。"""
     if kind not in LC_BAR_MINUTES:
         raise ValueError("kind must be lc1 or lc5")
     out = ParseResult()
     if len(data) % RECORD_SIZE:
         out.rejected["truncated_file"] += 1
+        out.file_rejected = True
         return out
+    labels: dict[dt.date, set[int]] = {}
     for raw_date, minute, o, h, low, c, amount, volume, _r in LC_LAYOUT.iter_unpack(data):
         try:
             day = decode_lc_date(raw_date)
         except ValueError:
             out.rejected["invalid_date"] += 1
-            continue
-        if not 0 < minute <= 24 * 60:
+            out.file_rejected = True
+            out.bars.clear()
+            return out
+        if not 0 < minute < 24 * 60:
             out.rejected["invalid_minute"] += 1
-            continue
+            out.file_rejected = True
+            out.bars.clear()
+            return out
+        valid_label = 571 <= minute <= 690 or 781 <= minute <= 900
+        if not valid_label and not (kind == "lc1" and minute == 780):
+            out.rejected["invalid_label"] += 1
+            out.file_rejected = True
+            out.bars.clear()
+            return out
         if not all(math.isfinite(x) for x in (o, h, low, c, amount)):  # T-A147 M2
             out.rejected[REJECT_NON_FINITE] += 1
             continue
-        quantized_prices = [_quantize(x, LC_PRICE_Q) for x in (o, h, low, c)]
+        quantized_prices = [
+            _quantize(x, LC_PRICE_Q, rounding=ROUND_HALF_UP) for x in (o, h, low, c)
+        ]
         quantized_amount = _quantize(amount, _MONEY_Q)
         prices = [x for x in quantized_prices if x is not None]
         if len(prices) != len(quantized_prices) or quantized_amount is None:  # 裁定②
@@ -244,8 +259,27 @@ def parse_lc_bytes(code: str, data: bytes, kind: Kind) -> ParseResult:
         if bad:
             out.rejected[bad] += 1
             continue
+        day_labels = labels.setdefault(day, set())
+        if minute in day_labels or (minute in (690, 780) and {690, 780} & day_labels):
+            out.rejected["duplicate_timestamp" if minute in day_labels else "coexisting_1300"] += 1
+            out.file_rejected = True
+            out.bars.clear()
+            return out
+        day_labels.add(minute)
         end = dt.datetime.combine(day, dt.time(0), BEIJING) + dt.timedelta(minutes=minute)
         out.bars.append(_bar(code, day, end, prices, volume, quantized_amount))
+    if kind == "lc1":
+        wanted = set(range(571, 690)) | set(range(781, 901))
+        repaired: list[TdxBar] = []
+        for bar in out.bars:
+            if bar.ts is not None and bar.ts.time() == dt.time(13):
+                day_labels = labels[bar.trade_date]
+                if len(day_labels) != 240 or day_labels - {780} != wanted:
+                    continue
+                bar = replace(bar, ts=bar.ts - dt.timedelta(minutes=90))
+            repaired.append(bar)
+        out.bars = repaired
+    out.bars.sort(key=lambda bar: (bar.trade_date, bar.ts))
     return out
 
 
@@ -281,7 +315,7 @@ def kind_dirs(root: Path, kind: Kind, exclude: Set[str] = frozenset()) -> dict[s
     found: dict[str, Path] = {}
     sub = KIND_DIR[kind]
     for market in MARKETS:
-        if market in exclude:
+        if market in exclude or (kind != "day" and market == "bj"):
             continue
         mdir = _child_ci(root, market)
         kdir = _child_ci(mdir, sub) if mdir is not None else None
@@ -630,6 +664,10 @@ def run_import(
                     report.status = "partial"
                     continue
                 report.rejected_records.update(parsed.rejected)
+                if parsed.file_rejected:
+                    report.rejected_files.update(parsed.rejected)
+                    report.status = "partial"
+                    continue
                 if unit_suspect(parsed.bars):
                     report.rejected_files["unit_suspect"] += 1
                     report.issues.append(f"tdx_unit_suspect:{cand.code}")
