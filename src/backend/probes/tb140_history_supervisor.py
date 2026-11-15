@@ -223,6 +223,10 @@ def run_supervised(
                 raise
             overall["batches"] += 1
             overall["done"] += int(summary.get("done") or 0)
+            if summary.get("blocked_bj_unconfirmed"):
+                overall["blocked_bj_unconfirmed"] = summary["blocked_bj_unconfirmed"]
+                overall["remaining"] = summary["remaining"]
+                break  # 留待确认后下一轮，不在本轮循环重拉。
         return overall
     except Halt as exc:
         overall["halt"] = str(exc)
@@ -245,7 +249,7 @@ def run_supervised(
             final_state = load_counter(counter_path)
             overall["total"] = final_state.get("total")
             overall["halted"] = final_state.get("halted")
-            overall["remaining"] = None
+            overall.setdefault("remaining", None)
         except Halt:
             pass
         text = redact(json.dumps(overall, ensure_ascii=False), secret)

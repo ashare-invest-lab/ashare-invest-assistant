@@ -3,7 +3,7 @@
 -- 默认跳过未确认 BJ，计入 skipped，沪深照常提交；不接受 confirmed 布尔参数。
 -- 需放行时，在本 psql 会话先按下列结构创建并填充 TEMP tb143_bj_volume_pairs。
 -- mairui_* 为离线原始 code/t/v；其余列为本地 code/trade_date/volume/source。
--- 至少 20 个不同合法 .BJ 码；同码同日、source=tdx_local、非负有限 v*100=整数股量，
+-- 排除停牌及零量后，共同单日至少 20 个不同合法 .BJ 码；同码同日、source=tdx_local，
 -- 全部对照通过才允许写 BJ（不限样本码）。每次重新校验；新会话须重新提供对照。
 \set ON_ERROR_STOP on
 BEGIN;
@@ -12,6 +12,9 @@ CREATE TEMP TABLE IF NOT EXISTS pg_temp.tb143_bj_volume_pairs (
   mairui_code text, mairui_t date, mairui_v numeric,
   code text, trade_date date, volume numeric, source text
 ) ON COMMIT PRESERVE ROWS;
+ALTER TABLE pg_temp.tb143_bj_volume_pairs
+  ADD COLUMN IF NOT EXISTS mairui_sf text,
+  ADD COLUMN IF NOT EXISTS is_suspended text;
 CREATE TEMP TABLE load_params (before_date date NOT NULL) ON COMMIT DROP;
 INSERT INTO load_params VALUES (:'before'::date);
 CREATE TEMP TABLE day_stage (
@@ -47,7 +50,15 @@ BEGIN
   END IF;
   SELECT count(*) INTO v_total FROM day_stage AS s;
   -- 不保存可复用的确认位；对照不足或任意一项不符（含 NULL）均关闭门闩。
-  SELECT count(DISTINCT p.code) >= 20 AND coalesce(bool_and(coalesce(
+  WITH pairs AS (
+    SELECT p.*, (p.mairui_v = 0 OR p.volume = 0
+      OR coalesce(lower(p.mairui_sf::text) IN ('1', 'true'), false)
+      OR coalesce(lower(p.is_suspended::text) IN ('1', 'true'), false)) AS excluded
+    FROM pg_temp.tb143_bj_volume_pairs AS p
+  )
+  SELECT EXISTS (SELECT 1 FROM pairs WHERE NOT excluded
+    GROUP BY trade_date HAVING count(DISTINCT code) >= 20)
+    AND coalesce(bool_and(coalesce(
     p.code ~ '^(43[0-9]|83[0-9]|87[0-9]|920)[0-9]{3}[.]BJ$'
     AND p.mairui_code = p.code AND p.mairui_t = p.trade_date
     AND isfinite(p.mairui_t) AND isfinite(p.trade_date)
@@ -55,9 +66,9 @@ BEGIN
     AND p.mairui_v::text NOT IN ('NaN', 'Infinity', '-Infinity')
     AND p.volume::text NOT IN ('NaN', 'Infinity', '-Infinity')
     AND p.mairui_v >= 0 AND p.volume >= 0
-    AND p.volume = trunc(p.volume) AND p.mairui_v * 100 = p.volume,
+    AND (p.excluded OR (p.volume = trunc(p.volume) AND p.mairui_v * 100 = p.volume)),
     false)), false)
-  INTO v_bj_confirmed FROM pg_temp.tb143_bj_volume_pairs AS p;
+  INTO v_bj_confirmed FROM pairs AS p;
   INSERT INTO market.daily_bars (
     code, trade_date, adj_type, open, high, low, close, volume, amount,
     source, pre_close, is_suspended, source_licence_id, fetched_at

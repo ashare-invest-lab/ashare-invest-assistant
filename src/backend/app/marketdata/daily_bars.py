@@ -18,6 +18,7 @@ from sqlalchemy.engine import Connection
 
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
+from app.bj_offline_volume import _bj_write_unconfirmed
 from app.common.errors import AppError
 from app.config import Settings
 from app.db.tables.market import daily_bars, securities, trading_calendar
@@ -99,6 +100,7 @@ class UpsertStats:
     unchanged: int
     conflicts: int
     issues: tuple[str, ...]
+    blocked_bj_unconfirmed: int = 0
     replaced: int = 0
     _replacement_results: tuple[dict[str, object], ...] = field(default=(), repr=False)
     _reconcile_sink: ReconcileSink | None = field(default=None, repr=False, compare=False)
@@ -349,7 +351,11 @@ def upsert_daily_bars(
     if not result.bars:
         return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
-    ordered = sorted(result.bars, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
+    writable = [bar for bar in result.bars if not _bj_write_unconfirmed({"code": bar.code})]
+    blocked_bj = len(result.bars) - len(writable)
+    if blocked_bj:
+        issues.append("blocked_bj_unconfirmed")
+    ordered = sorted(writable, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
     for offset in range(0, len(ordered), UPSERT_BATCH_ROWS):
         chunk = ordered[offset : offset + UPSERT_BATCH_ROWS]
         values = [
@@ -445,6 +451,7 @@ def upsert_daily_bars(
         conflicts=conflicts,
         issues=tuple(sorted(set(issues))),
         replaced=replaced,
+        blocked_bj_unconfirmed=blocked_bj,
         _replacement_results=tuple(replacement_results),
         _reconcile_sink=reconcile_sink,
     )

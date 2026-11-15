@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo
 if __package__:
     from .tb140_history_load import (
         CodeReject,
+        _bj_write_unconfirmed,
         RowReject,
         market_of,
         parse_window,
@@ -54,6 +55,7 @@ if __package__:
 else:
     from tb140_history_load import (
         CodeReject,
+        _bj_write_unconfirmed,
         RowReject,
         market_of,
         parse_window,
@@ -529,6 +531,28 @@ def run_batch(
     written_rows: list[dict[str, Any]] = []
     calls_before = 0
     persist_attempted = False
+    completed_codes: list[str] = []
+    blocked_codes: set[str] = set()
+
+    def record_completed() -> None:
+        for code in completed_codes:
+            if _bj_write_unconfirmed({"code": qualified_code(code)}) or (
+                market_of(code) == "BJ" and summary.get("db_blocked_bj_unconfirmed")
+            ):
+                blocked_codes.add(code)
+            if code in blocked_codes:
+                continue
+            state.setdefault("done_history", []).append(code)
+            state.setdefault("history_windows", {})[code] = {
+                "st": start.isoformat() if start else None,
+                "et": end.isoformat() if end else None,
+            }
+            summary["done"] += 1
+        summary["blocked_bj_unconfirmed"] = sorted(blocked_codes)
+        summary["remaining"] = len([c for c in codes if c not in state.get("done_history", [])])
+        if summary["done"]:
+            atomic_save(counter_path, state)
+
     try:
         state = load_counter(counter_path)
         if engine is None:
@@ -574,15 +598,9 @@ def run_batch(
             sql_path = sql_dir / f"{qcode}.sql"
             sql_path.write_text(render_insert_sql(rows, lid, bind_note=bind_note), encoding="utf-8")
             sql_names.append(str(sql_path.name))
-            if not state.get("done_history"):
-                state["done_history"] = []
-            state["done_history"].append(code)
-            state.setdefault("history_windows", {})[code] = {
-                "st": start.isoformat() if start else None,
-                "et": end.isoformat() if end else None,
-            }
-            atomic_save(counter_path, state)
-            summary["done"] += 1
+            completed_codes.append(code)
+            if _bj_write_unconfirmed({"code": qcode}):
+                blocked_codes.add(code)
             summary["written_bars"] += len(rows)
             summary["rejected_rows"] += len(rejects)
             summary["sql_files"] += 1
@@ -593,16 +611,17 @@ def run_batch(
                 encoding="utf-8",
             )
         summary["sql"] = sql_names
-        summary["remaining"] = len([c for c in codes if c not in set(state.get("done_history") or [])])
         if persist_rows is not None:
             persist_attempted = True
             _safe_persist(persist_rows, written_rows, engine, state, summary)
+        record_completed()
         return summary
     except Halt as exc:
         summary["halt"] = str(exc)
         if persist_rows is not None and written_rows and engine is not None and not persist_attempted:
             try:
                 _safe_persist(persist_rows, written_rows, engine, state, summary)
+                record_completed()
             except Halt as db_exc:
                 summary["halt"] = str(db_exc)
         raise
