@@ -11,7 +11,6 @@ import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../compone
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
-import { tradeDay } from '../../lib/market';
 import { StockErrorBoundary } from './StockErrorBoundary';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
@@ -108,20 +107,20 @@ function StockBody({ profile }: { profile: SecurityProfile }) {
   );
 }
 
+// HTTP /quotes 的无来源响应会返回 t=null；没有行情交易日就不能把日K或分时前收认作今日行情。
 function todayBar(bars: Bar[] | undefined, q: QuoteItem | null | undefined) {
   const last = bars?.[bars.length - 1];
-  const day = tradeDay(q?.t);
-  return last && day && tradeDay(last.t) === day ? last : null;
+  return last && q?.t && last.t.slice(0, 10) === q.t.slice(0, 10) ? last : null;
 }
 
 /** 1m 响应顶层 pre_close（契约 v0.2.6 Bar 响应）；只在与行情同一交易日时使用 */
 function intradayPreClose(res: BarsResponse | undefined, q: QuoteItem | null | undefined) {
-  const quoteDay = tradeDay(q?.t);
-  if (!res?.pre_close || !quoteDay) return null;
+  if (!res?.pre_close || !q?.t) return null;
   // A-12/F-14：data_as_of 可为 null（无数据时点），不能直接 slice；取不到交易日就不认这个前收
   const stamp = res.items[0]?.t ?? res.data_as_of;
-  const day = tradeDay(stamp);
-  return day && day === quoteDay ? res.pre_close : null;
+  if (!stamp) return null;
+  const day = stamp.slice(0, 10);
+  return day === q.t.slice(0, 10) ? res.pre_close : null;
 }
 
 /**
@@ -169,16 +168,16 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
         <AddToResearch origin="from_stock" securityCode={code} securityType={profile.type} />
         <WatchlistToggle code={code} securityType={profile.type} testId="watchlist-stock" />
       </div>
-      {quote.isError ? <ErrorBox error={quote.error} prefix="行情加载失败" /> : quote.isPending ? <span className="muted">行情加载中…</span> : q?.price != null ? (
+      {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price}</span>
+          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price ?? '—'}</span>
           <span className={`mono ${pctClass(q.change_pct)}`}>
-            {preClose && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}({q.change_pct == null ? '—' : `${signed(q.change_pct)}%`})
+            {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
           </span>
-          <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{q.t ? fmtTime(q.t) : '行情时间未知'}</span></Tooltip>
+          <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip>
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
         </div>
-      ) : <span className="muted">暂无行情数据</span>}
+      ) : <span className="muted">无行情缓存</span>}
       {q ? <GapNote status={q.data_status} gaps={q.gaps} asOf={q.data_as_of} testId="quote-gap-note" /> : null}
       <div className="sh-stats">
         {stats.map(([k, v]) => (

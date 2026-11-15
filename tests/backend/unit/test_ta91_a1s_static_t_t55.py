@@ -17,7 +17,7 @@ PROBES = ROOT / "src/backend/probes"
 SELFCHECKS = ROOT / "src/backend/selfchecks"
 DOCKERIGNORE = ROOT / "deploy/docker/backend.Dockerfile.dockerignore"
 
-# 41e517a 冻结的 24 个 probes/*.py（含子路径相对 probes/）
+# 41e517a 冻结清单现为 29 个 probes/*.py（含子路径相对 probes/）；新增 5 个为 t1063u/t1165u 授权登记。
 PROBES_FROZEN = frozenset(
     {
         "_helpers.py",
@@ -44,9 +44,23 @@ PROBES_FROZEN = frozenset(
         "tb81_evidence.py",
         "tb86_history.py",
         "tb86_offline.py",
+        "tb140_daily_bars.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_backfill.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_load.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_selfcheck.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_supervisor.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
     }
 )
-PROBES_HTTP_MAIRUI_ALLOW = frozenset({"common.py", "tb81.py", "tb86_history.py"})
+PROBES_HTTP_MAIRUI_ALLOW = frozenset(
+    {
+        "common.py",
+        "tb81.py",
+        "tb86_history.py",
+        "tb140_daily_bars.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_backfill.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+        "tb140_history_selfcheck.py",  # 用户授权 t1063u/t1165u 回填脚本；计数文件 team/runtime/mairui-batch-T-B140.count
+    }
+)
 
 S3_FORBIDDEN = frozenset(
     {
@@ -233,7 +247,7 @@ def _socket_attrs(tree: ast.AST) -> set[str]:
 
 
 def test_a1s_s1_tree_frozen_list_and_http_allow() -> None:
-    """负例：41e517a 冻结 24 文件存在且仅 3 个允许域名+HTTP；app 不导入 probes；dockerignore 不含 probes 白名单。"""
+    """负例：冻结清单 29 文件存在且仅 6 个允许域名+HTTP；app 不导入 probes；dockerignore 不含 probes 白名单。"""
     present = {str(p.relative_to(PROBES)) for p in PROBES.rglob("*.py") if p.is_file()}
     extra = present - PROBES_FROZEN
     missing = PROBES_FROZEN - present
@@ -243,7 +257,7 @@ def test_a1s_s1_tree_frozen_list_and_http_allow() -> None:
     if missing:
         offenders.append(f"S1 missing frozen probes: {sorted(missing)}")
     for path in sorted(PROBES.rglob("*.py")):
-        rel = path.name  # allow list is by basename per plan「3 个文件」
+        rel = path.name  # allow list is by basename per registry「6 个文件」
         src = path.read_text(encoding="utf-8")
         has_http = any(tok in src for tok in HTTP_TOKENS)
         has_mai = "mairuiapi" in src.lower()

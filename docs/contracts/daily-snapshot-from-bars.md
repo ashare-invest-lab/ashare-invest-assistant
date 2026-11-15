@@ -467,7 +467,7 @@ T-T71b 歧义 1 里的「v2」是用例 28 追加的 **version_no=2 持仓快照
 ## 13. 用户 11-10 答卡对快照的影响（T-A142）
 
 - 日报 17:30（`daily-bars-source.md` §9.1）：REPORT 在 analyze 结束后由 `worker_tick` 推出。快照仍由 analyze 首次过闸时惰性生成；REPORT 不触发快照，也不重建快照。§11.3 的晚到规则不变：17:30 后才取到的行当日记 `daily_bars_after_asof:<code>`，当天不回填进日报，次日作为历史 bar。
-- 自动补历史（§9.2）与每批续接（§9.3）只往 daily_bars 写完成版历史行，DO NOTHING 幂等；快照按 `daily_bars_ready` 与 `build_owned_snapshot` 的既有口径读取，不新增字段，`OWNED_VERSION` 不变。
+- 自动补历史（§9.2）与每批续接（§9.3）只往 daily_bars 写完成版历史行，DO NOTHING 幂等（T-A153 C1 例外：已有行为 `tdx_local`、写入方为 mairui 时按 `multi-source-ingest.md` §4 替换）；快照按 `daily_bars_ready` 与 `build_owned_snapshot` 的既有口径读取，不新增字段，`OWNED_VERSION` 不变。
 - 开市日 17:00–17:45 不跑补历史与回填批，所以 analyze 的 17:30 读取不会与回填写入并发。
 - 静态扫描（§10 J10）照旧：新加的 REPORT 链式推送与续接代码里不得出现 build_owned_snapshot、daily_bars_ready、daily_snapshot 字样。
 - G/W/T（测试）：`test_daily_snapshot_not_a_task`（不变）；`test_late_fetch_row_used_as_history_next_day`（不变）；`test_backfill_rows_visible_next_snapshot`（新）：Given B 在 11-09 由补历史写入 3 年行 / When 以 11-10 build / Then B 的 bars 含补入的历史开市日行，且都为完成版。

@@ -129,12 +129,7 @@ export interface Announcement {
   file_format: 'pdf' | 'html' | 'other' | null;
   first_seen_at: DateTime;
 }
-export type AnnouncementsResponse = Paged<Announcement> & Sourced & {
-  // 后端允许省略身份字段或返回 null（显式 fixture/provider 可只给分页数据）。
-  security_code?: string | null;
-  name?: string | null;
-  disclaimer: string;
-};
+export type AnnouncementsResponse = Paged<Announcement> & Sourced & { disclaimer: string };
 
 /** §5.1 SectorFlow（GET /market/sector-flows，盘后数据） */
 export interface SectorFlow {

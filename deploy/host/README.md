@@ -2,6 +2,8 @@
 
 本目录的脚本都只新增独立文件，不改动系统已有的文件。每一项都有卸载脚本。
 
+本地栈重启、重建或 down 前先调用 `bash deploy/scripts/restart-guard.sh` 或 `powershell -File deploy/scripts/restart-guard.ps1`：检查运行目录全部 `*.lock`，有锁退出 3；用 `AIA_RUNTIME_LOCK_DIR`、`--lock-dir` / `-LockDir` 指定目录，`--then "命令"` / `-Then "命令"` 仅在无锁时执行（守卫不代抢互斥锁）。
+
 ## dockerd 自启 + 免 sudo 使用 docker
 
 本机 PID 1 是 tini 加 pod-daemon，没有 systemd，也没有 cron 或 rc.local，所以不存在可靠的开机钩子。

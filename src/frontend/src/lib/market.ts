@@ -1,9 +1,6 @@
 import type { Bar } from '../api/types';
 import { bjToChartTime } from './format';
 
-/** 行情时间及 bars.data_as_of 允许 null；缺失时不推断交易日。 */
-export const tradeDay = (stamp: string | null | undefined): string | null => stamp ? stamp.slice(0, 10) : null;
-
 /**
  * A 股连续竞价分钟的“结束时刻”序列（09:31–11:30、13:01–15:00，共 240 根）。
  * 契约 §5.1：1m bar 的 t 为该分钟结束时刻；口径待 T003 实测确认（遗留问题）。

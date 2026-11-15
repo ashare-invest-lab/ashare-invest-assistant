@@ -441,12 +441,11 @@ export interface WatchlistResponse { items: WatchlistItem[]; caps: { watchlist: 
 export interface QuoteItem extends DataStatusBlock {
   security_code: string;
   name: string;
-  /** HTTP /quotes 无本人行情缓存时返回 null；SSE 的非空字段由 StreamQuoteItem 独立约束。 */
-  price: Decimal | null;
-  change_pct: Decimal | null;
-  volume: Decimal | null;
-  amount: Decimal | null;
-  t: DateTime | null;
+  price: Decimal;
+  change_pct: Decimal;
+  volume: Decimal;
+  amount: Decimal;
+  t: DateTime;
 }
 export interface BarsResponse extends DataStatusBlock {
   security_code: string;

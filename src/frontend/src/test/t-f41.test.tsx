@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
-import type { BarsResponse, QuoteItem } from '../api/types';
+import type { BarsResponse } from '../api/types';
 import type { Announcement, AnnouncementsResponse, FactorValue, FactorsResponse, FinancialPeriod, FinancialsResponse, FundFlowDay, FundFlowsResponse, SecurityProfile } from '../api/marketTypes';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
@@ -68,7 +68,6 @@ vi.mock('../pages/stock/StockTabs', async (original) => {
 const API = '/api/v1';
 const stamp = '2026-11-13T15:00:00+08:00';
 const code = '300502.SZ';
-const gap = { key: 'quotes', reason: 'no_source' as const, message: '示例数据：本人行情缓存尚无可用读取源' };
 
 function bars(securityCode: string, freq: BarsResponse['freq']): BarsResponse {
   return {
@@ -128,31 +127,7 @@ function enter(value: string) {
 }
 
 describe('T-F41 搜索及个股页（示例数据）', () => {
-  it.each(['d', '1m', 'empty'] as const)('空行情时间与 %s K 线共存时保持个股页，不触发路由报错页', async (available) => {
-    // 复刻后端 GET /quotes 的合法无源响应；不把空时间或空价格伪造为当前值。
-    const quote: QuoteItem = {
-      security_code: code, name: '示例数据证券', price: null, change_pct: null, volume: null, amount: null,
-      t: null, data_status: 'unavailable', data_as_of: null, gaps: [gap],
-    };
-    server.use(
-      http.get(`${API}/quotes`, () => HttpResponse.json({ items: [quote] })),
-      http.get(`${API}/securities/:code/bars`, ({ request }) => {
-        const freq = new URL(request.url).searchParams.get('freq') as BarsResponse['freq'];
-        const data = bars(code, freq);
-        return HttpResponse.json(available === freq ? data : { ...data, items: [], pre_close: null, data_as_of: null });
-      }),
-    );
-    const router = renderAt(`/stocks/${code}`);
-    const head = await screen.findByTestId('stock-head');
-    await waitFor(() => expect(within(head).getByTestId('quote-gap-note')).toHaveTextContent(gap.message));
-    expect(await screen.findByTestId('intraday')).toBeInTheDocument();
-    expect(head).toHaveTextContent('暂无行情数据');
-    expect(head.textContent).not.toMatch(/NaN|null|undefined|0手|0\.00亿/);
-    expect(router.state.location.pathname).toBe(`/stocks/${code}`);
-    expect(router.state.errors).toBeNull();
-    expect(screen.getByLabelText('证券搜索')).toBeInTheDocument();
-  });
-
+  // quote 空值及真实日 K 回归统一由 pool-stock-null-quote.test.tsx 覆盖。
   it('代码段补全覆盖三所，并保留显式 ETF/指数后缀', () => {
     for (const prefix of ['300', '301', '000', '001', '002', '003']) {
       expect(completeSecurityCode(`${prefix}001`)).toBe(`${prefix}001.SZ`);
@@ -236,16 +211,15 @@ describe('T-F41 搜索及个股页（示例数据）', () => {
     expect(screen.getByLabelText('证券搜索')).toBeInTheDocument();
   });
 
-  it.each([404, 500])('财务和行情接口 %s 保留档案与外壳并在页内展示错误', async (status) => {
+  it.each([404, 500])('财务接口 %s 保留档案与外壳并在页内展示错误', async (status) => {
     server.use(
       http.get(`${API}/securities/:code/financials`, () => apiError(status)),
-      http.get(`${API}/quotes`, () => apiError(status)),
     );
     const router = renderAt(`/stocks/${code}`);
     const head = await screen.findByTestId('stock-head');
-    expect(await within(head).findByRole('alert')).toHaveTextContent('加载失败');
+    expect(head).toHaveTextContent(code);
     const page = screen.getByTestId('stock-page');
-    await waitFor(() => expect(within(page).getAllByRole('alert')).toHaveLength(2));
+    expect(await within(page).findByRole('alert')).toHaveTextContent('加载失败');
     expect(screen.getByTestId('profile-panel')).toBeInTheDocument();
     expect(router.state.location.pathname).toBe(`/stocks/${code}`);
     expect(router.state.errors).toBeNull();
@@ -263,21 +237,6 @@ describe('T-F41 搜索及个股页（示例数据）', () => {
     expect(router.state.errors).toBeNull();
     expect(screen.getByLabelText('证券搜索')).toBeInTheDocument();
   });
-
-  it('行情时间缺失时提示未知，零成交量和零涨跌幅仍如实显示', async () => {
-    const quote: QuoteItem = {
-      security_code: code, name: '示例数据证券', price: '10.20', change_pct: '0.00', volume: '0', amount: '0',
-      t: null, data_status: 'partial', data_as_of: null, gaps: [gap],
-    };
-    server.use(http.get(`${API}/quotes`, () => HttpResponse.json({ items: [quote] })));
-    const router = renderAt(`/stocks/${code}`);
-    const head = await screen.findByTestId('stock-head');
-    expect(await within(head).findByText('行情时间未知')).toBeInTheDocument();
-    expect(head).toHaveTextContent('(0.00%)');
-    expect(head).toHaveTextContent('0手');
-    expect(head).not.toHaveTextContent('NaN');
-    expect(router.state.errors).toBeNull();
-  });
 });
 
 // 每个合法可空字段单独置 null，避免多个缺口恰好绕过发生异常的渲染分支。
@@ -291,10 +250,6 @@ function itemNullCases<T extends object>(endpoint: string, body: object, item: T
     body: { ...body, items: [{ ...item, [key]: null }] }, tab, ready: `tab-${tab}` }));
 }
 
-const exampleQuote: QuoteItem = {
-  security_code: code, name: '示例数据证券', price: '10.20', change_pct: '2.00', volume: '10000', amount: '102000',
-  t: stamp, data_status: 'fresh', data_as_of: stamp, gaps: [],
-};
 const examplePeriod: FinancialPeriod = {
   period_end: '2026-09-30', report_period: 'q3', announce_date: '2026-10-30', available_from: '2026-10-31', is_restated: false,
   revenue: '10000', revenue_yoy_pct: '1', net_profit: '2000', net_profit_yoy_pct: '2', deducted_net_profit: '1500',
@@ -328,7 +283,6 @@ const exampleProfile: SecurityProfile = {
   ...securityProfile('600000.SH')!, ...sourced, exchange: 'SZ', suspended: false,
   former_names: [{ name: '示例数据旧名', until: null }], code_history: [{ security_code: '000001.SZ', until: null }],
 };
-const quoteFields = ['price', 'change_pct', 'volume', 'amount', 't', 'data_as_of'] as const satisfies readonly NullableKey<QuoteItem>[];
 const periodFields = ['announce_date', 'available_from', 'revenue', 'revenue_yoy_pct', 'net_profit', 'net_profit_yoy_pct',
   'deducted_net_profit', 'eps', 'bvps', 'roe_pct', 'gross_margin_pct', 'debt_ratio_pct', 'operating_cash_flow'] as const satisfies readonly NullableKey<FinancialPeriod>[];
 const flowFields = ['amount', 'main_net', 'super_large_net', 'large_net', 'medium_net', 'small_net', 'main_net_pct'] as const satisfies readonly NullableKey<FundFlowDay>[];
@@ -341,7 +295,6 @@ const sourceBodies = [
   { endpoint: 'announcements', body: exampleAnnouncements, tab: 'announcements' },
 ];
 const nullableCases: NullCase[] = [
-  ...quoteFields.map((field) => ({ field: `quotes.${field}`, endpoint: 'quotes', body: { items: [{ ...exampleQuote, [field]: null }] }, tab: 'financials', ready: 'tab-financials' })),
   ...nullCases('bars', bars(code, '1m'), ['pre_close', 'adjust_as_of', 'next_before', 'data_as_of']),
   ...(['pre_close', 'avg_price'] as const).map((field) => ({
     field: `bars.items[].${field}`, endpoint: 'bars', body: { ...bars(code, '1m'), items: [{ ...bars(code, '1m').items[0], [field]: null }] }, tab: 'financials', ready: 'tab-financials',
@@ -352,7 +305,9 @@ const nullableCases: NullCase[] = [
   ...itemNullCases('factors', exampleFactors, exampleFactor, factorFields, 'factors'),
   ...nullCases('factors', exampleFactors, ['trade_date', 'factor_set_version'], 'factors'),
   ...itemNullCases('announcements', exampleAnnouncements, exampleAnnouncement, announcementFields, 'announcements'),
-  ...nullCases('announcements', exampleAnnouncements, ['security_code', 'name', 'next_cursor'], 'announcements'),
+  ...nullCases('announcements', exampleAnnouncements, ['next_cursor'], 'announcements'),
+  ...(['security_code', 'name'] as const).map((field) => ({ field: `announcements.${field}`, endpoint: 'announcements',
+    body: { ...exampleAnnouncements, [field]: null }, tab: 'announcements', ready: 'tab-announcements' })),
   ...sourceBodies.flatMap(({ endpoint, body, tab }) => [
     ...nullCases(endpoint, body, ['data_as_of'], tab),
     ...(['endpoint', 'fetched_at'] as const).map((field) => ({ field: `${endpoint}.sources[].${field}`, endpoint, tab, ready: `tab-${tab}`,
@@ -373,7 +328,7 @@ describe('T-F41 补充：逐字段 null 与页面错误边界（示例数据）'
 
   it.each(nullableCases)('$field=null 时完成渲染，不靠错误边界隐藏空值问题', async ({ endpoint, body, tab, ready }) => {
     let received = false;
-    const url = endpoint === 'quotes' ? `${API}/quotes` : `${API}/securities/:code${endpoint ? `/${endpoint}` : ''}`;
+    const url = `${API}/securities/:code${endpoint ? `/${endpoint}` : ''}`;
     server.use(http.get(url, ({ request }) => {
       received = true;
       // 同一字段也覆盖日/周 K，保持响应周期与请求一致。
