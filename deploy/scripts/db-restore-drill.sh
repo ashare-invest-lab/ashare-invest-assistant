@@ -62,8 +62,18 @@ start_pg() {  # $1 容器名
   done
   aia_docker logs "$1" 2>&1 | tail -20 >&2; aia_die "$1 未在 90s 内就绪"
 }
+aia_psql() {
+  [ "${AIA_PSQL_MODE:-}" != direct ] || aia_die "恢复演练禁止直连：不得设置 AIA_PSQL_MODE=direct"
+  local c="$1" db="$2"; shift 2
+  aia_docker exec -i -e AIA_TARGET_DB="$db" "$c" \
+    sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$AIA_TARGET_DB" "$@"' sh "$@"
+}
 psql_in() {
+  [ "${AIA_PSQL_MODE:-}" != direct ] || aia_die "恢复演练禁止直连：不得设置 AIA_PSQL_MODE=direct"
   local c="$1" db="$2" label; shift 2
+  case "$c" in
+    direct|aia_drill|exec) aia_die "拒绝演练容器名哨兵值：$c" ;;
+  esac
   case "$db" in
     aia_drill|aia_drill_restored) ;;
     postgres)
