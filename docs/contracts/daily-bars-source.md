@@ -254,6 +254,7 @@
   - `UpsertStats` 是冻结 dataclass，字段为 `inserted: int`、`unchanged: int`、`conflicts: int`、`issues: tuple[str, ...]`（只放 `daily_bar_conflict:<code>:<date>`，按字典序）。
   - 同值比较列：open、high、low、close、pre_close、volume、amount、is_suspended。先把入参量化到列精度（MONEY 为 4 位小数）再精确比较，NULL 只与 NULL 相等。**不比较** fetched_at、source、source_licence_id：同值但来源不同算 unchanged，保留原行的来源。
   - 写法：先 `INSERT … ON CONFLICT DO NOTHING RETURNING`；没有插入的键读回比较，分为 unchanged 或 conflict。任何情况都不 UPDATE。
+  - 例外（T-A153 裁定 C1，编排者 2026-11-14，见 `multi-source-ingest.md` §4）：已有行 source 为 `tdx_local`、写入方为 mairui 时，先写对账明细（kind 为 replaced_tdx_local），再在同一事务里 UPDATE 整行（source 改为 mairui）；对账明细写失败则不 UPDATE。这是唯一的跨源替换，其他来源组合仍不 UPDATE。
   - 运行记录：`fetch_and_record` 每次执行（休市日除外，见 ⑧）插入一行 pipeline_runs，kind=daily_batch，step=`daily_bars.fetch`，run_date=trade_date。
     - stats 只含：user_id、window_trading_days、codes（标的数）、inserted、unchanged、conflicts、missing、suspended、issues（排序后的字符串列表）。
     - 证券代码可以出现在 issue 字符串里；不得写入数量、成本、账户 id、用户名。
@@ -493,7 +494,7 @@
   - 常量 `UPSERT_BATCH_ROWS`，值 1000（`app/marketdata/daily_bars.py`），并在模块导入时断言它乘以每行参数数不超过 65535。
   - 写入前按 (code, trade_date, adj_type) 升序排序，再按 1000 行切块；每块一条 `INSERT … ON CONFLICT DO NOTHING RETURNING`。
   - 每块的读回比较只查本块未插入的键，用 (code, trade_date, adj_type) 元组 IN（顺带完成 T-A132 非阻塞项⑶），不再用三个独立 IN 做笛卡尔范围查询。
-  - `UpsertStats` 跨块累加；issues 全局排序去重。签名、返回类型、不 UPDATE 的规则都不变。
+  - `UpsertStats` 跨块累加；issues 全局排序去重。签名、返回类型、不 UPDATE 的规则都不变（T-A153 C1 例外：已有行为 `tdx_local`、写入方为 mairui 时按 `multi-source-ingest.md` §4 替换）。
 - 事务边界：全部块都在调用方的同一个事务里（`fetch_and_record` 仍不 begin/commit；`daily_bars_fetch_task` 用一个 `engine.begin()`），本次运行只写一行 pipeline_runs。任一块出错整体回滚，任务另开事务写 failed（§7 补6 不变）。不做逐块提交：那会让失败的运行留下半截数据，也与「一次运行一行运行记录」冲突。
 - 不需要迁移。
 

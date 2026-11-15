@@ -22,6 +22,8 @@
 
 ### 1.2 历史：通达信 minline / fzline（只取 A 股）
 
+- T-A153 裁定 C3（编排者 2026-11-14，见 `multi-source-ingest.md` §3.2、§3.3）：离线历史 .lc1 / .lc5 与 HF 1 分钟不再导入 PG，保留为 parquet 并登记 `market.minute_file_catalog`，读取方本地读文件。离线历史（任何范围）一律不经 `intraday-bars-import-tdx` 写 PG；该 CLI 代码暂留、不再使用。本节以下的时间戳、单位口径仍适用于文件层；但资格过滤改为沪深前缀白名单、含退市股（不按 listing_status 过滤），北交所一律不读（C7），`,exclude-bj` 等 bj 目录规则对文件层不适用。
+
 - 据编排者 2026-11-10 只读扫描（架构未核实）：
   - minline 的 .lc1：sh 4,831、sz 4,369、bj 360 个文件，样本每只 31,920 根，约 133 个交易日；
   - fzline 的 .lc5：同样的文件数，样本每只 13,776 根，约 287 个交易日。
@@ -90,7 +92,7 @@
   - source 的 CHECK 加入 mairui 与 tdx_local；
   - 加可空列 source_licence_id，口径同日线 0032；tdx_local 行为空；
   - 不改主键，不改已有行。
-- 5 分钟：新表 `market.minute5_bars`，列与 minute_bars 相同，hypertable 每 7 天一个 chunk，主键 (code, ts)。只存 .lc5 历史。以后的 5 分钟线在读取时由 1 分钟聚合，不另存。不能塞进 minute_bars：同一 ts 下 1 分钟 bar 和 5 分钟 bar 会撞主键。
+- 5 分钟：新表 `market.minute5_bars`，列与 minute_bars 相同，hypertable 每 7 天一个 chunk，主键 (code, ts)。只存 .lc5 历史（T-A153 C3：离线历史分钟改为文件层，见 `multi-source-ingest.md` §3.2、§3.3）：本表不再写入离线历史，保留给已有数据与日后聚合。以后的 5 分钟线在读取时由 1 分钟聚合，不另存。不能塞进 minute_bars：同一 ts 下 1 分钟 bar 和 5 分钟 bar 会撞主键。
 - 不按月原生分区的理由：基线已是 hypertable（chunk 自动建、自动压缩，可按 chunk 删）。改成按月分区要重建表，没有收益。
 - 压缩：chunk 满 7 天后压缩（plan §3A 原定）。
 - 保留期：
@@ -122,7 +124,7 @@
 
 ### 3.4 复测输入
 
-- 复测读取 minute_bars 与 minute5_bars，按 (code, 交易日) 给出有序的分钟序列，每根带 source。
+- 复测读取 minute_bars 与 minute5_bars，按 (code, 交易日) 给出有序的分钟序列，每根带 source。（T-A153 C3：离线历史分钟改为文件层，见 `multi-source-ingest.md` §3.2、§3.3）：离线历史改由目录表 `market.minute_file_catalog` 定位本地 parquet 读取，PG 只提供麦蕊盘中分钟。
 - tdx_local 与 mairui 都可以用作复测输入，但结果里必须保留 source。
 - 本期只交付数据就绪和一个只读导出 CLI（`intraday-bars-export`，输出 CSV 或 JSONL 到审计目录）；复测引擎压后。
 
@@ -431,7 +433,7 @@
 - `test_lc_import_a_share_only`：Given minline 内有 A 股、指数、ETF、880 板块文件 / Then 只导入 listed A 股；被过滤的文件不打开、不进清单。
 - `test_lc_import_manifest_generated_and_compared`：Then 审计目录生成清单；复跑时输出新增、删除、变化计数。
 - `test_lc_import_until_before_first_mairui_minute`：Given 某代码已有 mairui 分钟行起于 E 日 / Then 该代码只导入到 E 的前一开市日。
-- `test_lc5_goes_to_minute5_bars_only`：Then .lc5 行只出现在 minute5_bars，minute_bars 不变。
+- ~~`test_lc5_goes_to_minute5_bars_only`~~：作废（T-A153 C3：离线历史分钟改为文件层，见 `multi-source-ingest.md` §3.2、§3.3）。
 - `test_lc_import_rerun_idempotent`：Then 第二次 inserted 为 0。
 - `test_lc_import_readonly_root`：Given 只读根目录 / Then 成功，根目录不变。
 - `test_lc_import_no_network`：Then `egress.mairui_get` 调用数为 0。
