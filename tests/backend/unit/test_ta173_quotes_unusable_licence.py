@@ -12,11 +12,11 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from app.auth import deps
+from app.auth.sessions import Session
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.dialects import postgresql
 
-from app.auth import deps
-from app.auth.sessions import Session
 from tests.backend.unit.test_quotes_empty_s3 import (
     CODE,
     LICENCE,
@@ -122,12 +122,12 @@ def assert_unavailable(
     return item
 
 
-def assert_cache_untouched(world: Any, retained: list[Any]) -> None:
-    assert world.state.bars == retained
-    assert world.state.bars[0].source_licence_id == LICENCE
-    assert world.state.bars[0].close == Decimal("7.8750")
-    assert len(world.state.reads) == 2
-    assert all("daily_bars" not in sql for sql in world.state.reads)
+def assert_cache_untouched(harness: Any, retained: list[Any]) -> None:
+    assert harness.state.bars == retained
+    assert harness.state.bars[0].source_licence_id == LICENCE
+    assert harness.state.bars[0].close == Decimal("7.8750")
+    assert len(harness.state.reads) == 2
+    assert all("daily_bars" not in sql for sql in harness.state.reads)
 
 
 @pytest.mark.parametrize("unusable", ["missing", "expired", "invalid", "held", "cooling", "deleted"])
@@ -175,7 +175,7 @@ def test_ta173_quotes_active_licence_keeps_stale_close(
     assert item["security_code"] == CODE and item["name"] == NAME
     assert item["data_status"] == "stale" and item["gaps"] == []
     assert item["price"] == "7.8750"
-    assert Decimal(item["change_pct"]) == Decimal("5")
+    assert Decimal(item["change_pct"]) == Decimal(5)
     assert item["t"] == "2041-05-05T15:00:00+08:00"
     assert item["data_as_of"] == "2041-05-05T17:05:00+08:00"
     for field in ("t", "data_as_of"):
