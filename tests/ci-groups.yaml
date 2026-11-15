@@ -128,6 +128,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb114_bootstrap_restart_t_t47.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "TB114_DATABASE_URL", "create_engine real PG", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb115_o66b_paths_b2_t_t47.py", "group": "parallel", "keywords": ["fixed /run constants asserted only", "writes exclusively tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb117_session_filter_t_t61.py", "group": "parallel", "keywords": ["pure session calculations", "existing probe results read-only", "no probe execution"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb143_day_load_cli.py", "group": "parallel", "keywords": ["Mock/monkeypatch/tmp_path", "synthetic CSV and fake transactions", "no real PG/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_offline.py", "group": "parallel", "keywords": ["offline DDL compile", "tmp_path ZIP/CSV", "no_socket monkeypatch", "import-only RNG"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_pg.py", "group": "serial_pg", "keywords": ["offline_schema->pg_conn->pg_url", "psycopg", "docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb163r2_bj_gate.py", "group": "parallel", "keywords": ["Mock/monkeypatch", "confirm_bj_offline_volume_units and upsert gate", "no database connection"], "unverified": false}
