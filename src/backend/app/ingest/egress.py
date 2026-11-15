@@ -34,6 +34,7 @@ from app.db.tables.licences import data_licence_events, user_data_licence_status
 from app.ingest import ip_limit as ipl
 from app.ingest import netguard as ng
 from app.ingest.core import Call, IngestCore
+from app.ingest.mode import VERIFY_OFFLINE_REASON, verification_is_offline
 from app.ingest.scheduler import Dispatch
 from app.ingest.state import Priority, Transition
 from app.ingest.upstream import Signal, classify
@@ -47,6 +48,7 @@ EGRESS_DENIED_CODES = frozenset(
         "core_unavailable",
         "licence_unavailable",
         "core_denied",
+        VERIFY_OFFLINE_REASON,
     }
 )
 ADMIT_BUDGET_S = 2.8
@@ -487,6 +489,9 @@ def mairui_get(
     结果由消费者按最小语义落库（成功才 ``active``，其余保持原状态）。
     """
     from app.ingest.daily_lists import DailyHaltError, limited
+
+    if verify and verification_is_offline():
+        raise EgressDenied(VERIFY_OFFLINE_REASON)
 
     t0 = time.monotonic()
     deadline = t0 + ADMIT_BUDGET_S

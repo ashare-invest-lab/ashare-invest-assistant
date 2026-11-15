@@ -244,8 +244,10 @@ def test_r3_switch_off_malformed_patch_is_400_first(off: SimpleNamespace, sql: C
     assert _state(sql, authdb, c, off.user.id) == before
 
 
-def test_r3_switch_on_control(off: SimpleNamespace, sql: Callable[..., Any]) -> None:
+def test_r3_switch_on_control(off: SimpleNamespace, sql: Callable[..., Any],
+                              monkeypatch: pytest.MonkeyPatch) -> None:
     """对照：同一用户在开关开启的应用上 PATCH 200、test 202（开关是唯一差别）。"""
+    monkeypatch.setenv("MAIRUI_MODE", "live")  # enqueue only; no verification consumer runs here.
     c = Rec(off.on)
     r = c("PATCH", "/me/data-licence", json={"has_quant_pro": True})
     assert r.status_code == 200 and r.json()["has_quant_pro"] is True, r.text[:300]
