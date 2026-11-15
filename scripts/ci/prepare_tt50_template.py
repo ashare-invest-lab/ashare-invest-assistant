@@ -22,6 +22,8 @@ from psycopg import sql
 
 TEMPLATE = "o61_tmp_0030"
 SELFCHECK = "o67_selfcheck"
+CREATE_RETRY_DELAYS = (1, 2, 4, 4)
+CREATE_RETRY_SECONDS = 15
 
 
 def identity(env: dict) -> dict:
@@ -72,11 +74,46 @@ def state(name: str, expected: str) -> dict:
     return {"name": name, "version": expected, "tables": tables}
 
 
-def create(conn, name: str, source: str, receipt: dict, path: Path) -> dict:
-    if database(conn, name) is not None:
-        raise RuntimeError("Refusing to adopt an existing database")
-    conn.execute(sql.SQL("CREATE DATABASE {} WITH TEMPLATE {} OWNER {}").format(
-        sql.Identifier(name), sql.Identifier(source), sql.Identifier(os.environ["PGUSER"])))
+def mark_phase(receipt: dict, path: Path, phase: str) -> None:
+    receipt["phase"] = phase
+    receipt.setdefault("phases", []).append({"phase": phase, "at": now()})
+    save(path, receipt)
+    print(f"tt50-template：当前阶段 {phase}", file=sys.stderr)
+
+
+def create(conn, name: str, source: str, receipt: dict, path: Path, *, phase: str) -> dict:
+    # 共用重试预算，不重置计时，也不取消在途 SQL；正常退避合计 11 秒。
+    deadline = time.monotonic() + CREATE_RETRY_SECONDS
+    for attempt in range(1, len(CREATE_RETRY_DELAYS) + 2):
+        mark_phase(receipt, path, phase)
+        # 每次尝试都拒绝接管已有库；仅 CREATE 的占用异常允许重试。
+        if database(conn, name) is not None:
+            raise RuntimeError("拒绝接管已有数据库")
+        try:
+            conn.execute(sql.SQL("CREATE DATABASE {} WITH TEMPLATE {} OWNER {}").format(
+                sql.Identifier(name), sql.Identifier(source), sql.Identifier(os.environ["PGUSER"])))
+            break
+        except psycopg.errors.ObjectInUse:
+            if attempt > len(CREATE_RETRY_DELAYS):
+                raise
+            delay = CREATE_RETRY_DELAYS[attempt - 1]
+            if time.monotonic() + delay >= deadline:
+                raise
+            # 只读源库会话元数据，不读取查询文本，也不终止任何会话。
+            sessions = conn.execute(
+                "SELECT pid, application_name, backend_type FROM pg_stat_activity "
+                "WHERE datname=%s ORDER BY pid", (source,),
+            ).fetchall()
+            receipt.setdefault("retries", []).append({
+                "phase": phase, "name": name, "source": source, "attempt": attempt,
+                "delay_seconds": delay, "at": now(),
+                "sessions": [{"pid": pid, "application_name": app, "backend_type": backend}
+                             for pid, app, backend in sessions],
+            })
+            save(path, receipt)
+            time.sleep(delay)
+            if time.monotonic() >= deadline:
+                raise
     oid, owner = database(conn, name)
     row = {"name": name, "oid": oid, "owner": owner, "template": source, "created_at": now()}
     receipt["databases"].append(row)
@@ -85,6 +122,8 @@ def create(conn, name: str, source: str, receipt: dict, path: Path) -> dict:
 
 
 def drop(conn, row: dict, receipt: dict, path: Path) -> None:
+    phase = {TEMPLATE: "drop_template", SELFCHECK: "drop_selfcheck"}.get(row["name"], "drop_probe")
+    mark_phase(receipt, path, phase)
     probe = f"oci1_tpl_probe_{os.environ['GITHUB_RUN_ID']}_{os.environ['GITHUB_RUN_ATTEMPT']}"
     if row["name"] not in {TEMPLATE, SELFCHECK, probe} or row["owner"] != os.environ["PGUSER"]:
         raise RuntimeError("Refusing cleanup outside exact newly owned names")
@@ -106,7 +145,8 @@ def cleanup(conn, receipt: dict, path: Path) -> None:
         try:
             drop(conn, row, receipt, path)
         except (RuntimeError, OSError, ValueError, KeyError, psycopg.Error, subprocess.SubprocessError) as error:
-            failures.append({"name": row["name"], "error_type": type(error).__name__})
+            failures.append({"name": row["name"], "phase": receipt.get("phase", "cleanup"),
+                             "error_type": type(error).__name__})
     receipt.update(cleanup_failures=failures, state="cleanup_failed" if failures else "cleaned")
     save(path, receipt)
     if failures:
@@ -221,7 +261,7 @@ def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
     probe = f"oci1_tpl_probe_{env['GITHUB_RUN_ID']}_{env['GITHUB_RUN_ATTEMPT']}"
     if any(database(conn, n) is not None for n in (TEMPLATE, SELFCHECK, probe)):
         raise RuntimeError("Template, selfcheck or probe already exists")
-    row = create(conn, TEMPLATE, "template0", receipt, path)
+    row = create(conn, TEMPLATE, "template0", receipt, path, phase="create_template")
     with connect(TEMPLATE) as fresh:
         if fresh.execute("SELECT to_regclass('public.alembic_version')").fetchone() != (None,):
             raise RuntimeError("New template is not empty")
@@ -242,13 +282,13 @@ def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
 
     seal(conn, receipt, path)
     # Prove a clone of the sealed template is connectable at the original 0030.
-    cloned = create(conn, probe, TEMPLATE, receipt, path)
+    cloned = create(conn, probe, TEMPLATE, receipt, path, phase="clone_probe")
     receipt["clone_probe"] = state(probe, "0030")
     if receipt["clone_probe"]["tables"] != receipt["template"]["tables"]:
         raise RuntimeError("Template clone structure differs")
     drop(conn, cloned, receipt, path)
     # A28-A31 selfchecks use head, independently cloned from the unchanged source.
-    create(conn, SELFCHECK, source, receipt, path)
+    create(conn, SELFCHECK, source, receipt, path, phase="create_selfcheck")
     receipt["selfcheck"] = state(SELFCHECK, head)
     receipt["source_after"] = state(source, head)
     if receipt["source_before"] != receipt["source_after"] or list(database(conn, source)) != receipt["source_identity"]:
@@ -261,6 +301,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("action", nargs="?", choices=["prepare", "cleanup"], default="prepare")
     args = parser.parse_args()
+    receipt = {}
+    failed_phase = None
     try:
         env = check_runner()
         owner = identity(env)
@@ -279,17 +321,28 @@ def main() -> int:
             else:
                 if path.exists():
                     raise RuntimeError("Refusing to overwrite template receipt")
-                receipt = {"schema": "aia-ci-templates-v1", "owner": owner, "databases": [], "state": "preparing"}
+                receipt = {"schema": "aia-ci-templates-v1", "owner": owner, "databases": [],
+                           "state": "preparing", "phase": "prepare", "phases": [], "retries": []}
                 save(path, receipt)
                 try:
                     prepare(conn, receipt, path, env)
-                except Exception:
-                    cleanup(conn, receipt, path)
+                except Exception as error:
+                    # 清理会进入 drop 阶段；单独保存原始失败，避免诊断被覆盖。
+                    failed_phase = receipt.get("phase", "prepare")
+                    receipt["failure"] = {"phase": failed_phase, "error_type": type(error).__name__}
+                    save(path, receipt)
+                    try:
+                        cleanup(conn, receipt, path)
+                    except (RuntimeError, OSError, ValueError, KeyError, psycopg.Error,
+                            subprocess.SubprocessError) as cleanup_error:
+                        print(f"::error title=tt50-template::{receipt.get('phase', 'cleanup')} "
+                              f"{type(cleanup_error).__name__}; details withheld", file=sys.stderr)
                     raise
         print(json.dumps({"ci_templates": receipt}, sort_keys=True))
         return 0
     except (RuntimeError, OSError, ValueError, KeyError, psycopg.Error, subprocess.SubprocessError) as error:
-        print(f"::error title=tt50-template::{type(error).__name__}; details withheld", file=sys.stderr)
+        phase = failed_phase or receipt.get("phase", "initialization")
+        print(f"::error title=tt50-template::{phase} {type(error).__name__}; details withheld", file=sys.stderr)
         return 1
 
 
