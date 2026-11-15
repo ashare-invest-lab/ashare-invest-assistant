@@ -284,7 +284,8 @@ def test_wait_job_precedes_backend_without_spending_backend_test_budget():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     assert jobs["backend"]["needs"] == "coverage-base"
-    assert jobs["backend"]["timeout-minutes"] == 30
+    # T-O80：backend 因 30 分钟整分取消上调到 45；等待 coverage-base 仍用自己的 35 分钟，不占用 backend 预算。
+    assert jobs["backend"]["timeout-minutes"] == 45
     assert ready["timeout-minutes"] == 35
     assert ready["permissions"] == {"contents": "read", "actions": "read"}
     commands = [step["run"] for step in ready["steps"] if "run" in step]

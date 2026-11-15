@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
+import logging
 import uuid
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 from typing import Final, Protocol
 
-from sqlalchemy import insert, select, tuple_
+from sqlalchemy import column, func, insert, select, tuple_, update, values
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Connection
 
@@ -22,6 +24,7 @@ from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
+from app.ingest.tdx_local import AMOUNT_ABS_TOL, AMOUNT_REL_TOL
 from app.reports.service import covered
 from app.schemas.enums import GapReason
 
@@ -38,6 +41,12 @@ _VOLUME = Decimal("10000")
 _ALLOWED_SOURCES = frozenset({"fake", "mairui"})
 # daily-bars-tdx §2 / 0033：通达信本地日线的来源取值；快照侧按 §4 排除。
 TDX_LOCAL_SOURCE: Final[str] = "tdx_local"
+ReconcileSink = Callable[[dict[str, object]], None]
+_reconcile_logger = logging.getLogger("app.marketdata.daily_bars.reconcile")
+
+
+def _log_reconcile(record: dict[str, object]) -> None:
+    _reconcile_logger.warning("%s", json.dumps(record, ensure_ascii=False, sort_keys=True))
 
 
 @dataclass(frozen=True)
@@ -90,6 +99,17 @@ class UpsertStats:
     unchanged: int
     conflicts: int
     issues: tuple[str, ...]
+    replaced: int = 0
+    _replacement_results: tuple[dict[str, object], ...] = field(default=(), repr=False)
+    _reconcile_sink: ReconcileSink | None = field(default=None, repr=False, compare=False)
+
+    def reconcile_after_transaction(self, *, committed: bool) -> None:
+        """事务拥有者在提交成功或回滚后调用；不能把 UPDATE 成功当成提交成功。"""
+        if self._reconcile_sink is not None:
+            for record in self._replacement_results:
+                self._reconcile_sink(
+                    dict(record, value="committed" if committed else "rolled_back")
+                )
 
 
 class DailyBarsSource(Protocol):
@@ -253,6 +273,52 @@ def _bar_key(bar: DailyBar) -> tuple[object, ...]:
     )
 
 
+def _replacement_audit(bar: DailyBar, row: object, replacement_id: str) -> list[dict[str, object]]:
+    common: dict[str, object] = {
+        "replacement_id": replacement_id,
+        "code": bar.code,
+        "trade_date": bar.trade_date.isoformat(),
+        "adj_type": bar.adj_type,
+        "ts": None,
+        "existing_source": TDX_LOCAL_SOURCE,
+        "incoming_source": "mairui",
+    }
+    records: list[dict[str, object]] = []
+    for name in ("open", "high", "low", "close", "volume", "amount"):
+        old = _q_field(row, name)
+        new = getattr(bar, name)
+        tolerance = (
+            max(AMOUNT_ABS_TOL, abs(old or Decimal(0)) * AMOUNT_REL_TOL)
+            if name == "amount"
+            else Decimal(0)
+        )
+        if name in ("open", "high", "low", "close"):
+            old = old.quantize(_PRICE_Q) if old is not None else None
+            new = new.quantize(_PRICE_Q) if new is not None else None
+        same = old == new or (old is not None and new is not None and abs(old - new) <= tolerance)
+        if not same:
+            records.append(
+                dict(
+                    common,
+                    kind="replaced_tdx_local",
+                    field=name,
+                    existing_value=str(old) if old is not None else None,
+                    incoming_value=str(new) if new is not None else None,
+                    tolerance=str(tolerance),
+                )
+            )
+    return records or [
+        dict(
+            common,
+            kind="replaced_tdx_local_same",
+            field="*",
+            existing_value=None,
+            incoming_value=None,
+            tolerance="0",
+        )
+    ]
+
+
 def upsert_daily_bars(
     conn: Connection,
     result: FetchResult,
@@ -260,7 +326,16 @@ def upsert_daily_bars(
     source: str | None,
     licence_id: uuid.UUID | None,
     fetched_at: dt.datetime,
+    reconcile_sink: ReconcileSink | None = None,
 ) -> UpsertStats:
+    """追加日线，麦蕊可在对账成功后条件替换 tdx_local。
+
+    默认不替换并保留原冲突计数。启用替换须由调用方显式提供 sink，
+    sink 必须同步持久化，失败须抛异常。
+    本函数不提交调用方事务；事务拥有者须在事务结束后调用返回值的
+    reconcile_after_transaction，写 committed/rolled_back 结果。没有 committed
+    结果行的对账不得视为已替换；条件更新未命中时立即写 skipped。
+    """
     if source is None or not str(source):
         raise ValueError("source is required")
     if not isinstance(source, str):
@@ -268,8 +343,9 @@ def upsert_daily_bars(
     if licence_id is not None and not isinstance(licence_id, uuid.UUID):
         raise TypeError("licence_id must be uuid.UUID or None")
 
-    inserted = unchanged = conflicts = 0
+    inserted = unchanged = conflicts = replaced = 0
     issues: list[str] = []
+    replacement_results: list[dict[str, object]] = []
     if not result.bars:
         return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
@@ -320,6 +396,44 @@ def upsert_daily_bars(
                 row = by_pk.get((bar.code, bar.trade_date, bar.adj_type))
                 if row is None:
                     continue
+                if (
+                    source == "mairui"
+                    and row["source"] == TDX_LOCAL_SOURCE
+                    and reconcile_sink is not None
+                ):
+                    replacement_id = str(uuid.uuid4())
+                    for record in _replacement_audit(bar, row, replacement_id):
+                        reconcile_sink(record)
+                    result_record: dict[str, object] = {
+                        "kind": "replace_result",
+                        "replacement_id": replacement_id,
+                        "code": bar.code,
+                        "trade_date": bar.trade_date.isoformat(),
+                        "adj_type": bar.adj_type,
+                    }
+                    changed = conn.execute(
+                        update(daily_bars)
+                        .where(
+                            daily_bars.c.code == bar.code,
+                            daily_bars.c.trade_date == bar.trade_date,
+                            daily_bars.c.adj_type == bar.adj_type,
+                            daily_bars.c.source == TDX_LOCAL_SOURCE,
+                        )
+                        .values(
+                            **vars(bar),
+                            source=source,
+                            source_licence_id=licence_id,
+                            fetched_at=fetched_at,
+                        )
+                        .returning(daily_bars.c.code)
+                    ).mappings()
+                    count = len(list(changed))
+                    replaced += count
+                    if count:
+                        replacement_results.append(result_record)
+                    else:
+                        reconcile_sink(dict(result_record, value="skipped"))
+                    continue
                 if _bar_key(bar) == _value_key(row):
                     unchanged += 1
                 else:
@@ -330,6 +444,9 @@ def upsert_daily_bars(
         unchanged=unchanged,
         conflicts=conflicts,
         issues=tuple(sorted(set(issues))),
+        replaced=replaced,
+        _replacement_results=tuple(replacement_results),
+        _reconcile_sink=reconcile_sink,
     )
 
 
@@ -653,3 +770,45 @@ def daily_bars_fetch_task(
                 error=type(exc).__name__,
             )
         raise
+
+
+_BIND_BATCH: Final[int] = 5000
+_BIND_KEYS: Final[tuple[str, ...]] = ("code", "trade_date", "adj_type")
+
+
+def update_mairui_source_licence_id(
+    conn: Connection,
+    keys: Sequence[tuple[str, dt.date, str]],
+    *,
+    match: uuid.UUID | None,
+    value: uuid.UUID | None,
+    apply: bool,
+) -> int:
+    """T-B141：只改 mairui 行的 source_licence_id（绑定、改绑或回滚）。"""
+    count = 0
+    bars = daily_bars.c
+    for offset in range(0, len(keys), _BIND_BATCH):
+        batch = values(
+            *(column(name, daily_bars.c[name].type) for name in _BIND_KEYS),
+            name="manifest_keys",
+        ).data(keys[offset : offset + _BIND_BATCH])
+        conditions = (
+            bars.code == batch.c.code,
+            bars.trade_date == batch.c.trade_date,
+            bars.adj_type == batch.c.adj_type,
+            bars.source == "mairui",
+            (
+                bars.source_licence_id == match
+                if match is not None
+                else bars.source_licence_id.is_(None)
+            ),
+        )
+        if apply:
+            count += conn.execute(
+                update(daily_bars).where(*conditions).values(source_licence_id=value)
+            ).rowcount
+        else:
+            count += conn.execute(
+                select(func.count()).select_from(daily_bars, batch).where(*conditions)
+            ).scalar_one()
+    return count
