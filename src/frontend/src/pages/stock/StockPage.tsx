@@ -9,7 +9,7 @@ import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
-import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
+import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, QUOTE_CLOSE_PRICE, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { StockErrorBoundary } from './StockErrorBoundary';
 import { PriceChartPanel } from './PriceChartPanel';
@@ -171,10 +171,11 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
           <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price ?? '—'}</span>
+          {q.data_status === 'stale' && q.t ? <Tag data-testid="quote-stale-tag">{QUOTE_CLOSE_PRICE}·{fmtTime(q.t).slice(5, 10)}</Tag> : null}
           <span className={`mono ${pctClass(q.change_pct)}`}>
             {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
           </span>
-          <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip>
+          {q.data_status !== 'stale' ? <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip> : null}
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
         </div>
       ) : <span className="muted">无行情缓存</span>}
