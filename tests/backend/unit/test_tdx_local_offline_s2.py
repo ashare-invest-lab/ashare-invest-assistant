@@ -135,6 +135,21 @@ def test_daily_rejects_only_invalid_record(
         ({"date": 0}, "invalid_date"),
         ({"minute": 0}, "invalid_minute"),
         ({"minute": 1441}, "invalid_minute"),
+        ({"minute": 1440}, "invalid_minute"),
+    ],
+)
+def test_minute_rejects_whole_file(
+    changes: dict[str, Any], reason: str
+) -> None:
+    result = tdx.parse_lc_bytes(CODE, minute(**changes) + minute(), "lc1")
+    assert result.file_rejected
+    assert result.bars == []
+    assert result.rejected == Counter({reason: 1})
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
         ({"high": float("inf")}, "non_finite"),
         ({"amount": float("nan")}, "non_finite"),
         ({"high": 1e20}, "out_of_range"),

@@ -326,12 +326,12 @@ def upsert_daily_bars(
     source: str | None,
     licence_id: uuid.UUID | None,
     fetched_at: dt.datetime,
-    reconcile_sink: ReconcileSink | None = _log_reconcile,
+    reconcile_sink: ReconcileSink | None = None,
 ) -> UpsertStats:
     """追加日线，麦蕊可在对账成功后条件替换 tdx_local。
 
-    落盘路径由调用方提供，未验证。默认 sink 仅写 JSON 日志，不保证 jsonl 落盘；
-    显式传 None 禁用替换并保留原冲突计数。sink 必须同步持久化，失败须抛异常。
+    默认不替换并保留原冲突计数。启用替换须由调用方显式提供 sink，
+    sink 必须同步持久化，失败须抛异常。
     本函数不提交调用方事务；事务拥有者须在事务结束后调用返回值的
     reconcile_after_transaction，写 committed/rolled_back 结果。没有 committed
     结果行的对账不得视为已替换；条件更新未命中时立即写 skipped。

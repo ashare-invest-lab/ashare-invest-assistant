@@ -337,17 +337,66 @@ def test_mairui_late_arrival_requires_replacement() -> None:
     response.mappings.return_value = [existing]
     connection = Mock()
     connection.execute.return_value = response
+    records = []
     stats = upsert(
         connection,
         make_result(bars=(incoming,)),
         source="mairui",
         licence_id=None,
         fetched_at=dt.datetime(2026, 8, 8, tzinfo=dt.UTC),
+        reconcile_sink=records.append,
     )
     assert getattr(stats, "replaced", None) == 1, (
         "契约 §4、§5 C1：麦蕊后到应替换 tdx_local；UpsertStats.replaced 应计 1"
     )
     assert stats.conflicts == 0, "契约 §4：合法替换不计 conflict"
+    assert any(record["kind"] == "replaced_tdx_local" for record in records)
+
+
+@pytest.mark.parametrize("sink_fails", [False, True])
+def test_mairui_replacement_requires_successful_sink(sink_fails: bool) -> None:
+    from app.marketdata.daily_bars import DailyBar, DailyBarsResult, upsert_daily_bars
+
+    incoming = DailyBar(
+        CODE,
+        DAY,
+        "none",
+        *(Decimal("12.01"),) * 4,
+        None,
+        Decimal(700),
+        Decimal(8407),
+        False,
+    )
+    existing = dict(vars(incoming), source="tdx_local", close=Decimal("12.00"))
+    response = Mock()
+    response.all.return_value = []
+    response.mappings.return_value = [existing]
+    connection = Mock()
+    connection.execute.return_value = response
+    kwargs = dict(
+        source="mairui",
+        licence_id=None,
+        fetched_at=dt.datetime(2026, 8, 8, tzinfo=dt.UTC),
+    )
+    if sink_fails:
+        error = OSError("synthetic sink failure")
+        sink = Mock(side_effect=error)
+        with pytest.raises(OSError, match="synthetic sink failure") as raised:
+            upsert_daily_bars(
+                connection,
+                DailyBarsResult(bars=(incoming,)),
+                reconcile_sink=sink,
+                **kwargs,
+            )
+        assert raised.value is error
+        sink.assert_called_once()
+    else:
+        stats = upsert_daily_bars(connection, DailyBarsResult(bars=(incoming,)), **kwargs)
+        assert stats.conflicts == 1
+        assert stats.replaced == 0
+        assert stats.inserted == stats.unchanged == 0
+    assert connection.execute.call_count == 2
+    assert not any(call.args[0].is_update for call in connection.execute.call_args_list)
 
 
 def test_minute_sources_use_disjoint_date_segments() -> None:

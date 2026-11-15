@@ -10,8 +10,6 @@ from datetime import date, datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from zoneinfo import ZoneInfo
 
-from app.ingest.tdx_local import LC_LAYOUT, decode_lc_date
-
 # 定稿 8b32fcf §3.3，出自 DS splice 的 HF_END / SINGLE_DAY / MAIN_START。
 HF_END = date(2026, 8, 6)
 SINGLE_DAY = date(2026, 8, 7)
@@ -67,45 +65,6 @@ def check_overlap(existing: Iterable[CatalogEntry], new: CatalogEntry) -> None:
             and max(old_range[0], new_range[0]) <= min(old_range[1], new_range[1])
         ):
             raise ValueError("目录有效区间重叠，拒绝登记")
-
-
-def lc_entry(rel_path: str, data: bytes, sha256: str, kind: str, generator: str) -> CatalogEntry:
-    """登记原始 .lc 文件快照，不转换 parquet（编排者 15:25 裁定）。
-
-    此处与契约 §3.2「转换为 parquet」的差异待架构确认；行数与日期取自原始记录。
-    """
-    rel_path = validate_rel_path(rel_path)
-    match = re.fullmatch(
-        r"tdx-min/vipdoc/(sh|sz)/(minline|fzline)/(sh|sz)([0-9]{6})\.(lc1|lc5)", rel_path
-    )
-    if not match:
-        raise ValueError("不支持的沪深分钟文件路径")
-    market, directory, prefix, symbol, suffix = match.groups()
-    if (
-        kind not in ("lc1", "lc5")
-        or suffix != kind
-        or directory != ("minline" if kind == "lc1" else "fzline")
-        or market != prefix
-        or symbol[:3] not in PREFIXES[market.upper()]
-    ):
-        raise ValueError("分钟文件市场、前缀或 kind 不合法")
-    if not data or len(data) % LC_LAYOUT.size:
-        raise ValueError("分钟文件为空或不是 32 字节记录的整数倍")
-    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
-        raise ValueError("SHA256 不合法")
-    days = [decode_lc_date(record[0]) for record in LC_LAYOUT.iter_unpack(data)]
-    return CatalogEntry(
-        source="tdx_local",
-        code=f"{symbol}.{market.upper()}",
-        kind="1m" if kind == "lc1" else "5m",
-        date_from=min(days),
-        date_to=max(days),
-        rel_path=rel_path,
-        sha256=sha256,
-        row_count=len(days),
-        splice_segment="vipdoc_1m" if kind == "lc1" else "lc5",
-        generator=generator,
-    )
 
 
 def validate_rel_path(rel: str) -> str:

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 from collections import Counter
 from contextlib import ExitStack
@@ -22,13 +21,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from app.ingest.gbbq import GbbqRefused, load_pytdx_keys, read_gbbq_zip
-from app.ingest.minute_catalog import (
-    check_overlap,
-    hf_entries_from_manifest,
-    lc_entry,
-    resolve,
-    validate_rel_path,
-)
+from app.ingest.minute_catalog import hf_entries_from_manifest
 from app.ingest.tdx_history import DayRefusal, iter_day_zip
 from app.ingest.tdx_local import file_sha256
 
@@ -71,10 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     gbbq.add_argument("--expected-sha256", required=True)
     hf = sub.add_parser("hf-catalog", help="登记 HF 2022plus 文件清单")
     hf.add_argument("--manifest-files-csv", type=Path, required=True)
-    lc = sub.add_parser("lc-catalog", help="校验原始 .lc 快照并导出目录")
-    lc.add_argument("--root", type=Path, required=True, help="包含 tdx-min 的快照根目录")
-    lc.add_argument("--sha-manifest", type=Path, required=True)
-    for command in (day, gbbq, hf, lc):
+    for command in (day, gbbq, hf):
         command.add_argument("--generator", required=True, help="调用方提供的本脚本 git blob SHA")
         command.add_argument("--out", type=Path, required=True, help="输出目录")
     args = parser.parse_args(argv)
@@ -87,7 +77,6 @@ def main(argv: list[str] | None = None) -> int:
         "day": "daily_bars.csv",
         "gbbq": "ex_rights_events.csv",
         "hf-catalog": "minute_file_catalog.csv",
-        "lc-catalog": "minute_file_catalog.csv",
     }[args.command]
     target = args.out / output
     temporary = target.with_suffix(".csv.part")
@@ -108,29 +97,10 @@ def main(argv: list[str] | None = None) -> int:
                 for event in events:
                     event_writer.writerow({**asdict(event), "snapshot_sha256": snapshot})
             counts["rows_exported"] = len(events)
-        elif args.command in ("hf-catalog", "lc-catalog"):
-            if args.command == "hf-catalog":
-                inputs["manifest_files_csv"] = file_sha256(args.manifest_files_csv)
-                with args.manifest_files_csv.open(encoding="utf-8-sig", newline="") as stream:
-                    entries, counts = hf_entries_from_manifest(
-                        csv.DictReader(stream), args.generator
-                    )
-            else:
-                inputs["sha_manifest"] = file_sha256(args.sha_manifest)
-                entries = []
-                with args.sha_manifest.open(encoding="utf-8-sig", newline="") as stream:
-                    for row in csv.DictReader(stream):
-                        rel = validate_rel_path(row["rel_path"])
-                        data = resolve(str(args.root), rel).read_bytes()
-                        if hashlib.sha256(data).hexdigest() != row["sha256"]:
-                            raise ValueError(f"sha256_mismatch: {rel}")
-                        if len(data) != int(row["bytes"]):
-                            raise ValueError(f"bytes_mismatch: {rel}")
-                        entry = lc_entry(
-                            rel, data, row["sha256"], Path(rel).suffix[1:], args.generator
-                        )
-                        check_overlap(entries, entry)
-                        entries.append(entry)
+        elif args.command == "hf-catalog":
+            inputs["manifest_files_csv"] = file_sha256(args.manifest_files_csv)
+            with args.manifest_files_csv.open(encoding="utf-8-sig", newline="") as stream:
+                entries, counts = hf_entries_from_manifest(csv.DictReader(stream), args.generator)
             with temporary.open("w", encoding="utf-8", newline="") as stream:
                 catalog_writer = csv.DictWriter(stream, fieldnames=CATALOG_COLUMNS)
                 catalog_writer.writeheader()
