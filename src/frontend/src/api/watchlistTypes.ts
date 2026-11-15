@@ -8,12 +8,6 @@ export interface WatchlistCreate {
   note?: string | null;
 }
 
-/** ② 409 CONFLICT 的 details；existing_id 在并发兜底分支里后端可能给 null */
-export interface WatchlistConflictDetails {
-  field: 'security_code';
-  existing_id: string | null;
-}
-
 /** ⑩ 403 ENTITLEMENT_LIMIT_REACHED 的 details */
 export interface WatchlistLimitDetails {
   key: 'watchlist.per_user_cap';

@@ -68,8 +68,6 @@ export interface AdminDataLicence extends DataLicenceStatus {
   queue_depth: { p0: number; p1: number; p2: number };
 }
 
-/** §7.9 POST /admin/data-licences/{user_id}/pause · /resume 请求体 → 204 */
-export interface AdminLicenceAction { reason: string }
 export const ADMIN_REASON_MAX = 200;
 
 /** §7.9 GET /admin/securities/reconciliation 的 field（只有 field_mismatch 有） */

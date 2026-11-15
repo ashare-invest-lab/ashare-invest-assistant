@@ -29,8 +29,6 @@ export interface RegisterRequest {
 }
 
 export interface RegisterResponse { id: Uuid; username: string; status: 'pending' }
-/** 403 ACCOUNT_NOT_APPROVED 的 details（plan 3.6：rejected 附驳回理由） */
-export interface NotApprovedDetails { status: Exclude<AccountStatus, 'approved'>; reason?: string | null }
 
 export type Effort = 'low' | 'medium' | 'high';
 export type Experience = 'novice' | 'intermediate' | 'advanced';
