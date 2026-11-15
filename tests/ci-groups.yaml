@@ -8,10 +8,12 @@
 # 运维：parallel 可 xdist/分片；三个 serial_* 合并后用单 worker 顺序运行，并隔离 parallel 的 PG/端口/共享资源。
 # 从仓库根按 group 过滤 file 列表，作为 env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini 的位置参数。
 # 例如 Python yaml.safe_load(...)["tests"] 中筛选 r["group"] == "parallel" 后取 r["file"]；此组可追加 -n 4。
+# 守护递归扫描 tests/backend、tests/replay 及 src/backend/tests（不含 selfchecks）。
 # 全范围收集必须显式给 tests/backend tests/replay（根目录下裸跑会回退扫描范围外 scripts）；守护测试独立跑不启动嵌套收集。
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "src/backend/tests/test_terminal_quotes.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "socket.connect/create_connection denied", "synthetic data; no real PG/Redis/docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_contract_current.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_users_patch_t_b150.py", "group": "serial_pg", "keywords": ["app_client->authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_architect_rulings_t_t25.py", "group": "serial_pg", "keywords": ["session/sql->_t23.authdb->pg_url", "redis_url", "docker"], "unverified": false}
