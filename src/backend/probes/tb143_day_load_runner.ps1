@@ -1,4 +1,13 @@
-﻿[CmdletBinding()]
+﻿<#
+.SYNOPSIS
+校验已离线导出的日线包，按年加载到本地 PostgreSQL。
+.DESCRIPTION
+先在 src/backend 下运行 python -m app.cli.tb143_export day --zip <ZIP> `
+    --eligible-codes <资格集> --before <日期> --split-by-year --out <输出目录> `
+    --generator <app/cli/tb143_export.py 的 git blob SHA>。
+将生成的年度 CSV 与 tb143_load_day.sql 打包并生成清单后，才运行本 runner。
+#>
+[CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$Dir,
     [Parameter(Mandatory=$true)][string]$AllSha,

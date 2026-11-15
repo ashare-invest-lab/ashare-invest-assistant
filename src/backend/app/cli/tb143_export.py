@@ -1,5 +1,7 @@
 """T-B143 一次性离线导出，CSV 为 UTF-8 且带表头，不访问行情接口或数据库。
 
+在 src/backend 下运行 python -m app.cli.tb143_export <子命令>；
+仓库根目录运行时需先设置 PYTHONPATH=src/backend。
 各子命令的 --out 都是输出目录，可使用同一目录；生成 CSV，summary.json
 按子命令保留审计信息。day --split-by-year 生成每年独立的 day_YYYY.csv。
 --generator 由调用方传入本脚本的 git blob SHA。day 出现文件拒绝时返回 1，
@@ -101,10 +103,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise GbbqRefused("sha256_mismatch")
             snapshot, events = read_gbbq_zip(args.zip, args.expected_sha256, load_pytdx_keys())
             with temporary.open("w", encoding="utf-8", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=GBBQ_COLUMNS)
-                writer.writeheader()
+                event_writer = csv.DictWriter(stream, fieldnames=GBBQ_COLUMNS)
+                event_writer.writeheader()
                 for event in events:
-                    writer.writerow({**asdict(event), "snapshot_sha256": snapshot})
+                    event_writer.writerow({**asdict(event), "snapshot_sha256": snapshot})
             counts["rows_exported"] = len(events)
         elif args.command in ("hf-catalog", "lc-catalog"):
             if args.command == "hf-catalog":
@@ -130,9 +132,9 @@ def main(argv: list[str] | None = None) -> int:
                         check_overlap(entries, entry)
                         entries.append(entry)
             with temporary.open("w", encoding="utf-8", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=CATALOG_COLUMNS)
-                writer.writeheader()
-                writer.writerows(asdict(entry) for entry in entries)
+                catalog_writer = csv.DictWriter(stream, fieldnames=CATALOG_COLUMNS)
+                catalog_writer.writeheader()
+                catalog_writer.writerows(asdict(entry) for entry in entries)
             counts["rows_exported"] = len(entries)
             if any(value for key, value in counts.items() if key.startswith("reject_")):
                 status, exit_code = "partial", 1
