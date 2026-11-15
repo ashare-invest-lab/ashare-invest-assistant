@@ -8,18 +8,6 @@
     "serial_pg": 1190
   },
   "_max_skipped_source": "main run 43725507492（c6a79d0）JUnit：serial_pg 组 1190 passed / 65 skipped / 0 failed；跳过原因均为接口未实现或部署期角色/口令目录，非缺 PG。上调须在 PR 写明理由。min_passed 来源 main run 43731108139（6270179）与 43728565711（c3085ac）JUnit 均为 serial_pg 1190 passed。",
-  "colocate": [
-    [
-      "tests/backend/unit/test_ta87_m1_a1_a24_t_t50.py",
-      "tests/backend/unit/test_ta95_r6_g1_g3_t_t61.py"
-    ],
-    [
-      "tests/backend/api_app/test_architect_rulings_t_t25.py",
-      "tests/backend/api_app/test_contract_v028_t_t23.py",
-      "tests/backend/api_app/test_delete_user_data_cli_t_t24.py"
-    ]
-  ],
-  "_colocate_source": "隐性跨文件依赖须同片（片内按收集顺序执行）：t_t50 的 _ensure_tpl 创建 tt51_tpl，t_t61 的 engine 以它为模板；分开后 t_t61 三例「无法在目标实例上创建临时库」跳过（PR #192 run 43728842867 由 serial_pg 跳过守卫拦下）。 第二组：t_t24 的 purge_redis 只有在共享 Redis 里已有 ingest:requests 流时才走 xrange/xdel 分支（cli/delete_user_data.py 1083–1090），该流由按收集顺序在前的 t_t25/t_t23 留下；分开后总覆盖少 5 条语句，棘轮红（run 43730126573）。根治应由 t_t24 自建流，见 reports/T-O100.md。",
   "shard_overhead_seconds": {
     "1": 45
   },

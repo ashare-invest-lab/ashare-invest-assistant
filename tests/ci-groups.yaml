@@ -127,6 +127,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb117_session_filter_t_t61.py", "group": "parallel", "keywords": ["pure session calculations", "existing probe results read-only", "no probe execution"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_offline.py", "group": "parallel", "keywords": ["offline DDL compile", "tmp_path ZIP/CSV", "no_socket monkeypatch", "import-only RNG"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_pg.py", "group": "serial_pg", "keywords": ["offline_schema->pg_conn->pg_url", "psycopg", "docker"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb163r2_bj_gate.py", "group": "serial_shared", "keywords": ["T-O100c 临时登记：main 260bde9（#196）新增，待测试正式分组", "Mock/SimpleNamespace", "无真实 PG/Redis/docker"], "unverified": true, "reason": "T-O100c 临时登记，#196 合入后清单缺此项；未逐项核实资源风险，按未验证留在串行组，由测试正式分组"}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
   - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
