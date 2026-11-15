@@ -84,6 +84,9 @@ def terminal(
     *,
     _focus_only: bool = False,
 ) -> m.Terminal:
+    # Keep the daily_snapshot -> daily_bars -> aggregates.service import path acyclic.
+    from app.marketdata.quotes_read import read_quotes
+
     gaps = [
         gap("aggregation", "行情与部分事件来源尚未接线，已存在的本人建议按实际产物聚合。"),
         gap("account.pnl_day", "缺少上日基准，日盈亏不可计算。"),
@@ -125,6 +128,14 @@ def terminal(
         if codes
         else {}
     )
+    quotes = (
+        {
+            item.security_code: item
+            for item in read_quotes(conn, user_id, tuple(sorted(master))).items
+        }
+        if master
+        else {}
+    )
     values = {
         code: position.qty
         * (
@@ -151,6 +162,7 @@ def terminal(
     for code in codes:
         position = positions.get(code)
         info = master.get(code)
+        item = quotes.get(code)
         holding = None
         if position is not None:
             if not position.cost_known:
@@ -186,7 +198,14 @@ def terminal(
                 name=info.name if info else code,
                 in_watchlist=code in watch_codes,
                 focus=code in focused,
-                quote=None,
+                quote=m.TerminalQuote(
+                    price=item.price,
+                    change_pct=item.change_pct,
+                    amount=item.amount,
+                    t=dt.datetime.fromisoformat(item.t),
+                )
+                if item is not None and item.price is not None and item.t is not None
+                else None,
                 holding=holding,
                 suggestion=m.SuggestionSummary.model_validate_json(
                     products.encoded(summary(current[code]))
@@ -205,8 +224,10 @@ def terminal(
                 )
                 if code in current
                 else None,
-                data_status=DataStatus.PARTIAL,
-                data_as_of=None,
+                data_status=item.data_status if item is not None else DataStatus.UNAVAILABLE,
+                data_as_of=dt.datetime.fromisoformat(item.data_as_of)
+                if item is not None and item.data_as_of is not None
+                else None,
             )
         )
     watch_order = {code: index for index, code in enumerate(watch_codes)}
