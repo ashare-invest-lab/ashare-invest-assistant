@@ -474,6 +474,8 @@ T-T71b 歧义 1 里的「v2」是用例 28 追加的 **version_no=2 持仓快照
 
 ## 14. 回填/导入行就绪判定（T-A155）
 
+PN-06 合成盘后闭环见 [post-close-synthetic-loop.md](post-close-synthetic-loop.md) §2–§7；就绪判定严格沿本节，不放宽，收紧实施仍归 T-B148。
+
 基点 origin/main `c54920b`。问题来源：`reports/T-B144.md` §5（本地栈 off 不建快照；缺当日 daily_bars.fetch 运行或当日行不在 17:10–17:30 时整只省略；回填历史行进不了快照）。引用只写函数名、用例名、章节号。
 
 **结论**：历史行（回填、补历史、C1 替换后）不需要任何 pipeline_runs 等价记录，按本节 14.1 的逐行时点规则就绪；`daily_bars_ready` 只管快照日 T 的当日例行取数，且收紧为只认例行批（14.2 唯一改动）。17:15 取数、17:30 analyze、当日行窗口、point-in-time 口径一律不变，补建、重跑、一次性 Settings 覆盖都不豁免。不新增外呼、run kind、Settings 取值、迁移。
