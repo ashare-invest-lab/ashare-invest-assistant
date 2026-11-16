@@ -13,6 +13,7 @@
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "src/backend/tests/test_tb178_today_alerts.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL only", "isolated PostgreSQL database", "synthetic alerts; in-process Today API"], "unverified": false}
   - {"file": "src/backend/tests/test_terminal_quotes.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "socket.connect/create_connection denied", "synthetic data; no real PG/Redis/docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_contract_current.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_users_patch_t_b150.py", "group": "serial_pg", "keywords": ["app_client->authdb->pg_url", "redis_url", "docker"], "unverified": false}
