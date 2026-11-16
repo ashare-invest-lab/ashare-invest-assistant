@@ -19,7 +19,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from coverage_ratchet import BOOTSTRAP_BASE, bootstrap_record, validate_record
+from coverage_ratchet import BOOTSTRAP_BASE, bootstrap_record, coverage_counts, validate_record
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "scripts/ci/coverage-baseline.json"
@@ -91,6 +91,17 @@ def read_artifact(data: bytes, sha: str, run_id: int, attempt: int) -> dict:
         if entry.file_size > LIMIT:
             raise ValueError("Measurement exceeds bound")
         record = validate_record(json.loads(archive.read(entry)))
+        # Carry the paired raw JSON only in memory; main removes this payload
+        # before writing the frozen official measurement.
+        record.pop("_coverage_json", None)
+        coverage_name = "coverage.json"
+        if coverage_name in names:
+            if names.count(coverage_name) != 1 or archive.getinfo(coverage_name).file_size > LIMIT:
+                raise ValueError("Unexpected coverage archive entry")
+            coverage = json.loads(archive.read(coverage_name))
+            if coverage_counts(coverage) != record["counts"]:
+                raise ValueError("Archived coverage.json counts disagree with measurement")
+            record["_coverage_json"] = coverage
     if (record.get("commit") != sha or record.get("run_id") != str(run_id)
             or record.get("attempt") != str(attempt) or record.get("ratchet_passed") is not True):
         raise ValueError("Artifact does not belong to exact trusted base run")
@@ -214,6 +225,7 @@ def wait_for_base(repo: str, sha: str, get, timeout: int, *, allow_fallback: boo
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--coverage-output", type=Path)
     parser.add_argument("--wait-for-main-seconds", type=int, default=0)
     args = parser.parse_args()
     if not 0 <= args.wait_for_main_seconds <= 1800:
@@ -228,8 +240,15 @@ def main() -> int:
                                    allow_fallback=True)
         else:
             record = wait_for_base(repo, sha, get, args.wait_for_main_seconds)
-        if args.output.exists():
+        coverage = record.pop("_coverage_json", None)
+        if args.output.exists() or (args.coverage_output is not None and args.coverage_output.exists()):
             raise ValueError("Refuse to replace a frozen baseline")
+        if args.coverage_output is not None:
+            if coverage is None:
+                raise ValueError("Trusted base artifact has no coverage.json")
+            if args.coverage_output.resolve() == args.output.resolve():
+                raise ValueError("Frozen measurement and coverage outputs must differ")
+            args.coverage_output.write_text(json.dumps(coverage, separators=(",", ":")) + "\n", encoding="utf-8")
         args.output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         source = record["source"]
         selected = source.get("commit", sha)
