@@ -100,8 +100,18 @@ DUMP="$("$AIA_ROOT/deploy/scripts/db-backup.sh" --container "$SRC" --db "$SRC_DB
 DUMP_SIZE=$(stat -c %s "$DUMP"); DUMP_SHA=$(sha256sum "$DUMP" | cut -d' ' -f1)
 done_step
 
+assert_drill_container() {
+  local identity label image
+  identity=$(aia_docker inspect --format '{{ index .Config.Labels "aia.drill" }}|{{ .Config.Image }}' "$1") || aia_die "拒绝恢复：无法 inspect 目标容器 $1"
+  label=${identity%%|*}
+  image=${identity#*|}
+  [ "$label" = "$RUN_ID" ] || aia_die "拒绝恢复：目标容器 $1 的 aia.drill 标签与本次演练不符"
+  [ "$image" = "$IMAGE" ] || aia_die "拒绝恢复：目标容器 $1 的镜像与演练镜像不符"
+}
+
 step "start-target"; start_pg "$DST"; done_step
 step "restore"
+assert_drill_container "$DST"
 "$AIA_ROOT/deploy/scripts/db-restore.sh" "$DUMP" --container "$DST" --db "$DST_DB"
 done_step
 
