@@ -175,8 +175,8 @@ jobs:
       with:
         name: backend-shard-a-${{ github.run_id }}-${{ github.run_attempt }}
         path: |
-          ${RUNNER_TEMP}/coverage-a.json
-          ${RUNNER_TEMP}/backend-pytest-a.xml
+          ${{ runner.temp }}/coverage-a.json
+          ${{ runner.temp }}/backend-pytest-a.xml
         if-no-files-found: error
         retention-days: 7
     - env:
@@ -337,9 +337,9 @@ jobs:
       with:
         name: backend-shard-b-${{ github.run_id }}-${{ github.run_attempt }}
         path: |
-          ${RUNNER_TEMP}/coverage-b.json
-          ${RUNNER_TEMP}/backend-pytest-b.xml
-          ${RUNNER_TEMP}/selfcheck-a1s-a32.xml
+          ${{ runner.temp }}/coverage-b.json
+          ${{ runner.temp }}/backend-pytest-b.xml
+          ${{ runner.temp }}/selfcheck-a1s-a32.xml
         if-no-files-found: error
         retention-days: 7
     - env:
