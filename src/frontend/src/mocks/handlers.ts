@@ -133,6 +133,7 @@ function todayBody(): TodayResponse {
   // 只带被引用到的 evidence（契约：alerts、plan_triggers 的 evidence_ids 都能在 evidence[] 找到）
   const used = new Set([...alerts, ...triggers].flatMap((x) => x.evidence_ids));
   return {
+    account_id: ACCOUNT_ID,
     server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
     // T-F36/T-F36b：持仓行一律带 t_view，非持仓行为 null（契约 intraday-bars.md §3.7 ①）
