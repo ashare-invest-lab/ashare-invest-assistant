@@ -5,7 +5,7 @@ import type { TerminalAccount, TerminalRow, TerminalScope } from '../../api/type
 import { DataGrid, type DataColumn } from '../../components/DataGrid';
 import { ActionBadge, ConsensusBadge, DataStatusTag } from '../../components/common';
 import { EXECUTABILITY, REGIME, RISK_LEVEL } from '../../i18n/labels';
-import { fmtAmount, fmtNum, pctClass, signed } from '../../lib/format';
+import { fmtAmount, fmtNum, fmtPrice, pctClass, signed } from '../../lib/format';
 
 const SCOPES: { label: string; value: TerminalScope }[] = [
   { label: '全部', value: 'all' },
@@ -57,7 +57,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
     },
     {
       key: 'price', header: '现价', width: 64, numeric: true, value: (r) => (r.quote ? Number(r.quote.price) : null),
-      render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{r.quote.price}</span> : <span className="muted">—</span>),
+      render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{fmtPrice(r.quote.price)}</span> : <span className="muted">—</span>),
     },
     {
       key: 'chg', header: '涨跌%', width: 66, numeric: true, value: (r) => (r.quote ? Number(r.quote.change_pct) : null),
