@@ -17,7 +17,7 @@
 
 统一约束：`as_of` 必须带时区，按瞬时比较，T 为其北京日期；`available_at≤as_of` 且业务生效时间不晚于使用时点。缺即 null，未知不当 0，不猜单位，不用当前主数据补历史。
 一轮评估只选一次 d；全部特征及三个分位池固定该 d、本人、证书、日历与来源版本，单键缺数不得自行回退旧日。派生可见时间为全部必要依赖的最大值；已落库派生还不得早于实际产出时间。
-真调麦蕊、生产迁移、对真实库执行 `--apply` **须用户本人批准**；本契约、合成 PASS、任务派发均不构成批准。禁止借本单恢复出网、补取或 push。
+TEAM-RULES 第二节原文：「硬红线仍须用户本人批准：真调麦蕊（日K、分钟、单 D）、生产部署、删除用户数据、对外发送、解除 HALT、恢复外网出口、backfill --apply。（通达信真实全量导入已由用户 11-14 t1110u 授权，见本文件「t1110u」条；仍须走 upsert_daily_bars 并过写库门闩，绕开按误放处理。）」普通已派单登记不需本人重复批准，不将所有真实库 `--apply` 统列为硬红线；既有授权范围不重复批准，BJ 门闩保留。禁止借本单恢复出网、补取或 push。
 
 ## 2. 六项裁定
 
@@ -46,7 +46,7 @@
 
 每日决策调用方传 **T 日 Asia/Shanghai 17:30**，迟到不补跑原决策；HTTP `/horizon-assessments` 由服务端在请求入口捕获一次请求时刻并传入，只公开 security_code，不新增公开 as_of 参数；离线复算传原始 as_of。
 明确区分“以原截止复算”与“该时刻已存结果”：后算结果保留真实 computed_at/created_at，不能伪称当时落库。等价时区瞬时必须同结果；缺时区或缺参数直接拒绝。
-画像、持仓、成交、状态也受该截止约束；现有 latest_profile、当前 holdings/主数据及 `snapshot_id` 仅哈希 values 的做法不构成历史保证。A0 无版本证据时保留 null，账户版本/FIFO 按 A188 B13、完整持久化按 C2 交付。
+画像、持仓、成交、状态也受该截止约束；现有 latest_profile、当前 holdings/主数据及 `snapshot_id` 仅哈希 values 的做法不构成历史保证。A0 无版本证据时保留 null，账户版本/FIFO 按 A188 B13；已知缺口：`get_horizon_assessment` 仍返回 `snapshot_id` 函数生成的 values UUID，未履行 API §7.4 的真实快照要求，持久化/复用及本人/证书隔离归正式后继单 T-B177（我方后端），按 L-046 登记，#205 须同步引用 T-B177；实现与验收未验证，本 docs PR 不改后端。
 
 ### A0-3 盘中边界
 
@@ -79,7 +79,7 @@
 | A1a | 两表迁移、模型、约束/索引、不可变性与空库迁移验收；无数据回填、无生产执行、无外呼接线。原估算 350–550 行，未验证；硬上限 ≤800 | 本节 A1-1 两项及 single_head/upgrade/downgrade 测试 |
 | A1b | A1a 后实现版本登记/读取、完成证据提供者、权息可见性适配及向 prepare 的参数转换；仅接已有可证材料，无新采集器、无真实 gbbq 连乘启用。原估算 450–650 行，未验证；硬上限 ≤800 | provider_revision_isolation；`test_a188_source_revision_and_licence_isolation`；§A1-3 测试 |
 
-若估算无法满足，实施前按边界另拆并重新派单，不压缩格式凑行数。两单合计可超过 800，不能合成一个超限 PR；A1b 不包含 B/C 特征算法、FIFO、分位池算法或 C2 完整持久化服务。
+若估算无法满足，实施前按边界另拆并重新派单，不压缩格式凑行数。两单合计可超过 800，不能合成一个超限 PR；A1b 不包含 B/C 特征算法、FIFO、分位池算法或 T-B177 承接的 C2 快照持久化/复用服务。A1b 预估超 800，实施前须再拆，见 reports/T-A192.md 末节。
 
 ### A1-3 PN-03 权息可见性接口
 
@@ -142,9 +142,9 @@ proof 必含同源完成声明、证券/日期/来源/证书/版本摘要、原�
 新写版本的实际持久化/可引用回执才能确立 available_at；事务未提交或回滚不发布完成证明。登记可晚于原始材料可见时刻，但只有原先已保存的不可变回执能证明历史可见，不能事后生成早时刻。
 修订必须追加并留旧值；无法恢复的替换前版本留 gap，不能声称现值表能恢复历史。A1b 只登记已经保存的版本材料，不为“补证”修改 upsert 或打开同源替换。
 `market.daily_bars`、`ex_rights_events`、`factor_values`、`feature_bars_daily`、`trading_calendar`、`app.pipeline_runs` **均零列变更**，其旧主键/索引/可空性及写行为保留；新表是 horizon 严格读取的版本层，不是新的行情写入口。
-`app.data_snapshots`、`app.symbol_horizon_assessments` 同样零列变更。前者已有 purpose=horizon、user_id/licence_id、items/hash/created_at；后者已有 snapshot_id、classifier_version_id、evidence 等，不能重复迁移 purpose 枚举。
-C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/证据/特征/日历/截面版本与缺口；hash/复用键含本人、证书、时点、分类器/转换版本，不能仅 values UUID。同一包复用，变更另存，旧 assessment/snapshot 不回写。
-仅隔离空库可验 upgrade/downgrade；两表有数据时 downgrade 必须拒绝，不以 DROP TABLE 抹历史。生产迁移和历史材料登记另走用户本人批准关口。
+`app.data_snapshots`、`app.symbol_horizon_assessments` 同样零列变更。前者已有 purpose=horizon、user_id/licence_id、items/hash/created_at；后者已有 snapshot_id、classifier_version_id、evidence 等，不能重复迁移 purpose 枚举；API §7.4 要求的真实快照及评估落库缺口由 T-B177 承接，未验证。
+C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/证据/特征/日历/截面版本与缺口；hash/复用键含本人、证书、时点、分类器/转换版本，不能仅 values UUID。同一包复用，变更另存，旧 assessment/snapshot 不回写。T-B177 须验收返回的 snapshot_id 在 data_snapshots 真实存在、评估关联该快照、本人/证书隔离及同一输入重复请求复用；持久化与复用验收未验证。
+仅隔离空库可验 upgrade/downgrade；两表有数据时 downgrade 必须拒绝，不以 DROP TABLE 抹历史。生产迁移按 §1 的生产部署批准关口执行；普通已派单的历史材料登记不需本人重复批准，既有授权及 upsert_daily_bars、BJ 门闩仍按 §1 执行。
 
 ## 4. A0 协议与 A1b 提供者（内部接口草案）
 
