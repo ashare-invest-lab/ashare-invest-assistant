@@ -116,7 +116,10 @@ def test_cli_missing_measurement_is_nonzero_not_default_pass(tmp_path):
     base = deepcopy(ratchet.bootstrap_record())
     path = tmp_path / "base.json"
     path.write_text(json.dumps(base))
+    empty = tmp_path / "nondet.json"
+    empty.write_text(json.dumps({"schema": "aia-coverage-nondet-lines-v1", "files": []}))
     assert check.main([str(tmp_path / "missing.json"), "--base", str(path),
+                       "--nondet-lines", str(empty),
                        "--output", str(tmp_path / "out.json")]) == 1
     assert not (tmp_path / "out.json").exists()
 
@@ -250,7 +253,10 @@ def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     assert "--cov=src/backend/app --cov-report=term-missing:skip-covered" in workflow
     assert "--cov-fail-under=80" not in workflow
     assert "timeout-minutes: 30" in workflow
-    assert "steps.coverage_ratchet.outcome == 'success'" in workflow
+    assert "!cancelled() && steps.coverage_ratchet.outcome != 'skipped'" in workflow
+    assert "steps.coverage_ratchet.outcome == 'success'" not in workflow
+    assert '--base-coverage "${RUNNER_TEMP}/coverage-base-coverage.json"' in workflow
+    assert "--nondet-lines scripts/ci/coverage-nondet-lines.json" in workflow
     assert "fetch-depth: 0" in workflow and "GH_TOKEN: ${{ github.token }}" in workflow
 
 
@@ -342,7 +348,8 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
             assert "hashFiles" not in step.get("if", ""), step["name"]
     frozen = steps[freeze_index]
     assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
-                             '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"')
+                             '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" '
+                             '--coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"')
     assert frozen["if"] == steps[ratchet_index]["if"]
     assert frozen["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert not frozen.get("continue-on-error", False)

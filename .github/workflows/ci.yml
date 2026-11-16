@@ -43,7 +43,7 @@ jobs:
     - name: 等待原 main push 的精确测量归档
       env:
         GH_TOKEN: ${{ github.token }}
-      run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json"
+      run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json" --coverage-output "${RUNNER_TEMP}/coverage-base-ready-coverage.json"
   backend-a:
     name: 'backend-a (pytest shard: api_app + replay)'
     runs-on: ubuntu-24.04
@@ -398,7 +398,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       if: ${{ !cancelled() }}
       name: 冻结可信 base 覆盖率棘轮基线
-      run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"
+      run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" --coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"
     - id: coverage_ratchet
       if: ${{ !cancelled() }}
       name: 精确覆盖率棘轮（可信 base，不下降）
@@ -406,9 +406,11 @@ jobs:
         test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
         python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json" \
           --base "${RUNNER_TEMP}/coverage-base.json" \
+            --base-coverage "${RUNNER_TEMP}/coverage-base-coverage.json" \
+            --nondet-lines scripts/ci/coverage-nondet-lines.json \
           --policy scripts/ci/coverage-baseline.json \
           --output "${RUNNER_TEMP}/coverage-ratchet-measurement.json"
-    - if: ${{ !cancelled() && steps.coverage_ratchet.outcome == 'success' }}
+    - if: ${{ !cancelled() && steps.coverage_ratchet.outcome != 'skipped' }}
       name: 归档可信覆盖率测量与原始 JSON/JUnit
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
