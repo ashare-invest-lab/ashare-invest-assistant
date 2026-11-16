@@ -50,7 +50,7 @@ R01–R22 是本卡全部行为规则，每条附【虚构】用例；除 §8 �
 |---|---|
 | observation_key | `(suggestion_id, strategy_version_id, horizon_days)`；同版本多实例仍一条 |
 | window | `signal_at, entry_at, exit_at, as_of, sessions, calendar_version`；日历未知时 entry/exit 可为 null |
-| benchmark_slots | `primary/secondary/industry` 三槽；各含 `benchmark_id, benchmark_code, status, entry_points, exit_points, benchmark_return_pct, excess_pct, gap_keys` |
+| benchmark_slots | `primary/secondary/industry` 三槽；各含 `benchmark_id, benchmark_code, status, entry_points, exit_points, benchmark_return_pct, excess_pct, benchmark_window_complete, gap_keys`；完整性独立于端点可算性，见R12 |
 | status | 内部取 `pending/complete/unavailable`；基准 complete 只表示该槽输入可计算，不改变个股 state；行业固定 unavailable 至 B12 核验 |
 | basis | `price_index, adjust=none, unit=index_points, formula=arithmetic_difference, cost_applied=false, dividend_bias=true` |
 | provenance | `source, source_endpoint_template, source_symbol, source_market, security_type=index, data_version, content_sha256, directory_version, methodology_version`；端点与逐日行引用可解析 |
@@ -84,7 +84,7 @@ R01–R22 是本卡全部行为规则，每条附【虚构】用例；除 §8 �
 
 沿 T-R71 README §3、四卡 §16、多源契 §4：候选产生时冻结主辅角色和选源策略；**未来尚未到达的行不在 T 伪造冻结**。评估时各序列以一个可审计 source、数据快照 data_version 读取全窗，在快照内逐行保留修订和可见时点；个股与指数可有不同源，但该来源组合也须登记。辅指数独立冻结。tdx 仅独立对照，不能填进 mairui 的缺日；主源未具备整窗则给缺口。data_version 是快照标识，不要求所有日线同一 fetched_at；同一时刻多版本无法唯一选择则拒绝。无版本/hash 为 `benchmark_version_unverified`；混源为 `benchmark_source_mixed`。严格整窗单源快照检查是 draft 新增（U05），库存源优先级不能代替它。
 
-【虚构】mairui-v1 有D1开1000、D5收1040，D3只在tdx-v7存在；禁止拼成完整窗，正式基准=null+`benchmark_source_mixed`（若输入未拼、仅缺日，则R12缺日码）。若完整tdx-v7独立对照得3%，也不能覆盖主槽空值。源名相同但版本/hash均缺→null+`benchmark_version_unverified`。
+【虚构】mairui-v1 有D1开1000、D5收1040，D3只在tdx-v7存在；禁止拼成完整窗，正式基准=null+`benchmark_source_mixed`（若输入未拼、仅缺日，则端点收益仍为4%，缺日只影响R12完整性字段并列逐日gap）。若完整tdx-v7独立对照得3%，也不能覆盖主槽空值。源名相同但版本/hash均缺→null+`benchmark_version_unverified`。
 
 ## 4. 日历、窗口与可见性
 
@@ -136,9 +136,13 @@ R01–R22 是本卡全部行为规则，每条附【虚构】用例；除 §8 �
 
 ### R12 指数缺日与完整性
 
-沿T-R71 §5/§11的完整对齐要求，**draft新增保守规则**：每个入场至末端开市日均须有唯一、有效、定稿、可见的指数OHLC；完整性按同一日历检查，不能以两端有值宣称整窗已核验。任何缺日→该槽benchmark_return_pct/excess_pct=null，`benchmark_daily_missing:<D>`；缺入口open/末端close另列 `benchmark_prices`（兼容已有键）。日内异常/未定稿/不可见分别用R03/R08/R09的码，并计入不可用日期，不能补0、前值或插值。端点算术候选可写诊断evidence，不能写正式收益字段。此严于现E端点实现，需D03裁定。
+按团队报告 `T-A190.md` D03裁定及B01修正：**端点可算性与整窗完整性分开报告**。窗口由R05的已验证日历确定；可信同源同版、定稿且PIT可见（`available_at≤as_of`，并满足R08其余时点要求）的入场open与末端close两端齐备，即正常计算正式 `benchmark_return_pct`，个股收益可算且满足其余规则时正常计算 `excess_pct`。中间缺日或非端点OHLC缺项不得清空这些端点收益。
 
-【虚构】D1开1000、D5收1040但D3无行：端点诊断为4%，正式基准/超额=null+`benchmark_daily_missing:D3`；删D5行还加 `benchmark_prices`。D3若实际为明确休市，则不属于期内开市集，完整D1…D5定义随R05重算，不能将原D5当第5个开市日不变。
+完整性独立按同一日历的入场至末端开市日逐日检查唯一、有效、定稿、可见的OHLC：确认齐备才记 `benchmark_window_complete=true`；缺日或非端点OHLC缺项记 `benchmark_window_complete=false`（不完整），按受影响日期逐日列 `benchmark_daily_missing:<D>`，缺字段保留null及字段证据；无法核实完整性则记 `benchmark_window_complete=unavailable` 并保留相应gap。两端可算不代表整窗已验证。日内异常、未定稿、不可见仍分别按R03/R09/R08的码报告；影响端点有效性时阻断相应收益，仅影响中间行时报告完整性不可用及日期证据，不额外否决可信端点。
+
+缺任一端点 → `benchmark_return_pct/excess_pct=null` + `benchmark_prices`；缺整行另列该日 `benchmark_daily_missing:<D>`。不补0、不跨日借值、不插值。缺日历而无法确定窗口时不算，收益/超额为null，按R05报告calendar gap，不猜窗口或缺日日期。
+
+【虚构】已验证日历的D1开1000、D5收1040，两端均满足上述要求，但D3无行：正式输出 `R_b=4%`，个股收益若为10%则正式超额为6个百分点；`benchmark_window_complete=false`（不完整）+ `benchmark_daily_missing:D3`，不得宣称整窗已验证。删D5行后，正式基准/超额=null + `benchmark_prices`，另保留D3/D5逐日缺口。D3若实际为明确休市，则不属于期内开市集，D1…D5定义随R05重算，不能将原D5当第5个开市日不变。
 
 ### R13 数据修订、冻结与补算
 
@@ -192,7 +196,7 @@ R01–R22 是本卡全部行为规则，每条附【虚构】用例；除 §8 �
 
 ### R21 状态和缺口传播
 
-沿E:322–343及api-contract §7.11.3：缺基准只影响该槽的收益/超额/方向，股票complete可保留；总体data_status至少partial。主辅均缺不等于股票收益0；只有缺可计算股票价格/可成交性时才使股票unavailable。按R05日历未知与R10未到期分流，随后依次验证身份/源版本、定稿可见性、逐日日线、公式；多种独立缺口并列。辅槽失败不抹掉主槽；行业未验证始终显示，不能把行业缺口藏在主槽complete之后。新增全局/逐槽gap聚合是draft，A当前仅收集盈亏比gap的局限需实施修复。
+沿E:322–343及api-contract §7.11.3：基准端点不可算只影响该槽的收益/超额/方向，股票complete可保留；整窗缺日/非端点缺项按R12独立报告完整性与gap，保留可信端点收益；有缺口时总体data_status至少partial。主辅均缺不等于股票收益0；只有缺可计算股票价格/可成交性时才使股票unavailable。按R05日历未知与R10未到期分流，随后验证身份/源版本、定稿可见性，分别检查端点公式与逐日完整性；多种独立缺口并列。辅槽失败不抹掉主槽；行业未验证始终显示，不能把行业缺口藏在主槽complete之后。新增全局/逐槽gap聚合是draft，A当前仅收集盈亏比gap的局限需实施修复。
 
 【虚构】股票收益10%且可成交，主缺D5、辅收益3%：股票state=complete，主R_b/E/方向=null+`benchmark_daily_missing:D5`/`benchmark_prices`，辅E=7，行业=null+`industry_benchmark_unverified`，总体partial。若股票也缺qfq端点，state=unavailable、股票/双槽超额=null，但已有辅R_b=3%可以保留。
 
@@ -220,7 +224,7 @@ T-R79b公开查证/访问日期统一为2026-11-15。公开出处仅采纳编制
 | U03 | 完整日历版本 | PN-03 §2已定合并来源/边界。**已核部分**：B02–B06是上交所2012/2023/2026、深交所2024/2026休市通知，可作对应年份核对参照。**仍未验证部分**：2012年以来沪深逐年通知集合与临时变更尚未齐备，更未逐日比对实库；真实覆盖/sha/重叠一致性未知。需逐年原通知及补充通知清单、自然日对账、合并版本hash和边界重叠报告。 | 未验证（部分核实）；R05；检索站点sse.com.cn、szse.cn，词「2012年 全年/部分节假日 休市安排」「2013–2025 休市安排」「2026年 部分节假日休市安排」，2026-11-15；深交所2012原通知未取得，不能以转载补证 |
 | U04 | 个股qfq因子/可成交事实 | **已核实（源码）的部分**：同一cutoff筛可见因子并锚定qfq、缺因子不补1；停牌/涨跌停/forced_hold及未知事实分流，详C04的代码与测试。**仍未验证部分**：真实因子与复杂权息事件对账、版本/首次可见、停复牌及持仓事实接线。公开出处不适用；需实库对账及后端验收。 | 未验证（部分源码核实）；R08/R11/R21；C04；SQL Q01/Q02 |
 | U05 | 单源整窗快照 | **已核实（源码）的部分**：生成/观测/结果摘要校验、算法版本和原始价格输入快照、完成后保留旧结果，详C05。**仍未验证部分**：读取未筛source，快照未冻结日历本体/目录版本及整窗来源manifest；单源data_version/hash重放与混源拒绝未实现验收。T-R71 §3禁止混拼，严格拒绝组合仍为本卡draft，外层hash不证明上游来源。 | 未验证（部分源码核实）；R04/R22；C05；SQL Q03/Q05 |
-| U06 | 指数完整性门槛 | **已核实（源码）的部分**：当前指数只取可见且final的两端，缺基准不抹掉可算股票收益，详C06。**仍未验证部分**：整窗每开市日OHLC齐备门槛是保守draft；没有指数中间缺日即拒绝的测试证据。需D03裁定、后端整窗/缺日用例及实库覆盖验收；官方每日发布不能裁定本卡门槛。 | 未验证（部分源码核实）；R12；D03；C06；SQL Q04 |
+| U06 | 指数端点与完整性报告 | **已核实（源码）的部分**：当前指数只取可见且final的两端，缺基准不抹掉可算股票收益，详C06。**D03已裁定：端点与完整性分开**（T-A190 D03），中间缺日/非端点OHLC缺项不清空可信端点收益。**仍未验证部分**：缺后端整窗/缺日用例与实库覆盖，尚未验收完整性字段、逐日gap及端点收益并存；官方每日发布不证明整窗已验证。 | 未验证（部分源码核实）；R12；D03；C06；SQL Q04 |
 | U07 | 全收益及分红偏差 | **已核部分**：O2/O4第2页明确H00300/H00985全收益系列；B09/B10的2018-01单张各自列出基日2004-12-31、发布日期2005-04-08/2011-08-02；B01 §2.2/§3.2.1区分分红处理。**仍未验证部分**：仓库接入、入场开盘点位及偏差量化无证据。需全收益来源接线、端点可得性核对和同窗价格/全收益实测对照；旧单张仅用于身份日期，不代表现行样本/编制规则。 | 未验证（部分核实）；R02；查csindex.com.cn，词「H00300 H00985 基日 发布 全收益」并访问两条H代码详情页，2026-11-15；详情页仅返回JS壳，日期改由B09/B10官方PDF核实 |
 | U08 | 发布前/更名映射政策 | **已核部分**：O2/O4价格指数基日均2004-12-31，发布日分别2005-04-08/2011-08-02；B07为更名且编制方法不变的官方实例。**仍未验证部分**：该实例不证明000300/000985历史目录连续性；未取得两指数发布前回溯数据的完整可见性说明，回溯样本准入仍属draft。需编制方具体变更/连续性文件、带有效期源目录、回溯数据说明及D06裁定。 | 未验证（部分核实）；R14；D06；查csindex.com.cn、sse.com.cn，词「历史回溯 数据 发布前」「指数更名 代码保持不变」「上证市值100 名称变更」，2026-11-15 |
 | U09 | 盘中分钟/复权衔接 | E:235–240已有缺口。**已核部分**：B01 §2.5及O1 §12.3说明实时频率以行情系统接口为准，未给统一固定秒数。**仍未验证部分**：B11分钟槽START/END、下一分钟开盘定义、跨午休/日界处理及个股qfq桥全链。需对应接口版本、时间标签样本及股票/指数同槽后端验收。 | 未验证（部分核实）；R07；D08；查csindex.com.cn、sse.com.cn，词「指数 实时 行情 发布频率」「指数 分钟 开盘」，2026-11-15；实时发布不证明分钟OHLC已接入 |
@@ -246,11 +250,11 @@ T-R79b公开查证/访问日期统一为2026-11-15。公开出处仅采纳编制
 - 对应测试：`src/backend/selfchecks/test_p2n03_tracking.py:405`的`test_actual_p1_worker_tracking_snapshots_api_replay_pit_and_ownership`在合成行情被修改后断言API内容和snapshot_id不变（`:428–443`）；`:602`的`test_pending_wall_clock_replay_keeps_same_rows_and_snapshot_ids`覆盖pending。`src/backend/selfchecks/test_ta27_tracking.py:179`的`test_actual_worker_multiple_instances_earliest_then_uuid_and_frozen`在`:254–261`断言算法版本及原始股票first_seen_at≤cutoff；这些测试未单独构造摘要篡改反例，摘要拒绝分支的依据是上述源码，不外推测试覆盖。
 - 仍未验证：`src/backend/app/tracking/service.py:55–95`未筛source且丢掉source等字段；`:346–358`没有日历本体、指数目录/来源版本manifest。`src/backend/app/db/tables/market.py:379`主键为code/trade_date/adj_type，不能当作多修订历史。SQL Q03/Q05只能盘点当前来源与快照结构；单一source/合法hash形状不证明整窗同版重放或混源拒绝。
 
-**C06 → U06：指数完整性，部分源码核实。** 规范边界：`docs/api-contract.md:1288`只规定缺基准相关结果为空，本卡R12的整窗门槛仍待D03。
+**C06 → U06：指数完整性，部分源码核实。** 规范边界：`docs/api-contract.md:1288`规定缺基准相关结果为空；**D03已裁定：端点与完整性分开**（T-A190 D03），R12不再以中间缺日/非端点OHLC缺项阻断可信端点收益。
 
-- 已核实（源码）：`src/backend/app/tracking/engine.py:267–284`先筛final/first_seen/收盘时刻，再仅用入场日open及到期日close；`:326–330`股票complete不依赖基准非空。`src/backend/app/tracking/service.py:68–84`只收四价正数且已收盘的行，直接赋is_final=true；这不是上游定稿证据，也没有整窗缺日拒绝。
-- 对应测试：`src/backend/selfchecks/test_p2n03_tracking.py:155`的`test_real_calendar_boundaries_entry_reference_independent_qfq_and_benchmark`覆盖可见两端的1/5/20计算；`:243`的`test_missing_benchmark_factors_calendar_and_future_knowledge`断言全缺基准时股票可complete、超额/方向为空；`:478`的`test_benchmark_future_revision_is_not_historical_knowledge`断言晚可见基准被排除。没有以这些端点用例声称指数中间缺日门槛已通过。
-- 仍未验证：整窗OHLC门槛仍需D03及专门的中间缺日/非法OHLC测试；SQL Q04只相对于库存日历和指定source诊断覆盖。日历版本、首次可见、真实final须另验；空集不能通过。
+- 已核实（源码）：`src/backend/app/tracking/engine.py:267–284`先筛final/first_seen/收盘时刻，再仅用入场日open及到期日close；`:326–330`股票complete不依赖基准非空。`src/backend/app/tracking/service.py:68–84`只收四价正数且已收盘的行，直接赋is_final=true；这不是上游定稿证据，也没有独立的整窗完整性报告。
+- 对应测试：`src/backend/selfchecks/test_p2n03_tracking.py:155`的`test_real_calendar_boundaries_entry_reference_independent_qfq_and_benchmark`覆盖可见两端的1/5/20计算；`:243`的`test_missing_benchmark_factors_calendar_and_future_knowledge`断言全缺基准时股票可complete、超额/方向为空；`:478`的`test_benchmark_future_revision_is_not_historical_knowledge`断言晚可见基准被排除。这些端点用例不能证明整窗完整性报告已通过。
+- 仍未验证：缺后端整窗/缺日用例与实库覆盖；须专门覆盖两端齐/中间缺日、非端点OHLC缺项、缺任一端点及非法OHLC，分别核对收益与完整性/gap。SQL Q04只相对于库存日历和指定source诊断覆盖。日历版本、首次可见、真实final须另验；空集不能通过。
 
 **C10 → U10：截止/补算，部分源码核实。**
 
@@ -269,7 +273,7 @@ T-R79b公开查证/访问日期统一为2026-11-15。公开出处仅采纳编制
 - 对应测试：`src/backend/selfchecks/test_ta27_tracking.py:179`的`test_actual_worker_multiple_instances_earliest_then_uuid_and_frozen`断言择最早/并列最小、other_instance留证及各周期n=1，`:274–285`核mine/site计数与匿名输出；`src/backend/selfchecks/test_p2n03_tracking.py:503`的`test_actual_multiple_strategy_versions_are_independently_persisted`断言两版本独立且单建议各周期n=2；`:269`的`test_stat_thresholds_and_no_auto_feedback`覆盖n=0/4/5/29/30；`:567`的`test_api_empty_anonymous_foreign_unknown_version_and_no_get_side_effect`覆盖空集、匿名和GET无副作用。并非辅槽/配对n测试。
 - 仍未验证：`src/backend/app/tracking/models.py:24–29`只有单个benchmark字段组；`src/backend/app/tracking/service.py:245,388`固定000300.SH；`src/backend/app/tracking/api.py:97–134`未按来源版本/动作/置信度分组且只聚合盈亏比gap。辅槽、metadata、共同有效集n、额外统计gap及负零展示需D02/D07和完整验收。Q07只能复核一个快照的分组n，不能代替API跨建议去重或辅槽验收。
 
-只读核对入口：[readonly_checks.sql](readonly_checks.sql)，Q01–Q07共7条，逐条列了迁移/模型出处、参数和期望判读。**草稿，未执行；仅供运维在本地栈只读执行，执行需另行授权。** 没有为尚不存在的来源版本列、辅槽表或因子表编造SQL，也不以只读查询替代D03/D04等裁定或U11样本外复测。
+只读核对入口：[readonly_checks.sql](readonly_checks.sql)，Q01–Q07共7条，逐条列了迁移/模型出处、参数和期望判读。**草稿，未执行；仅供运维在本地栈只读执行，执行需另行授权。** 没有为尚不存在的来源版本列、辅槽表或因子表编造SQL；只读查询不能代替D03口径的后端验收、D04等待裁定项或U11样本外复测。
 
 ### 本次公开出处及短摘录
 
@@ -323,17 +327,21 @@ T-R79b公开查证/访问日期统一为2026-11-15。公开出处仅采纳编制
 
 这些事实不证明B11路由后缀、库覆盖、分钟开盘、历史可见性或全收益数据已接入；这些仍按U01/U02/U07/U09处理。R14【虚构】用例说明发布日前后准入，不将基点当真实开盘报价。
 
-## 9. 待裁定清单（8条）
+## 9. 裁定登记（8条；本次仅同步D03）
 
 | ID | 歧义/需要决定的内容 | 本draft确定的保守输出（对应规则/用例） |
 |---|---|---|
 | D01 | 是否曾需按板块或周期切换主辅；未找到此类裁定 | 不切换，不把RC5周期映射当换指数条件；R01 |
 | D02 | 现API单benchmark字段如何承载辅槽、行业槽、gap与版本metadata | 主槽兼容；新增槽仅内部研究包，不改API、不重复观测；R01/R18/R21 |
-| D03 | 完整对齐是否阻断端点已齐但中间缺日的收益 | 本卡正式槽null+缺日码，端点值仅诊断；现实现差异明确；R12 |
+| D03 | 已裁定（T-A190 D03）：端点与完整性分开 | 可信同源同版、定稿且PIT可见的两端齐则正式计算收益/超额；中间缺日/非端点缺项只影响完整性字段及逐日gap，不宣称整窗已验证；缺端点则null+`benchmark_prices`，缺日历按R05不算；R12 |
 | D04 | unavailable五日补算与到期日截止如何协调；股票complete但基准缺失是否允许新观察版本 | 不倒填可见时点、不改冻结行；仅恢复截止前可见版本可补，真正迟到仍null；R08/R13 |
 | D05 | B11指数目录/市场映射、采集资格、版本保存及available_at责任方 | 无可核验映射/时点/source/version则受影响槽null；不复用stock过滤器；R03/R04/R08 |
 | D06 | 是否允许发布前回溯历史；更名连续性证明及历史目录版本如何留存 | 发布前或更名未核均null；仅证据完整的同系列续接；R14 |
 | D07 | plan的动作/置信度分组如何对接现API；源版本分组、配对n和基准均值是否入接口 | 内部按已知标签分组，未知单列；不合并源版本，不外推置信桶；R18/R19/R20 |
 | D08 | 盘中指数下一分钟开盘及股票qfq桥何时具备核验依据 | 原分钟缺口继续阻断，不用日线替代；R07 |
 
-后端可按R01–R22建立离线合成验收，未决项按上表保守输出。真实基准就绪至少需要B11身份/定稿/版本链、同日历全窗、个股同as_of qfq及可成交性证据；本单只交付规格与文档检查，不报告这些真实门槛已通过。
+后端可按R01–R22建立离线合成验收，未决项按上表保守输出。真实基准就绪至少需要B11身份/定稿/版本链、同日历窗口及独立完整性报告、个股同as_of qfq及可成交性证据；本单只交付规格与文档检查，不报告这些真实门槛已通过。
+
+## 10. 变更记录
+
+- T-R79d（2026-11-15）：按T-A190 D03/B01修R12，端点可算性与整窗完整性分开报告，同步U06/C06、D03及相关引用；仅修B01，后端G02–G04等缺口留待后续，lifecycle保持draft。
