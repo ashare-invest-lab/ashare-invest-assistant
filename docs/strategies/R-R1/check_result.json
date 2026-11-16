@@ -1,0 +1,199 @@
+{
+  "mode": "offline_archived_bytes",
+  "as_of": {
+    "SZ": "2026-11-13",
+    "SH_fetch_date": "2026-11-15"
+  },
+  "source_checks": [
+    {
+      "id": "szse_name_change",
+      "bytes": 287548,
+      "sha256": "a6a785daa7319d71f52252505a03892f256f381421362cffcb1b5d74e9f221b8",
+      "matches_archived": true
+    },
+    {
+      "id": "szse_termination",
+      "bytes": 10983,
+      "sha256": "bc8f56e80cd27d0d705d3488ce5d54f1f853f5e069eff17f73b67c626191cf4d",
+      "matches_archived": true
+    },
+    {
+      "id": "sse_current_main",
+      "bytes": 1944421,
+      "sha256": "5b9680e18cfa9d54987018204fb28fe96c67a9274bcd71bf14aa90c66f55fbed",
+      "matches_archived": true
+    },
+    {
+      "id": "sse_current_star",
+      "bytes": 716448,
+      "sha256": "ff4bdbe9b3aa4f7bae37878b7572089fcb4c937d0f6741d85b7163611a28e938",
+      "matches_archived": true
+    },
+    {
+      "id": "sse_termination_main",
+      "bytes": 156390,
+      "sha256": "884c42a68be2dfdc70866f41654ddb3e5210ea5364b75cc534f103c5ab0f3637",
+      "matches_archived": true
+    },
+    {
+      "id": "sse_termination_star",
+      "bytes": 3800,
+      "sha256": "6950940c3b86b6bc362a9ccb4a449c3b46622b291d0f7aaa3ec0ba1bf2acff83",
+      "matches_archived": true
+    }
+  ],
+  "counts": {
+    "sz_name_events_old_new": [
+      7503,
+      7505
+    ],
+    "sz_termination_a_old_new": [
+      189,
+      190
+    ],
+    "sz_current_st_old_new": [
+      113,
+      113
+    ],
+    "sh_current_main_star": [
+      1700,
+      619
+    ],
+    "sh_current_st": 80,
+    "sh_termination": 148,
+    "current_st_total": 193,
+    "current_termination_total": 338,
+    "current_st_by_exchange_flag": {
+      "SH": {
+        "*ST": 38,
+        "ST": 42
+      },
+      "SZ": {
+        "*ST": 49,
+        "ST": 64
+      }
+    },
+    "current_termination_by_exchange": {
+      "SH": 148,
+      "SZ": 190
+    },
+    "current_cdr_excluded": 1
+  },
+  "reference_checks": {
+    "termination_records": 90,
+    "mismatches": [
+      {
+        "exchange": "SH",
+        "symbol": "600190",
+        "reference": "2025-07-25",
+        "current": "2025-07-28"
+      }
+    ],
+    "sh_600543_expected_actual": [
+      "*ST",
+      "*ST"
+    ],
+    "t_r65_sh_termination_expected_actual": [
+      148,
+      148
+    ]
+  },
+  "differences": [
+    {
+      "exchange": "SZ",
+      "category": "name_change",
+      "change": "added",
+      "symbol": "300901",
+      "event_date": "2026-11-12",
+      "old_snapshot": "2026-11-10",
+      "new_snapshot": "2026-11-13",
+      "name_before": "中胤时尚",
+      "name_after": "中胤科技",
+      "old_value": "",
+      "new_value": "",
+      "source": "szse_name_change",
+      "note": "简称事件差分；不等同ST切换"
+    },
+    {
+      "exchange": "SZ",
+      "category": "name_change",
+      "change": "added",
+      "symbol": "301015",
+      "event_date": "2026-11-12",
+      "old_snapshot": "2026-11-10",
+      "new_snapshot": "2026-11-13",
+      "name_before": "百洋医药",
+      "name_after": "百洋制药",
+      "old_value": "",
+      "new_value": "",
+      "source": "szse_name_change",
+      "note": "简称事件差分；不等同ST切换"
+    },
+    {
+      "exchange": "SZ",
+      "category": "termination",
+      "change": "added",
+      "symbol": "002731",
+      "event_date": "2026-11-13",
+      "old_snapshot": "2026-11-10",
+      "new_snapshot": "2026-11-13",
+      "name_before": "",
+      "name_after": "萃华退",
+      "old_value": "",
+      "new_value": "2026-11-13",
+      "source": "szse_termination",
+      "note": "A/B股原始表全量差分；当前A股名单另过滤"
+    },
+    {
+      "exchange": "SZ",
+      "category": "current_status",
+      "change": "changed",
+      "symbol": "002731",
+      "event_date": "2026-11-13",
+      "old_snapshot": "2026-11-10",
+      "new_snapshot": "2026-11-13",
+      "name_before": "萃华退",
+      "name_after": "",
+      "old_value": "退",
+      "new_value": "已终止",
+      "source": "szse_name_change+szse_termination",
+      "note": "退与ST分列；已终止不留在当前简称状态表"
+    },
+    {
+      "exchange": "SH",
+      "category": "st_aggregate",
+      "change": "count_changed",
+      "symbol": "",
+      "event_date": "",
+      "old_snapshot": "2026-11-01",
+      "new_snapshot": "2026-11-15",
+      "name_before": "",
+      "name_after": "",
+      "old_value": "81",
+      "new_value": "80",
+      "source": "security_master.md+sse_current_main+sse_current_star",
+      "note": "仅历史汇总数对比；无旧逐代码快照，不推断具体新增/摘帽股票"
+    },
+    {
+      "exchange": "SH",
+      "category": "termination_date_mismatch",
+      "change": "source_conflict",
+      "symbol": "600190",
+      "event_date": "2025-07-28",
+      "old_snapshot": "public_notice",
+      "new_snapshot": "2026-11-15",
+      "name_before": "退市锦港",
+      "name_after": "退市锦港",
+      "old_value": "2025-07-25",
+      "new_value": "2025-07-28",
+      "source": "S2-7/termination_public_subset.csv+current_exchange_termination_list",
+      "note": "公告摘牌日与交易所当前DELIST_DATE冲突；双值保留，不改写来源"
+    }
+  ],
+  "limits": [
+    "深市为两份旧新公开XLSX全量差分；沪市旧ST仅有2026-11-01汇总数，不能逐项还原81→80。",
+    "沪市终止名单新快照为全量，旧记录仅核manifest与S2公开子集的36个键，不冒充148项逐项旧新比较。",
+    "深市当前ST由官方简称变更派生并剔除已终止；ST/*ST与退、已终止分列。",
+    "不读原337行CSV、数据库、私有样本或真实持仓；不做F23准确率、策略、r2或交易判读。"
+  ]
+}

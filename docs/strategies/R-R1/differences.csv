@@ -1,0 +1,7 @@
+exchange,category,change,symbol,event_date,old_snapshot,new_snapshot,name_before,name_after,old_value,new_value,source,note
+SZ,name_change,added,300901,2026-11-12,2026-11-10,2026-11-13,中胤时尚,中胤科技,,,szse_name_change,简称事件差分；不等同ST切换
+SZ,name_change,added,301015,2026-11-12,2026-11-10,2026-11-13,百洋医药,百洋制药,,,szse_name_change,简称事件差分；不等同ST切换
+SZ,termination,added,002731,2026-11-13,2026-11-10,2026-11-13,,萃华退,,2026-11-13,szse_termination,A/B股原始表全量差分；当前A股名单另过滤
+SZ,current_status,changed,002731,2026-11-13,2026-11-10,2026-11-13,萃华退,,退,已终止,szse_name_change+szse_termination,退与ST分列；已终止不留在当前简称状态表
+SH,st_aggregate,count_changed,,,2026-11-01,2026-11-15,,,81,80,security_master.md+sse_current_main+sse_current_star,仅历史汇总数对比；无旧逐代码快照，不推断具体新增/摘帽股票
+SH,termination_date_mismatch,source_conflict,600190,2025-07-28,public_notice,2026-11-15,退市锦港,退市锦港,2025-07-25,2025-07-28,S2-7/termination_public_subset.csv+current_exchange_termination_list,公告摘牌日与交易所当前DELIST_DATE冲突；双值保留，不改写来源

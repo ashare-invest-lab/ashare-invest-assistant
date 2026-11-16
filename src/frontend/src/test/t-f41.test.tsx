@@ -338,6 +338,7 @@ describe('T-F41 补充：逐字段 null 与页面错误边界（示例数据）'
     await screen.findByTestId(ready);
     const head = screen.getByTestId('stock-head');
     await waitFor(() => expect(within(head).queryByText('行情加载中…')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByText('分时'));
     await screen.findByTestId('intraday');
     fireEvent.click(screen.getByText('日K'));
     await screen.findByTestId('kline');
@@ -355,6 +356,7 @@ describe('T-F41 补充：逐字段 null 与页面错误边界（示例数据）'
       return HttpResponse.json({ ...bars(code, freq), items: [], data_as_of: null });
     }));
     const router = renderAt(`/stocks/${code}`);
+    fireEvent.click(within(await screen.findByTestId('price-chart')).getByText('分时'));
     expect(await screen.findByTestId('chart-empty')).toHaveTextContent('无分时数据');
     const head = screen.getByTestId('stock-head');
     const row = within(head).getByText('昨收').parentElement!;
@@ -369,9 +371,9 @@ describe('T-F41 补充：逐字段 null 与页面错误边界（示例数据）'
       fault.module = module;
       const tab = ['fund-flow', 'factors', 'announcements'].includes(module) ? module : 'financials';
       const router = renderAt(`/stocks/${code}?tab=${tab}`);
-      if (module === 'kline') {
-        await screen.findByTestId('intraday');
-        fireEvent.click(screen.getByText('日K'));
+      if (module === 'intraday') {
+        await screen.findByTestId('kline');
+        fireEvent.click(screen.getByText('分时'));
       }
       const card = await screen.findByTestId('stock-render-error');
       expect(card).toHaveAttribute('role', 'alert');
