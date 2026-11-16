@@ -23,39 +23,6 @@
       },
       "reason": "API 调用依赖 datetime.now 的会话分支，盘前、盘中、午休、收盘互斥。",
       "review_by": "2026-12-15"
-    },
-    {
-      "path": "src/backend/app/risk/rc1.py",
-      "lines": [
-        232,
-        233,
-        234,
-        235,
-        244,
-        249,
-        250,
-        252,
-        253,
-        263,
-        264,
-        265
-      ],
-      "anchors": {
-        "232": "if at >= closing:",
-        "233": "facts.mode = \"close\"",
-        "234": "facts.endpoint = \"market.daily_bars:adj_type=none\"",
-        "235": "bar = conn.execute(",
-        "244": "if (",
-        "249": "facts.low, facts.high, facts.observed_at = bar.low, bar.high, closing",
-        "250": "facts.fetched_at = bar.fetched_at",
-        "252": "facts.endpoint = \"market.realtime_quotes:raw\"",
-        "253": "quote = conn.execute(",
-        "263": "if quote is not None:",
-        "264": "facts.last, facts.observed_at = quote.price, quote.ts",
-        "265": "facts.fetched_at = quote.fetched_at"
-      },
-      "reason": "rc1.load 依赖北京时间 15:00 的时钟分支，收盘日线与盘中实时行情互斥（T-O109）。",
-      "review_by": "2026-12-15"
     }
   ]
 }
