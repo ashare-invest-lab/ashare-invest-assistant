@@ -36,11 +36,12 @@ from typing import Any, Final
 
 from sqlalchemy import Connection, Row, exists, func, insert, select
 
-from app.auth.service import bj, latest_profile, now_utc
+from app.auth.service import bj, latest_profile
 from app.config import Settings
 from app.db.tables.accounts import accounts, broker_position_snapshots, holdings
 from app.db.tables.research import claim_links, claims
 from app.db.tables.reviews import data_snapshots
+from app.features.horizon_sources import EmptyEvidenceProvider
 from app.licences.service import live_status
 from app.strategy.horizon import classifier
 from app.strategy.horizon import inputs as hz_inputs
@@ -199,13 +200,26 @@ def _security_risks(sec: Row[Any] | SecStub, c: Content, evs: _Ev) -> None:
 
 
 def _fit(
-    conn: Connection, settings: Settings, user_id: uuid.UUID, code: str, evs: _Ev
+    conn: Connection,
+    settings: Settings,
+    user_id: uuid.UUID,
+    code: str,
+    evs: _Ev,
+    *,
+    as_of: dt.datetime,
 ) -> dict[str, Any]:
-    prof = latest_profile(conn, user_id)
+    prof = latest_profile(conn, user_id, as_of=as_of)
     hints: list[dict[str, str]] = []
     if prof is not None:
         cfg = settings.business.horizon_classifier
-        got = hz_inputs.collect(conn, user_id, code, list(cfg.features))
+        got = hz_inputs.collect(
+            conn,
+            user_id,
+            code,
+            list(cfg.features),
+            as_of=as_of,
+            evidence_provider=EmptyEvidenceProvider(),
+        )
         hints = [dict(h) for h in classifier.classify(cfg, got.values).hints]
 
     acc_ids = select(accounts.c.id).where(
@@ -262,21 +276,22 @@ def generate(
     code: str,
     sec: Row[Any] | SecStub,
     suggestion: Row[Any] | None,
+    as_of: dt.datetime,
 ) -> Content:
-    now = now_utc()
+    now = as_of
     evs = _Ev(now)
     c = Content(name=str(sec.name))
     if suggestion is not None:
         _from_suggestion(suggestion, c)
     else:
         _security_risks(sec, c, evs)
-    c.fit = _fit(conn, settings, user_id, code, evs)
+    c.fit = _fit(conn, settings, user_id, code, evs, as_of=as_of)
     c.evidence.extend(evs.items)
 
-    as_of = [sec.master_as_of or sec.updated_at]
+    dates = [sec.master_as_of or sec.updated_at]
     if suggestion is not None:
-        as_of.append(suggestion.created_at)
-    c.data_as_of = bj(max(a for a in as_of if a is not None)) if any(as_of) else None
+        dates.append(suggestion.created_at)
+    c.data_as_of = bj(max(a for a in dates if a is not None)) if any(dates) else None
     lic_ok = live_status(conn, user_id) == "active"
     c.data_status = "partial"
     c.gaps = [
