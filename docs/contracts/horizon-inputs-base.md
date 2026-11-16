@@ -111,6 +111,19 @@ qfq@as_of 只用 `date≤T`、`available_at≤as_of` 且所依赖事件也可见
 
 主键 id；版本键/唯一索引 `(user_id,licence_id,kind,source,code,data_date,source_key,version_hash)`，采用 NULLS NOT DISTINCT，避免公共源空证书重复。version_hash 覆盖身份、源版本、payload、可见时点、转换、依赖与 supersedes_id，不只哈希数值。
 读取索引 `(user_id,licence_id,kind,code,data_date,available_at)`；另建 supersedes_id 索引。CHECK：per_licence 时 licence_id 非空，其他 scope 时为空；sha 格式；available_at 非空须 first_seen_at 非空且不早于它；派生 available_at 不早于 computed_at。
+kind 与 source 出处（T-A192 补，编排者 11-15 裁定单 T-B172b1a 第 4、6 条；出处给齐前 b1a 不加 kind/source CHECK，服务层白名单校验，代码注释标「未验证」）：
+
+| kind（原始/派生） | source 允许值 | 出处 |
+| --- | --- | --- |
+| calendar（原始） | `merged_calendar`（DS `sessions.merged_calendar` 合并结果）；合成夹具 `fake` | trading-calendar-exrights.md §2 主源行、Q4（合成沿用 fake）；源名作为 source 值为本契约约定，未验证 |
+| daily_bar（原始） | `mairui`；合成夹具 `fake`；`tdx_local` 不得登记 | `marketdata/daily_bars._ALLOWED_SOURCES`；multi-source-ingest.md §1 源清单；本契约 §2 A0-1 第 3 条（tdx_local 不进 horizon） |
+| ex_rights（原始） | `tdx_gbbq`；合成夹具 `fake` | multi-source-ingest.md §1 源清单、§3.4 |
+| vendor_factor（原始） | 未验证：`market.factor_values` 无 source 列，只有 calc_version；源名待 S §3.10/T-R78 horizon_vendor 定稿 | reports/T-R78.md horizon_vendor 节；在出处前 b2a 拒绝登记该 kind |
+| adjust_factor（派生） | 派生不取外部源名，固定为算法标识 `derived`，来源由 dependency_ids 指向 ex_rights 与参考价版本 | 本契约 §3.1 payload 表 adjust_factor 行、§A1-3；`derived` 取值为本契约约定，未验证 |
+| feature（派生） | 同上 `derived`；仅唯一 features pipeline 产出 | 本契约 §3.1 payload 表 feature 行；`derived` 取值同上未验证 |
+
+派生 kind 清单＝adjust_factor、feature（computed_at 必填、available_at 按依赖取 max）；六类划分本身来自 A188 Q12/A1 的输入清单与本契约 §3.1，不另有外部出处。scope 与 source 搭配：`fake` 只配 synthetic，`mairui` 只配 per_licence，`merged_calendar`/`tdx_gbbq`/`derived` 配 public 或 per_licence（随依赖），未验证。
+
 服务验证 dependency_ids 全部存在、无环、同本人/合法来源范围；supersedes 仅同逻辑键，不跨证书。派生 available_at=max(必要依赖可见时刻、实际 computed_at)，任一依赖未知则整体未知，不跳过 null 取 max。
 
 | kind / source_key | payload 必需内容及条件可空性 |
