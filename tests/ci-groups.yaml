@@ -136,6 +136,7 @@ tests:
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt99_market_clock_fixed.py", "group": "parallel", "keywords": ["in-memory SQLite calendar only", "fixed aware instants and repository market_rules", "no PG/Redis/docker/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "parallel", "keywords": ["socket.connect/create_connection monkeypatch denies all connections", "synthetic /tmp paths", "no real PG/redis or docker/services"], "unverified": false}
   - {"file": "tests/backend/unit/test_verify_licence_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG", "Redis fake", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_verify_licence_t_b145.py", "group": "parallel", "keywords": ["world overrides imported helper world", "MagicMock engine/FakeRedis", "tmp_path", "monkeypatch"], "unverified": false}

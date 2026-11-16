@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -159,7 +159,7 @@ def authdb(pg_url: str, redis_url: str) -> Iterator[SimpleNamespace]:
     env.pop("APP_MASTER_KEY", None)
     proc = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=BACKEND_DIR, env=env, capture_output=True, text=True, timeout=300,
+        cwd=BACKEND_DIR, env=env, capture_output=True, text=True, timeout=300, check=False,
     )
     assert proc.returncode == 0, "alembic upgrade head 失败：\n" + (proc.stderr or proc.stdout)[-2000:]
     eng = create_engine(url.replace("postgresql://", "postgresql+psycopg://", 1))
@@ -534,7 +534,7 @@ def test_login_no_user_enumeration(app_client: Callable[..., Any], mkuser: Calla
     for r, _ in wrong + ghost:
         assert_err(r, 401, "INVALID_CREDENTIALS")
         assert "set-cookie" not in r.headers
-    strip = lambda r: {k: v for k, v in r.json()["error"].items() if k != "request_id"}  # noqa: E731
+    strip = lambda r: {k: v for k, v in r.json()["error"].items() if k != "request_id"}
     assert strip(wrong[0][0]) == strip(ghost[0][0])
     assert wrong[0][0].headers.get("content-length") == ghost[0][0].headers.get("content-length")
     t_wrong = statistics.median(t for _, t in wrong)
@@ -554,13 +554,13 @@ def test_login_locked_account_is_403_with_retry_after(
     app_client: Callable[..., Any], mkuser: Callable[..., SimpleNamespace], sql: Callable[..., Any], authdb: SimpleNamespace
 ) -> None:
     u = mkuser()
-    until = datetime.now(timezone.utc) + timedelta(minutes=15)
+    until = datetime.now(UTC) + timedelta(minutes=15)
     sql("UPDATE app.users SET locked_until=:t WHERE id=:i", t=until, i=u.id)
     r = app_client().post(f"{API}/auth/login", json={"username": u.username, "password": u.password})
     err = assert_err(r, 403, "ACCOUNT_LOCKED")
     assert 0 < err["details"]["retry_after_s"] <= 900
     assert user_session_keys(authdb, u.id) == set()
-    sql("UPDATE app.users SET locked_until=:t WHERE id=:i", t=datetime.now(timezone.utc) - timedelta(seconds=1), i=u.id)
+    sql("UPDATE app.users SET locked_until=:t WHERE id=:i", t=datetime.now(UTC) - timedelta(seconds=1), i=u.id)
     assert app_client().post(f"{API}/auth/login", json={"username": u.username, "password": u.password}).status_code == 200
 
 
@@ -632,7 +632,7 @@ def _age_session(authdb: SimpleNamespace, sid: str, days: float) -> None:
     key = sid_key(sid)
     ttl = authdb.redis.ttl(key)
     data = json.loads(authdb.redis.get(key))
-    data["created_at"] = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    data["created_at"] = (datetime.now(UTC) - timedelta(days=days)).isoformat()
     authdb.redis.set(key, json.dumps(data), ex=ttl)
 
 
@@ -1063,6 +1063,7 @@ V025_LOW_PROFILE = {"horizon_pref": ["long"], "effort": "low", "risk_tolerance":
 
 
 @pytest.mark.parametrize("profile", ["none", "unsatisfied"])
+@pytest.mark.usefixtures("fixed_aggregate_clock")
 def test_v025_no_403_gate_without_or_with_low_profile(session: Callable[..., SimpleNamespace], profile: str) -> None:
     """v0.2.5 组 3：无画像、或画像不满足任何条件时，⚖ 接口、``POST /imports``、``POST /trades`` 均不返回 403。
 
