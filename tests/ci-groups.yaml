@@ -14,7 +14,9 @@
 version: 1
 tests:
   - {"file": "src/backend/tests/test_market_read_tb185.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic database and Redis; no external IO"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172a_horizon_asof.py", "group": "parallel", "keywords": ["synthetic evidence/calendar", "fake connection/provider", "deny_network monkeypatch"], "unverified": false}
   - {"file": "src/backend/tests/test_terminal_quotes.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "socket.connect/create_connection denied", "synthetic data; no real PG/Redis/docker"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb171_unavailable_recompute.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL/TT41_DATABASE_URL real PG", "skip when no DSN"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_contract_current.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_users_patch_t_b150.py", "group": "serial_pg", "keywords": ["app_client->authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_architect_rulings_t_t25.py", "group": "serial_pg", "keywords": ["session/sql->_t23.authdb->pg_url", "redis_url", "docker"], "unverified": false}
