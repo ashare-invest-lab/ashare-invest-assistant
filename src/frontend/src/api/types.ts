@@ -565,6 +565,7 @@ export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }
 export interface TodayResponse {
+  account_id: Uuid | null;
   server_time: DateTime;
   trade_date: DateStr;
   session: MarketSession;
