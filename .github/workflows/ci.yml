@@ -70,7 +70,7 @@ jobs:
       PGPASSWORD: ci-only
       TB116D_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/o67_selfcheck
       MAIRUI_MODE: replay
-      AIA_SHARD_DIRS: tests/backend/api_app tests/replay tests/backend/milestone/test_enqueue_diagnostics.py tests/backend/integration/run_p2n10.py tests/backend/integration/tt21_closeout.py tests/backend/integration/tt22_closeout.py tests/backend/integration/ci_unix_identity.py tests/backend/integration/test_p2n10_loop.py
+      AIA_SHARD_DIRS: tests/backend/api_app tests/replay
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -223,9 +223,10 @@ jobs:
       PGPASSWORD: ci-only
       TB116D_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/o67_selfcheck
       MAIRUI_MODE: replay
-      AIA_SHARD_DIRS: tests/backend/unit tests/backend/integration tests/backend/milestone tests/backend/contract tests/backend/golden
-      # 分片互斥（T-O90）：p2n10 四件套与 enqueue_diagnostics 在分片 A 跑（进程内审计钩子与 subprocess 用户隔离），本片显式忽略防重复。
-      AIA_SHARD_IGNORE: tests/backend/integration/run_p2n10.py tests/backend/integration/tt21_closeout.py tests/backend/integration/tt22_closeout.py tests/backend/integration/ci_unix_identity.py tests/backend/integration/test_p2n10_loop.py tests/backend/milestone/test_enqueue_diagnostics.py
+      AIA_SHARD_DIRS: tests/backend/contract tests/backend/golden tests/backend/integration tests/backend/milestone tests/backend/unit
+      # T-O90：目录序＝执行序。按字母序还原原单 job 的子目录执行顺序——integration（p2n10 fixture
+      # subprocess）与 milestone（enqueue 子进程）先于 unit 内安装进程内 netguard 钩子的用例执行，
+      # 与拆分前的全局顺序一致（v5/v6 教训：unit 排首会让钩子先装，杀死后续一切 subprocess）。
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
