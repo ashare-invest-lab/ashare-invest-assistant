@@ -181,7 +181,8 @@ export interface SuggestionSummary {
   divergent_dimensions: Dimension[];
   top_score: number | null;
 }
-export interface TerminalQuote { price: Decimal; change_pct: Decimal; amount: Decimal; t: DateTime }
+/** 价格/时点存在时保留行情；缺少前收或成交额不应丢弃整条行情。 */
+export interface TerminalQuote { price: Decimal; change_pct: Decimal | null; amount: Decimal | null; t: DateTime }
 export interface TerminalHolding {
   qty: Decimal;
   sellable_qty: Decimal;
@@ -470,6 +471,8 @@ export interface TerminalAccount {
   data_status: DataStatus;
 }
 export interface TerminalResponse {
+  /** T-A12：实际选中的本人账户；没有账户时为 null。 */
+  account_id: Uuid | null;
   server_time: DateTime;
   /** v0.2.3：行情所属交易日（非交易日为最近一个交易日） */
   trade_date: DateStr;

@@ -31,7 +31,8 @@ const row = (t: TView | null | undefined, code = '000001.SZ'): TodayFocusRow => 
 
 function today(items: TodayFocusRow[]): TodayResponse {
   return {
-    account_id: null, server_time: '2026-11-10T02:31:30Z', trade_date: DATE, session: 'morning',
+    account_id: null,
+    server_time: '2026-11-10T02:31:30Z', trade_date: DATE, session: 'morning',
     market: { regime: null, regime_position_range: null, data_status: 'fresh' },
     focus: { items, more: false },
     pending_plan_drafts: empty, released_reasons: empty, risk_flags: empty, invalidations_today: empty,

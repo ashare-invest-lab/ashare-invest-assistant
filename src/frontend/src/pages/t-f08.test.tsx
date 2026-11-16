@@ -92,7 +92,8 @@ function itemKeys(list: string) {
 const row = TERMINAL_ROWS.find((r) => r.suggestion && r.holding)!;
 /** 各区都有数据、都被截断的示例（测试专用） */
 const FULL: TodayResponse = {
-  account_id: null, server_time: '2026-11-02T15:20:00+08:00', trade_date: '2026-11-02', session: 'closed',
+  account_id: null,
+  server_time: '2026-11-02T15:20:00+08:00', trade_date: '2026-11-02', session: 'closed',
   market: { regime: 'range', regime_position_range: { min_pct: '40', max_pct: '60' }, data_status: 'fresh' },
   focus: { items: [row], more: true },
   pending_plan_drafts: { items: [{ id: uid(901), security_code: row.security_code, name: row.name, action: 'reduce', valid_until: '2026-11-03T15:00:00+08:00', status: 'stale' }], more: true },

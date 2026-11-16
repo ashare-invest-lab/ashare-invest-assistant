@@ -60,10 +60,10 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{r.quote.price}</span> : <span className="muted">—</span>),
     },
     {
-      key: 'chg', header: '涨跌%', width: 66, numeric: true, value: (r) => (r.quote ? Number(r.quote.change_pct) : null),
-      render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{signed(r.quote.change_pct)}%</span> : <span className="muted">—</span>),
+      key: 'chg', header: '涨跌%', width: 66, numeric: true, value: (r) => (r.quote?.change_pct != null ? Number(r.quote.change_pct) : null),
+      render: (r) => (r.quote?.change_pct != null ? <span className={pctClass(r.quote.change_pct)}>{signed(r.quote.change_pct)}%</span> : <span className="muted">—</span>),
     },
-    { key: 'amount', header: '成交额', width: 66, numeric: true, value: (r) => (r.quote ? Number(r.quote.amount) : null), render: (r) => fmtAmount(r.quote?.amount) },
+    { key: 'amount', header: '成交额', width: 66, numeric: true, value: (r) => (r.quote?.amount != null ? Number(r.quote.amount) : null), render: (r) => fmtAmount(r.quote?.amount) },
     {
       key: 'weight', header: '持仓占比', width: 70, numeric: true, value: (r) => (r.holding ? Number(r.holding.weight_pct) : null),
       tooltip: (r) => (r.holding ? `持仓 ${r.holding.qty} 股 · 可卖 ${r.holding.sellable_qty} · 成本 ${r.holding.cost_price}` : undefined),
