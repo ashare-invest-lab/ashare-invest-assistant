@@ -24,8 +24,13 @@ SAMPLES = (
     "sz300750", "sh688981", "sh688801", "sz001246", "sz001381",
     "sz301569", "sz301718", "bj920000", "bj920085", "sz000972",
 )
-# README T-R82 current SH/SZ snapshot hits; conservative B7 proxy exclusion only.
-# This is not evaluation-date PIT ST identity; no BSE snapshot was obtained.
+# Official SH/SZ current ST snapshot accessed 2026-11-15 (README T-R82).
+# Applying it to historical dates is look-ahead, violating Q12 visibility.
+# Accepted only by the orchestrator's 2026-11-15 21:50 MST supplemental ruling:
+# conservative B7 exclusion only (remove values, never add values).
+# This is not evaluation-date PIT ST identity; backend implementations must use
+# historical ST evidence with available_at <= as_of, not copy this rule.
+# No BSE snapshot was obtained.
 ST_CURRENT_SNAPSHOT_HITS = frozenset({"sz000972"})
 HASHES = (
     "b6c2a5043a76d8f9b9752b3cca1952ed697ac7bd5eebe88cd7a96809f47cee46",
@@ -255,7 +260,7 @@ def generate(day_zip, gbbq_zip):
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, FIELDS, lineterminator="\n")
     writer.writeheader()
-    with tempfile.TemporaryDirectory(prefix="tr81-", dir="/tmp") as temp:
+    with tempfile.TemporaryDirectory(prefix="tr81-") as temp:
         scratch = Path(temp)
         with zipfile.ZipFile(gbbq_zip) as archive:
             raw = archive.read("gbbq")
