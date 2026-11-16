@@ -49,6 +49,7 @@ MATERIALS: dict[str, dict[str, Any]] = json.loads(
     .replace("@U", U)
     .replace("@SHA", SHA)
 )
+MATERIALS["daily_bar"]["hash"] = store.material_hash(MATERIALS["daily_bar"])
 PROOF, BATCH = MATERIALS["proof"], MATERIALS["batch"]
 PAYLOADS = {k: p for k, p in MATERIALS.items() if k not in {"proof", "batch"}}
 EMPTY_ARRAYS = {"adjust_factor": ["trade_dates", "issues"], "batch": ["members", "issues"]}
@@ -87,6 +88,8 @@ def test_payload_required_nullable_empty(kind: str, key: str, mode: str) -> None
             if mode == "null"
             else ({} if isinstance(p[key], dict) else [] if isinstance(p[key], list) else "")
         )
+    if allowed and kind == "daily_bar":
+        p["hash"] = store.material_hash(p)
     with nullcontext() if allowed else pytest.raises(store.EvidenceRejected):
         validate(kind, p)
 
@@ -142,7 +145,7 @@ def test_canon_fixed_vector() -> None:
     obj = {"uuid": UUID(U), "time": datetime.fromisoformat(T), "text": "中文", "nil": None}
     assert (
         store.canon_sha256(obj)
-        == "8db5cc1790c2ebad4019eadc4c60621747d2d5c27922f5e8d2577841807c1987"
+        == "87ba2dd209943cbae166bd4049c6ea4133df97c674921c1aa1dc4fd63d736f9a"
     )
     assert store.canon_sha256(obj) == store.canon_sha256(dict(reversed(list(obj.items()))))
     assert store.canon_sha256({"d": date.fromisoformat(D)}) == store.canon_sha256({"d": D})
@@ -160,4 +163,11 @@ PROOF_KEYS = "proof is_final available_at bar_version_id"
 )
 def test_hash_components(keys: str, key: str) -> None:
     p = dict.fromkeys(keys.split())
-    assert store.canon_sha256(p) != store.canon_sha256({**p, key: "changed"})
+    changed: object = (
+        UUID(U)
+        if key in store.UUID_FIELDS
+        else datetime.fromisoformat(T)
+        if key in store.TIME_FIELDS
+        else "changed"
+    )
+    assert store.canon_sha256(p) != store.canon_sha256({**p, key: changed})

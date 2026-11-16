@@ -36,6 +36,7 @@ def reference_bar(connection: Connection, **changes: Any) -> UUID:  # noqa: ANN4
         "trade_date": str(day),
         **changes.get("payload", {}),
     }
+    p["payload"]["hash"] = store.material_hash(p["payload"])
     return register_version(connection, **p)
 
 
@@ -352,6 +353,8 @@ def test_r252_reference_price_fail_closed(
         payload["price_unit"] = None
     if case == "unit_missing":
         del payload["price_unit"]
+    if case != "unit_missing":
+        payload["hash"] = store.material_hash(payload)
     with monkeypatch.context() as patch:
         if case == "unit_missing":  # 追加历史损坏材料；不改 b2a 或不可变记录。
             patch.setattr(store, "validate_payload", lambda *a, **kw: None)

@@ -13,6 +13,7 @@
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "src/backend/tests/test_tb179_material_hash.py", "group": "parallel", "keywords": ["synthetic fixed vectors", "socket/DNS denied", "fake persistence; no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b2c_adjust_factors_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "isolated database", "alembic upgrade", "synthetic adjustment versions"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b2c_adjust_factors_offline.py", "group": "parallel", "keywords": ["pure prepare factor adapter", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172a_horizon_asof.py", "group": "parallel", "keywords": ["synthetic evidence/calendar", "fake connection/provider", "deny_network monkeypatch"], "unverified": false}

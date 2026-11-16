@@ -29,20 +29,52 @@ class EvidenceConflict(EvidenceRejected):
     pass
 
 
-def _json_default(obj: object) -> str:
+def _normalize(obj: object, field: str = "", *, declared: bool = True) -> Any:  # noqa: ANN401
+    if obj is None:
+        return None
+    # §3.4 声明字段也归一；其余字符串保持原值，不猜测字符串的类型。
+    if field in UUID_FIELDS:
+        if not isinstance(obj, (str, UUID)):
+            raise EvidenceRejected("invalid_uuid_type")
+        obj = UUID(str(obj))
+    if field in TIME_FIELDS and isinstance(obj, str):
+        obj = datetime.fromisoformat(obj)
+    if field in TIME_FIELDS and not isinstance(obj, datetime):
+        raise EvidenceRejected("invalid_time_type")
     if isinstance(obj, datetime):
         if obj.utcoffset() is None:
             raise EvidenceRejected("timezone_required")
-        return obj.astimezone(UTC).isoformat()
+        return obj.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
     if isinstance(obj, (UUID, date)):
         return str(obj)
+    if isinstance(obj, Decimal):
+        if not obj.is_finite():
+            raise EvidenceRejected("invalid_decimal")
+        return str(obj)
+    if isinstance(obj, dict):
+        if any(not isinstance(key, str) for key in obj):
+            raise EvidenceRejected("invalid_json_key")
+        # object 槽内部结构未验证：不把任意原始键名猜成契约声明，类型值仍递归归一。
+        declared = declared and field not in OBJECT_FIELDS
+        return {
+            key: _normalize(value, key if declared else "", declared=declared)
+            for key, value in obj.items()
+        }
+    if isinstance(obj, list):
+        if field == "members":  # §3.4 [UUID string, code string]，保持行与列顺序。
+            if any(not isinstance(v, list) or len(v) != 2 for v in obj):
+                raise EvidenceRejected("invalid_members")
+            return [[_normalize(v[0], "user_id"), _normalize(v[1])] for v in obj]
+        item_field = "id" if field in {"dependency_ids", "evidence_ids"} else ""
+        return [_normalize(value, item_field, declared=declared) for value in obj]
+    if type(obj) in {str, int, float, bool}:
+        return obj
     raise EvidenceRejected("invalid_json_type")
 
 
 def _canon(obj: object) -> str:
     return json.dumps(
-        obj,
-        default=_json_default,
+        _normalize(obj),
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -51,6 +83,7 @@ def _canon(obj: object) -> str:
 
 
 def canon_sha256(obj: object) -> str:
+    """horizon-hash-v1：递归归一，精确 JSON UTF-8（无 BOM/尾换行）SHA-256。"""
     return hashlib.sha256(_canon(obj).encode("utf-8")).hexdigest()
 
 
@@ -84,7 +117,7 @@ SCHEMAS = {
         "volume:decimal? amount:decimal? is_suspended:bool? raw_fields:object "
         "raw_units:object price_unit:str? volume_unit:str? amount_unit:str? code:str "
         "trade_date:date adj_type:str source:str? source_licence_id:uuid? "
-        "fetched_at:time? hash:str"
+        "fetched_at:time? hash:sha"
     ),
     "ex_rights": (
         "code:str ex_date:date cash_per_share:decimal rights_price:decimal "
@@ -111,6 +144,77 @@ SCHEMAS = {
         "run_date:date"
     ),
 }
+
+# UUID/时间声明出处：本模块 SCHEMAS（契约 §3.4）及 register_version/completion 参数。
+UUID_FIELDS = {"id", "user_id", "bar_version_id", "pipeline_run_id", "supersedes_id"} | {
+    key
+    for schema in SCHEMAS.values()
+    for key, spec in (s.split(":") for s in schema.split())
+    if spec.rstrip("?") == "uuid"
+}
+TIME_FIELDS = {"first_seen_at", "available_at", "computed_at"} | {
+    key
+    for schema in SCHEMAS.values()
+    for key, spec in (s.split(":") for s in schema.split())
+    if spec.rstrip("?") == "time"
+}
+OBJECT_FIELDS = {
+    key
+    for schema in SCHEMAS.values()
+    for key, spec in (s.split(":") for s in schema.split())
+    if spec == "object"
+}
+
+# 以下全部覆盖/排除口径及复用 horizon-hash-v1：
+# 架构师已裁（reports/T-B179-ruling.md）：覆盖 18 键、复用 horizon-hash-v1。
+# 数值量化位数各源一致性未验证。
+MATERIAL_FIELDS = (
+    # market.py:daily_bars/PrimaryKeyConstraint；daily_bars.py:upsert_daily_bars/values：
+    # code/adj_type 非空 text；trade_date 非空 date，绑定原行身份，故覆盖。
+    "code",
+    "trade_date",
+    "adj_type",
+    # market.py:daily_bars 各同名 money 列、daily_bars.py:DailyBar/upsert_daily_bars：
+    # open/high/low/close/pre_close/volume/amount 可空 Numeric，payload 为十进制字符串。
+    # 这是原表持久化数值，不冒充厂商原始字段；后者单独以 raw_fields/raw_units 留存。
+    # 不臆定单位；原表数值与单位分别绑定，避免同值异单位混淆。
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "volume",
+    "amount",
+    # daily_bars.is_suspended / DailyBar.is_suspended / upsert_daily_bars：可空 bool。
+    "is_suspended",
+    # daily_bars.source/source_licence_id / upsert_daily_bars(source, licence_id)：
+    # 可空 text/UUID；覆盖（归属材料），未验证：写入出处不能证明摘要归属裁定。
+    "source",
+    "source_licence_id",
+    # 契约 §3.4 raw_fields/raw_units：非空对象（单位映射值可 null）；内部结构未验证，
+    # 无原表/保存路径出处；覆盖以绑定原始材料及其单位，不能由标准化字段反推。
+    "raw_fields",
+    "raw_units",
+    # pipeline.py:prepare；daily_snapshot.py:_instrument 的各同名单位键：
+    # 可空字符串，实际单位未验证；覆盖以绑定标准化值的单位，不填充缺失单位。
+    "price_unit",
+    "volume_unit",
+    "amount_unit",
+)
+# 排除 fetched_at：daily_bars.fetched_at/_now NOT NULL；upsert_daily_bars 写入抓取时间，
+# 不是历史首次可见证据，契约 §3.1 payload 可 null，不改列/不倒填。
+# 排除 persisted_receipt：契约 §3.4 回执证明持久化，不是原行材料。
+# 排除 hash/version_hash/proof_hash：避免自引用；后两者为外层证据摘要，
+# version_hash 仍覆盖整个 payload（含材料 hash），proof 经 version_hash 绑定。
+# data_snapshots.hash 为 reviews.py 的截面容器摘要，与本材料摘要无复用关系。
+
+
+def material_hash(payload: Mapping[str, Any]) -> str:
+    """horizon-hash-v1 材料摘要：按 T-B179 裁定的 18 键组包（reports/T-B179-ruling.md）。"""
+    for key in MATERIAL_FIELDS:
+        if key not in payload:
+            raise EvidenceRejected(f"daily_bar:{key}")
+    return canon_sha256({key: payload[key] for key in MATERIAL_FIELDS})
 
 
 def _valid(value: object, spec: str) -> bool:
@@ -178,6 +282,8 @@ def validate_payload(
     if kind not in SOURCES:
         raise EvidenceRejected("kind")
     _fields(kind, payload)
+    if kind == "daily_bar" and payload["hash"] != material_hash(payload):
+        raise EvidenceRejected("daily_bar:hash_mismatch")
     _receipt(payload, available_at)
     for key, expected in (
         ("dependency_ids", [str(v) for v in dependency_ids]),
@@ -210,7 +316,7 @@ def validate_proof(
     if is_final is not None and type(is_final) is not bool:
         raise EvidenceRejected("is_final_type")
     if available_at is not None:
-        _json_default(available_at)
+        _normalize(available_at)
     _receipt(proof, available_at)
     # 真实同源完成声明及可核回执来源未验证；这里只检查显式非空材料，不发明厂商字段。
     if (
@@ -286,7 +392,7 @@ def register_version(
             raise EvidenceRejected(f"version:{field}")
     for timestamp in (first_seen_at, available_at, computed_at):
         if timestamp is not None:
-            _json_default(timestamp)
+            _normalize(timestamp)
     version_id = uuid4()
     deps = list(dependency_ids)
     if version_id in deps or len(set(deps)) != len(deps):

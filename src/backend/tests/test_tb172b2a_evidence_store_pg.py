@@ -58,6 +58,8 @@ def package(kind: str = "calendar", **changes: object) -> dict[str, Any]:
         p["payload"].update(
             source=p["source"], source_licence_id=str(p["licence_id"]) if p["licence_id"] else None
         )
+    if kind == "daily_bar" and all(key in p["payload"] for key in store.MATERIAL_FIELDS):
+        p["payload"]["hash"] = store.material_hash(p["payload"])
     return p
 
 
@@ -136,6 +138,8 @@ def test_daily_bar_outer_binding(conn: Connection, target: str, key: str) -> Non
         p = completion(conn, store.register_version(conn, **p))
     bad = "2026-11-14" if key == "trade_date" else "b" * 64
     p[target][key] = str(uuid4()) if key.endswith("id") else bad
+    if target == "payload":
+        p[target]["hash"] = store.material_hash(p[target])
     with nullcontext() if key == "sha256" else pytest.raises(store.EvidenceRejected, match=key):
         if target == "payload":
             store.register_version(conn, **p)
