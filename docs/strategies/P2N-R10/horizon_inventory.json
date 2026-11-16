@@ -916,6 +916,11 @@
       "path": "docs/strategies/T-R79/benchmark_spec.md",
       "scope_role": "research_support_not_strategy",
       "note": "T-R79 draft benchmark specification; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/readonly_checks.sql",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79c unexecuted read-only SQL draft; no strategy identity or runtime change"
     }
   ],
   "records": [
