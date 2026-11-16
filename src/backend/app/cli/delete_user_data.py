@@ -588,10 +588,6 @@ def unknown_triggers(conn: Connection, tables: list[str]) -> list[str]:
     ]
 
 
-def _params(plan_or_uid: Any, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
-    return extra | {"uid": plan_or_uid}
-
-
 def _count(conn: Connection, table: str, where: str, params: dict[str, Any]) -> int:
     return int(
         conn.execute(text(f"SELECT count(*) FROM {table} WHERE {where}"), params).scalar_one()
