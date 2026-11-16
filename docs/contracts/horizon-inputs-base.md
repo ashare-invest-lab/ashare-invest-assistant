@@ -164,7 +164,7 @@ C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/�
 
 ### 3.4 payload 与 proof 键名表（T-A202）
 
-采纳下列键名及类型/可空约定；借名不代表已有 schema 或真实证据已验证，§3.1/§3.2 已明确的键继续适用。A0 出处以模块路径标识。
+采纳下列键名及类型/可空约定；借名不代表已有 schema 或真实证据已验证，§3.1/§3.2 已明确的键继续适用。出处中的 A0 模块为草案，horizon.py 为 §3.1/§3.2 拟增列，均未验证；现有实现的借名不证明新包语义。
 无出处的六项由架构师命名证据槽，均为必需的非空 JSON 对象，内部结构「未验证」；`raw_units` 是值可为 null 的映射。b2a 对这些槽只校验键存在且为非空对象，缺键、null 或空对象一律拒绝登记，不得视为成功；fake 源测试可用合成对象。
 `dependency_ids`、`transform_version` 复用外层字段；payload 如重复引用须与外层一致。依赖、证据及截面引用须绑定版本摘要，`evidence_ids` 须解析到持久化完成证据，不能使用响应内 e1/e2。
 
@@ -174,7 +174,7 @@ C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/�
 | --- | --- | --- | --- |
 | 覆盖范围起点 | `coverage_start` | date 字符串，必填非空 | `src/backend/app/reference_files.py:CalendarReference.coverage_start` |
 | 覆盖范围终点 | `coverage_end` | date 字符串，必填非空 | `src/backend/app/reference_files.py:CalendarReference.coverage_end` |
-| 主源版本 | `source_version` | string，必填非空 | `app.features.horizon_sources:SourceVersion.source_version`；`src/backend/app/db/tables/horizon.py:horizon_input_versions.source_version` |
+| 主源版本 | `source_version` | string，必填非空 | `app.features.horizon_sources:SourceVersion.source_version`（A0 草案，未验证）；`src/backend/app/db/tables/horizon.py:horizon_input_versions.source_version`（§3.1 拟增列，未验证） |
 | 主源 sha | `sha256` | 64 位小写 hex string，必填非空 | `src/backend/app/master/mairui_snapshot.py:apply_delivery/sha256`；`src/backend/app/master/mairui_snapshot.py:apply_delivery/stats.sha256` |
 | 重叠核对证据 | `overlap_check` | 非空 JSON 对象，必填；内部结构未验证 | 架构师裁定（未验证，无实现出处） |
 
@@ -188,9 +188,12 @@ C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/�
 | 标准成交量单位 | `volume_unit` | string 或 null；可用归一输入须非空 | `src/backend/app/features/pipeline.py:prepare/volume_unit`；`src/backend/app/marketdata/daily_snapshot.py:_instrument/volume_unit` |
 | 标准成交额单位 | `amount_unit` | string 或 null；可用归一输入须非空 | `src/backend/app/features/pipeline.py:prepare/amount_unit`；`src/backend/app/marketdata/daily_snapshot.py:_instrument/amount_unit` |
 | 原表主键 | `code`、`trade_date`、`adj_type` | 三个 string，必填非空；trade_date 为 date 字符串 | `src/backend/app/db/tables/market.py:daily_bars.code`；`src/backend/app/db/tables/market.py:daily_bars.trade_date`；`src/backend/app/db/tables/market.py:daily_bars.adj_type`；`src/backend/app/db/tables/market.py:daily_bars/PrimaryKeyConstraint` |
-| 原表来源/证书/抓取旁证 | `source`、`source_licence_id`、`fetched_at` | string / UUID string / 带时区时间字符串，原列允许 null | `src/backend/app/db/tables/market.py:daily_bars.source`；`src/backend/app/db/tables/market.py:daily_bars.source_licence_id`；`src/backend/app/db/tables/market.py:daily_bars.fetched_at` |
-| 原表材料摘要 | `hash` | string，必填非空；摘要算法待确认 | `src/backend/app/db/tables/reviews.py:data_snapshots.items`；`src/backend/app/db/tables/reviews.py:data_snapshots.hash` |
-| 持久化回执 | `persisted_receipt` | string，已可引用版本必填非空 | `app.features.horizon_sources:SourceVersion.persisted_receipt`；`app.features.horizon_sources:permitted/persisted_receipt` |
+| 原表来源/证书旁证 | `source`、`source_licence_id` | string / UUID string 或 null；两项原列均可空 | `src/backend/app/db/tables/market.py:daily_bars.source`；`src/backend/app/db/tables/market.py:daily_bars.source_licence_id` |
+| 原表抓取旁证 | `fetched_at` | payload 为带时区时间字符串或 null（沿 §3.1）；原列非空 | `src/backend/app/db/tables/market.py:daily_bars.fetched_at` 调用 `_now`，由该函数设置 `nullable=False, default_now=True` |
+| 原表材料摘要 | `hash` | string，必填非空；覆盖字段集合未验证，算法/覆盖范围/序列化/验收由 T-B179 承接（tasks/T-B179.md） | 仅借名：`src/backend/app/db/tables/reviews.py:data_snapshots.items`；`src/backend/app/db/tables/reviews.py:data_snapshots.hash`；两列不能证明原材料 hash 规范 |
+| 持久化回执 | `persisted_receipt` | string，已可引用版本必填非空 | `app.features.horizon_sources:SourceVersion.persisted_receipt`（A0 草案，未验证）；`app.features.horizon_sources:permitted/persisted_receipt`（A0 草案，未验证） |
+
+这里区分原列形状与证据包约定：§3.1 的 payload.fetched_at 未知仍可 null，不改变 `market.daily_bars.fetched_at` 的 NOT NULL；原列默认 now() 不证明历史首次可见，不改库。`daily_bar.hash` 的覆盖字段集合无法从上述容器列及当前日线实现确认，延期由 T-B179 承接（tasks/T-B179.md），不能以任意非空字符串宣称材料校验完成。本次仅在仓库外提供 `/workspace/team/reports/T-A202-T-B179-draft.md` 供编排者建单，正式 tasks 文件尚未建立，承接及实现验收仍未完成；该缺口不由下文的 version_hash/proof_hash 规则代替。
 
 **vendor_factor（仅作后续命名，b2a 拒绝登记）**
 
@@ -199,34 +202,32 @@ C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/�
 | 窗口 | `window` | date 字符串二元组的 JSON 数组；建议必填非空 | `src/backend/app/marketdata/daily_bars.py:HistoryConfirmation.window` |
 | 披露时点旁证 | `available_from`、`first_seen_at` | 带时区时间字符串或 null | `src/backend/app/db/tables/market.py:factor_values.available_from`；`src/backend/app/db/tables/market.py:factor_values.first_seen_at` |
 | 披露/修订原始证据 | `disclosure_evidence` | 非空 JSON 对象，必填；内部结构未验证 | 架构师裁定（未验证，无实现出处） |
-| 原计算版本与显式修订关联 | `calc_version`、`supersedes_id` | string 或 null；UUID string 或 null | `src/backend/app/db/tables/market.py:factor_values.calc_version`；`src/backend/app/db/tables/horizon.py:horizon_input_versions.supersedes_id` |
+| 原计算版本与显式修订关联 | `calc_version`、`supersedes_id` | string 或 null；UUID string 或 null | `src/backend/app/db/tables/market.py:factor_values.calc_version`；`src/backend/app/db/tables/horizon.py:horizon_input_versions.supersedes_id`（§3.1 拟增列，未验证） |
 
 **ex_rights（payload）**
 
 | 项 | 键名 | 类型/可空 | 出处 |
 | --- | --- | --- | --- |
 | 事件版本材料 | `snapshot_sha256` | 64 位小写 hex string，必填非空 | `src/backend/app/db/tables/market.py:ex_rights_events.snapshot_sha256`；`src/backend/app/db/tables/market.py:ex_rights_events/PrimaryKeyConstraint` |
-| 事件版本封装 | `source_version`、`version_hash` | string / 64 位小写 hex string，必填非空 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.source_version`；`src/backend/app/db/tables/horizon.py:horizon_input_versions.version_hash` |
-| 首次可引用回执 | `persisted_receipt` | string，available_at 非空时必填非空 | `app.features.horizon_sources:SourceVersion.persisted_receipt` |
+| 事件版本封装 | `source_version`、`version_hash` | string / 64 位小写 hex string，必填非空 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.source_version`（§3.1 拟增列，未验证）；`src/backend/app/db/tables/horizon.py:horizon_input_versions.version_hash`（§3.1 拟增列，未验证） |
+| 首次可引用回执 | `persisted_receipt` | string，available_at 非空时必填非空 | `app.features.horizon_sources:SourceVersion.persisted_receipt`（A0 草案，未验证） |
 
 **adjust_factor（payload）**
 
 | 项 | 键名 | 类型/可空 | 出处 |
 | --- | --- | --- | --- |
-| 已验证算法版本 | `transform_version` | string，必填非空 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.transform_version`；`app.features.horizon_sources:SourceVersion.transform_version` |
+| 已验证算法版本 | `transform_version` | string，必填非空 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.transform_version`（§3.1 拟增列，未验证）；`app.features.horizon_sources:SourceVersion.transform_version`（A0 草案，未验证） |
 | 算法已验证的审计证据 | `algo_audit` | 非空 JSON 对象，必填；内部结构未验证 | 架构师裁定（未验证，无实现出处） |
 | 覆盖范围 | `coverage_start`、`coverage_end` | date 字符串，建议必填非空 | `src/backend/app/reference_files.py:CalendarReference.coverage_start`；`src/backend/app/reference_files.py:CalendarReference.coverage_end` |
-| 覆盖日期与缺口 | `trade_dates`、`issues` | date 字符串数组 / string 数组，建议必填非空（可为空数组） | `src/backend/app/ingest/gbbq.py:compute_adjust_factors/trade_dates`；`src/backend/app/ingest/gbbq.py:AdjustFactorsResult.issues` |
+| 覆盖日期与缺口 | `trade_dates`、`issues` | date 字符串数组 / string 数组；建议键必需、数组非 null、允许 [] | `src/backend/app/ingest/gbbq.py:compute_adjust_factors/trade_dates`；`src/backend/app/ingest/gbbq.py:AdjustFactorsResult.issues` |
 | 完整性证据 | `integrity_audit` | 非空 JSON 对象，必填；内部结构未验证 | 架构师裁定（未验证，无实现出处） |
 
 **feature（payload）**
 
 | 项 | 键名 | 类型/可空 | 出处 |
 | --- | --- | --- | --- |
-| 全部依赖版本 ID | `dependency_ids` | UUID string 数组，必填非空（空数组须有真实语义） | `src/backend/app/db/tables/horizon.py:horizon_input_versions.dependency_ids`；`app.features.horizon_sources:SourceVersion.dependency_ids` |
-| 完成证据 ID | `evidence_ids` | 建议 UUID string 数组，必填非空 | `src/backend/app/features/evaluation.py:RuleEvaluator.evaluate/evidence_ids`；`src/backend/app/db/tables/horizon.py:horizon_completion_evidence.id` |
-| 日历版本 | `dependency_ids` | UUID string 数组；必要日历引用必需 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.dependency_ids` |
-| 因子版本 | `dependency_ids` | UUID string 数组；需要复权时必需 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.dependency_ids` |
+| 全部依赖版本 ID（含日历/因子） | `dependency_ids` | UUID string 数组；键必需、数组非 null，允许有真实语义的 []；合并为一个集合，按依赖 kind 解析，含必要日历引用及需要复权时的因子引用 | `src/backend/app/db/tables/horizon.py:horizon_input_versions.dependency_ids`（§3.1 拟增列，未验证）；`app.features.horizon_sources:SourceVersion.dependency_ids`（A0 草案，未验证） |
+| 完成证据 ID | `evidence_ids` | 建议 UUID string 数组，必填非空 | `src/backend/app/features/evaluation.py:RuleEvaluator.evaluate/evidence_ids`；`src/backend/app/db/tables/horizon.py:horizon_completion_evidence.id`（§3.2 拟增列，未验证） |
 | 截面版本引用 | `snapshot_id`、`hash` | UUID string / string，使用截面时必填非空 | `src/backend/app/db/tables/reviews.py:review_versions.snapshot_id`；`src/backend/app/db/tables/reviews.py:data_snapshots.hash` |
 | 管线版本 | `feature_set_version` | string，必填非空 | `src/backend/app/features/pipeline.py:prepare/feature_set_version`；`src/backend/app/db/tables/market.py:feature_bars_daily.feature_set_version` |
 
@@ -234,39 +235,49 @@ C2 的新 items 包须含 schema_version、as_of、T、d（可空）、来源/�
 
 | 项 | 键名 | 类型/可空 | 出处 |
 | --- | --- | --- | --- |
-| 同源完成声明 | `source_final_receipt` | string；可用于 E 的证明必填非空 | `app.features.horizon_sources:CompletionProof.source_final_receipt` |
-| 证券 | `code` | string，必填非空 | `app.features.horizon_sources:DailyBarVersion.code`；`src/backend/app/db/tables/market.py:daily_bars.code` |
-| 日期 | `trade_date` | date 字符串，必填非空 | `app.features.horizon_sources:DailyBarVersion.trade_date`；`src/backend/app/db/tables/market.py:daily_bars.trade_date` |
-| 来源 | `source` | string，必填非空 | `app.features.horizon_sources:SourceVersion.source`；`src/backend/app/db/tables/market.py:daily_bars.source` |
-| 证书 | `licence_id` | UUID string 或 null | `app.features.horizon_sources:SourceVersion.licence_id`；`src/backend/app/db/tables/horizon.py:horizon_input_versions.licence_id` |
-| 本人范围 | `user_id` | UUID string，必填非空 | `app.features.horizon_sources:SourceVersion.user_id` |
-| 版本摘要 | `version_hash` | 64 位小写 hex string，必填非空 | `app.features.horizon_sources:SourceVersion.version_hash`；`src/backend/app/db/tables/horizon.py:horizon_input_versions.version_hash` |
-| 源版本标识 | `source_version` | string，必填非空 | `app.features.horizon_sources:SourceVersion.source_version` |
+| 同源完成声明 | `source_final_receipt` | string；可用于 E 的证明必填非空 | `app.features.horizon_sources:CompletionProof.source_final_receipt`（A0 草案，未验证） |
+| 证券 | `code` | string，必填非空 | `app.features.horizon_sources:DailyBarVersion.code`（A0 草案，未验证）；`src/backend/app/db/tables/market.py:daily_bars.code` |
+| 日期 | `trade_date` | date 字符串，必填非空 | `app.features.horizon_sources:DailyBarVersion.trade_date`（A0 草案，未验证）；`src/backend/app/db/tables/market.py:daily_bars.trade_date` |
+| 来源 | `source` | string，必填非空 | `app.features.horizon_sources:SourceVersion.source`（A0 草案，未验证）；`src/backend/app/db/tables/market.py:daily_bars.source` |
+| 证书 | `licence_id` | UUID string 或 null | `app.features.horizon_sources:SourceVersion.licence_id`（A0 草案，未验证）；`src/backend/app/db/tables/horizon.py:horizon_input_versions.licence_id`（§3.1 拟增列，未验证） |
+| 本人范围 | `user_id` | UUID string，必填非空 | `app.features.horizon_sources:SourceVersion.user_id`（A0 草案，未验证） |
+| 版本摘要 | `version_hash` | 64 位小写 hex string，必填非空 | `app.features.horizon_sources:SourceVersion.version_hash`（A0 草案，未验证）；`src/backend/app/db/tables/horizon.py:horizon_input_versions.version_hash`（§3.1 拟增列，未验证） |
+| 源版本标识 | `source_version` | string，必填非空 | `app.features.horizon_sources:SourceVersion.source_version`（A0 草案，未验证） |
 | 原始回执摘要 | `sha256` | 64 位小写 hex string，建议必填非空 | `src/backend/app/master/mairui_snapshot.py:apply_delivery/sha256`；`src/backend/app/master/mairui_snapshot.py:apply_delivery/stats.sha256` |
-| 持久化证据 | `persisted_receipt` | string；可用于 E 的证明必填非空 | `app.features.horizon_sources:SourceVersion.persisted_receipt`；`app.features.horizon_sources:permitted/persisted_receipt` |
-| 例行批回执集合 | `batches` | object 数组；当日 mairui 路径必需 | `app.features.horizon_sources:BasisEvidence.batches` |
-| 例行批：run_id | `run_id` | UUID string，当日例行路径必填非空 | `app.features.horizon_sources:BatchReceipt.run_id`；`src/backend/app/db/tables/horizon.py:horizon_completion_evidence.pipeline_run_id` |
-| 例行批：运行范围（本人） | `owner_id` | UUID string 或 null | `app.features.horizon_sources:BatchReceipt.owner_id` |
-| 例行批：运行范围（证书） | `licence_id` | UUID string 或 null | `app.features.horizon_sources:BatchReceipt.licence_id` |
-| 例行批：运行范围（成员） | `members` | [UUID string, code string] 数组，必填；全体批须包含本人/该证券 | `app.features.horizon_sources:BatchReceipt.members` |
-| 例行批：状态 | `status` | enum string，必填非空 | `app.features.horizon_sources:BatchReceipt.status`；`src/backend/app/db/tables/realtime.py:pipeline_runs.status`；`src/backend/app/db/tables/realtime.py:pipeline_runs/status` |
-| 例行批：完成时刻 | `finished_at` | 带时区时间字符串，必填非空 | `app.features.horizon_sources:BatchReceipt.finished_at`；`src/backend/app/db/tables/realtime.py:pipeline_runs.finished_at` |
-| 例行批：可见时刻 | `available_at` | 带时区时间字符串，必填非空 | `app.features.horizon_sources:BatchReceipt.available_at` |
-| 例行批：issues | `issues` | string 数组，必填非空（无问题为空数组） | `app.features.horizon_sources:BatchReceipt.issues`；`src/backend/app/marketdata/daily_bars.py:_empty_stats/issues` |
-| 例行批：kind | `kind` | enum string，必填非空 | `app.features.horizon_sources:BatchReceipt.kind`；`src/backend/app/db/tables/realtime.py:pipeline_runs.kind` |
-| 例行批：step | `step` | string，必填非空 | `app.features.horizon_sources:BatchReceipt.step`；`src/backend/app/db/tables/realtime.py:pipeline_runs.step` |
-| 例行批：run_date | `run_date` | date 字符串，必填非空 | `app.features.horizon_sources:BatchReceipt.run_date`；`src/backend/app/db/tables/realtime.py:pipeline_runs.run_date` |
-| 例行批：window_trading_days | `window_trading_days` | int 或 null；例行批只允许缺键或 null | `app.features.horizon_sources:BatchReceipt.window_trading_days`；`src/backend/app/marketdata/daily_bars.py:_empty_stats/window_trading_days` |
+| 持久化证据 | `persisted_receipt` | string；可用于 E 的证明必填非空 | `app.features.horizon_sources:SourceVersion.persisted_receipt`（A0 草案，未验证）；`app.features.horizon_sources:permitted/persisted_receipt`（A0 草案，未验证） |
+| 例行批回执集合 | `batches` | object 数组；当日 mairui 路径必需 | `app.features.horizon_sources:BasisEvidence.batches`（A0 草案，未验证） |
+| 例行批：run_id | `run_id` | UUID string，当日例行路径必填非空 | `app.features.horizon_sources:BatchReceipt.run_id`（A0 草案，未验证）；`src/backend/app/db/tables/horizon.py:horizon_completion_evidence.pipeline_run_id`（§3.2 拟增列，未验证） |
+| 例行批：运行范围（本人） | `owner_id` | UUID string 或 null | `app.features.horizon_sources:BatchReceipt.owner_id`（A0 草案，未验证） |
+| 例行批：运行范围（证书） | `licence_id` | UUID string 或 null | `app.features.horizon_sources:BatchReceipt.licence_id`（A0 草案，未验证） |
+| 例行批：运行范围（成员） | `members` | [UUID string, code string] 数组，必填；全体批须包含本人/该证券 | `app.features.horizon_sources:BatchReceipt.members`（A0 草案，未验证） |
+| 例行批：状态 | `status` | enum string，必填非空 | `app.features.horizon_sources:BatchReceipt.status`（A0 草案，未验证）；`src/backend/app/db/tables/realtime.py:pipeline_runs.status`；`src/backend/app/db/tables/realtime.py:pipeline_runs/status` |
+| 例行批：完成时刻 | `finished_at` | 带时区时间字符串，必填非空 | `app.features.horizon_sources:BatchReceipt.finished_at`（A0 草案，未验证）；`src/backend/app/db/tables/realtime.py:pipeline_runs.finished_at` |
+| 例行批：可见时刻 | `available_at` | 带时区时间字符串，必填非空 | `app.features.horizon_sources:BatchReceipt.available_at`（A0 草案，未验证） |
+| 例行批：issues | `issues` | string 数组；键必需、数组非 null，无问题时为 [] | `app.features.horizon_sources:BatchReceipt.issues`（A0 草案，未验证）；`src/backend/app/marketdata/daily_bars.py:_empty_stats/issues` |
+| 例行批：kind | `kind` | enum string，必填非空 | `app.features.horizon_sources:BatchReceipt.kind`（A0 草案，未验证）；`src/backend/app/db/tables/realtime.py:pipeline_runs.kind` |
+| 例行批：step | `step` | string，必填非空 | `app.features.horizon_sources:BatchReceipt.step`（A0 草案，未验证）；`src/backend/app/db/tables/realtime.py:pipeline_runs.step` |
+| 例行批：run_date | `run_date` | date 字符串，必填非空 | `app.features.horizon_sources:BatchReceipt.run_date`（A0 草案，未验证）；`src/backend/app/db/tables/realtime.py:pipeline_runs.run_date` |
+| 例行批：window_trading_days | `window_trading_days` | int 或 null；例行批只允许缺键或 null | `app.features.horizon_sources:BatchReceipt.window_trading_days`（A0 草案，未验证）；`src/backend/app/marketdata/daily_bars.py:_empty_stats/window_trading_days` |
 
 登记门禁：版本 payload／完成证明 proof 在 `available_at` 非空时必须带 `persisted_receipt`（非空字符串，沿用 A0 已有字段，不另起新键），空字符串不算。`available_at` 为空则该版本不可被评估读取，完成证明同样不能用于 E。
-哈希裁定：`version_hash`／`proof_hash` 沿用 `src/backend/app/strategy/horizon/inputs.py:snapshot_id` 的 canon：UUID 与 UTC ISO 时间先转字符串，再以 `json.dumps(sort_keys=True, ensure_ascii=False, separators=(",",":"))` 序列化，UTF-8 编码后取 sha256；覆盖 §3.1/§3.2 列出的全部成分。
+哈希裁定：`version_hash`／`proof_hash` 采用独立命名的 **horizon-hash-v1**（本契约规则，实现未验证），覆盖范围仍为 §3.1/§3.2 规定的全部成分。仅借用 origin/main 的 `src/backend/app/strategy/horizon/inputs.py:snapshot_id` 中 `json.dumps` 的 `sort_keys=True`、`ensure_ascii=False`、`separators=(",", ":")` 三项设置。main 另用 `default=str` 后生成 UUIDv5，不先归一 UTC ISO；本规则不沿用其包结构或 `default=str`。
+本规则递归归一：非 null 的 UUID 值及声明为 UUID 的字段转为小写带连字符标准字符串；非 null 的 datetime 值及声明为时间的字段须有时区，转 UTC 后按 `isoformat(timespec="microseconds")` 输出并将末尾 `+00:00` 换为 `Z`，固定六位小数，无时区时间拒绝；date 转 `YYYY-MM-DD`；十进制值沿 §3.1 使用十进制字符串；其余 JSON 字符串及 null 保持原值，数组保持顺序。归一后的对象以以上三项设置及 `allow_nan=False` 序列化，不设 `default`，不支持的类型拒绝；这些新增归一及参数要求均为本契约裁定（实现未验证）。对所得文本直接 UTF-8 编码（无 BOM、无尾换行），取 `hashlib.sha256(...).hexdigest()`，结果为 **64 位小写十六进制 sha256**，不是 UUIDv5。
+
+序列化固定向量（仅验证 horizon-hash-v1 字节规则，不是完整登记包；已用 Python 实算）：输入为 `{"id": UUID("ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF"), "t": datetime.fromisoformat("2026-01-02T11:04:05+08:00"), "note": "中文", "missing": None}`。归一并 dumps 后的 UTF-8 文本如下（不含代码块换行）：
+
+```json
+{"id":"abcdefab-cdef-4abc-8def-abcdefabcdef","missing":null,"note":"中文","t":"2026-01-02T03:04:05.000000Z"}
+```
+
+输出 sha256：`54fd26faaf78fedda4ae870c58c2facdba6f03cd556c79fb954bd2f00461b125`。
 `read_versions` 归 b2b；b2a 只做 `register_version`／`register_completion`。真实同源完成声明、原始回执及历史可见性仍「未验证」；非空证据槽或合成测试通过不代表真实材料已验证。
 
 **验收（b2a 实施时须完成）**
 
 - 每个必需键均有缺失拒绝用例；每个要求非空的键均有空值拒绝用例，显式可空及允许空数组按表保留；六个证据槽逐项覆盖缺键、null、空对象与 fake 合成对象。
 - `available_at` 非空而 `persisted_receipt` 缺失、null 或空字符串均拒绝登记；`available_at` 为空不可被评估读取。
-- canon 哈希有固定向量用例（含 UUID、UTC ISO 时间、中文、null），校验键顺序稳定及 §3.1/§3.2 任一受覆盖成分变化会改变摘要。
+- horizon-hash-v1 校验上述固定向量、键顺序稳定、同一瞬时不同时区输入同摘要、无时区时间拒绝及 §3.1/§3.2 任一受覆盖成分变化会改变摘要；完整 version_hash/proof_hash 登记包向量由 b2a 实施补齐，未验证。
+- 原材料 hash 的字段清单、序列化与固定向量及逐字段变更/缺失/摘要不符拒绝验收由 T-B179 承接（tasks/T-B179.md）；正式建单和实现完成前仍标未验证，不以本节序列化示例冒充材料 hash 验收。
 - 不新增 kind/source CHECK；覆盖 vendor_factor 拒绝登记、b2a/b2b 职责边界，真实同源完成声明仍标未验证。
 
 ## 4. A0 协议与 A1b 提供者（内部接口草案）
