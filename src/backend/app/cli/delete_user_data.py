@@ -494,6 +494,11 @@ TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
             "trg_horizon_input_versions_no_update",
             "app.reject_horizon_input_update",
         ),
+        (
+            "app.horizon_input_versions",
+            "trg_horizon_input_versions_no_delete",
+            "app.reject_horizon_input_delete",
+        ),
         ("app.plan_conditions", "trg_plan_conditions_immutable", "app.reject_mutation"),
         (
             "app.plan_draft_confirmations",

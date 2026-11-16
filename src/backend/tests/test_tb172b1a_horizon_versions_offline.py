@@ -72,10 +72,6 @@ def test_a192_a1a_schema_keys_nullability_indexes() -> None:
     assert {
         c.name: str(c.sqltext) for c in table.constraints if isinstance(c, CheckConstraint)
     } == {
-        "ck_horizon_input_versions_kind": (
-            "kind IN ('calendar', 'daily_bar', 'vendor_factor', "
-            "'ex_rights', 'adjust_factor', 'feature')"
-        ),
         "ck_horizon_input_versions_scope": "scope IN ('per_licence', 'public', 'synthetic')",
         "ck_horizon_input_versions_licence_scope": (
             "(scope = 'per_licence') = (licence_id IS NOT NULL)"
@@ -87,6 +83,9 @@ def test_a192_a1a_schema_keys_nullability_indexes() -> None:
         ),
         "ck_horizon_input_versions_computed_order": (
             "available_at IS NULL OR computed_at IS NULL OR available_at >= computed_at"
+        ),
+        "ck_horizon_input_versions_derived_computed_at": (
+            "kind NOT IN ('adjust_factor', 'feature') OR computed_at IS NOT NULL"
         ),
     }
     indexes = {index.name: index for index in table.indexes}
@@ -117,3 +116,13 @@ def test_a192_a1a_schema_keys_nullability_indexes() -> None:
     assert indexes["uq_horizon_input_versions_version"].dialect_options["postgresql"][
         "nulls_not_distinct"
     ]
+
+
+def test_delete_trigger_registered_in_cli_allowlist() -> None:
+    from app.cli.delete_user_data import TRIGGER_ALLOWLIST
+
+    assert (
+        "app.horizon_input_versions",
+        "trg_horizon_input_versions_no_delete",
+        "app.reject_horizon_input_delete",
+    ) in TRIGGER_ALLOWLIST

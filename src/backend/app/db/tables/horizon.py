@@ -18,6 +18,7 @@ from app.db.base import (
 )
 
 # 派生 kind 清单与 source 枚举未验证，待契约出处后另补（编排者裁定 T-B172b1a 第 4 条）。
+# kind 白名单归服务层 b2a。
 horizon_input_versions = Table(
     "horizon_input_versions",
     metadata,
@@ -40,9 +41,6 @@ horizon_input_versions = Table(
     txt("transform_version", nullable=False),
     uuid_col("supersedes_id", fk="app.horizon_input_versions.id"),
     created_at("recorded_at"),
-    one_of(
-        "kind", ["calendar", "daily_bar", "vendor_factor", "ex_rights", "adjust_factor", "feature"]
-    ),
     one_of("scope", ["per_licence", "public", "synthetic"]),
     CheckConstraint("(scope = 'per_licence') = (licence_id IS NOT NULL)", name="licence_scope"),
     CheckConstraint("kind = 'calendar' OR code IS NOT NULL", name="code"),
@@ -54,6 +52,11 @@ horizon_input_versions = Table(
     CheckConstraint(
         "available_at IS NULL OR computed_at IS NULL OR available_at >= computed_at",
         name="computed_order",
+    ),
+    # 派生 kind 清单出处：契约 §3.1 kind/source 出处表（48177db）。
+    CheckConstraint(
+        "kind NOT IN ('adjust_factor', 'feature') OR computed_at IS NOT NULL",
+        name="derived_computed_at",
     ),
     schema=APP,
 )

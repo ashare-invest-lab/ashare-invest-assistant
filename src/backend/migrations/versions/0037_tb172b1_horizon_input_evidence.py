@@ -14,6 +14,7 @@ depends_on = None
 
 def upgrade() -> None:
     # 派生 kind 清单与 source 枚举未验证，待契约出处后另补（编排者裁定 T-B172b1a 第 4 条）。
+    # kind 白名单归服务层 b2a。
     op.create_table(
         "horizon_input_versions",
         sa.Column("id", UUID(), nullable=False),
@@ -45,10 +46,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["app.users.id"]),
         sa.ForeignKeyConstraint(["supersedes_id"], ["app.horizon_input_versions.id"]),
-        sa.CheckConstraint(
-            "kind IN ('calendar', 'daily_bar', 'vendor_factor', 'ex_rights', 'adjust_factor', 'feature')",
-            name="kind",
-        ),
         sa.CheckConstraint("scope IN ('per_licence', 'public', 'synthetic')", name="scope"),
         sa.CheckConstraint(
             "(scope = 'per_licence') = (licence_id IS NOT NULL)", name="licence_scope"
@@ -62,6 +59,11 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "available_at IS NULL OR computed_at IS NULL OR available_at >= computed_at",
             name="computed_order",
+        ),
+        # 派生 kind 清单出处：契约 §3.1 kind/source 出处表（48177db）。
+        sa.CheckConstraint(
+            "kind NOT IN ('adjust_factor', 'feature') OR computed_at IS NOT NULL",
+            name="derived_computed_at",
         ),
         schema="app",
     )
@@ -104,6 +106,18 @@ def upgrade() -> None:
         CREATE TRIGGER trg_horizon_input_versions_no_update
         BEFORE UPDATE ON app.horizon_input_versions
         FOR EACH ROW EXECUTE FUNCTION app.reject_horizon_input_update();
+        CREATE FUNCTION app.reject_horizon_input_delete() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF current_user <> 'aia_maint' THEN
+                RAISE EXCEPTION 'horizon_input_versions is immutable: DELETE forbidden';
+            END IF;
+            RETURN OLD;
+        END;
+        $$;
+        CREATE TRIGGER trg_horizon_input_versions_no_delete
+        BEFORE DELETE ON app.horizon_input_versions
+        FOR EACH ROW EXECUTE FUNCTION app.reject_horizon_input_delete();
     """)
 
 
@@ -118,4 +132,6 @@ def downgrade() -> None:
     """)
     op.execute("DROP TRIGGER trg_horizon_input_versions_no_update ON app.horizon_input_versions")
     op.execute("DROP FUNCTION app.reject_horizon_input_update()")
+    op.execute("DROP TRIGGER trg_horizon_input_versions_no_delete ON app.horizon_input_versions")
+    op.execute("DROP FUNCTION app.reject_horizon_input_delete()")
     op.drop_table("horizon_input_versions", schema="app")
