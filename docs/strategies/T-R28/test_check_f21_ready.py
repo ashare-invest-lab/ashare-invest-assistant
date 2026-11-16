@@ -1,9 +1,10 @@
-"""T-R31：F21 readiness 阈值锁定 + 篡改/覆盖拒绝（离线，无库、无凭证）。"""
+"""T-R31/T-R77：F21 阈值锁定、篡改/覆盖拒绝及无库 CLI（离线，无凭证）。"""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -89,18 +90,89 @@ def test_decide_ready_boundary():
     require(m.decide_ready({"stocks_with_min_days": 4}, th) is False)
 
 
+def run_no_db(*args, script=None, env_overrides=None):
+    # Exclude the DB setting without reading its value; never connect in these cases.
+    env = {
+        key: os.environ[key] for key in os.environ
+        if key != "DATABASE_URL" and key not in m.FORBIDDEN_ENV
+    }
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.update(env_overrides or {})
+    return subprocess.run(
+        [sys.executable, *(["-O"] if sys.flags.optimize else []),
+         str(script or Path(m.__file__)), *args],
+        env=env, capture_output=True, text=True, timeout=10,
+    )
+
+
+def test_no_db_cli():
+    result = run_no_db()
+    require(result.returncode == 0, result.stderr)
+    report = json.loads(result.stdout)
+    require(report["status"] == "skipped_no_db", report)
+    require(report["f21_status"] == "declared", report)
+    require("ready" in report and report["ready"] is None, report)
+    require(report["message"] == "未做实库扫描，结论未验证", report)
+    require("signal" not in report and "suggested_dispatch" not in report, report)
+
+    result = run_no_db("--require-db")
+    require(result.returncode == 1, result)
+    require(result.stdout == "", result.stdout)
+    require(result.stderr.strip() ==
+            "DATABASE_URL 未设置；本脚本只读、不写，但需要目标库（通常是隔离库）。",
+            result.stderr)
+
+
+def test_no_db_overrides_rejected():
+    for flag in ("--min-stocks", "--min-days", "--window-days", "--factor-id",
+                 "--thresholds", "--thresholds-json"):
+        result = run_no_db(flag + "=1")
+        require(result.returncode != 0, flag)
+        require("threshold override rejected" in result.stderr, result.stderr)
+        require(result.stdout == "", result.stdout)
+    for key in m.FORBIDDEN_ENV:
+        result = run_no_db(env_overrides={key: "1"})
+        require(result.returncode != 0, key)
+        require("threshold override rejected via env: " + key in result.stderr,
+                result.stderr)
+        require(result.stdout == "", result.stdout)
+
+
+def test_no_db_hash_tamper_rejected():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        script = root / "check_f21_ready.py"
+        shutil.copyfile(m.__file__, script)
+        thresholds = root / "T-R28"
+        thresholds.mkdir()
+        shutil.copyfile(m.THRESHOLDS_PATH, thresholds / m.THRESHOLDS_PATH.name)
+        (thresholds / m.THRESHOLDS_HASH_PATH.name).write_text("0" * 64 + "\n")
+        result = run_no_db(script=script)
+        require(result.returncode != 0, result)
+        require("thresholds hash mismatch" in result.stderr, result.stderr)
+        require(result.stdout == "", result.stdout)
+
+
 def main() -> int:
     test_load_ok()
     test_hash_tamper_rejected()
     test_cli_override_rejected()
     test_env_override_rejected()
     test_decide_ready_boundary()
+    test_no_db_cli()
+    test_no_db_overrides_rejected()
+    test_no_db_hash_tamper_rejected()
     print(json.dumps({
         "normal_threshold_load": "pass",
         "mutation_hash_rejected": 1,
         "mutation_cli_override_rejected": 5,
         "mutation_env_override_rejected": 1,
         "decide_ready_boundary": "5_pass_4_fail",
+        "no_db_cli": "skipped_no_db_ready_null",
+        "require_db_missing_rc": 1,
+        "no_db_cli_overrides_rejected": 6,
+        "no_db_env_overrides_rejected": len(m.FORBIDDEN_ENV),
+        "no_db_hash_tamper_rejected": 1,
         "f21_status": "declared",
     }, ensure_ascii=False))
     return 0
