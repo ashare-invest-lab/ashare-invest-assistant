@@ -113,7 +113,7 @@ def upsert_one():
 
 
 @TRUST_PENDING(reason=(
-    "T-B182（待编排者建）：只给已解析对加自填 source 应拒绝；"
+    "T-B182：只给已解析对加自填 source 应拒绝；"
     "缺口：confirm 仍接受已解析字段；出处：" + TRUST_CONTRACT_SOURCE
 ))
 def test_ta172_parsed_pairs_with_self_filled_source_are_rejected(bj_isolated_list):
@@ -128,7 +128,7 @@ def test_ta172_parsed_pairs_with_self_filled_source_are_rejected(bj_isolated_lis
 
 
 @TRUST_PENDING(reason=(
-    "T-B183（待编排者建）：sha256 不在清单中应拒绝；"
+    "T-B183：sha256 不在清单中应拒绝；"
     "缺口：现有夹具丢弃哈希，confirm 未校验清单 sha256；出处：" + TRUST_CONTRACT_SOURCE
 ))
 def test_ta172_sha256_absent_from_isolated_list_is_rejected(bj_isolated_list):
@@ -143,7 +143,7 @@ def test_ta172_sha256_absent_from_isolated_list_is_rejected(bj_isolated_list):
 
 
 @TRUST_PENDING(reason=(
-    "T-B184（待编排者建）：字节被改动一位应拒绝；"
+    "T-B184：字节被改动一位应拒绝；"
     "缺口：confirm 忽略 raw_bytes，未拒绝字节篡改；出处：" + TRUST_CONTRACT_SOURCE
 ))
 def test_ta172_one_bit_flip_in_raw_bytes_is_rejected(bj_isolated_list):
