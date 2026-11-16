@@ -13,10 +13,14 @@ export interface PlanDraft {
   qty_range: { min: Decimal; max: Decimal; lot: Decimal };
   price_range: { low: Decimal; high: Decimal };
   stops: Stops;
-  max_loss_amount: Decimal;
-  max_loss_pct: Decimal;
+  /** §7.11.4：无止损时两值为 null；总资产未知时比例为 null。 */
+  max_loss_amount: Decimal | null;
+  max_loss_pct: Decimal | null;
   fee_estimate: { amount: Decimal; epistemic_type: EpistemicType };
-  user_context_snapshot: { holding_qty: Decimal; sellable_qty: Decimal; cash: Decimal; sector_pct: Decimal };
+  user_context_snapshot: {
+    holding_qty: Decimal; sellable_qty: Decimal; cash: Decimal; sector_pct: Decimal | null;
+    gaps?: { key: string; reason: string }[];
+  };
   risk_flags: RiskFlag[];
   judgment_checklist: ChecklistItem[];
   valid_until: DateTime | null;

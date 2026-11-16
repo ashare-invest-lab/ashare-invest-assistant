@@ -85,7 +85,7 @@ export function PortfolioPage() {
   );
 }
 
-const accountLabel = (a: BrokerAccount) => `${a.alias} · ${a.broker_name}${a.fund_account_masked ? `（${a.fund_account_masked}）` : ''}`;
+const accountLabel = (a: BrokerAccount) => `${a.alias} · ${a.broker_name ?? '—'}${a.fund_account_masked ? `（${a.fund_account_masked}）` : ''}`;
 
 function CreateAccountModal({ open, onClose }: { open: boolean; onClose: (id?: string) => void }) {
   const [form] = Form.useForm<{ alias: string; broker_name: string }>();
