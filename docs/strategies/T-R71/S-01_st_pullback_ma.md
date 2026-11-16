@@ -41,9 +41,9 @@ lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.m
 
 团队报告 T-A159「*_qfq 口径裁定」及条件 C1：以晚于信号日（如最新日）为锚的前复权仅可用于展示，不得用于候选信号或回测。*_qfq 指 qfq@as_of：以信号日 T 为锚、逐日重算、只用当时可见且已生效的权息因子，等同团队报告 T-R72 §7 B08 权息事件逐日复权，可用于候选信号、指标与回测，字段名不改。历史日 d 的价格为 raw(d)×A(d)/A(T)，T 日值等于不复权价；因子事件日期须≤T 且 available_at≤as_of，缺因子记缺口，不补 1。回测须每个历史 T 独立调用 prepare 或等价重算，不得复用末日锚定序列、拼接不同锚点末值算指标，或用后续修订的因子回写过去候选信号。同一因子版本下，固定基准 hfq 与 qfq@T 仅差正比例常数，比值、均线和结构位同尺度比较等价；绝对元价阈值（如低于 2 元）、一字板与涨跌停价一律用不复权价（none）。收盘、均线、入场价和结构止损/止盈阈值按同一 qfq@T 尺度比较。成交及费用按实际不复权价记账；入场价折算后用于同尺度比较，R 统计仍须核验现金分红、送转股数、持仓权重及费用账本，不直接混减复权价差与不复权每股费用。冻结 source、因子版本及旧快照；事件可见性或复杂权息证据缺失时标“未验证”并阻断相关求值。
 
-字段口径依据团队报告 T-A159：保留 f.*_qfq、plan.entry_price_qfq、ctx.cost_price_qfq、ctx.highest_close_since_entry_qfq 等现有名称，均按 qfq@as_of 使用；成交日价格按 A(成交日)/A(T) 折算。本卡 v2 无结构止损，不涉及条件 C2；入场价折算公式存在于参考实现已证实（src/backend/app/features/pipeline.py:290）；端到端接线及 R 账本统计仍未验证（团队报告 T-A159 §已知清单，第3项）。
+字段口径依据团队报告 T-A159：保留 f.*_qfq、plan.entry_price_qfq、ctx.cost_price_qfq、ctx.highest_close_since_entry_qfq 等现有名称，均按 qfq@as_of 使用；成交日价格按 A(成交日)/A(T) 折算。本卡 v2 无结构止损，不涉及条件 C2；入场价折算参考实现未验证（仓内定义：src/backend/app/features/pipeline.py:290）；端到端接线及 R 账本统计仍未验证。
 
-S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖边界出处已证实（docs/strategies/feature_spec.md:121；docs/strategies/feature_spec.md:215；docs/strategies/feature_spec.md:389；docs/strategies/feature_spec.md:53）；建议阈值的 A 股有效性仍未验证（待复测），见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
+S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖边界未验证（仓内定义：docs/strategies/feature_spec.md:121；仓内定义：docs/strategies/feature_spec.md:215；仓内定义：docs/strategies/feature_spec.md:389；仓内定义：docs/strategies/feature_spec.md:53）；建议阈值的 A 股有效性仍未验证（待复测），见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
 
 ## 数据接口依赖（T-R72 P1 对照）
 
@@ -131,7 +131,7 @@ KEY_DATA_MISSING / DATA_STALE：对应字段与≤T 可见性证据补齐且快�
 
 涨跌停价按成交日有效段、当日 pre_close 和 0.01 元 ROUND_HALF_UP 计算，含不足一价位及最低价格边界；除权日 pre_close 必须是可核对的参考价。pre_close 无效、状态未知或校验冲突则限价未知，不以昨天 close 或 gbbq 推值补缺。来源：docs/strategies/feature_spec.md §F35/F36。止损/止盈的展示和申报价需截断至执行日合法涨跌停区间；截断不能解释为阈值处一定能成交。来源：docs/strategies/_template.md §7.3、§17。
 
-停牌日不补值，伪停牌按缺失；复牌若此前停牌≥5 个交易日，首个复牌交易日阻断入场，退出继续求值。上市不足 30 个交易日买入阻断，各卡上市门槛与预热还需满足；注册制上市前 5 日无涨跌幅，不进波动类窗口。来源：docs/strategies/_template.md §7.3。G-01 另含 none 价格低于2元的买入阻断（初值出处已证实；A 股有效性未验证（待复测），出处：docs/strategies/catalog.md:73；共用登记 P14），使用实际 none 价格比较。上市年龄按日历从上市日计，不能以已回填 K 线根数代替。来源：docs/strategies/feature_spec.md §F13。
+停牌日不补值，伪停牌按缺失；复牌若此前停牌≥5 个交易日，首个复牌交易日阻断入场，退出继续求值。上市不足 30 个交易日买入阻断，各卡上市门槛与预热还需满足；注册制上市前 5 日无涨跌幅，不进波动类窗口。来源：docs/strategies/_template.md §7.3。G-01 另含 none 价格低于2元的买入阻断（初值未验证；A 股有效性未验证（待复测）；仓内定义：docs/strategies/catalog.md:73；共用登记 P14），使用实际 none 价格比较。上市年龄按日历从上市日计，不能以已回填 K 线根数代替。来源：docs/strategies/feature_spec.md §F13。
 
 沪深主板/创业板买入为 100 股整数倍；科创板单笔买卖≥200 股，200 以上按 1 股递增为“部分核实”口径；不足申报单位的卖出余额须一次性申报，且不得超过可卖量。单笔数量上限沿 config/market_rules.yaml §segments.lot，不在本稿重新设值。来源：docs/strategies/market_rules_T-R10.md §1.1–§1.3、§2.1–§2.2。
 
@@ -141,7 +141,7 @@ KEY_DATA_MISSING / DATA_STALE：对应字段与≤T 可见性证据补齐且快�
 
 印花税按实际卖出交易日分段：2023-04-10 至 2023-08-27 为 0.1%；2023-08-28 起为 0.05%，仅卖出计。过户费在仓库已建模区间为双边 0.001%；更早日期不外推。来源：config/market_rules.yaml §segments（2023-04-10、2023-08-28、2026-07-06）.fees。
 
-单边基础滑点见 §22（estimate，取值出处已证实：docs/strategies/cards/st_pullback_ma.md:104；成本校准未验证（待复测））；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate，档表及回退口径出处已证实，成本校准未验证（待复测），不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。来源：docs/strategies/_template.md:252；docs/strategies/_template.md:253；docs/strategies/_template.md:258；docs/strategies/_template.md:259；docs/strategies/_template.md:260；docs/strategies/_template.md:261；docs/strategies/_template.md:262；docs/strategies/_template.md:266；docs/strategies/_template.md:267；docs/strategies/_template.md:268。
+单边基础滑点见 §22（estimate，未验证；仓内定义：docs/strategies/cards/st_pullback_ma.md:104；成本校准未验证（待复测））；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate，档表及回退口径未验证，成本校准未验证（待复测），不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。仓内定义：docs/strategies/_template.md:252；仓内定义：docs/strategies/_template.md:253；仓内定义：docs/strategies/_template.md:258；仓内定义：docs/strategies/_template.md:259；仓内定义：docs/strategies/_template.md:260；仓内定义：docs/strategies/_template.md:261；仓内定义：docs/strategies/_template.md:262；仓内定义：docs/strategies/_template.md:266；仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:268。
 
 T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实成交额、税率及滑点只属于执行账本。T+1 的实际开盘不能参与 T 的入场规则。仓位金额未知时不生成精确费用数字。共用参数登记见 docs/strategies/T-R71/README.md §6。
 
@@ -159,36 +159,36 @@ T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实�
 
 ## 22. 参数与敏感性
 
-表中 default 仅照录原值，min/max/step 只保留原网格，均不自动生效；没有经过本轮选择。slippage_bp 为 estimate，其余具名参数为 hypothesis。固定规则参数也属待检验假设或口径，不因写成常数而省略出处。 本节“取值出处已证实”只确认原值、网格或方法有据，不代表 A 股有效性、数据就绪或门禁通过；论文只证明有文献采用该取值或方法。
+表中 default 仅照录原值，min/max/step 只保留原网格，均不自动生效；没有经过本轮选择。slippage_bp 为 estimate，其余具名参数为 hypothesis。固定规则参数也属待检验假设或口径，不因写成常数而省略出处。 本节仓内材料只标“仓内定义”，相关项仍未验证；外部出处须有 URL、访问日期并核对原文。论文只证明有文献采用该取值或方法，不能证明本卡网格、组合或 A 股有效性；A 股有效性仍未验证（待复测）。
 
-| 参数 | 类型 | 原 default | 原范围 | 原 step | 出处（相对路径:行号／公开文献） | 状态 |
+| 参数 | 类型 | 原 default | 原范围 | 原 step | 仓内定义（相对路径:行号）／外部出处 | 状态 |
 |---|---|---|---|---|---|---|
-| rs_min | float | 0.15 | 0.10–0.30 | 0.05 | docs/strategies/cards/st_pullback_ma.md:96 | 取值出处已证实；A 股有效性未验证（待复测） |
-| touch_pct | float | 0.01 | 0.0–0.03 | 0.005 | docs/strategies/cards/st_pullback_ma.md:97 | 取值出处已证实；A 股有效性未验证（待复测） |
-| shrink_ratio | float | 0.7 | 0.5–0.9 | 0.05 | docs/strategies/cards/st_pullback_ma.md:98 | 取值出处已证实；A 股有效性未验证（待复测） |
-| exit_confirm_days | int | 2 | 1–3 | 1 | docs/strategies/cards/st_pullback_ma.md:99 | 取值出处已证实；A 股有效性未验证（待复测） |
-| hard_stop_pct | float | 0.08 | 0.05–0.12 | 0.01 | docs/strategies/cards/st_pullback_ma.md:100 | 取值出处已证实；A 股有效性未验证（待复测） |
-| time_stop | int | 5 | 3–10 | 1 | docs/strategies/cards/st_pullback_ma.md:101 | 取值出处已证实；A 股有效性未验证（待复测） |
-| min_amount | float | 50000000.0 | 10000000.0–500000000.0 | 10000000.0 | docs/strategies/cards/st_pullback_ma.md:102 | 取值出处已证实；A 股有效性未验证（待复测） |
-| min_list_days | int | 60 | 30–250 | 10 | docs/strategies/cards/st_pullback_ma.md:103 | 取值出处已证实；A 股有效性未验证（待复测） |
-| slippage_bp | float | 10.0 | 0.0–50.0 | 1.0 | docs/strategies/cards/st_pullback_ma.md:104 | 取值出处已证实；成本校准未验证（待复测） |
+| rs_min | float | 0.15 | 0.10–0.30 | 0.05 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:96 | 未验证；A 股有效性未验证（待复测） |
+| touch_pct | float | 0.01 | 0.0–0.03 | 0.005 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:97 | 未验证；A 股有效性未验证（待复测） |
+| shrink_ratio | float | 0.7 | 0.5–0.9 | 0.05 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:98 | 未验证；A 股有效性未验证（待复测） |
+| exit_confirm_days | int | 2 | 1–3 | 1 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:99 | 未验证；A 股有效性未验证（待复测） |
+| hard_stop_pct | float | 0.08 | 0.05–0.12 | 0.01 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:100 | 未验证；A 股有效性未验证（待复测） |
+| time_stop | int | 5 | 3–10 | 1 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:101 | 未验证；A 股有效性未验证（待复测） |
+| min_amount | float | 50000000.0 | 10000000.0–500000000.0 | 10000000.0 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:102 | 未验证；A 股有效性未验证（待复测） |
+| min_list_days | int | 60 | 30–250 | 10 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:103 | 未验证；A 股有效性未验证（待复测） |
+| slippage_bp | float | 10.0 | 0.0–50.0 | 1.0 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:104 | 未验证；成本校准未验证（待复测） |
 
-| 固定参数登记项 | 原值/含义 | 出处（相对路径:行号／公开文献） | 状态 |
+| 固定参数登记项 | 原值/含义 | 仓内定义（相对路径:行号）／外部出处 | 状态 |
 |---|---|---|---|
-| 均线窗口 | 5/10/20 根有效日 K | docs/strategies/cards/st_pullback_ma.md:110；docs/strategies/cards/st_pullback_ma.md:113；docs/strategies/cards/st_pullback_ma.md:128；docs/strategies/cards/st_pullback_ma.md:130 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 动量窗口 | 20 根有效日 K | docs/strategies/cards/st_pullback_ma.md:107 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 缩量/流动性/反证均额窗口 | 5/20 根有效日 K | docs/strategies/cards/st_pullback_ma.md:116；docs/strategies/cards/st_pullback_ma.md:118；docs/strategies/cards/st_pullback_ma.md:126 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 反证阈值 | 跌幅 5%；放量倍数 1.5 | docs/strategies/cards/st_pullback_ma.md:124；docs/strategies/cards/st_pullback_ma.md:126 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 时间止损 R 门槛 | 1R | docs/strategies/cards/st_pullback_ma.md:135 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 卡预热 | 25 根有效日 K | docs/strategies/cards/st_pullback_ma.md:18 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 候选有效期 | 1 个交易日 | docs/strategies/cards/st_pullback_ma.md:139 | 取值出处已证实；A 股有效性未验证（待复测） |
-| 原证伪参数组 | 5 日、n≥30、胜率45%、邻域±0.05/±0.1 | docs/strategies/cards/st_pullback_ma.md:38；docs/strategies/cards/st_pullback_ma.md:39；docs/strategies/cards/st_pullback_ma.md:40 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 均线窗口 | 5/10/20 根有效日 K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:110；仓内定义：docs/strategies/cards/st_pullback_ma.md:113；仓内定义：docs/strategies/cards/st_pullback_ma.md:128；仓内定义：docs/strategies/cards/st_pullback_ma.md:130 | 未验证；A 股有效性未验证（待复测） |
+| 动量窗口 | 20 根有效日 K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:107 | 未验证；A 股有效性未验证（待复测） |
+| 缩量/流动性/反证均额窗口 | 5/20 根有效日 K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:116；仓内定义：docs/strategies/cards/st_pullback_ma.md:118；仓内定义：docs/strategies/cards/st_pullback_ma.md:126 | 未验证；A 股有效性未验证（待复测） |
+| 反证阈值 | 跌幅 5%；放量倍数 1.5 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:124；仓内定义：docs/strategies/cards/st_pullback_ma.md:126 | 未验证；A 股有效性未验证（待复测） |
+| 时间止损 R 门槛 | 1R | 仓内定义：docs/strategies/cards/st_pullback_ma.md:135 | 未验证；A 股有效性未验证（待复测） |
+| 卡预热 | 25 根有效日 K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:18 | 未验证；A 股有效性未验证（待复测） |
+| 候选有效期 | 1 个交易日 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:139 | 未验证；A 股有效性未验证（待复测） |
+| 原证伪参数组 | 5 日、n≥30、胜率45%、邻域±0.05/±0.1 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:38；仓内定义：docs/strategies/cards/st_pullback_ma.md:39；仓内定义：docs/strategies/cards/st_pullback_ma.md:40 | 未验证；A 股有效性未验证（待复测） |
 
 敏感性：先只测试原值与原网格内单因素邻域，结果未评估；不添加自拟阈值。逐卡具名参数 9 项、固定参数组 8 项，A 股有效性均未验证（待复测）；共用环境/成本/研究参数只在 README §6 计一次。
 
 ## 23. 审计、差异与未决
 
-这是当前分支 v2 的对照草稿，不是 T-R59 提及但本分支没有的 v3。保留绝对强势阈值，不伪造截面池、N_min 或 rank_pct 实现。入场价折算与 R 统计采用 qfq@as_of（B08 权息事件逐日复权），现有 plan.entry_price_qfq 等字段按团队报告 T-A159 的 qfq@as_of 口径，其中入场价折算公式存在于参考实现已证实（src/backend/app/features/pipeline.py:290）；端到端接线与 R 统计仍未验证（团队报告 T-A159 §已知清单，第3项）；不以此稿重启 v2 晋级。 T-R71 只形成可审阅文字草稿；lifecycle 始终为 draft。G1–G7 未执行，本次文档 checker 的通过不能替代它们。来源：docs/strategies/card_promotion_gates.md §0、§3、§4。
+这是当前分支 v2 的对照草稿，不是 T-R59 提及但本分支没有的 v3。保留绝对强势阈值，不伪造截面池、N_min 或 rank_pct 实现。入场价折算与 R 统计采用 qfq@as_of（B08 权息事件逐日复权），现有 plan.entry_price_qfq 等字段按团队报告 T-A159 的 qfq@as_of 口径，其中入场价折算参考实现未验证（仓内定义：src/backend/app/features/pipeline.py:290）；端到端接线与 R 统计仍未验证；不以此稿重启 v2 晋级。 T-R71 只形成可审阅文字草稿；lifecycle 始终为 draft。G1–G7 未执行，本次文档 checker 的通过不能替代它们。来源：docs/strategies/card_promotion_gates.md §0、§3、§4。
 
 ## 24. 合规文案
 
