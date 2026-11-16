@@ -921,6 +921,11 @@
       "path": "docs/strategies/T-R79/readonly_checks.sql",
       "scope_role": "research_support_not_strategy",
       "note": "T-R79c unexecuted read-only SQL draft; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/u11_calib.py",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R80 offline U11 descriptive calibration; no system suggestions or runtime change"
     }
   ],
   "records": [
