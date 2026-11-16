@@ -935,7 +935,7 @@ evidence: Evidence[]
 - `title`：“发生了什么”的事实陈述（例如“示例银行发布业绩预告”），经过禁用词校验，不包含动作建议。`security_code` 为 `null` 时 `name` 也为 `null`（账户级提醒）。
 - `evidence_ids` 非空，每个 id 都能在同一响应的 `evidence[]` 中找到（提醒的“事实 + 来源”）。
 - 排序：`severity`（important > attention > info）→ `triggered_at` 降序 → `id` 升序（按 uuid 值升序；与 #256@5086bc3 `aggregates/products.py:今日提醒查询 order_by`（未合入）一致）。最多 50 条，`more=true` 时到 `/alerts?status=new,read` 查看。
-- 未知档位兜底：后端只输出 `important`、`attention`、`info` 三档（模型层拒绝契约外值）；前端消费 `severity` 时只按三档自有键取映射（不得取到原型链属性，例如 `__proto__`、`constructor`、`toString`），其他任何值（含空串、带空格、未来新档）显示固定文案「未知」与默认（中性）颜色，条目照常显示、不崩溃、不在客户端重排，保留服务端顺序。该口径适用于所有渲染 `severity` 的页面。
+- 未知档位兜底：后端只输出 `important`、`attention`、`info` 三档（模型层拒绝契约外值）；前端消费 `severity` 时只按三档自有键取映射（不得取到原型链属性，例如 `__proto__`、`constructor`、`toString`），其他任何值（含空串、带空格、未来新档）显示固定文案「未知」与默认（中性）颜色，条目照常显示、不崩溃；只用 `severity` 取颜色而不显示其文案的位置（如通知面板的类型标签）用中性色即可。本列表不在客户端重排，保留服务端顺序；其他列表沿用各自既有排序，但未知档位不得改变排序或筛选结果。该兜底适用于所有渲染 `severity` 的页面。
 
 **`TodayPlanTrigger`**（plan “计划触发”；来源：`plan_conditions` 的满足记录，即 SSE `plan_triggered` 与 `origin=plan_condition` 的提醒）
 `{plan_id: uuid, plan_version_no: int, security_code: string, name: string, condition_id: uuid, condition_kind: plan_condition_kind, condition_text: string, triggered_at: string(datetime), alert_id: uuid | null, evidence_ids: string[]}`
