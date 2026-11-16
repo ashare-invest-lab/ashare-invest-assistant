@@ -1,0 +1,145 @@
+# T-T93 / T-O100 后端 CI 分组；每个模块一行，路径相对仓库根。
+# 优先级 serial_pg > serial_port > serial_shared > parallel；keywords 同时保留次级风险。
+# serial_pg：真实 PG（含连接失败探测）；serial_port：服务/共享端口客户端；serial_shared：共享文件或全局状态。
+# parallel：纯函数、mock、内存数据库、进程内 TestClient、pytest 临时目录及自动还原 monkeypatch。
+# 公共 tests/conftest.py 的 replay/DNS 防护为各进程共同基线；不等于所有文件请求 PG/Redis fixture。
+# 已逐文件扫描关键词/AST、近层 conftest、导入的 fixture/helper；注释、合成 DSN、只读常量不单独判 PG。
+# unverified 表示仍不确定的资源风险，必须留在串行组；false 表示静态链路已确认，不表示实际跑过集成例。
+# 运维：parallel 可 xdist/分片；三个 serial_* 合并后用单 worker 顺序运行，并隔离 parallel 的 PG/端口/共享资源。
+# 从仓库根按 group 过滤 file 列表，作为 env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini 的位置参数。
+# 例如 Python yaml.safe_load(...)["tests"] 中筛选 r["group"] == "parallel" 后取 r["file"]；此组可追加 -n 4。
+# 守护递归扫描 tests/backend、tests/replay 及 src/backend/tests（不含 selfchecks）。
+# 全范围收集必须显式给 tests/backend tests/replay（根目录下裸跑会回退扫描范围外 scripts）；守护测试独立跑不启动嵌套收集。
+# 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
+version: 1
+tests:
+  - {"file": "src/backend/tests/test_terminal_quotes.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "socket.connect/create_connection denied", "synthetic data; no real PG/Redis/docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_admin_contract_current.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_admin_users_patch_t_b150.py", "group": "serial_pg", "keywords": ["app_client->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_architect_rulings_t_t25.py", "group": "serial_pg", "keywords": ["session/sql->_t23.authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_auth_t_b03.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "psycopg.connect", "redis_url", "docker", "subprocess alembic"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_config.py", "group": "parallel", "keywords": ["clean_env->tmp_path", "monkeypatch.setenv/delenv", "make_settings"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_config_yaml_defaults.py", "group": "parallel", "keywords": ["read-only YAML snapshots", "private _Yaml12Loader subclass resolver", "monkeypatch.setenv"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_contract_t_a11_t_f22.py", "group": "serial_pg", "keywords": ["roles/cli/session->_t24->_t23.authdb->pg_url", "redis_url", "docker", "threads"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_contract_v022.py", "group": "parallel", "keywords": ["contract docs read-only", "make_client ASGI in-process", "make_settings"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_contract_v028_t_t23.py", "group": "serial_pg", "keywords": ["_t22._auth.authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_contract_v029_t_t25.py", "group": "serial_pg", "keywords": ["_r._t23.authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_data_licence_backend_t_t22.py", "group": "parallel", "keywords": ["subprocess config-only isolated environment", "monkeypatch.setenv", "no real DB"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_data_licence_t_t22.py", "group": "serial_pg", "keywords": ["_auth.authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_delete_user_data_cli_t_t24.py", "group": "serial_pg", "keywords": ["roles/cli->_t23.authdb->pg_url", "psycopg.connect", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_errors_and_validation.py", "group": "parallel", "keywords": ["make_client ASGI in-process", "fake routes"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_health.py", "group": "serial_pg", "keywords": ["psycopg AsyncConnection actual negative probe on closed port", "Redis actual negative probe", "other cases monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_horizon_t_b30a_acceptance.py", "group": "serial_pg", "keywords": ["hz->_t25d.session/sql->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_http_diagnostics.py", "group": "parallel", "keywords": ["fake HTTP responses", "monkeypatch", "subprocess child under tmp_path"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_integration_t_t25c.py", "group": "serial_pg", "keywords": ["_t24.roles/cli/session->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_market_rules_lots_t_t19.py", "group": "parallel", "keywords": ["read-only config_dir", "pure lot calculations"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_meta_enums.py", "group": "parallel", "keywords": ["make_client ASGI in-process", "read-only enum snapshots"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_migration_0008_to_0011_t_t24.py", "group": "serial_pg", "keywords": ["migdb->pg_url", "psycopg.connect", "docker", "subprocess alembic"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_pagination.py", "group": "parallel", "keywords": ["make_client ASGI in-process", "local route list", "cursor calculations"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_request_id_and_logging.py", "group": "parallel", "keywords": ["make_client ASGI in-process", "ThreadPoolExecutor", "captured logging"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_review_116cb7e_t_t24.py", "group": "serial_pg", "keywords": ["_t23.session/sql->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_rulings_t_b46_47_t_t25d.py", "group": "serial_pg", "keywords": ["pf/hz/grant_roles->authdb->pg_url", "psycopg.connect", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_rulings_t_o11_t_t25e.py", "group": "serial_pg", "keywords": ["_a11.session/sql->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_security_dataset_applicability.py", "group": "serial_pg", "keywords": ["_t23.session/sql->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_tb134_t_view_db_r25.py", "group": "serial_pg", "keywords": ["db->authdb->pg_url", "redis_url", "docker", "tv._HISTORY singleton"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_tb134_t_view_r25.py", "group": "parallel", "keywords": ["imported selfchecks.test_tb134_t_view", "pure build with synthetic inputs"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_tb134c_snapshot_r25.py", "group": "serial_pg", "keywords": ["conn->engine->authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/contract/test_auth_live.py", "group": "serial_port", "keywords": ["AIA_CONTRACT_BASE_URL", "shared HTTP service default port 8080", "urllib client"], "unverified": false}
+  - {"file": "tests/backend/contract/test_contract_live.py", "group": "serial_port", "keywords": ["schemathesis from_fixture live_schema->conftest", "AIA_CONTRACT_BASE_URL", "shared HTTP service port 8080"], "unverified": false}
+  - {"file": "tests/backend/contract/test_contract_stub.py", "group": "parallel", "keywords": ["stub_schema->from_wsgi make_app", "STUB read-only", "no listening socket"], "unverified": false}
+  - {"file": "tests/backend/contract/test_g7_live.py", "group": "serial_port", "keywords": ["AIA_CONTRACT_BASE_URL", "shared HTTP service port 8080", "login session global effects"], "unverified": false}
+  - {"file": "tests/backend/contract/test_gateway_live.py", "group": "serial_port", "keywords": ["AIA_CONTRACT_BASE_URL", "shared HTTP service port 8080", "http.client"], "unverified": false}
+  - {"file": "tests/backend/contract/test_r11_exceptions.py", "group": "parallel", "keywords": ["from_asgi/from_wsgi schemas", "synthetic contract", "read-only config"], "unverified": false}
+  - {"file": "tests/backend/golden/test_golden.py", "group": "parallel", "keywords": ["read-only JSON golden cases", "pure functions", "hypothesis"], "unverified": false}
+  - {"file": "tests/backend/integration/test_ci_unix_identity.py", "group": "parallel", "keywords": ["docker metadata fake", "monkeypatch", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/integration/test_db_container.py", "group": "serial_pg", "keywords": ["pg_conn->pg_url", "psycopg.connect", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/integration/test_p2n10_loop.py", "group": "serial_pg", "keywords": ["database->psycopg.connect", "Redis UNIX socket", "uvicorn", "subprocess.Popen frontend", "shared.REDIS"], "unverified": false}
+  - {"file": "tests/backend/integration/test_tb28_isolation_config.py", "group": "parallel", "keywords": ["no_real_docker autouse monkeypatch", "synthetic /tmp strings", "no PG"], "unverified": false}
+  - {"file": "tests/backend/integration/test_tb58_replay_calibrated.py", "group": "serial_shared", "keywords": ["fixed /tmp evidence input", "shared external evidence may change", "tmp_path_factory output", "currently unconditional skip"], "unverified": true, "reason": "未验证：固定 /tmp 外部取证副本的并发读写隔离未实跑，当前全文件 skip；输出仅用 tmp_path_factory，保守串行。"}
+  - {"file": "tests/backend/integration/test_tb63_signals.py", "group": "serial_pg", "keywords": ["verify_isolated_pg", "tb60.main real PG", "docker inspect", "fixed UNIX socket"], "unverified": false}
+  - {"file": "tests/backend/integration/test_tb63_socket_consumer.py", "group": "parallel", "keywords": ["no_real_resources autouse monkeypatch", "docker/PG fully stubbed"], "unverified": false}
+  - {"file": "tests/backend/milestone/test_enqueue_diagnostics.py", "group": "parallel", "keywords": ["fake engine/queue", "synthetic UNIX URL only", "subprocess under tmp_path"], "unverified": false}
+  - {"file": "tests/backend/milestone/test_tt21_mainline_manifest.py", "group": "parallel", "keywords": ["tmp_path migration copies", "read-only current migration graph"], "unverified": false}
+  - {"file": "tests/backend/milestone/test_tt21_migrations.py", "group": "serial_pg", "keywords": ["tt21_integration->tt21_plugin real PG", "redis", "fixed UNIX socket", "alembic"], "unverified": false}
+  - {"file": "tests/backend/milestone/test_tt22_baselines.py", "group": "serial_pg", "keywords": ["integration/setup->tt21_integration real PG", "redis", "fixed UNIX socket", "worker globals"], "unverified": false}
+  - {"file": "tests/backend/milestone/test_tt22_fixture_wiring.py", "group": "parallel", "keywords": ["tt21_integration.__wrapped__ with create_engine monkeypatched", "no PG", "Path.exists restored"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_b03_seeds.py", "group": "parallel", "keywords": ["selfchecks bundle->tmp_path_factory", "httpx.MockTransport", "no_network monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_b04_bars.py", "group": "parallel", "keywords": ["selfchecks env", "SQLite memory StaticPool", "ASGI TestClient", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_b05_announcements.py", "group": "parallel", "keywords": ["b05_harness.environment", "SQLite memory", "ASGI TestClient", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_b05_factors.py", "group": "parallel", "keywords": ["b05_harness.environment", "SQLite memory", "ASGI TestClient", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_b05_financials.py", "group": "parallel", "keywords": ["b05_harness.environment", "SQLite memory", "ASGI TestClient", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_b05_fund_flows.py", "group": "parallel", "keywords": ["b05_harness.environment", "SQLite memory", "ASGI TestClient", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/b05_routes/test_s2_owned_daily_bars.py", "group": "serial_pg", "keywords": ["selfchecks.test_s2_owned_daily_bars.world", "psycopg.connect", "PGHOST", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ci_template_worker_wait.py", "group": "parallel", "keywords": ["fake PG metadata", "monkeypatch connects/docker/socket", "tmp_path", "virtual clock"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_backfill_latest_start_c2.py", "group": "serial_pg", "keywords": ["late->world imported from consumer->pg_url", "docker", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_batch_fetch_c2.py", "group": "parallel", "keywords": ["world->tmp_path", "fake engine/grant/transport", "socket.connect monkeypatched"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_consumer_c2.py", "group": "serial_pg", "keywords": ["world->pg_url", "psycopg.connect", "docker", "tmp_path", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_grant_and_trade_date_t_t73b.py", "group": "serial_pg", "keywords": ["temp_db->daily_bars_t70_support._open_temp_db", "PGHOST", "real PG", "worker _engines singleton"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_http_budget_t_t73.py", "group": "serial_pg", "keywords": ["temp_db->_open_temp_db", "PGHOST", "real PG", "tmp_path", "monkeypatch.setenv"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_late_history_c2.py", "group": "serial_pg", "keywords": ["late->history->consumer.world->pg_url", "docker", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_outbox_c2.py", "group": "serial_pg", "keywords": ["world->pg_url", "psycopg.connect", "docker", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_plan_c2.py", "group": "serial_pg", "keywords": ["world->pg_url", "psycopg.connect", "docker"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_resume_c2.py", "group": "serial_pg", "keywords": ["batch/history->consumer.world->pg_url", "docker", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_source_impl_a_t_t70.py", "group": "serial_pg", "keywords": ["temp_db->_open_temp_db", "PGHOST", "create_engine real PG", "template database"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_source_impl_a_t_t72.py", "group": "serial_pg", "keywords": ["temp_db->daily_bars_t70_support._open_temp_db", "real PG", "worker _engines singleton"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_time_gate_c2.py", "group": "serial_pg", "keywords": ["gated->history->consumer.world->pg_url", "docker", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_window_consumer_c2.py", "group": "serial_pg", "keywords": ["history->consumer.world->pg_url", "docker", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_window_fetch_c2.py", "group": "parallel", "keywords": ["window->batch_fetch.world", "tmp_path", "fake transport", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_snapshot_impl_b.py", "group": "serial_pg", "keywords": ["b_db->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_db_metadata.py", "group": "parallel", "keywords": ["SQLAlchemy metadata read-only", "DDL compile only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_domain_portfolio_cov_t6.py", "group": "parallel", "keywords": ["autouse deny_network rejects socket.connect/create_connection", "app.domain.portfolio only", "synthetic data; no external resources"], "unverified": false}
+  - {"file": "tests/backend/unit/test_expected_json.py", "group": "parallel", "keywords": ["read-only synthetic fixtures/expected JSON"], "unverified": false}
+  - {"file": "tests/backend/unit/test_fixtures_fmt_a.py", "group": "parallel", "keywords": ["subprocess generate --check read-only", "generate --out tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_g7_board_in_universe_prod_t_t66.py", "group": "serial_pg", "keywords": ["o61_engine", "PGHOST", "create_engine real PG", "template database"], "unverified": false}
+  - {"file": "tests/backend/unit/test_g7_h12_s12_s20_exec_t_t63.py", "group": "parallel", "keywords": ["pure strategy calculations", "mock engine", "read-only cards"], "unverified": false}
+  - {"file": "tests/backend/unit/test_h18_null_propagation_h01_t_t48.py", "group": "parallel", "keywords": ["pure DSL evaluation", "read-only card/config", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_horizon_cases.py", "group": "parallel", "keywords": ["read-only YAML cases", "local rule evaluation"], "unverified": false}
+  - {"file": "tests/backend/unit/test_import_cases_skeleton.py", "group": "parallel", "keywords": ["read-only mapping/fixtures", "pure parser"], "unverified": false}
+  - {"file": "tests/backend/unit/test_import_codes_generated.py", "group": "parallel", "keywords": ["read-only expected JSON", "pure importing parser"], "unverified": false}
+  - {"file": "tests/backend/unit/test_import_resolutions_t_b02x.py", "group": "parallel", "keywords": ["read-only resolution table", "pure findings calculations"], "unverified": false}
+  - {"file": "tests/backend/unit/test_importing_preview_coverage_repair.py", "group": "parallel", "keywords": ["pure synthetic preview context"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ingest_expiry_offline.py", "group": "parallel", "keywords": ["synthetic dates", "deny_network monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ingest_intents_offline.py", "group": "parallel", "keywords": ["synthetic intents", "deny_network monkeypatch", "SHARING read-only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ingest_vendor_lists_offline.py", "group": "parallel", "keywords": ["fake DB/transport", "deny_network monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_mairui_guard.py", "group": "parallel", "keywords": ["guarded DNS rejects before network", "environment read-only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_mairui_licence_bind_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG", "monkeypatch.setenv"], "unverified": false}
+  - {"file": "tests/backend/unit/test_master_public_sources_s2.py", "group": "parallel", "keywords": ["deny_all_network monkeypatch", "synthetic parser inputs"], "unverified": false}
+  - {"file": "tests/backend/unit/test_master_sources_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "in-memory ZIP"], "unverified": false}
+  - {"file": "tests/backend/unit/test_master_sync_pg_s2.py", "group": "serial_pg", "keywords": ["conn->owned_engine->pg_url", "psycopg.connect", "docker", "tmp_path.parent UUID filename"], "unverified": false}
+  - {"file": "tests/backend/unit/test_master_terms_offline.py", "group": "parallel", "keywords": ["fake DB calls", "deny_network monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_master_xlsx_offline_r_b3.py", "group": "parallel", "keywords": ["in-memory ZIP/XML", "forbid_network monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_quotes_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "subprocess import check", "socket monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_s3_report_chain_coverage.py", "group": "parallel", "keywords": ["fake RedisQueue", "isolated_jobs autouse monkeypatch", "TASKS restored via setitem"], "unverified": false}
+  - {"file": "tests/backend/unit/test_sector_flows_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "socket monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_set_licence_retain_id_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta173_quotes_unusable_licence.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "fake DB/ASGI TestClient", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "ipl global replacement restored in finally"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta81_l6781_t_t45.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "thread contention"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta87_m1_a1_a24_t_t50.py", "group": "serial_pg", "keywords": ["_temp_db", "PGHOST", "create_engine real PG", "socket.bind blackhole", "subprocess", "fallback /tmp"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta87_m1_a1_a27_t_t52.py", "group": "serial_pg", "keywords": ["_h._temp_db from t_t50", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta91_a1r_runtime_t_t55.py", "group": "serial_port", "keywords": ["subprocess", "socket.connect fixed UNIX /tmp socket and private address", "netguard audit hook confined to child"], "unverified": true, "reason": "未验证：固定 UNIX socket/私网目标是否存在服务未探测，保守隔离客户端；环境写入和审计钩子仅在子进程。"}
+  - {"file": "tests/backend/unit/test_ta91_a1s_static_t_t55.py", "group": "parallel", "keywords": ["AST/read-only source scan", "synthetic files only tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta91_a28_a32_t_t55.py", "group": "serial_pg", "keywords": ["_temp_db from t_t50", "psycopg.connect", "docker run", "redis", "socket", "fixed /tmp files", "os.environ PGPORT", "global SOCKET/REDIS"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta93_b4_admit_lease_audit_t_t58.py", "group": "serial_pg", "keywords": ["_temp_db from t_t50", "real PG", "subprocess", "ipl global replacement restored"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta95_b3_g6_warn_ack_t_t61.py", "group": "parallel", "keywords": ["pure review/confidence calculations", "fake connection"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta95_r6_g1_g3_t_t61.py", "group": "serial_pg", "keywords": ["engine->PGHOST", "create_engine real PG", "template database"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb110_migration_heads_chain_t_t70b.py", "group": "parallel", "keywords": ["read-only alembic migration graph", "no connection"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb113_l1_l10_runner_h12_h17_t_t46.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "thread contention", "Redis fake"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb114_bootstrap_restart_t_t47.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "TB114_DATABASE_URL", "create_engine real PG", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb115_o66b_paths_b2_t_t47.py", "group": "parallel", "keywords": ["fixed /run constants asserted only", "writes exclusively tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb117_session_filter_t_t61.py", "group": "parallel", "keywords": ["pure session calculations", "existing probe results read-only", "no probe execution"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb143_multi_source_offline.py", "group": "parallel", "keywords": ["offline DDL compile", "tmp_path ZIP/CSV", "no_socket monkeypatch", "import-only RNG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb143_multi_source_pg.py", "group": "serial_pg", "keywords": ["offline_schema->pg_conn->pg_url", "psycopg", "docker"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb163r2_bj_gate.py", "group": "parallel", "keywords": ["Mock/monkeypatch", "confirm_bj_offline_volume_units and upsert gate", "no database connection"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
+  - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
+  - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "parallel", "keywords": ["socket.connect/create_connection monkeypatch denies all connections", "synthetic /tmp paths", "no real PG/redis or docker/services"], "unverified": false}
+  - {"file": "tests/backend/unit/test_verify_licence_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG", "Redis fake", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_verify_licence_t_b145.py", "group": "parallel", "keywords": ["world overrides imported helper world", "MagicMock engine/FakeRedis", "tmp_path", "monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_worker_healthcheck_offline.py", "group": "parallel", "keywords": ["fake Redis/runner", "deny_network monkeypatch", "runpy with restored sys.argv"], "unverified": false}
+  - {"file": "tests/replay/test_licence_t_t22.py", "group": "parallel", "keywords": ["RefIngest/RefScheduler fake clock", "pure synthetic licence state"], "unverified": false}
+  - {"file": "tests/replay/test_replay_example.py", "group": "parallel", "keywords": ["ReplayClient/Tape fake clock", "read-only recordings", "tmp_path"], "unverified": false}

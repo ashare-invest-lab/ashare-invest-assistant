@@ -6,6 +6,9 @@
     --eligible-codes <资格集> --before <日期> --split-by-year --out <输出目录> `
     --generator <app/cli/tb143_export.py 的 git blob SHA>。
 将生成的年度 CSV 与 tb143_load_day.sql 打包并生成清单后，才运行本 runner。
+每年使用新 psql 会话，默认跳过未确认 BJ（计入 skipped），沪深照常提交。
+BJ 确认须在同一 psql 会话提供至少 20 个不同合法 BJ 码的离线对照：同码同日、
+source=tdx_local、原始手量 v×100 精确等于整数股量，全部通过；本 runner 不提供强制放行参数。
 #>
 [CmdletBinding()]
 param(
@@ -126,7 +129,7 @@ try {
     } | Sort-Object)
     Write-Log "CSV count=$($csvs.Count)"
     if ($csvs.Count -eq 0) { throw '没有 day_YYYY.csv' }
-    $candidates = 0L; $inserted = 0L; $skipped = 0L
+    $candidates = 0L; $inserted = 0L; $skipped = 0L; $skippedBj = 0L
     for ($i = 0; $i -lt $csvs.Count; $i++) {
         $csv = $csvs[$i]; $year = $csv.Substring(4, 4)
         Write-Log "YEAR $year START；此前成功年份已独立提交。"
@@ -138,11 +141,19 @@ try {
             }
         })
         if ($counts.Count -ne 1) { throw "YEAR $year 已提交，但 candidates/inserted/skipped 解析失败" }
+        $blocked = @($script:dockerOutput | ForEach-Object {
+            if ([string]$_ -match '^\s*blocked_bj_unconfirmed\s*\|\s*(\d+)\s*$') {
+                [long]$Matches[1]
+            }
+        })
+        if ($blocked.Count -ne 1) { throw "YEAR $year 已提交，但 BJ 阻断计数解析失败" }
+        $skippedBj += $blocked[0]
         $candidates += $counts[0].Candidates; $inserted += $counts[0].Inserted; $skipped += $counts[0].Skipped
         Write-Log "YEAR $year COMMITTED candidates=$($counts[0].Candidates) inserted=$($counts[0].Inserted) skipped=$($counts[0].Skipped)"
         if ($i -lt $csvs.Count - 1) { Start-Sleep -Seconds $PauseSeconds }
     }
     Write-Log "TOTAL candidates=$candidates inserted=$inserted skipped=$skipped"
+    if ($skippedBj -gt 0) { throw 'BJ 未确认，保留本地产物供确认后续跑。' }
     $allYearsSucceeded = $true
 } catch {
     $exitCode = 1

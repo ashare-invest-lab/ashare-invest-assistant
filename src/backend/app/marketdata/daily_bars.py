@@ -18,6 +18,7 @@ from sqlalchemy.engine import Connection
 
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
+from app.bj_offline_volume import _BJ, _QUALIFIED_RE, _bj_write_unconfirmed, qualified_code
 from app.common.errors import AppError
 from app.config import Settings
 from app.db.tables.market import daily_bars, securities, trading_calendar
@@ -102,6 +103,7 @@ class UpsertStats:
     replaced: int = 0
     _replacement_results: tuple[dict[str, object], ...] = field(default=(), repr=False)
     _reconcile_sink: ReconcileSink | None = field(default=None, repr=False, compare=False)
+    blocked_bj_unconfirmed: int = 0
 
     def reconcile_after_transaction(self, *, committed: bool) -> None:
         """事务拥有者在提交成功或回滚后调用；不能把 UPDATE 成功当成提交成功。"""
@@ -349,7 +351,18 @@ def upsert_daily_bars(
     if not result.bars:
         return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
-    ordered = sorted(result.bars, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
+    for bar in result.bars:
+        if (bar.code.endswith(".BJ") or bar.code[:6].startswith(_BJ)) and (
+            not _QUALIFIED_RE.fullmatch(bar.code)
+            or not bar.code[:6].startswith(_BJ)
+            or qualified_code(bar.code[:6]) != bar.code
+        ):
+            raise ValueError("qualified_code_invalid")
+    writable = [bar for bar in result.bars if not _bj_write_unconfirmed({"code": bar.code})]
+    blocked_bj = len(result.bars) - len(writable)
+    if blocked_bj:
+        issues.append("blocked_bj_unconfirmed")
+    ordered = sorted(writable, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
     for offset in range(0, len(ordered), UPSERT_BATCH_ROWS):
         chunk = ordered[offset : offset + UPSERT_BATCH_ROWS]
         values = [
@@ -445,6 +458,7 @@ def upsert_daily_bars(
         conflicts=conflicts,
         issues=tuple(sorted(set(issues))),
         replaced=replaced,
+        blocked_bj_unconfirmed=blocked_bj,
         _replacement_results=tuple(replacement_results),
         _reconcile_sink=reconcile_sink,
     )
@@ -690,7 +704,9 @@ def _run_fetch(
     missing_issues = [f"daily_bars_missing:{code}" for code in missing_codes]
     issues = sorted(set(missing_issues) | set(upsert.issues))
     suspended = sum(1 for bar in kept if bar.is_suspended)
-    status = "partial" if upsert.conflicts or missing_pairs else "ok"
+    status = (
+        "partial" if upsert.conflicts or missing_pairs or upsert.blocked_bj_unconfirmed else "ok"
+    )
     stats = _empty_stats(
         uid,
         window_trading_days,

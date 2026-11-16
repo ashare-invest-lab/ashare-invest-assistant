@@ -487,6 +487,11 @@ def fetch_mairui_daily_bars(
         )
         written = upsert.inserted + upsert.unchanged
         issues.extend(upsert.issues)
+        if upsert.blocked_bj_unconfirmed:
+            history_evidence = {
+                code: evidence for code, evidence in history_evidence.items()
+                if not code.endswith(".BJ")
+            }
 
     run_status = (
         "partial"
