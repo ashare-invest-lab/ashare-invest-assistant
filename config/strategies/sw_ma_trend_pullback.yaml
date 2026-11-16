@@ -4,7 +4,8 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
 
   > **v3 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v2 → v3；本版除补参数出处外，还补
   A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v2 原文冻结在 `cards/history/sw_ma_trend_pullback.v2.md`。新版本须重新导入并重跑
-  G1–G6，lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
+  G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待
+  Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
 
   > 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card`
@@ -123,7 +124,7 @@ narrative: '# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式�
   series 已按 qfq@as_of 折算；W01-FX14 锁定 Wilder（SMA 口径会得出相反结论）；W01-FX15 跟踪止盈跨除权（A(d)=前
   74 根 1.0、后 6 根 1.5）。含 `LIMIT_LOCKED`/`SUSPENDED` 的夹具写 `expect.reason_details:{码:{direction}}`；`expect.lot_rule={min_buy,
   step, odd_lot_sell_all, sell_qty?}`（plan 2.5.14 T-R15 ⑧⑨）。'
-source_hash: b004d4d262e5629fa7750b75a8ce50d32b768db31cd157e1a7a30291de3d85c8
+source_hash: f5b4d795e28124fdebb6f822439de1957fa26a03693daf0239b6d1d22bbaf669
 strategy-card:
   a_share_constraints: ST/*ST、退市整理、停牌仍由 G-01 处理；ST/*ST、退市整理阻断买入方向候选信号的执行，持仓退出仍按原规则评估。
     T+1：当日新买股份不可当日卖出；停牌买卖均不可执行，一字涨停阻买、一字跌停阻卖。 涨跌停按 config/market_rules.yaml 有效段：主板普通股10%；主板ST/*ST在2026-07-06前5%、当天起10%；创业板/科创板含风险警示20%；北交所含风险警示30%，但本卡仍不含北交所。

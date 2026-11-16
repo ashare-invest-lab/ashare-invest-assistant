@@ -4,7 +4,8 @@ narrative: '# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v4（T-R
 
   > **v4 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v3 → v4；本版除补参数出处外，还补
   A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v3 原文冻结在 `cards/history/hold_risk_monitor.v3.md`。新版本须重新导入并重跑
-  G1–G6，lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
+  G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待
+  Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
 
   > 正式卡。导入格式：plan 2.5.14 A 节三个带标签块。`mount_policy: system_only` 纯离场组件（G1 豁免依据，plan
@@ -193,7 +194,7 @@ narrative: '# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v4（T-R
   - G4 佣金费率未在卡上钉死；未设置时 δ 只含最低佣金，偏低。
 
   - G5 样本：H-01 只对持仓求值，simulating 期间仅管理员测试账户，不重叠事件凑满 n ≥ 30 可能需要较长时间；未满前不判证伪。'
-source_hash: 2206bb7a73ca26e24242bf5c4cc37b160173c671df8b7add556e49045185db1d
+source_hash: e2fb31b427df917771d0292f1e6d3f92947438c7986a4aadb5f78462daa78862
 strategy-card:
   a_share_constraints: 本卡仅对持仓产生 reduce/sell 候选信号，不新增买入或加仓；ST/*ST、退市整理不自动取消持仓退出评估，也不单凭风险警示身份触发卖出。
     T+1：当日新买股份不可当日卖出；停牌买卖均不可执行，一字涨停阻买、一字跌停阻卖。 涨跌停按 config/market_rules.yaml 有效段：主板普通股10%；主板ST/*ST在2026-07-06前5%、当天起10%；创业板/科创板含风险警示20%；北交所含风险警示30%，但本卡仍不含北交所。
