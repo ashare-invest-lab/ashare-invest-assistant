@@ -22,6 +22,11 @@ FEATURES = {
 }
 SOURCE_SHA = '057dc4d4644e74cbbb3ac65a7811e0a50417bf29c23f2ecea471f4e05b96543f'
 PROXY_SHA = '755d2a8ee8b90bd2b31b45339d0a1ae1e96578cb4629fa510f023fc5d72fc3a4'
+GBBQ_SHA = 'c1cbc818d748079aa79749393729dbcf378adf258a22734762d19b885ed0eeab'
+SLICE_SHA = {
+    'calendar.csv': '1be8c10beb9a9c09de8a9d7360a7f8ab341a64ecd492d04e911bd51e90f8d261',
+    'listings.csv': 'bf9fd90ec0475de73e967679eae70304e93fd0f02b33794b5d4f56da5ba1010b',
+}
 FIELDS = ('code,market,as_of,feature,input_key,value,unit,status,fq_basis,null_reason,'
           'available_at,source_ids,source_url,proxy_value,proxy_available_at,proxy_flags,'
           'ex_date_proxy_years,ex_date_proxy_null_reasons,'
@@ -222,22 +227,8 @@ def generate(inputs, ledger, calendar, listings):
     return rows
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--day-zip', required=True, type=Path)
-    parser.add_argument('--gbbq-zip', type=Path, help='legacy CLI argument; unused by finance')
-    parser.add_argument('--rules', type=Path, help='legacy CLI argument; unused by finance')
-    parser.add_argument('--sources', type=Path, default=HERE/'sources/public_sources.csv')
-    parser.add_argument('--output', type=Path, default=HERE/'reference_values.csv')
-    parser.add_argument('--features', nargs='+', choices=FEATURES, default=list(FEATURES))
-    parser.add_argument('--check', action='store_true')
-    args = parser.parse_args()
-    path = HERE/'sources/proxy_inputs.jsonl'
-    require(sha256(args.sources) == SOURCE_SHA and sha256(path) == PROXY_SHA, 'source hash mismatch')
-    ledger = list(csv.DictReader(args.sources.open()))
-    inputs = [json.loads(s) for s in path.read_text().splitlines()]
-    require(sha256(args.day_zip) == next(r['sha256'] for r in ledger if r['kind'] == 'day_zip'), 'day hash mismatch')
-    with zipfile.ZipFile(args.day_zip) as archive:
+def extract_days(path, inputs):
+    with zipfile.ZipFile(path) as archive:
         members = {n.replace('\\', '/'): n for n in archive.namelist()}
         def days(stem):
             raw = archive.read(members[f'{stem[:2]}/lday/{stem}.day'])
@@ -245,8 +236,73 @@ def main():
             result = [iso(r[0]) for r in BAR.iter_unpack(raw)]
             require(result == sorted(set(result)), 'unordered/duplicate bars')
             return result
-        calendar = days('sh000001')
-        listings = {x['code']: days(('bj' if x['code'].startswith('92') else 'sh' if x['code'].startswith('6') else 'sz')+x['code'])[0] for x in inputs}
+        full = days('sh000001')
+        listings = {x['code']: days(('bj' if x['code'].startswith('92') else 'sh'
+                    if x['code'].startswith('6') else 'sz') + x['code'])[0] for x in inputs}
+    # Retain the lower-bound guard and every possible visible notice's successor.
+    # This sparse calendar is valid only for the pinned proxy inputs and DATES.
+    selected = {full[0]}
+    for data in inputs:
+        for kind in ('income', 'balance', 'dividend'):
+            for row in data[kind]['rows']:
+                notice = row[1][:10] if row[1] else ''
+                pos = bisect_right(full, notice)
+                if full[0] <= notice <= max(DATES) and pos < len(full) and full[pos] <= max(DATES):
+                    selected.add(full[pos])
+    return sorted(selected), listings
+
+
+def market_inputs(args, inputs, ledger):
+    if args.gbbq_zip:
+        require(sha256(args.gbbq_zip) == GBBQ_SHA, 'gbbq hash mismatch')
+        # No gbbq field is read by B9–B12; absence of a slice is not zero dividends.
+        with zipfile.ZipFile(args.gbbq_zip) as archive:
+            require('gbbq' in archive.namelist(), 'missing gbbq member')
+    if args.day_zip:
+        require(sha256(args.day_zip) == next(r['sha256'] for r in ledger if r['kind'] == 'day_zip'),
+                'day hash mismatch')
+        calendar, listings = extract_days(args.day_zip, inputs)
+        if args.extract_inputs:
+            args.input_dir.mkdir(parents=True, exist_ok=True)
+            for name, fields, rows in (
+                ('calendar.csv', ['trade_date'], ((d,) for d in calendar)),
+                ('listings.csv', ['code', 'first_bar_date'], sorted(listings.items())),
+            ):
+                with (args.input_dir/name).open('w', encoding='utf-8', newline='') as stream:
+                    writer = csv.writer(stream, lineterminator='\n')
+                    writer.writerow(fields)
+                    writer.writerows(rows)
+        return calendar, listings
+    require(not args.extract_inputs, '--extract-inputs requires --day-zip')
+    for name, expected in SLICE_SHA.items():
+        require(sha256(args.input_dir/name) == expected, 'slice hash mismatch: ' + name)
+    with (args.input_dir/'calendar.csv').open(encoding='utf-8', newline='') as stream:
+        calendar = [r['trade_date'] for r in csv.DictReader(stream)]
+    with (args.input_dir/'listings.csv').open(encoding='utf-8', newline='') as stream:
+        listings = {r['code']: r['first_bar_date'] for r in csv.DictReader(stream)}
+    require(calendar and calendar == sorted(set(calendar)), 'unordered/duplicate calendar')
+    require(set(listings) == {x['code'] for x in inputs}, 'listing sample mismatch')
+    return calendar, listings
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--day-zip', type=Path, help='从冻结原包重新抽取日线日期；默认使用仓库内 CSV')
+    parser.add_argument('--gbbq-zip', type=Path, help='核验冻结权息原包；当前财务计算无权息字段依赖')
+    parser.add_argument('--input-dir', type=Path, default=HERE/'inputs')
+    parser.add_argument('--extract-inputs', action='store_true', help='配合 --day-zip 将切片写入 --input-dir')
+    parser.add_argument('--rules', type=Path, help='legacy CLI argument; unused by finance')
+    parser.add_argument('--sources', type=Path, default=HERE/'sources/public_sources.csv')
+    parser.add_argument('--output', type=Path, default=HERE/'reference_values.csv')
+    parser.add_argument('--features', nargs='+', choices=FEATURES, default=list(FEATURES))
+    parser.add_argument('--check', action='store_true')
+    args = parser.parse_args()
+    require(not (args.check and args.extract_inputs), '--check cannot write input slices')
+    path = HERE/'sources/proxy_inputs.jsonl'
+    require(sha256(args.sources) == SOURCE_SHA and sha256(path) == PROXY_SHA, 'source hash mismatch')
+    ledger = list(csv.DictReader(args.sources.open()))
+    inputs = [json.loads(s) for s in path.read_text().splitlines()]
+    calendar, listings = market_inputs(args, inputs, ledger)
     with localcontext() as ctx:
         ctx.prec = 50
         rows = generate(inputs, ledger, calendar, listings)

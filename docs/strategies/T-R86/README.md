@@ -27,17 +27,36 @@
 [public_sources.csv](sources/public_sources.csv)记录104条来源、62个URL及原始响应SHA256。保留原40个利润/分红接口与行情包；移除无关ST公告及股本包，新增21个资产负债表请求（含银行通用接口空响应）。
 权益使用东财公开 `RPT_F10_FINANCE_GBALANCE`，000001使用 `RPT_F10_FINANCE_BBALANCE` 的 `TOTAL_PARENT_EQUITY`，币种CNY；不以总权益替代归母权益。字段语义未独立证实，所有B10保留source_semantics_unverified。
 [proxy_inputs.jsonl](sources/proxy_inputs.jsonl)每股一行按fields抽取，source_id关联URL/原始响应哈希；收入原响应逐一验哈希后补REPORT_TYPE_CODE，资产负债表原响应另行归档，响应pages=1且count逐一对齐。归档访问日2026-11-15不冒充历史首见日。
-脚本锁定两份来源文件与行情包SHA256；只读取公开归档，无网络、数据库或凭据访问。日期筛选排除未来报告/披露/除息；当前响应可能重述的风险单列保留。
+脚本锁定两份来源文件、输入切片及可选原包的SHA256；只读取公开归档，无网络、数据库或凭据访问。日期筛选排除未来报告/披露/除息；当前响应可能重述的风险单列保留。
+
+## 仓库内公开行情切片与离线复现
+
+出处为通达信公开日线 `hsjday_20261110.zip` 与权息 `gbbq_20261110.zip` 文件，包日期均为 **20261110**；日线公开发布入口见来源账本 `https://data.tdx.com.cn/vipdoc/hsjday.zip`。入口可能更新，不代表当前远端内容等于冻结包；本次只使用本地冻结原包，未联网核验当前下载地址或内容。
+日线原包 SHA256 见来源账本 `kind=day_zip`；权息原包 SHA256 为 `c1cbc818d748079aa79749393729dbcf378adf258a22734762d19b885ed0eeab`。
+
+切片仅含公开证券代码及日期，不含私有样本、持仓、股东代码。CSV 为 UTF-8、LF、含表头；日期单位为自然日，格式 `YYYY-MM-DD`（中国市场本地日期），证券代码按六位字符串读取、保留前导零。
+
+| 文件 | 列名、含义与单位 | 抽取规则 |
+|---|---|---|
+| [inputs/calendar.csv](inputs/calendar.csv) | `trade_date`：上证指数 sh000001 的日线日期，无价格单位 | 仅保留原始首日 1990-12-19（原算法下界），以及三类 proxy 输入中非空 NOTICE_DATE 在原日历下界至最大评估日 2026-11-09 内的次一观察日；次日也不得晚于最大评估日。排序去重后 771 日，末日 2026-11-03。 |
+| [inputs/listings.csv](inputs/listings.csv) | `code`：证券代码，无量纲；`first_bar_date`：首根日线日期 | 仅 proxy_inputs 中 20 股，各保留原 `.day` 的首个日期；代码前缀 92/6/其余分别映射 bj/sh/sz。首 K 只是上市日期代理，不能替代正式上市证据。 |
+
+`.day` 记录按 `<IIIIIfII` 解析，只使用第一字段 YYYYMMDD；不保存 OHLC、成交量、成交额等未读取列。日历是针对锁定 proxy_inputs 和三个评估日的稀疏依赖切片，不是完整交易日历；保留每个查询日期的真实次日及首日下界，才能保持 `bisect_right` 和历史披露排除规则。早年财务披露仍参与 B9，不能只保留 2026 年。样本股后续日线均未使用，故不保留。
+当前 B9–B12 与 proxy_inputs **没有读取任何 gbbq 字段**，分红代理来自已冻结的公开分红快照。因此实际所需权息记录为零，不另存无用权息 CSV，也不能据此推断这些股票没有权息事件。`--gbbq-zip` 保留为可选原包哈希及成员核验入口，不替代付款/完成证据。
+
+从仓库根目录执行以下命令即可离线复现；仅需 Python 标准库，不需要原包、网络或环境配置：
 
 ```sh
-DATA=../tdx-pack
-export PYTHONDONTWRITEBYTECODE=1
-python3 docs/strategies/T-R86/gen_reference.py --day-zip "$DATA/hsjday_20261110.zip"
-python3 docs/strategies/T-R86/gen_reference.py --check --day-zip "$DATA/hsjday_20261110.zip"
-python3 -O docs/strategies/T-R86/gen_reference.py --check --day-zip "$DATA/hsjday_20261110.zip"
+PYTHONDONTWRITEBYTECODE=1 python3 docs/strategies/T-R86/gen_reference.py --check
 ```
 
-`--check`逐字节校验全部列；`--features B9`等只重算选定键；最终验收必须全量。旧--gbbq-zip/--rules参数仅为CLI兼容，不参与财务计算。
+可选重抽取：将两份冻结原包放在工作目录的 `tdx-pack/` 后执行（原包不入库）：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 docs/strategies/T-R86/gen_reference.py --day-zip tdx-pack/hsjday_20261110.zip --gbbq-zip tdx-pack/gbbq_20261110.zip --extract-inputs
+```
+
+`--day-zip` 直接从原包提取后计算；加 `--extract-inputs` 才写入切片，可用 `--input-dir` 指定切片目录。`--check` 只读、逐字节校验全部列，不能与 `--extract-inputs` 同用；`--features B9`等只重算选定键，最终验收必须全量。旧 `--rules` 仅为CLI兼容，不参与财务计算。
 手算、各层null分布、与cbc665b逐值差异及验收结果见团队报告T-R86c节。仅解释候选信号，不荐股、不承诺收益。
 
 ## 验收用途（编排者 T-R86c 裁定）
