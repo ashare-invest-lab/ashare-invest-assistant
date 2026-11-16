@@ -61,3 +61,9 @@ DATA指向已有公开行情包目录，仅代理使用；正式计算不读行�
 超过800行的来源材料已单列[sources_ext](sources_ext/)：report_excerpts.csv、announcement_indexes.csv、public_profiles.csv、calendar_excerpts.csv、dividend_excerpts.csv、url_status.csv，建议作为第二个PR及对应inventory登记项；不自行建分支。核心脚本只依赖sources下CSV，摘录不参与计算。
 URL状态逐项在url_status.csv：152个公告详情页、201个PDF、20个公司概况、4个官方日历、1个检索入口均HTTP 200；另3个探路失败入口未作证据。4个报告PDF也属于更正公告，去重仅计一次；状态只证明本次可访问。
 手算2例、全部门禁、净增行数及提交尝试见团队报告T-R86d节。仅作财务输入验收，不荐股、不承诺收益。
+
+## 验收用途（编排者 T-R86c 裁定）
+
+- 代理层是后端计算逻辑的验收基准：同一份输入下，后端计算结果必须与 `proxy_value` 逐值一致。代理层不是正式证据，也不替代主源。
+- B12 的正式值和代理值全为 null，这是 #225 契约在缺少付款完成和年度闭合证据时的规定结果。实现时 B12 用标为【虚构】的合成夹具验收，覆盖契约 F-Q06–F-Q09 列出的各条边界。
+- 正式列是按 #225 离线重算口径得到的值，无可信主源时保持 null；本单已有的非空正式值，保留与否以编排者的最终裁定为准。
