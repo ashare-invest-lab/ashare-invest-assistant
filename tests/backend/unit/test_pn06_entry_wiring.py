@@ -603,11 +603,12 @@ def test_pn06_entry_tb140_daily_bars():
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'mkt')
-    namespace = {}
+    namespace = {"history_load": _probe("tb140_history_load")}
     exec(  # noqa: S102 - 仅执行从原文件AST隔离出的mkt函数
         compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace
     )
-    assert namespace["mkt"]("920999") == "SH"
+    # T-A157 §10.3：mkt 薄调用单一映射，920 新码归 BJ，不得判成 SH。
+    assert namespace["mkt"]("920999") == "BJ"
     assert "20231113" in source and "20261113" in source
     assert all(x in source for x in ("latest20", "ssjy_all", "history"))
 
@@ -682,7 +683,9 @@ def test_pn06_entry_day_runner_ps1(tmp_path):
     fake.write_text(
         "import json,os,sys\nopen(os.environ['PN06_LOG'],'a').write(json.dumps(sys.argv[1:])+'\\n')\n"
         "if 'find' in sys.argv: print('./day_2030.csv\\n./day_2031.csv')\n"
-        "if 'psql' in sys.argv: print('1 | 1 | 0')\n",
+        "if 'psql' in sys.argv:\n"
+        "    print('1 | 1 | 0')\n"
+        "    print('blocked_bj_unconfirmed | 0')\n",
         encoding="utf-8",
     )
     bindir = tmp_path / "bin"
@@ -737,7 +740,8 @@ def _run_sql(conn, schema, name, before="2025-01-01"):
 def test_pn06_entry_load_day_sql(pg_conn):
     schema = _probe_schema(pg_conn)
     calendars = pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone()
-    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == [(1, 1, 0)]
+    # T-B163 在 candidates/inserted/skipped 后新增 blocked_bj 计数。
+    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == [(1, 1, 0, 0)]
     source = pg_conn.execute(f'SELECT source FROM "{schema}".daily_bars').fetchone()
     assert source == ("tdx_local",)
     with (
