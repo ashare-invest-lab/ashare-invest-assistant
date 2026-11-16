@@ -38,7 +38,7 @@ def bar(connection: Connection, **changes: Any) -> UUID:  # noqa: ANN401
     return store.register_version(connection, **package("daily_bar", source_key="none", **changes))
 
 
-def test_b2b1_complete_registration_still_has_no_basis(conn: Connection) -> None:  # noqa: F811
+def test_b2b2_complete_registration_yields_basis(conn: Connection) -> None:  # noqa: F811
     store.register_version(conn, **package("calendar"))
     p = package("daily_bar")
     p["payload"].update(is_suspended=False, fetched_at=NOW.isoformat())
@@ -67,11 +67,25 @@ def test_b2b1_complete_registration_still_has_no_basis(conn: Connection) -> None
     for kind in ("calendar", "daily_bar"):
         assert provider.read_versions(**SCOPE, kind=kind, dates=[DAY], as_of=LATER).versions
     basis = provider.read_basis(**SCOPE, as_of=LATER)
-    assert (basis.bars, basis.proofs, basis.batches) == ((), (), ())
-    assert "basis_unavailable" in basis.gaps
-    assert select_day(basis, **SCOPE, as_of=LATER).d is None
+    assert len(basis.bars) == len(basis.proofs) == len(basis.batches) == 1
+    daily_bar, proof, receipt = basis.bars[0], basis.proofs[0], basis.batches[0]
+    assert (daily_bar.trade_date, daily_bar.version_id, daily_bar.fetched_at) == (
+        DAY,
+        str(saved),
+        NOW,
+    )
+    assert proof.version == daily_bar
+    assert proof.is_final is True
+    assert (proof.available_at, proof.run_id) == (NOW, str(run))
+    assert (receipt.run_date, receipt.run_id, receipt.status) == (DAY, str(run), "ok")
+    assert (receipt.finished_at, receipt.available_at) == (NOW, NOW)
+    assert not any(
+        gap.startswith(("basis_unavailable", "completion_blocked", "version_conflict_day"))
+        for gap in basis.gaps
+    )
+    assert select_day(basis, **SCOPE, as_of=LATER).d == DAY
     collected = inputs.collect(conn, UUID(U), "SYN", [], as_of=LATER, evidence_provider=provider)
-    assert collected.d is None
+    assert collected.d == DAY
 
 
 @pytest.mark.parametrize("case", ["chain", "late", "fork", "roots", "hidden", "other_key"])
