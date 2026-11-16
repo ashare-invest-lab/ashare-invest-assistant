@@ -13,6 +13,7 @@ import { ApiError, newIdempotencyKey } from '../../api/client';
 import { ENUMS } from '../../api/enums';
 import { IMPORT_422_TEXT, IMPORT_CODES, IMPORT_TONE, rowTone } from '../../api/importCodes';
 import { ErrorBox, Loading } from '../../components/common';
+import { CursorPager } from '../../components/CursorPager';
 import { DEDUP_STATUS, ENCODINGS, IMPORT_FIELDS, IMPORT_ROW_STATUS, IMPORT_STATUS, RECON_STATUS, TRADE_SIDE } from '../../i18n/importLabels';
 import { fmtAmount, fmtNum, fmtTime } from '../../lib/format';
 import { otherKindHint, parsersFor } from '../../lib/importKind';
@@ -241,8 +242,8 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
   const [dlErr, setDlErr] = useState<unknown>(null);
 
   const actionable = useMemo(
-    () => [...b.file_findings, ...(allRows.data?.items ?? []).flatMap((r) => r.findings)].filter((f) => f.needs_action),
-    [b.file_findings, allRows.data],
+    () => [...b.file_findings, ...allRows.items.flatMap((r) => r.findings)].filter((f) => f.needs_action),
+    [b.file_findings, allRows.items],
   );
   const fileErrors = b.file_findings.filter((f) => f.severity === 'error');
   const s = b.stats;
@@ -279,18 +280,22 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
               <Select allowClear showSearch placeholder="提示码" style={{ width: 260 }} value={filter.code} onChange={(v) => setFilter((f) => ({ ...f, code: v }))}
                 optionFilterProp="label" options={IMPORT_CODES.filter((c) => c.scope === 'row').map((c) => ({ value: c.code, label: `${c.title} ${c.code}` }))} />
             </Space>
-            {rows.isError ? <ErrorBox error={rows.error} /> : null}
-            <RowsTable rows={rows.data?.items ?? []} loading={rows.isPending} />
+            {rows.isError && !rows.isFetchNextPageError ? <ErrorBox error={rows.error} /> : null}
+            <RowsTable rows={rows.items} loading={rows.isPending} />
+            <CursorPager query={rows} loaded={rows.items.length} testId="import-rows-pager" unit="行" />
           </section>
 
-          {actionable.length ? (
+          {actionable.length || allRows.hasNextPage || allRows.isError ? (
             <section className="imp-section" data-testid="needs-action">
-              <h3>需处理的警告（{actionable.filter((f) => !f.resolution).length} 项未处理 / 共 {actionable.length} 项）</h3>
+              <h3>需处理的警告（已加载提示中 {actionable.filter((f) => !f.resolution).length} 项未处理 / {actionable.length} 项）</h3>
               <p className="muted">可以逐项选择处理方式；也可以在确认时勾选“接受默认处理”。选择“仍然导入”等覆盖默认处理的选项时必须填写理由。</p>
+              {allRows.hasNextPage ? <p className="muted">还有预览行未加载，后续行可能含需处理的警告。可继续加载全部预览行后检查。</p> : null}
+              {allRows.isError && !allRows.isFetchNextPageError ? <ErrorBox error={allRows.error} prefix="警告行读取失败" /> : null}
               {actionable.filter((f) => f.row_no != null).map((f) => (
                 <FindingItem key={`${f.id}-${f.resolution?.choice ?? ''}`} f={f} busy={resolve.isPending && resolve.variables?.v.finding_id === f.id}
                   onResolve={(choice, reason) => resolve.mutate({ id: b.batch_id, v: { finding_id: f.id, choice, reason } }, { onSuccess: () => void allRows.refetch() })} />
               ))}
+              <CursorPager query={allRows} loaded={allRows.items.length} testId="import-action-rows-pager" unit="行" />
             </section>
           ) : null}
 
