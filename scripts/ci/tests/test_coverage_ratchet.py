@@ -317,8 +317,11 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     backend = jobs["backend"]
-    assert "if" not in ready and "if" not in backend  # Required on merge_group too.
-    assert "needs" not in backend
+    # Both still run in parallel after classification, including on merge_group.
+    assert ready["needs"] == backend["needs"] == "changes"
+    assert ready["if"] == backend["if"] == (
+        "${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}"
+    )
     # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
     assert backend["timeout-minutes"] == 75
     assert backend["name"] == "backend (ruff, mypy, pytest+coverage)"

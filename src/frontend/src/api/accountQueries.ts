@@ -145,11 +145,15 @@ export function useVoidTrade() {
 }
 
 // ---------------- §7.2 导入 ----------------
+const importBatchId = (b: ImportBatchSummary) => b.batch_id;
 export const useImports = (accountId: string | undefined) =>
-  useQuery({
+  useCursorPages<ImportBatchSummary>({
     queryKey: ak.imports(accountId ?? ''),
-    queryFn: ({ signal }) => apiGet<Paged<ImportBatchSummary>>('/imports', { account_id: accountId, limit: 50 }, signal),
+    path: '/imports',
+    params: { account_id: accountId },
+    limit: 50,
     enabled: !!accountId,
+    idOf: importBatchId,
   });
 
 export const useUploadImport = () =>
