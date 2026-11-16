@@ -1,7 +1,7 @@
 """Frozen per-horizon observations in the existing suggestion_tracking snapshot.
 
 A row's snapshot holds a unique result per strategy VERSION (not a merged vote).
-No migration or new event machine. Terminal observations are never overwritten.
+No migration or new event machine. Only unavailable observations may be recomputed.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ from app.tracking.models import Result, Stat
 SCHEMA = "p2n03-tracking-v1"
 OBS_SCHEMA = "p2n03-market-observations-v1"
 PERIODS: tuple[Literal[1, 5, 20], ...] = (1, 5, 20)
+# docs/api-contract.md §7.11.3, T-A33 ruling 1: D+1 through D+5 trading days.
+UNAVAILABLE_RECOMPUTE_DAYS = 5
 
 
 def canonical(value: Any) -> str:  # noqa: ANN401
@@ -229,16 +231,66 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
                 suggestion_tracking.c.horizon_days == period,
             )
         ).first()
-        if prior is not None and prior.status != "pending":
+        today = at.astimezone(BEIJING).date()
+        within_window, elapsed = True, 0
+        for offset in range(1, (today - due).days + 1):
+            day = due + dt.timedelta(days=offset)
+            # T-A33: missing calendar never advances the count. Conservatively
+            # treat unknown coverage as outside the window; do not guess weekdays.
+            if day not in days or elapsed >= UNAVAILABLE_RECOMPUTE_DAYS:
+                within_window = False
+                break
+            elapsed += int(days[day])
+        previous_snapshot = None
+        previous_body: dict[str, Any] = {}
+        if prior is not None and prior.snapshot_id is not None:
+            previous_snapshot = conn.execute(
+                select(data_snapshots).where(
+                    data_snapshots.c.id == prior.snapshot_id, data_snapshots.c.user_id == owner
+                )
+            ).one()
+            previous_body = previous_snapshot._mapping["items"]
+            if digest(previous_body) != previous_snapshot.hash:
+                raise ValueError("tracking_result_snapshot_hash_conflict")
+        previous_results = {r["strategy_version_id"]: r for r in previous_body.get("results", [])}
+        unavailable = any(r["state"] == "unavailable" for r in previous_results.values())
+        if prior is not None and unavailable and not within_window:
+            # Expiry freezes the existing observation, without a new evaluation
+            # or snapshot. A first computation (including late runs) still runs below.
+            if prior.status != "done":
+                conn.execute(
+                    update(suggestion_tracking)
+                    .where(
+                        suggestion_tracking.c.suggestion_id == identifier,
+                        suggestion_tracking.c.horizon_days == period,
+                    )
+                    .values(status="done")
+                )
+                count += 1
+            continue
+        if prior is not None and prior.status != "pending" and not unavailable:
+            continue
+        if (
+            unavailable
+            and prior is not None
+            and prior.computed_at is not None
+            and at <= prior.computed_at
+        ):
             continue
         if prior is not None and prior.due_date == due and at < close_at(due):
             # Pending has no priced observation yet. A different wall clock
             # on replay must not create duplicate immutable snapshots.
             continue
-        cutoff = min(
-            at,
-            dt.datetime.combine(due + dt.timedelta(days=1), dt.time.min, BEIJING)
-            - dt.timedelta(microseconds=1),
+        # Recomputed knowledge is visible now; price dates remain bounded by D.
+        # Keep the existing cutoff for a first computation, including late runs.
+        cutoff = (
+            at
+            if unavailable
+            else min(
+                at,
+                dt.datetime.combine(due + dt.timedelta(days=1), dt.time.min, BEIJING)
+                - dt.timedelta(microseconds=1),
+            )
         )
         source, data = observations(conn, owner, cutoff)
         stock = instrument(conn, row.security_code, due, cutoff)
@@ -266,6 +318,13 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
         )
         results = []
         for conclusion in conclusions:
+            previous_result = previous_results.get(str(conclusion["strategy_version_id"]))
+            if previous_result is not None and previous_result["state"] not in {
+                "pending",
+                "unavailable",
+            }:
+                results.append(previous_result)
+                continue
             signal = conclusion["signal"]
             # forced_hold requires a generation-time bound observation. No mutable
             # current holding or missing evidence is silently converted to False.
@@ -326,6 +385,7 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
                 forced_hold=forced,
                 now=at,
                 minutes=minute_inputs,
+                recompute=previous_result is not None and previous_result["state"] == "unavailable",
             )
             bound_instances = bindings[str(conclusion["strategy_version_id"])]
             for index, instance in enumerate(bound_instances):
@@ -343,11 +403,22 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
                 result.evidence.append(evidence)
                 result.evidence_ids.append(evidence.id)
             results.append(result.model_dump(mode="json"))
+        history = list(previous_body.get("history", []))
+        if previous_snapshot is not None:
+            history.append(
+                {
+                    "snapshot_id": str(previous_snapshot.id),
+                    "hash": previous_snapshot.hash,
+                    "as_of": previous_body["as_of"],
+                    "results": previous_body["results"],
+                }
+            )
         snapshot_body = {
             "schema_version": SCHEMA,
             "algorithm_version": "p2n03-deterministic-ta27-v2",
             "generation_hash": generation.hash,
             "results": results,
+            "history": history,
             "suggestion_snapshot_id": str(row.snapshot_id),
             "observation_snapshot_id": str(source.id) if source is not None else None,
             "observation_hash": source.hash if source is not None else None,
@@ -377,7 +448,7 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
         states = {r["state"] for r in results}
         status = (
             "pending"
-            if "pending" in states
+            if "pending" in states or ("unavailable" in states and within_window)
             else "not_applicable"
             if states <= {"excluded", "untradable"}
             else "done"
