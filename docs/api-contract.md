@@ -542,6 +542,7 @@
 
 | # | code | 级别 | 范围 | 消息模板 | 处理与是否可覆盖 | 测试夹具 / 提示 |
 |---|---|---|---|---|---|---|
+| 1 | `IMPORT_EMPTY_FILE` | error | file | 文件为空（0 字节或只有空白字符） | 不可覆盖；上传时即拒绝（`422 IMPORT_FILE_ERRORS`，不创建批次） | `empty.txt`；编码检测不得抛异常 |
 | 2 | `IMPORT_FILE_TOO_LARGE` | error | file | 文件超过 {limit_mb} MB | 不可覆盖；上传时拒绝，不创建批次 | 生成器造 5 MB + 1 字节 |
 | 3 | `IMPORT_UNSUPPORTED_FILE_TYPE` | error | file | 只支持 .txt / .csv 文本文件 | 不可覆盖；上传时拒绝（扩展名不符，或 NUL 字节占比 > 1% 视为二进制） | 生成器造含 NUL 的文件 |
 | 4 | `IMPORT_TOO_MANY_ROWS` | error | file | 数据行超过 {limit} 行（默认 50,000） | 不可覆盖；请拆分文件 | 生成器 |
