@@ -37,7 +37,6 @@ from app.db.tables.market import (
 from app.db.tables.market import (
     security_risk_flag_history as risk,
 )
-from app.features.horizon_sources import EmptyEvidenceProvider
 from app.master.mairui_snapshot import (
     DATASETS,
     TASK,
@@ -172,6 +171,7 @@ def test_real_queue_worker_persistence_pit_and_consumer(
     assert run.status == "ok"
     assert flags(e)["f.is_st"] is True
     assert flags(e)["f.is_delisting_period"] is False
+    from app.features.horizon_sources import EmptyEvidenceProvider
     from app.strategy.horizon import inputs
 
     out = inputs.collect(
