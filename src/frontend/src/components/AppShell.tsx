@@ -37,7 +37,7 @@ function NotificationPanel({ onNavigate }: { onNavigate: (route: string) => void
           >
             <div style={{ width: '100%' }}>
               <div className="notif-head">
-                <Tag color={SEVERITY[n.severity]}>{NOTIFY_KIND[n.kind]}</Tag>
+                <Tag color={Object.hasOwn(SEVERITY, n.severity) ? SEVERITY[n.severity] : undefined}>{!Object.hasOwn(SEVERITY, n.severity) ? '未知级别' : Object.hasOwn(NOTIFY_KIND, n.kind) ? NOTIFY_KIND[n.kind] : '未知通知'}</Tag>
                 <span className="muted mono">{fmtTime(n.created_at).slice(5)}</span>
               </div>
               <div className="notif-title">{n.title}</div>

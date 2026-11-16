@@ -244,6 +244,28 @@ describe('T-F08 今日关注', () => {
     expect(alerts.querySelector('.today-empty')).toBeNull();
   });
 
+  it.each(['warning', 'future_level', '__proto__', 'constructor', 'toString'])(
+    'T-F54r：未知严重度 %s 显示默认标签且不进入错误边界', async (severity) => {
+      const alert = { ...FULL.alerts.items[0], severity };
+      // 故意注入契约外的网络响应，保留正式 API 的三档类型约束。
+      server.use(http.get('/api/v1/today', () => HttpResponse.json({
+        ...FULL, alerts: { items: [alert], more: false },
+      })));
+      const router = renderAt('/today');
+      const alerts = await screen.findByTestId('today-alerts');
+      expect(alerts).toBeInTheDocument();
+      const li = within(alerts).getByTestId(`alert-${alert.id}`);
+      expect(li).toHaveTextContent(alert.title);
+      const tag = within(li).getByText('未知级别', { exact: true });
+      expect(tag).toHaveClass('ant-tag');
+      for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
+      expect(tag.style.color).toBe('');
+      expect(tag.style.backgroundColor).toBe('');
+      expect(router.state.errors).toBeNull();
+      expect(screen.queryByText(/Unexpected Application Error/)).not.toBeInTheDocument();
+    },
+  );
+
   it('T-F54：保留服务端的严重度 → 触发时间降序 → id 顺序', async () => {
     const base = FULL.alerts.items[0];
     // 较低严重度有较新时间；同档既有不同时刻，也有同刻不同 id。
