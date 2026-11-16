@@ -2,7 +2,7 @@
 
 ## 0. 定位与使用边界
 
-lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.md §0–§24 编排为文字研究草稿，不使用正式导入围栏。仅收敛既有卡，不登记新策略版本，不替换源卡。所有规则均待复测，输出统一称“候选信号”。
+lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.md §0–§24 编排为文字研究草稿，不使用正式导入围栏。仅收敛既有卡，不登记新策略版本，不替换源卡。所有规则均待复测，输出统一称“候选信号”。 G7：☐。
 
 ## 1. 身份
 
@@ -43,7 +43,7 @@ lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.m
 
 字段口径依据团队报告 T-A159：保留 f.*_qfq、plan.entry_price_qfq、ctx.cost_price_qfq、ctx.highest_close_since_entry_qfq 等现有名称，均按 qfq@as_of 使用；成交日价格按 A(成交日)/A(T) 折算。plan.stop_loss_qfq、plan.breakout_level_qfq 的 QFQ-1/QFQ-2 派生尚未实现，持久化与换算要求见三张相关卡的 §7、§9；字段口径裁定不代表派生已经实现。
 
-S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖阈值原本属建议的部分仍未验证，见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
+S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖边界出处已证实（docs/strategies/feature_spec.md:121；docs/strategies/feature_spec.md:215；docs/strategies/feature_spec.md:389；docs/strategies/feature_spec.md:53）；建议阈值的 A 股有效性仍未验证（待复测），见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
 
 ## 数据接口依赖（T-R72 P1 对照）
 
@@ -134,7 +134,7 @@ KEY_DATA_MISSING / DATA_STALE：对应字段与≤T 可见性证据补齐且快�
 
 涨跌停价按成交日有效段、当日 pre_close 和 0.01 元 ROUND_HALF_UP 计算，含不足一价位及最低价格边界；除权日 pre_close 必须是可核对的参考价。pre_close 无效、状态未知或校验冲突则限价未知，不以昨天 close 或 gbbq 推值补缺。来源：docs/strategies/feature_spec.md §F35/F36。止损/止盈的展示和申报价需截断至执行日合法涨跌停区间；截断不能解释为阈值处一定能成交。来源：docs/strategies/_template.md §7.3、§17。
 
-停牌日不补值，伪停牌按缺失；复牌若此前停牌≥5 个交易日，首个复牌交易日阻断入场，退出继续求值。上市不足 30 个交易日买入阻断，各卡上市门槛与预热还需满足；注册制上市前 5 日无涨跌幅，不进波动类窗口。来源：docs/strategies/_template.md §7.3。G-01 另含 none 价格低于2元的买入阻断（既有初值未验证，出处：docs/strategies/catalog.md §3 G-01；共用登记 P14），使用实际 none 价格比较。上市年龄按日历从上市日计，不能以已回填 K 线根数代替。来源：docs/strategies/feature_spec.md §F13。
+停牌日不补值，伪停牌按缺失；复牌若此前停牌≥5 个交易日，首个复牌交易日阻断入场，退出继续求值。上市不足 30 个交易日买入阻断，各卡上市门槛与预热还需满足；注册制上市前 5 日无涨跌幅，不进波动类窗口。来源：docs/strategies/_template.md §7.3。G-01 另含 none 价格低于2元的买入阻断（初值出处已证实；A 股有效性未验证（待复测），出处：docs/strategies/catalog.md:73；共用登记 P14），使用实际 none 价格比较。上市年龄按日历从上市日计，不能以已回填 K 线根数代替。来源：docs/strategies/feature_spec.md §F13。
 
 沪深主板/创业板买入为 100 股整数倍；科创板单笔买卖≥200 股，200 以上按 1 股递增为“部分核实”口径；不足申报单位的卖出余额须一次性申报，且不得超过可卖量。单笔数量上限沿 config/market_rules.yaml §segments.lot，不在本稿重新设值。来源：docs/strategies/market_rules_T-R10.md §1.1–§1.3、§2.1–§2.2。
 
@@ -144,7 +144,7 @@ KEY_DATA_MISSING / DATA_STALE：对应字段与≤T 可见性证据补齐且快�
 
 印花税按实际卖出交易日分段：2023-04-10 至 2023-08-27 为 0.1%；2023-08-28 起为 0.05%，仅卖出计。过户费在仓库已建模区间为双边 0.001%；更早日期不外推。来源：config/market_rules.yaml §segments（2023-04-10、2023-08-28、2026-07-06）.fees。
 
-单边基础滑点见 §22（estimate，未验证）；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate、未验证、待复测，不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。来源：docs/strategies/_template.md §18。
+单边基础滑点见 §22（estimate，取值出处已证实：docs/strategies/T-R16/W-02_sw_breakout.md:71；成本校准未验证（待复测））；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate，档表及回退口径出处已证实，成本校准未验证（待复测），不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。来源：docs/strategies/_template.md:252；docs/strategies/_template.md:253；docs/strategies/_template.md:258；docs/strategies/_template.md:259；docs/strategies/_template.md:260；docs/strategies/_template.md:261；docs/strategies/_template.md:262；docs/strategies/_template.md:266；docs/strategies/_template.md:267；docs/strategies/_template.md:268。
 
 T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实成交额、税率及滑点只属于执行账本。T+1 的实际开盘不能参与 T 的入场规则。仓位金额未知时不生成精确费用数字。共用参数登记见 docs/strategies/T-R71/README.md §6。
 
@@ -162,33 +162,33 @@ T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实�
 
 ## 22. 参数与敏感性
 
-表中 default 仅照录原值，min/max/step 只保留原网格，均不自动生效；没有经过本轮选择。slippage_bp 为 estimate，其余具名参数为 hypothesis。固定规则参数也属待检验假设或口径，不因写成常数而省略出处。
+表中 default 仅照录原值，min/max/step 只保留原网格，均不自动生效；没有经过本轮选择。slippage_bp 为 estimate，其余具名参数为 hypothesis。固定规则参数也属待检验假设或口径，不因写成常数而省略出处。 本节“取值出处已证实”只确认原值、网格或方法有据，不代表 A 股有效性、数据就绪或门禁通过；论文只证明有文献采用该取值或方法。
 
-| 参数 | 类型 | 原 default | 原范围 | 原 step | 出处（文件 §节） | 状态 |
+| 参数 | 类型 | 原 default | 原范围 | 原 step | 出处（相对路径:行号／公开文献） | 状态 |
 |---|---|---|---|---|---|---|
-| bw_pct120_th | float | 0.2 | 0.05–0.4 | 0.05 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| vol_mult | float | 1.5 | 1.2–3.0 | 0.1 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| fail_pct | float | 0.03 | 0.01–0.05 | 0.01 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| stop_pct | float | 0.05 | 0.03–0.10 | 0.01 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| max_hold | int | 20 | 10–40 | 5 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| min_amount | float | 50000000.0 | 10000000.0–500000000.0 | 10000000.0 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| min_list_days | int | 120 | 60–250 | 10 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
-| slippage_bp | float | 15.0 | 0.0–50.0 | 1.0 | docs/strategies/T-R16/W-02_sw_breakout.md §22 | 未验证；待复测 |
+| bw_pct120_th | float | 0.2 | 0.05–0.4 | 0.05 | docs/strategies/T-R16/W-02_sw_breakout.md:64 | 取值出处已证实；A 股有效性未验证（待复测） |
+| vol_mult | float | 1.5 | 1.2–3.0 | 0.1 | docs/strategies/T-R16/W-02_sw_breakout.md:65 | 取值出处已证实；A 股有效性未验证（待复测） |
+| fail_pct | float | 0.03 | 0.01–0.05 | 0.01 | docs/strategies/T-R16/W-02_sw_breakout.md:66 | 取值出处已证实；A 股有效性未验证（待复测） |
+| stop_pct | float | 0.05 | 0.03–0.10 | 0.01 | docs/strategies/T-R16/W-02_sw_breakout.md:67 | 取值出处已证实；A 股有效性未验证（待复测） |
+| max_hold | int | 20 | 10–40 | 5 | docs/strategies/T-R16/W-02_sw_breakout.md:68 | 取值出处已证实；A 股有效性未验证（待复测） |
+| min_amount | float | 50000000.0 | 10000000.0–500000000.0 | 10000000.0 | docs/strategies/T-R16/W-02_sw_breakout.md:69 | 取值出处已证实；A 股有效性未验证（待复测） |
+| min_list_days | int | 120 | 60–250 | 10 | docs/strategies/T-R16/W-02_sw_breakout.md:70 | 取值出处已证实；A 股有效性未验证（待复测） |
+| slippage_bp | float | 15.0 | 0.0–50.0 | 1.0 | docs/strategies/T-R16/W-02_sw_breakout.md:71 | 取值出处已证实；成本校准未验证（待复测） |
 
-| 固定参数登记项 | 原值/含义 | 出处（文件 §节） | 状态 |
+| 固定参数登记项 | 原值/含义 | 出处（相对路径:行号／公开文献） | 状态 |
 |---|---|---|---|
-| 布林窗口/倍数/ddof | 20 根、2、总体标准差 ddof=0 | docs/strategies/T-R16/W-02_sw_breakout.md §5；docs/strategies/feature_spec.md §F31 | 未验证；待复测 |
-| 时间分位窗口 | 120 个非 null 带宽值（含 T） | docs/strategies/T-R16/W-02_sw_breakout.md §5；docs/strategies/feature_spec.md §F32 | 未验证；待复测 |
-| 突破窗口 | 前 20 根最高收盘（不含 T） | docs/strategies/T-R16/W-02_sw_breakout.md §7 E2 | 未验证；待复测 |
-| 主板近涨停反证 | 9.5%（其他板块待复测） | docs/strategies/T-R16/W-02_sw_breakout.md §7 C1 | 未验证；待复测 |
-| 失效/结构回撤窗口 | 3 日内；结构回撤 3% 为原证伪用值 | docs/strategies/T-R16/W-02_sw_breakout.md §7 I1；§3 | 未验证；待复测 |
-| 均线退出/确认窗口 | MA10；连续 2 根 | docs/strategies/T-R16/W-02_sw_breakout.md §7 X2 | 未验证；待复测 |
-| 时间止损门槛 | 持有≥3 日且未达 0.5R | docs/strategies/T-R16/W-02_sw_breakout.md §7 X4 | 未验证；待复测 |
-| 卡预热 | 140 根有效日 K | docs/strategies/T-R16/W-02_sw_breakout.md §5 | 未验证；待复测 |
-| 候选有效期 | 1 个交易日 | docs/strategies/T-R16/W-02_sw_breakout.md §8–10 | 未验证；待复测 |
-| 原证伪敏感性/窗口 | 分位0.1–0.3；倍数1.3–2.0；10日 | docs/strategies/T-R16/W-02_sw_breakout.md §3 | 未验证；待复测 |
+| 布林窗口/倍数/ddof | 20 根、2、总体标准差 ddof=0 | docs/strategies/T-R16/W-02_sw_breakout.md:17；docs/strategies/feature_spec.md:381；Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.8 | 取值出处已证实；A 股有效性未验证（待复测）；文献仅采用20日及2倍标准差，ddof=0仅据仓库，不证明突破组合有效 |
+| 时间分位窗口 | 120 个非 null 带宽值（含 T） | docs/strategies/T-R16/W-02_sw_breakout.md:16；docs/strategies/T-R16/W-02_sw_breakout.md:17；docs/strategies/feature_spec.md:388；docs/strategies/feature_spec.md:389 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 突破窗口 | 前 20 根最高收盘（不含 T） | docs/strategies/T-R16/W-02_sw_breakout.md:23 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 主板近涨停反证 | 9.5%（其他板块待复测） | docs/strategies/T-R16/W-02_sw_breakout.md:28 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 失效/结构回撤窗口 | 3 日内；结构回撤 3% 为原证伪用值 | docs/strategies/T-R16/W-02_sw_breakout.md:12；docs/strategies/T-R16/W-02_sw_breakout.md:29 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 均线退出/确认窗口 | MA10；连续 2 根 | docs/strategies/T-R16/W-02_sw_breakout.md:31 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 时间止损门槛 | 持有≥3 日且未达 0.5R | docs/strategies/T-R16/W-02_sw_breakout.md:33 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 卡预热 | 140 根有效日 K | docs/strategies/T-R16/W-02_sw_breakout.md:17 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 候选有效期 | 1 个交易日 | docs/strategies/T-R16/W-02_sw_breakout.md:44 | 取值出处已证实；A 股有效性未验证（待复测） |
+| 原证伪敏感性/窗口 | 分位0.1–0.3；倍数1.3–2.0；10日 | docs/strategies/T-R16/W-02_sw_breakout.md:12 | 取值出处已证实；A 股有效性未验证（待复测） |
 
-敏感性：先只测试原值与原网格内单因素邻域，结果未评估；不添加自拟阈值。逐卡具名参数 8 项、固定参数组 10 项，均未验证；共用环境/成本/研究参数只在 README §6 计一次。
+敏感性：先只测试原值与原网格内单因素邻域，结果未评估；不添加自拟阈值。逐卡具名参数 8 项、固定参数组 10 项，A 股有效性均未验证（待复测）；共用环境/成本/研究参数只在 README §6 计一次。
 
 ## 23. 审计、差异与未决
 
