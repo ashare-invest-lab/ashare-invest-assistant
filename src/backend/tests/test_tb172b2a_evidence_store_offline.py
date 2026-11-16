@@ -17,7 +17,7 @@ D = "2026-11-15"
 T = "2026-11-15T09:00:00+00:00"
 SHA = "a" * 64
 # 固定合成证据包；占位符只用于共享日期、UUID 与材料摘要。
-PAYLOADS: dict[str, dict[str, Any]] = json.loads(
+MATERIALS: dict[str, dict[str, Any]] = json.loads(
     """
 {
   "calendar": {"is_open":true, "coverage_start":"@D", "coverage_end":"@D",
@@ -37,46 +37,47 @@ PAYLOADS: dict[str, dict[str, Any]] = json.loads(
   "feature": {"values":{"x":null}, "units":{"x":null}, "raw_values":{"x":null},
     "transforms":{"x":"identity"}, "window":["@D","@D"], "qfq_anchor":"@D",
     "as_of":"@T", "d":null, "dependency_ids":["@U"], "evidence_ids":["@U"],
-    "feature_set_version":"v1"}
+    "feature_set_version":"v1"},
+  "proof": {"code":"SYN", "trade_date":"@D", "source":"fake", "licence_id":null,
+    "user_id":"@U", "version_hash":"@SHA", "source_version":"v1", "sha256":"@SHA"},
+  "batch": {"run_id":"@U", "owner_id":null, "licence_id":null, "members":[["@U","SYN"]],
+    "status":"ok", "finished_at":"@T", "available_at":"@T", "issues":[],
+    "kind":"daily_batch", "step":"daily_bars.fetch", "run_date":"@D"}
 }
 """.replace("@D", D)
     .replace("@T", T)
     .replace("@U", U)
     .replace("@SHA", SHA)
 )
-PROOF = json.loads(
-    """
-{"code":"SYN", "trade_date":"@D", "source":"fake", "licence_id":null,
- "user_id":"@U", "version_hash":"@SHA", "source_version":"v1", "sha256":"@SHA"}
-""".replace("@D", D)
-    .replace("@U", U)
-    .replace("@SHA", SHA)
-)
-BATCH = json.loads(
-    """
-{"run_id":"@U", "owner_id":null, "licence_id":null, "members":[["@U","SYN"]],
- "status":"ok", "finished_at":"@T", "available_at":"@T", "issues":[],
- "kind":"daily_batch", "step":"daily_bars.fetch", "run_date":"@D"}
-""".replace("@U", U)
-    .replace("@T", T)
-    .replace("@D", D)
-)
-NULLABLE = {k: [key for key, value in p.items() if value is None] for k, p in PAYLOADS.items()}
-EMPTY_ARRAYS = {"adjust_factor": ["trade_dates", "issues"]}
-CASES = [(kind, key) for kind, payload in PAYLOADS.items() for key in payload]
+PROOF, BATCH = MATERIALS["proof"], MATERIALS["batch"]
+PAYLOADS = {k: p for k, p in MATERIALS.items() if k not in {"proof", "batch"}}
+EMPTY_ARRAYS = {"adjust_factor": ["trade_dates", "issues"], "batch": ["members", "issues"]}
+CASES = [(kind, key) for kind, payload in MATERIALS.items() for key in payload]
 
 
-def validate(kind: str, payload: dict[str, Any]) -> None:
-    store.validate_payload(
-        kind, payload, dependency_ids=[UUID(U)], transform_version="v1", available_at=None
-    )
+def validate(kind: str, payload: dict[str, Any], available_at: datetime | None = None) -> None:
+    if kind == "proof":
+        store.validate_proof(
+            payload, available_at=available_at, is_final=None, proof_kind="synthetic"
+        )
+    elif kind == "batch":
+        store.validate_batch(payload)
+    else:
+        store.validate_payload(
+            kind,
+            payload,
+            dependency_ids=[UUID(U)],
+            transform_version="v1",
+            available_at=available_at,
+        )
 
 
 @pytest.mark.parametrize(("kind", "key"), CASES)
 @pytest.mark.parametrize("mode", ["missing", "null", "empty"])
 def test_payload_required_nullable_empty(kind: str, key: str, mode: str) -> None:
-    p = deepcopy(PAYLOADS[kind])
-    allowed = mode == "null" and key in NULLABLE[kind]
+    validate(kind, deepcopy(MATERIALS[kind]))
+    p = deepcopy(MATERIALS[kind])
+    allowed = mode == "null" and MATERIALS[kind][key] is None
     allowed |= mode == "empty" and key in EMPTY_ARRAYS.get(kind, [])
     if mode == "missing":
         del p[key]
@@ -90,50 +91,14 @@ def test_payload_required_nullable_empty(kind: str, key: str, mode: str) -> None
         validate(kind, p)
 
 
-@pytest.mark.parametrize("kind", PAYLOADS)
-def test_synthetic_payloads(kind: str) -> None:
-    validate(kind, deepcopy(PAYLOADS[kind]))
-
-
-@pytest.mark.parametrize(
-    ("target", "key"), [(t, k) for t, p in (("proof", PROOF), ("batch", BATCH)) for k in p]
-)
 @pytest.mark.parametrize("bad", ["missing", None, ""])
-def test_proof_batch_required_keys(target: str, key: str, bad: object) -> None:
-    p = {**(PROOF if target == "proof" else BATCH), key: bad}
-    if bad == "missing":
-        del p[key]
-    allowed = bad is None and key in {"owner_id", "licence_id"}
-    with nullcontext() if allowed else pytest.raises(store.EvidenceRejected):
-        if target == "proof":
-            store.validate_proof(p, available_at=None, is_final=None, proof_kind="synthetic")
-        else:
-            store.validate_batch(p)
-
-
-@pytest.mark.parametrize("bad", ["missing", None, ""])
-@pytest.mark.parametrize("target", ["payload", "proof"])
-def test_persisted_receipt_gate(bad: object, target: str) -> None:
-    p = {**(PAYLOADS["calendar"] if target == "payload" else PROOF), "persisted_receipt": bad}
+@pytest.mark.parametrize("kind", ["calendar", "proof"])
+def test_persisted_receipt_gate(bad: object, kind: str) -> None:
+    p = {**MATERIALS[kind], "persisted_receipt": bad}
     if bad == "missing":
         del p["persisted_receipt"]
     with pytest.raises(store.EvidenceRejected):
-        receipt_check(target, p)
-
-
-def receipt_check(target: str, p: dict[str, Any]) -> None:
-    if target == "payload":
-        store.validate_payload(
-            "calendar",
-            p,
-            dependency_ids=[],
-            transform_version="v1",
-            available_at=datetime.fromisoformat(T),
-        )
-    else:
-        store.validate_proof(
-            p, available_at=datetime.fromisoformat(T), is_final=None, proof_kind="synthetic"
-        )
+        validate(kind, p, datetime.fromisoformat(T))
 
 
 @pytest.mark.parametrize(
