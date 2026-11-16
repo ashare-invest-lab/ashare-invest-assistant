@@ -50,7 +50,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
           <>
             <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price}</span>
             <span className={`mono ${pctClass(q.change_pct)}`}>
-              {pre ? signed(Number(q.price) - Number(pre)) : ''} ({signed(q.change_pct)}%)
+              {pre ? `${signed(Number(q.price) - Number(pre))} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
             </span>
             <span className="muted small mono">成交额 {fmtAmount(q.amount)}</span>
             <span className="muted small mono">{fmtTime(q.t).slice(11)}</span>

@@ -101,6 +101,7 @@ tests:
   - {"file": "tests/backend/unit/test_import_cases_skeleton.py", "group": "parallel", "keywords": ["read-only mapping/fixtures", "pure parser"], "unverified": false}
   - {"file": "tests/backend/unit/test_import_codes_generated.py", "group": "parallel", "keywords": ["read-only expected JSON", "pure importing parser"], "unverified": false}
   - {"file": "tests/backend/unit/test_import_resolutions_t_b02x.py", "group": "parallel", "keywords": ["read-only resolution table", "pure findings calculations"], "unverified": false}
+  - {"file": "tests/backend/unit/test_import_storage_offline_cov_t6.py", "group": "parallel", "keywords": ["socket.connect/create_connection denied", "generated synthetic keys and tmp_path only", "no real DB or import files"], "unverified": false}
   - {"file": "tests/backend/unit/test_importing_preview_coverage_repair.py", "group": "parallel", "keywords": ["pure synthetic preview context"], "unverified": false}
   - {"file": "tests/backend/unit/test_ingest_expiry_offline.py", "group": "parallel", "keywords": ["synthetic dates", "deny_network monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ingest_intents_offline.py", "group": "parallel", "keywords": ["synthetic intents", "deny_network monkeypatch", "SHARING read-only"], "unverified": false}
@@ -115,7 +116,9 @@ tests:
   - {"file": "tests/backend/unit/test_quotes_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "subprocess import check", "socket monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_s3_report_chain_coverage.py", "group": "parallel", "keywords": ["fake RedisQueue", "isolated_jobs autouse monkeypatch", "TASKS restored via setitem"], "unverified": false}
   - {"file": "tests/backend/unit/test_sector_flows_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "socket monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_security_search_terms_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake engine/rebuild transaction", "socket connections denied", "read-only config plus tmp_path and restored environment"], "unverified": false}
   - {"file": "tests/backend/unit/test_set_licence_retain_id_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_signal_rt_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake Consumer/Redis/engine/runner", "socket connections denied", "runpy and automatically restored monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "ipl global replacement restored in finally"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta81_l6781_t_t45.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "thread contention"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta87_m1_a1_a24_t_t50.py", "group": "serial_pg", "keywords": ["_temp_db", "PGHOST", "create_engine real PG", "socket.bind blackhole", "subprocess", "fallback /tmp"], "unverified": false}
