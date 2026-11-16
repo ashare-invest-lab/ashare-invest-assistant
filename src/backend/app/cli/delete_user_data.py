@@ -490,6 +490,11 @@ TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
             "app.reject_horizon_completion_update",
         ),
         (
+            "app.horizon_completion_evidence",
+            "trg_horizon_completion_evidence_no_delete",
+            "app.reject_horizon_completion_delete",
+        ),
+        (
             "app.horizon_input_versions",
             "trg_horizon_input_versions_no_update",
             "app.reject_horizon_input_update",

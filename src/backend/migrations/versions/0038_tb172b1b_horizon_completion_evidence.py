@@ -86,6 +86,18 @@ def upgrade() -> None:
         CREATE TRIGGER trg_horizon_completion_evidence_no_update
         BEFORE UPDATE ON app.horizon_completion_evidence
         FOR EACH ROW EXECUTE FUNCTION app.reject_horizon_completion_update();
+        CREATE FUNCTION app.reject_horizon_completion_delete() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+            IF current_user <> 'aia_maint' THEN
+                RAISE EXCEPTION 'horizon_completion_evidence is immutable: DELETE forbidden';
+            END IF;
+            RETURN OLD;
+        END;
+        $$;
+        CREATE TRIGGER trg_horizon_completion_evidence_no_delete
+        BEFORE DELETE ON app.horizon_completion_evidence
+        FOR EACH ROW EXECUTE FUNCTION app.reject_horizon_completion_delete();
     """)
 
 
@@ -104,6 +116,10 @@ def downgrade() -> None:
     op.execute(
         "DROP TRIGGER trg_horizon_completion_evidence_no_update ON app.horizon_completion_evidence"
     )
+    op.execute(
+        "DROP TRIGGER trg_horizon_completion_evidence_no_delete ON app.horizon_completion_evidence"
+    )
     op.execute("DROP FUNCTION app.validate_horizon_completion_version()")
     op.execute("DROP FUNCTION app.reject_horizon_completion_update()")
+    op.execute("DROP FUNCTION app.reject_horizon_completion_delete()")
     op.drop_table("horizon_completion_evidence", schema="app")

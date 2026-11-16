@@ -53,6 +53,28 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
+@pytest.fixture
+def role_conn(world: SimpleNamespace) -> Iterator[Connection]:
+    # CREATE ROLE / GRANT 均在事务内；回滚清理自建角色并恢复复用角色的原权限。
+    with world.engine.connect() as conn:
+        try:
+            for role in ("aia_api", "aia_maint"):
+                if not conn.scalar(
+                    text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": role}
+                ):
+                    conn.execute(text(f"CREATE ROLE {role} NOLOGIN"))
+                conn.execute(text(f"GRANT USAGE ON SCHEMA app TO {role}"))
+                conn.execute(
+                    text(f"GRANT SELECT, DELETE ON app.horizon_completion_evidence TO {role}")
+                )
+                conn.execute(
+                    text(f"GRANT SELECT, DELETE ON app.horizon_input_versions TO {role}")
+                )
+            yield conn
+        finally:
+            conn.rollback()
+
+
 def seed(conn: Connection, *, kind: str = "daily_bar", scope: str = "synthetic") -> dict[str, Any]:
     from app.db.tables.horizon import horizon_input_versions as versions
 
@@ -102,7 +124,11 @@ def test_completion_single_head_empty_upgrade_guarded_downgrade(world: SimpleNam
     with world.engine.connect() as conn:
         assert not inspect(conn).has_table(table.name, schema="app")
         assert inspect(conn).has_table("horizon_input_versions", schema="app")
-        for function in ("validate_horizon_completion_version", "reject_horizon_completion_update"):
+        for function in (
+            "validate_horizon_completion_version",
+            "reject_horizon_completion_update",
+            "reject_horizon_completion_delete",
+        ):
             assert (
                 conn.scalar(text("SELECT to_regprocedure(:f)"), {"f": f"app.{function}()"}) is None
             )
@@ -117,12 +143,13 @@ def test_completion_single_head_empty_upgrade_guarded_downgrade(world: SimpleNam
         assert conn.scalar(text("SELECT version_num FROM public.alembic_version")) == "0038"
 
 
-def test_completion_append_only_and_privacy_delete(world: SimpleNamespace) -> None:
+def test_completion_append_only_and_privacy_delete(role_conn: Connection) -> None:
     from app.cli.delete_user_data import STEPS, unknown_triggers
     from app.db.tables.horizon import horizon_completion_evidence as table
     from app.db.tables.horizon import horizon_input_versions as versions
 
-    with world.engine.begin() as conn:
+    with role_conn.begin_nested():
+        conn = role_conn
         row = seed(conn)
         conn.execute(insert(table).values(**row))
         original = conn.execute(select(table)).one()
@@ -150,9 +177,29 @@ def test_completion_append_only_and_privacy_delete(world: SimpleNamespace) -> No
         assert conn.scalar(select(func.count()).select_from(table)) == 2
         assert unknown_triggers(conn, [table.fullname]) == []
         step = next(s for s in STEPS if s.table == table.fullname)
+        conn.execute(text("SET ROLE aia_maint"))
+        assert conn.scalar(text("SELECT current_user")) == "aia_maint"
         conn.execute(text(f"DELETE FROM {step.table} WHERE {step.where}"), {"uid": OWNER})  # noqa: S608
         assert conn.scalar(select(func.count()).select_from(table)) == 0
         conn.execute(versions.delete().where(versions.c.user_id == OWNER))
+        conn.execute(text("RESET ROLE"))
+
+
+def test_delete_requires_aia_maint(role_conn: Connection) -> None:
+    from app.db.tables.horizon import horizon_completion_evidence as table
+
+    row = seed(role_conn)
+    role_conn.execute(insert(table).values(**row))
+    role_conn.execute(text("SET ROLE aia_api"))
+    assert role_conn.scalar(text("SELECT current_user")) == "aia_api"
+    with pytest.raises(DBAPIError, match="DELETE forbidden"), role_conn.begin_nested():
+        role_conn.execute(table.delete().where(table.c.id == row["id"]))
+    assert role_conn.scalar(select(table.c.id)) == row["id"]
+    role_conn.execute(text("SET ROLE aia_maint"))
+    assert role_conn.scalar(text("SELECT current_user")) == "aia_maint"
+    role_conn.execute(table.delete().where(table.c.id == row["id"]))
+    assert role_conn.scalar(select(func.count()).select_from(table)) == 0
+    role_conn.execute(text("RESET ROLE"))
 
 
 @pytest.mark.parametrize(

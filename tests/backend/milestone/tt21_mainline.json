@@ -151,7 +151,7 @@
     },
     {
       "migration_file": "0038_tb172b1b_horizon_completion_evidence.py",
-      "sha256_checksum": "46835de2a84095a109b7cd1738c388d055fca5c369ede356735232d6b1062b70"
+      "sha256_checksum": "c7a46bf4cabeddc88a95c2e749db17708a3002018fe584f5b17673cb0017d523"
     }
   ]
 }

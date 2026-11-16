@@ -98,4 +98,9 @@ def test_purge_step_and_trigger_allowlist() -> None:
             "trg_horizon_completion_evidence_no_update",
             "app.reject_horizon_completion_update",
         ),
+        (
+            "app.horizon_completion_evidence",
+            "trg_horizon_completion_evidence_no_delete",
+            "app.reject_horizon_completion_delete",
+        ),
     } <= TRIGGER_ALLOWLIST
