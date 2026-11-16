@@ -2,7 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from './client';
 import type { Paged } from './types';
-import type { StrategyInstance, StrategyInstanceCreate, StrategyInstanceCreated, StrategyTemplate } from './strategyTypes';
+import type { StrategyInstance, StrategyInstanceCreate, StrategyInstanceCreated, StrategyTemplate, StrategyTracking, StrategyVersionDetail } from './strategyTypes';
 
 export const sk = { templates: ['strategies'] as const, instances: ['strategy-instances'] as const };
 
@@ -28,6 +28,20 @@ export async function fetchAllPages<T>(path: string, signal?: AbortSignal, limit
 
 export const useStrategyTemplates = () =>
   useQuery({ queryKey: sk.templates, queryFn: ({ signal }) => fetchAllPages<StrategyTemplate>('/strategies', signal) });
+export const useStrategyVersion = (strategyId: string, versionId: string) =>
+  useQuery({
+    queryKey: ['strategy-version', strategyId, versionId],
+    queryFn: ({ signal }) => apiGet<StrategyVersionDetail>(`/strategies/${encodeURIComponent(strategyId)}/versions/${encodeURIComponent(versionId)}`, undefined, signal),
+    enabled: !!strategyId && !!versionId,
+  });
+
+/** 详情页独立缓存范围，避免与信号页的本人统计混用。 */
+export const useStrategyDetailTracking = (strategyId: string, versionId: string, scope: StrategyTracking['scope']) =>
+  useQuery({
+    queryKey: ['strategy-detail-tracking', strategyId, versionId, scope],
+    queryFn: ({ signal }) => apiGet<StrategyTracking>(`/strategies/${encodeURIComponent(strategyId)}/versions/${encodeURIComponent(versionId)}/tracking`, { scope }, signal),
+    enabled: !!strategyId && !!versionId,
+  });
 export const useStrategyInstances = () =>
   useQuery({ queryKey: sk.instances, queryFn: ({ signal }) => fetchAllPages<StrategyInstance>('/strategy-instances', signal) });
 

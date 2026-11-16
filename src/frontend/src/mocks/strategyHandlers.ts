@@ -4,7 +4,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { ENUMS, type Horizon } from '../api/enums';
-import type { StrategyInstance, StrategyInstanceCreate, StrategyTemplate, StrategyTracking } from '../api/strategyTypes';
+import type { StrategyInstance, StrategyInstanceCreate, StrategyTemplate, StrategyTracking, StrategyVersionDetail } from '../api/strategyTypes';
 import { errorBody, page } from './handlerUtils';
 import { ACCOUNT_ID, STRATEGIES, uid } from './fixtures';
 import { HORIZON } from '../i18n/labels';
@@ -112,6 +112,20 @@ export const strategyHandlers = [
     if (raw !== null && raw !== 'mine' && raw !== 'site') return json(errorBody('VALIDATION_ERROR', 'scope 取值 mine|site', { fields: [{ field: 'scope', issue: 'scope 取值 mine|site' }] }), 400);
     const scope = raw === 'site' ? 'site' : 'mine';
     return json(trackingOf(t, scope));
+  }),
+  http.get(`${API}/strategies/:id/versions/:vid`, ({ params }) => {
+    const t = STRATEGY_TEMPLATES.find((x) => x.id === params.id);
+    if (!t || t.current_version.id !== params.vid) return json(errorBody('NOT_FOUND', '策略模板或版本不存在（示例数据）'), 404);
+    const detail: StrategyVersionDetail = {
+      key: t.key, version_no: t.current_version.version_no, kind: 'rule_template', horizons: t.horizons,
+      lifecycle: t.current_version.lifecycle, card_version_id: null, risk_level: t.risk_level,
+      param_hash: '示例数据-param-hash', parent_version_id: null,
+      internal_check: { done: false, method_types: [], checked_on: null },
+      rules: [{ id: '示例数据-R1', dimension: 'technical', role: 'entry', expr: 'close > ma(close, ma_fast)' }],
+      params_schema: { ma_fast: { type: 'int', default: 20, min: 5, max: 60, step: 1, desc: '快线周期（示例数据）' } },
+      stops: { stop_loss: 'entry - 2 * atr(14)', take_profit: null, time_stop_days: 10 },
+    };
+    return json(detail);
   }),
   http.get(`${API}/strategies`, ({ request }) => {
     const url = new URL(request.url);

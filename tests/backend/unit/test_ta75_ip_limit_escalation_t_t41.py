@@ -308,7 +308,8 @@ def test_ta75_t5_events_and_logs_have_no_licence_material(caplog: pytest.LogCapt
         core = IngestCore(CFG, engine=engine)
     except TypeError:
         pytest.fail("受测树 IngestCore 不接受 engine，无法做持久化不泄露验收（非静默 skip）")
-    uid, lid = uuid.uuid4(), uuid.uuid4()
+    uid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+    lid = uuid.UUID("22222222-2222-4222-8222-222222222222")
     _seed(engine, uid, lid, lic_text=FAKE_LICENCE)
     with caplog.at_level(logging.DEBUG):
         # inject a decoy secret into logger namespace; production path must not echo licence

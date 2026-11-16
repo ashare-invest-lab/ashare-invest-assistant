@@ -1,6 +1,6 @@
 /** 策略库类型（契约 v0.2.7 §5.1 StrategyInstance、§6.0A、§7.4 /strategies、§7.5 /strategy-instances） */
-import type { CardRiskLevel, Horizon, InstanceEventKind, InstanceOrigin, InstanceStatus, Lifecycle, ReasonCode } from './enums';
-import type { DataStatusBlock, DateTime, Decimal, Stat, Uuid } from './types';
+import type { CardRiskLevel, Dimension, Horizon, InstanceEventKind, InstanceOrigin, InstanceStatus, Lifecycle, ReasonCode, RuleRole } from './enums';
+import type { DataStatusBlock, DateStr, DateTime, Decimal, Stat, Uuid } from './types';
 
 /** GET /strategies 元素 */
 export interface StrategyTemplate {
@@ -12,6 +12,31 @@ export interface StrategyTemplate {
   health: { state: string; weight: Decimal; n: number } | null;
   /** v0.2.7：取当前版本关联 L1 卡片的值，未关联为 normal */
   risk_level: CardRiskLevel;
+}
+
+/** GET /strategies/{id}/versions/{vid}：配置按实际返回展示，不在前端求值。 */
+export interface StrategyVersionDetail {
+  lifecycle: Lifecycle;
+  card_version_id: Uuid | null;
+  risk_level: CardRiskLevel;
+  param_hash: string;
+  parent_version_id: Uuid | null;
+  internal_check: {
+    done: boolean;
+    method_types: ('factor_ic' | 'event_study' | 'param_robustness')[];
+    checked_on: DateStr | null;
+  };
+  key?: string;
+  version_no?: number;
+  kind?: 'rule_template' | 'code';
+  horizons?: Horizon[];
+  params_schema?: Record<string, { type?: string; default?: unknown; min?: number; max?: number; step?: number; desc?: string }>;
+  rules?: { id?: string; dimension?: Dimension; role?: RuleRole; expr?: string | null }[];
+  action_map?: Record<string, unknown>;
+  stops?: Record<string, unknown>;
+  applicability?: Record<string, unknown>;
+  valid_until?: Record<string, unknown>;
+  screen?: Record<string, unknown> | null;
 }
 
 /** POST /strategy-instances 请求体（契约 §7.5；v0.2.5 起没有 fit_ack，v0.2.6 T006e：高风险模板也没有确认字段） */

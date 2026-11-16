@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 from copy import deepcopy
+from pathlib import Path
 
 import coverage_ratchet as ratchet
 import coverage_ratchet_base as loader
@@ -53,10 +54,13 @@ class Actions:
     def __init__(self):
         self.states = {}
         self.calls = []
+        self.counts = {}
 
-    def put(self, sha, mode="valid"):
+    def put(self, sha, mode="valid", *, counts=None):
         identifier = 100 + len(self.states)
         self.states[sha] = (identifier, mode)
+        if counts is not None:
+            self.counts[sha] = deepcopy(counts)
 
     def __call__(self, path, *, binary=False):
         self.calls.append(path)
@@ -92,6 +96,8 @@ class Actions:
             return b"synthetic invalid archive"
         record = deepcopy(ratchet.bootstrap_record())
         record.update(commit=sha, run_id=str(identifier), attempt="1")
+        if sha in self.counts:
+            record["counts"] = deepcopy(self.counts[sha])
         if mode == "failed_ratchet":
             record["ratchet_passed"] = False
         elif mode == "wrong_identity":
@@ -217,14 +223,16 @@ def test_authentication_or_transport_failure_is_not_hidden_by_ancestry(history, 
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "pull_request"])
+@pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "pull_request", "merge_group"])
 def test_cli_allows_main_events_to_recover_but_pr_remains_exact(
     history, tmp_path, monkeypatch, capsys, event_name,
 ):
     _, (first, _, third) = history
     actions = Actions()
     actions.put(first)
-    event = {"before": third, "pull_request": {
+    event = {"before": third, "merge_group": {
+        "base_ref": "refs/heads/main", "base_sha": third, "head_sha": "a" * 40,
+    }, "pull_request": {
         "base": {"sha": third, "ref": "main", "repo": {"full_name": REPO}},
         "head": {"sha": "a" * 40},
     }}
@@ -234,12 +242,13 @@ def test_cli_allows_main_events_to_recover_but_pr_remains_exact(
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
     monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
     monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
-    monkeypatch.setenv("GITHUB_REF", "refs/pull/7/merge" if event_name == "pull_request"
-                       else "refs/heads/main")
+    refs = {"pull_request": "refs/pull/7/merge",
+            "merge_group": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
+    monkeypatch.setenv("GITHUB_REF", refs.get(event_name, "refs/heads/main"))
     monkeypatch.setattr(loader, "api_reader", lambda repo: actions)
     monkeypatch.setattr(sys, "argv", ["loader", "--output", str(output)])
     result = loader.main()
-    if event_name == "pull_request":
+    if event_name in {"pull_request", "merge_group"}:
         assert result == 1 and not output.exists()
         assert all(third in call for call in actions.calls)
     else:
@@ -283,3 +292,136 @@ def test_no_new_fallback_can_reset_to_an_unmeasured_bootstrap_ancestor(history, 
     with pytest.raises(ValueError, match="No usable trusted main push measurement"):
         loader.freeze(REPO, third, Actions(), allow_fallback=True)
     assert root.exists()
+
+
+def test_explicit_recovery_constants_match_the_approved_pair():
+    assert loader.EXPLICIT_RECOVERY_BASE == "f6c939d6ed4af94144e7dd669f206c96d6aeaf6b"
+    assert loader.EXPLICIT_RECOVERY_PARENT == "90ef8ff16abb7204b7c4ffd54174aeeb8f712455"
+
+
+@pytest.fixture
+def explicit_recovery_case(history, monkeypatch):
+    root, (_, _, parent) = history
+
+    def make(path="docs/recovery.md", *, approved=True):
+        git(root, "checkout", "-q", "--detach", parent)
+        changed = root / path
+        changed.parent.mkdir(parents=True, exist_ok=True)
+        changed.write_text("synthetic recovery change\n", encoding="utf-8")
+        git(root, "add", path)
+        child = commit(root, "explicit recovery: " + path)
+        if approved:
+            monkeypatch.setattr(loader, "EXPLICIT_RECOVERY_BASE", child)
+            monkeypatch.setattr(loader, "EXPLICIT_RECOVERY_PARENT", parent)
+        counts = deepcopy(ratchet.BOOTSTRAP["counts"])
+        counts["total"] = [19263, 25198]
+        actions = Actions()
+        actions.put(parent, counts=counts)
+        return {"root": root, "parent": parent, "child": child,
+                "actions": actions, "counts": counts}
+
+    return make
+
+
+def assert_explicit_pair_recovers(freeze, case, *, allow_fallback=False):
+    record = freeze(REPO, case["child"], case["actions"], allow_fallback=allow_fallback)
+    assert record["commit"] == case["parent"]
+    assert record["counts"] == case["counts"]
+    assert record["ratchet_passed"] is True
+    assert record["source"] == {
+        "kind": "trusted-main-push-artifact", "commit": case["parent"],
+        "run_id": 100, "attempt": 1, "requested_base": case["child"],
+    }
+    assert not any(case["child"] in call for call in case["actions"].calls)
+
+
+def assert_other_base_rejected(freeze, case):
+    with pytest.raises(ValueError, match="No completed exact-base main measurement run"):
+        freeze(REPO, case["child"], case["actions"], allow_fallback=False)
+    assert not any(case["parent"] in call for call in case["actions"].calls)
+
+
+def assert_non_docs_rejected(freeze, case):
+    with pytest.raises(ValueError, match="Explicit recovery requires a docs-only diff"):
+        freeze(REPO, case["child"], case["actions"], allow_fallback=False)
+    assert not case["actions"].calls
+
+
+@pytest.mark.parametrize("allow_fallback", [False, True])
+@pytest.mark.parametrize("child_mode", [None, "pending", "no_artifact", "failed_ratchet"])
+def test_explicit_pair_uses_parent_measurement_before_any_child_run(
+    explicit_recovery_case, allow_fallback, child_mode,
+):
+    case = explicit_recovery_case()
+    if child_mode is not None:
+        case["actions"].put(case["child"], child_mode)
+    assert_explicit_pair_recovers(loader.freeze, case, allow_fallback=allow_fallback)
+
+
+def test_other_docs_only_child_cannot_use_explicit_recovery(explicit_recovery_case):
+    approved = explicit_recovery_case()
+    other = explicit_recovery_case("docs/other.md", approved=False)
+    assert other["child"] != approved["child"]
+    assert_other_base_rejected(loader.freeze, other)
+
+
+def test_explicit_recovery_rejects_non_docs_changes(explicit_recovery_case):
+    assert_non_docs_rejected(loader.freeze, explicit_recovery_case("src/example.py"))
+
+
+def test_explicit_recovery_requires_the_configured_first_parent(
+    explicit_recovery_case, monkeypatch,
+):
+    case = explicit_recovery_case()
+    wrong_parent = git(case["root"], "rev-parse", case["parent"] + "^1")
+    monkeypatch.setattr(loader, "EXPLICIT_RECOVERY_PARENT", wrong_parent)
+    case["actions"].put(wrong_parent)
+    with pytest.raises(ValueError, match="Explicit recovery requires the approved first parent"):
+        loader.freeze(REPO, case["child"], case["actions"])
+    assert not case["actions"].calls
+
+
+def test_main_fallback_accepts_the_explicit_recovery_artifact(explicit_recovery_case):
+    case = explicit_recovery_case()
+    requested = commit(case["root"], "later unmeasured main")
+    record = loader.freeze(REPO, requested, case["actions"], allow_fallback=True)
+    assert_fallback(record, case["parent"], requested, 1)
+    assert record["counts"] == case["counts"]
+    assert record["source"]["requested_base"] == case["child"]
+    assert not any(case["child"] in call for call in case["actions"].calls)
+
+
+@pytest.mark.parametrize("mutation", ["scope", "branch", "docs"])
+def test_explicit_recovery_mutations_are_caught(explicit_recovery_case, tmp_path, mutation):
+    case = explicit_recovery_case("src/example.py" if mutation == "docs" else "docs/recovery.md")
+    if mutation == "scope":
+        case = explicit_recovery_case("docs/other.md", approved=False)
+        needle = "if sha == EXPLICIT_RECOVERY_BASE:"
+        replacement = "if True:  # mutated: any base may recover"
+        check = assert_other_base_rejected
+    elif mutation == "branch":
+        needle = "if sha == EXPLICIT_RECOVERY_BASE:"
+        replacement = "if False:  # mutated: explicit recovery removed"
+        check = assert_explicit_pair_recovers
+    else:
+        needle = 'if any(not path.startswith("docs/") for path in diff.stdout.split("\\0") if path):'
+        replacement = "if False:  # mutated: docs-only check removed"
+        check = assert_non_docs_rejected
+    text = Path(loader.__file__).read_text(encoding="utf-8")
+    assert text.count(needle) == 1
+    mutant_path = tmp_path / "mutant_coverage_ratchet_base.py"
+    mutant_path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+    namespace = {"__file__": loader.__file__, "__name__": "mutant_coverage_ratchet_base"}
+    exec(compile(mutant_path.read_text(encoding="utf-8"), str(mutant_path), "exec"), namespace)
+    namespace.update(ROOT=loader.ROOT, EXPLICIT_RECOVERY_BASE=loader.EXPLICIT_RECOVERY_BASE,
+                     EXPLICIT_RECOVERY_PARENT=loader.EXPLICIT_RECOVERY_PARENT)
+    check(loader.freeze, case)
+    case["actions"].calls.clear()
+    if mutation == "branch":
+        with pytest.raises(ValueError, match="No completed exact-base main measurement run"):
+            check(namespace["freeze"], case)
+    else:
+        with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
+            check(namespace["freeze"], case)
+        # Without either guard the very same assertion sees an incorrect recovery.
+        assert_explicit_pair_recovers(namespace["freeze"], case)

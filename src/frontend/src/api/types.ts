@@ -441,11 +441,12 @@ export interface WatchlistResponse { items: WatchlistItem[]; caps: { watchlist: 
 export interface QuoteItem extends DataStatusBlock {
   security_code: string;
   name: string;
-  price: Decimal;
-  change_pct: Decimal;
-  volume: Decimal;
-  amount: Decimal;
-  t: DateTime;
+  price: Decimal | null;
+  change_pct: Decimal | null;
+  volume: Decimal | null;
+  amount: Decimal | null;
+  /** 日线回退时为收盘日 15:00+08:00；data_as_of 为采集时点。 */
+  t: DateTime | null;
 }
 export interface BarsResponse extends DataStatusBlock {
   security_code: string;
