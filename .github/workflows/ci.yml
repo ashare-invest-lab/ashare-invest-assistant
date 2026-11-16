@@ -623,8 +623,6 @@ jobs:
 
   # ------------------------------------------------------------------ 交割单夹具一致性（7.4A 条件 1–5、3.5A-2）
   fixtures:
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: fixtures (check_fixtures.py)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -667,8 +665,6 @@ jobs:
   # 证书封装私钥（secret / *_PRIVATE_KEYS 变量 / 私钥挂载）只给 ingest；api 只拿公钥。
   # 正反例在 scripts/ci/tests/test_secret_boundary.py、test_compose_networks.py（secret-scan.yml selftest job 运行）。
   secret-boundary:
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: secret-boundary (私钥只给 ingest，无全站证书变量)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -695,8 +691,6 @@ jobs:
   # 所有 job 都在 actions/checkout 的干净检出上运行；setup-uv / setup-node 的缓存只缓存依赖下载（uv 缓存、pnpm store），
   # 不恢复工作区文件，所以未跟踪文件不会被带进 CI。本地复现同样条件：scripts/ci/clean_check.sh。
   ignored-sources:
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: ignored-sources (源码不被 .gitignore 误伤)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -707,7 +701,8 @@ jobs:
       - name: check_ignored_sources.py
         run: python3 scripts/ci/check_ignored_sources.py
 
-  # Report SUCCESS under each required name when PR paths are docs-only.
+  # 惰性文档 PR：轻检查真跑；以下空跑仅覆盖已审计的不相关输入。
+  # 安全：只验证 main 覆盖率制品；惰性文档不改变可执行代码或测量输入。
   coverage-base-docs:
     name: trusted main coverage readiness
     needs: changes
@@ -716,6 +711,7 @@ jobs:
     steps:
       - run: exit 0
 
+  # 安全：测试读取的契约/策略等 docs 已列入 CONSUMED_DOCS；其余惰性文档不参与测试。
   backend-docs:
     name: backend (ruff, mypy, pytest+coverage)
     needs: changes
@@ -724,6 +720,7 @@ jobs:
     steps:
       - run: exit 0
 
+  # 安全：测试读取的契约、plan 和免责策略已排除；构建/依赖输入均在 src/frontend。
   frontend-docs:
     name: frontend (eslint, tsc, vitest, pnpm audit)
     needs: changes
@@ -738,8 +735,14 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
     runs-on: ubuntu-24.04
     steps:
-      - run: exit 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          python3 scripts/ci/check_contract.py
+          python3 scripts/ci/check_code_namespaces.py
 
+  # 安全：输入为 src/backend 迁移、deploy/db 和配置；不读取惰性文档。
   migrations-docs:
     name: migrations (alembic up/down/up)
     needs: changes
@@ -748,6 +751,7 @@ jobs:
     steps:
       - run: exit 0
 
+  # 安全：构建上下文 src/backend，仅 COPY 应用/依赖/迁移；不 COPY docs 或根 Markdown。
   image-docs:
     name: image (backend.Dockerfile, no push)
     needs: changes
@@ -756,6 +760,7 @@ jobs:
     steps:
       - run: exit 0
 
+  # 安全：构建上下文 src/frontend；不 COPY docs 或根 Markdown，冒烟只读部署配置。
   frontend-image-docs:
     name: frontend-image (frontend.Dockerfile, no push)
     needs: changes
@@ -764,6 +769,7 @@ jobs:
     steps:
       - run: exit 0
 
+  # 安全：仅审计 uv.lock、pyproject 和 tests/requirements.txt；不读取惰性文档。
   pip-audit-docs:
     name: pip-audit
     needs: changes
@@ -772,6 +778,7 @@ jobs:
     steps:
       - run: exit 0
 
+  # 安全：仅检查依赖许可元数据与前端依赖清单；不读取惰性文档。
   licenses-docs:
     name: licenses (no ag-grid-enterprise, no GPL/AGPL/NC)
     needs: changes
@@ -780,32 +787,9 @@ jobs:
     steps:
       - run: exit 0
 
-  fixtures-docs:
-    name: fixtures (check_fixtures.py)
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
-    runs-on: ubuntu-24.04
-    steps:
-      - run: exit 0
-
+  # 安全：只读取 nginx/compose/config 与冒烟脚本；不读取惰性文档。
   gateway-limits-docs:
     name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
-    runs-on: ubuntu-24.04
-    steps:
-      - run: exit 0
-
-  secret-boundary-docs:
-    name: secret-boundary (私钥只给 ingest，无全站证书变量)
-    needs: changes
-    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
-    runs-on: ubuntu-24.04
-    steps:
-      - run: exit 0
-
-  ignored-sources-docs:
-    name: ignored-sources (源码不被 .gitignore 误伤)
     needs: changes
     if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
     runs-on: ubuntu-24.04

@@ -9,21 +9,45 @@ import subprocess
 from collections.abc import Sequence
 
 
-def is_docs_only(paths: Sequence[str]) -> bool:
+# Runtime/test inputs: keep directory prefixes terminated by '/'.
+CONSUMED_DOCS = (
+    "docs/api-contract.md", "docs/plan.md", "docs/contracts/", "docs/strategies/",
+    "docs/handover/team/reports/T-B46-47-rulings.md",
+)
+
+
+def is_docs_only(paths: Sequence[str], modes: Sequence[str] | None = None) -> bool:
     """Empty diffs run full CI; paths are case sensitive repository-relative names."""
-    return bool(paths) and all(path.startswith("docs/") or path.endswith(".md") for path in paths)
+    return bool(paths) and (modes is None or (
+        len(modes) == len(paths) and all(mode == "100644" for mode in modes)
+    )) and all(
+        path.endswith(".md") and (path.startswith("docs/") or "/" not in path)
+        and not any(path.startswith(item) if item.endswith("/") else path == item
+                    for item in CONSUMED_DOCS)
+        for path in paths
+    )
 
 
-def changed_paths(base: str, head: str) -> list[str]:
+def changed_paths(base: str, head: str) -> tuple[list[str], list[str]]:
     for sha in (base, head):
         if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
             raise ValueError("base and head must be full commit SHAs")
     # -z preserves whitespace/newlines; --no-renames includes both sides of moves.
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}", "--"],
+        ["git", "diff", "--raw", "--no-abbrev", "--no-renames", "-z", f"{base}...{head}", "--"],
         check=True, capture_output=True,
     )
-    return [os.fsdecode(path) for path in result.stdout.split(b"\0") if path]
+    fields = result.stdout.split(b"\0")
+    paths, modes = [], []
+    for index in range(0, len(fields) - 1, 2):
+        old, new, _, _, status = fields[index].removeprefix(b":").split()
+        paths.append(os.fsdecode(fields[index + 1]))
+        # Deletions use the old mode; type changes must be ordinary on both sides.
+        mode = old if status == b"D" else new
+        if old not in (b"000000", b"100644"):
+            mode = old
+        modes.append(mode.decode("ascii"))
+    return paths, modes
 
 
 def main() -> None:
@@ -31,7 +55,7 @@ def main() -> None:
     parser.add_argument("base")
     parser.add_argument("head")
     args = parser.parse_args()
-    print(f"docs_only={str(is_docs_only(changed_paths(args.base, args.head))).lower()}")
+    print(f"docs_only={str(is_docs_only(*changed_paths(args.base, args.head))).lower()}")
 
 
 if __name__ == "__main__":

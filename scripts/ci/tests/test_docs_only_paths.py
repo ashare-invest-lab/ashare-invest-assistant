@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import ast
 import os
+import re
+import shutil
 import subprocess
 import sys
-from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -36,15 +37,21 @@ CHECKS = {
 @pytest.mark.parametrize("paths,expected", [
     (["docs/foo.md"], True),
     (["README.md"], True),
-    (["nested/README.md"], True),
-    (["docs/assets/diagram.png"], True),
-    (["docs/foo.md", "nested/README.md", "docs/data.json"], True),
+    *[([path], False) for path in (
+        "docs/api-contract.md", "docs/plan.md", "docs/contracts/x.md",
+        "docs/strategies/cards/x.md", "docs/data.json",
+        "tests/fixtures/broker_statements/fmt_a/README.md", "src/frontend/x.md", ".github/x.md",
+    )],
+    (["docs/handover/x.md", "docs/reviews/x.md"], True),
+    (["nested/README.md"], False),
+    (["docs/assets/diagram.png"], False),
+    (["docs/foo.md", "nested/README.md", "docs/data.json"], False),
     (["README.md", "src/backend/app.py"], False),
     ([], False),
     (["docs-other/foo.png"], False),
     (["README.MD"], False),
     (["docs"], False),
-    (["docs/line\nbreak.png", "with space.md"], True),
+    (["docs/line\nbreak.md", "with space.md"], True),
 ])
 def test_path_classification(paths, expected):
     assert classifier.is_docs_only(paths) is expected
@@ -71,7 +78,7 @@ def test_cli_uses_pr_three_dot_diff_and_detects_source_moved_into_docs(tmp_path)
     git("commit", "-m", "fixture base")
     git("checkout", "-b", "pr")
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs/space and\nnewline.png").write_bytes(b"fixture")
+    (tmp_path / "docs/space and\nnewline.md").write_bytes(b"fixture")
     (tmp_path / "README.md").write_text("fixture docs\n")
     git("add", ".")
     git("commit", "-m", "fixture docs")
@@ -108,20 +115,37 @@ def _condition(expression, event, docs_only):
     return eval(compile(tree, "<workflow condition>", "eval"), {"__builtins__": {}})
 
 
-def test_each_required_check_has_one_full_and_one_empty_success_job():
+ALWAYS_RUN = {"fixtures", "secret-boundary", "ignored-sources"}
+# Explicit audit whitelist: each corresponding job has its input rationale in ci.yml.
+EMPTY_DOCS_JOBS = {
+    "coverage-base-docs", "backend-docs", "frontend-docs", "migrations-docs",
+    "image-docs", "frontend-image-docs", "pip-audit-docs", "licenses-docs", "gateway-limits-docs",
+}
+
+
+def test_required_check_routing_and_audited_empty_jobs():
     jobs = WORKFLOW["jobs"]
-    assert set(jobs) == {"changes", *CHECKS, *(f"{key}-docs" for key in CHECKS)}
-    for suffix in ("", "-docs"):
-        assert Counter(jobs[key + suffix]["name"] for key in CHECKS) == Counter(CHECKS.values())
+    assert set(jobs) == {"changes", *CHECKS, "contract-docs", *EMPTY_DOCS_JOBS}
     for key, name in CHECKS.items():
-        assert jobs[key]["name"] == jobs[key + "-docs"]["name"] == name
-        assert jobs[key]["needs"] == jobs[key + "-docs"]["needs"] == "changes"
-        assert jobs[key]["steps"]
-        empty = jobs[key + "-docs"]
-        assert set(empty) == {"name", "needs", "if", "runs-on", "steps"}
-        assert empty["steps"] == [{"run": "exit 0"}]
-        result = subprocess.run(["bash", "-c", empty["steps"][0]["run"]], capture_output=True)
-        assert result.returncode == 0
+        assert jobs[key]["name"] == name
+        if key in ALWAYS_RUN:
+            assert "needs" not in jobs[key] and "if" not in jobs[key]
+        else:
+            assert jobs[key + "-docs"]["name"] == name
+            assert jobs[key]["needs"] == jobs[key + "-docs"]["needs"] == "changes"
+    for key, job in jobs.items():
+        if _condition(job.get("if", "True"), "pull_request", "true"):
+            commands = [line.strip() for step in job["steps"]
+                        for line in step.get("run", "").splitlines()
+                        if line.strip() and not line.lstrip().startswith("#")]
+            if commands == ["exit 0"] and not any("uses" in step for step in job["steps"]):
+                assert key in EMPTY_DOCS_JOBS
+    contract = jobs["contract-docs"]["steps"]
+    assert contract[0]["uses"] == jobs["contract"]["steps"][0]["uses"]
+    assert contract[0]["with"] == {"persist-credentials": False}
+    assert _contract_commands() == [
+        "python3 scripts/ci/check_contract.py", "python3 scripts/ci/check_code_namespaces.py",
+    ]
 
 
 @pytest.mark.parametrize("event", ["pull_request", "push", "merge_group", "workflow_dispatch"])
@@ -129,8 +153,11 @@ def test_each_required_check_has_one_full_and_one_empty_success_job():
 def test_job_routing_and_concurrency(event, docs_only):
     bypass = event == "pull_request" and docs_only == "true"
     for key in CHECKS:
-        assert _condition(WORKFLOW["jobs"][key]["if"], event, docs_only) is not bypass
-        assert _condition(WORKFLOW["jobs"][key + "-docs"]["if"], event, docs_only) is bypass
+        if key in ALWAYS_RUN:
+            assert "if" not in WORKFLOW["jobs"][key]
+        else:
+            assert _condition(WORKFLOW["jobs"][key]["if"], event, docs_only) is not bypass
+            assert _condition(WORKFLOW["jobs"][key + "-docs"]["if"], event, docs_only) is bypass
     assert _condition(WORKFLOW["concurrency"]["cancel-in-progress"], event, docs_only) is (
         event == "pull_request"
     )
@@ -181,11 +208,13 @@ def workflow_repo(tmp_path):
         git("commit", "-m", "fixture")
         return git("rev-parse", "HEAD")
 
-    def prepare(base_script, changes):
+    def prepare(base_script, changes, base_files=None):
         git("init", "-b", "base")
         write("src/x.py", "# base\n")
         if base_script is not None:
             write("scripts/ci/docs_only_paths.py", base_script)
+        for path, content in (base_files or {}).items():
+            write(path, content)
         base = commit()
         git("checkout", "-b", "pr")
         for path, content in changes.items():
@@ -263,6 +292,7 @@ def test_workflow_fails_closed_when_diff_fails(workflow_repo):
 
 @pytest.mark.parametrize("path,expected", [
     ("docs/guide.md", "true"),
+    ("docs/api-contract.md", "false"),
     ("scripts/ci/docs_only_paths.py", "false"),
     (".github/workflows/ci.yml", "false"),
 ])
@@ -296,3 +326,124 @@ def test_full_jobs_retain_heavy_commands(key, commands):
     runs = "\n".join(step.get("run", "") for step in steps)
     for command in commands:
         assert command in runs
+
+
+def _contract_commands():
+    return [line.strip() for step in WORKFLOW["jobs"]["contract-docs"]["steps"]
+            for line in step.get("run", "").splitlines() if line.strip()]
+
+
+def test_contract_docs_really_checks_document(tmp_path):
+    shutil.copytree(REPO / "docs", tmp_path / "docs")
+    ci = tmp_path / "scripts/ci"
+    ci.mkdir(parents=True)
+    for name in ("check_contract.py", "check_code_namespaces.py", "contract_md.py"):
+        shutil.copy(REPO / "scripts/ci" / name, ci / name)
+    def run():
+        return subprocess.run(["bash", "-e", "-c", "\n".join(_contract_commands())],
+                              cwd=tmp_path, capture_output=True, text=True)
+    original = run()
+    assert original.returncode == 0, original.stdout + original.stderr
+    path = tmp_path / "docs/api-contract.md"
+    text, count = re.subn(r"^\|\s*1\s*\|[^\n]*IMPORT_[^\n]*\n", "", path.read_text(),
+                         count=1, flags=re.M)
+    assert count == 1
+    path.write_text(text)
+    assert run().returncode != 0
+
+
+@pytest.mark.parametrize("kind", ["symlink", "executable", "submodule"])
+@pytest.mark.parametrize("delete", [False, True])
+def test_workflow_rejects_nonordinary_markdown(workflow_repo, kind, delete):
+    repo, prepare, run = workflow_repo
+    base, _ = prepare(_current_classifier(), {"docs/guide.md": "# docs\n"})
+    def git(*args):
+        return subprocess.run(["git", "-c", "user.name=CI test", "-c",
+                               "user.email=ci@example.invalid", "-c", "core.hooksPath=/dev/null",
+                               *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    path = repo / "README.md"
+    if kind == "symlink":
+        path.symlink_to("docs/guide.md")
+        git("add", "README.md")
+    elif kind == "executable":
+        path.write_text("# docs\n")
+        path.chmod(0o755)
+        git("add", "README.md")
+    else:
+        git("update-index", "--add", "--cacheinfo", f"160000,{base},README.md")
+    git("commit", "-m", "special file")
+    if delete:
+        base = git("rev-parse", "HEAD")
+        git("rm", "README.md")
+        git("commit", "-m", "delete special file")
+    assert run(base, git("rev-parse", "HEAD"))[0] == "docs_only=false\n"
+
+
+def _referenced_docs(repo=REPO):
+    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo).decode().split("\0")
+    refs = set()
+    for name in filter(None, tracked):
+        path = repo / name
+        # Never open environment/credential files or follow tracked symlinks.
+        if (name.startswith("docs/") or path.is_symlink() or not path.is_file()
+                or any(part.startswith(".env") or part in {"secrets", "private_keys", ".aws"}
+                       for part in path.parts)
+                or path.suffix in {".pem", ".key", ".p12", ".pfx"}):
+            continue
+        data = path.read_bytes()
+        if b"\0" in data:
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        refs.update(re.findall(r"\bdocs/([\w./-]+)", text))
+        # Join literal pathlib segments; retain directory prefixes before dynamic pieces.
+        for match in re.finditer(r'''["']docs["']\)?((?:\s*/\s*["'][\w./-]+["'])+)''', text):
+            refs.add("/".join(re.findall(r'''["']([\w./-]+)["']''', match[1])))
+        for match in re.finditer(r'''\b(?:DOCS_DIR|docs_dir|_docs_dir\(\))\s*/\s*["']([\w./-]+)["']''', text):
+            refs.add(match[1])
+        if "AIA_DOCS_DIR" in text or "_docs_dir()" in text:
+            # Local aliases d, _docs_dir(), fixture-returned docs_dir, etc.
+            refs.update(re.findall(r'''["']([\w./-]+\.(?:md|json|ya?ml))["']''', text))
+    # Explicit supplements for nonliteral indirection (fixture/function returned roots).
+    refs.update({"api-contract.md", "plan.md"})
+    found = set()
+    for ref in refs:
+        target = repo / "docs" / ref.rstrip("./")
+        if target.is_file():
+            found.add(target.relative_to(repo).as_posix())
+        elif target.is_dir():
+            found.update(p.relative_to(repo).as_posix() for p in target.rglob("*") if p.is_file())
+    return found
+
+
+def test_consumed_docs_inventory_does_not_drift():
+    referenced = _referenced_docs()
+    assert len(referenced) >= 100, "docs reference scan unexpectedly empty/incomplete"
+    missed = sorted(path for path in referenced if classifier.is_docs_only([path]))
+    assert not missed, f"Register consumed docs in CONSUMED_DOCS: {missed}"
+
+
+def test_reference_scan_recognizes_literal_joined_and_env_paths(workflow_repo):
+    repo, prepare, _ = workflow_repo
+    prepare(_current_classifier(), {
+        "docs/new.md": "# new", "docs/joined/a.md": "# joined",
+        "docs/env.md": "# env", "docs/variable.md": "# var",
+        "reader.py": '''a = "docs/new.md"
+b = ROOT / "docs" / "joined"
+c = DOCS_DIR / "variable.md"
+d = Path(os.environ.get("AIA_DOCS_DIR", ROOT / "docs")) / "env.md"
+e = "docs/not-real.md"
+''',
+    })
+    assert _referenced_docs(repo) == {
+        "docs/new.md", "docs/joined/a.md", "docs/env.md", "docs/variable.md",
+    }
+
+
+def test_workflow_rejects_only_broken_contract_edit(workflow_repo):
+    _, prepare, run = workflow_repo
+    base, head = prepare(_current_classifier(), {"docs/api-contract.md": "# broken contract\n"},
+                         {"docs/api-contract.md": (REPO / "docs/api-contract.md").read_text()})
+    assert run(base, head)[0] == "docs_only=false\n"
