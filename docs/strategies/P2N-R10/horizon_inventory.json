@@ -906,6 +906,16 @@
       "path": "docs/strategies/T-R74/param_audit.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R78/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R78/horizon_inputs_spec.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
     }
   ],
   "records": [
