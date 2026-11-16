@@ -53,6 +53,25 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
+@pytest.fixture
+def role_conn(world: SimpleNamespace) -> Iterator[Connection]:
+    # CREATE ROLE / GRANT 均在事务内；回滚清理自建角色并恢复复用角色的原权限。
+    with world.engine.connect() as conn:
+        try:
+            for role in ("aia_api", "aia_maint"):
+                if not conn.scalar(
+                    text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": role}
+                ):
+                    conn.execute(text(f"CREATE ROLE {role} NOLOGIN"))
+                conn.execute(text(f"GRANT USAGE ON SCHEMA app TO {role}"))
+                conn.execute(
+                    text(f"GRANT SELECT, DELETE ON app.horizon_input_versions TO {role}")
+                )
+            yield conn
+        finally:
+            conn.rollback()
+
+
 def seed(conn: Connection) -> dict[str, Any]:
     conn.execute(
         insert(users).values(
@@ -91,6 +110,9 @@ def test_a192_a1a_single_head_empty_upgrade_guarded_downgrade(world: SimpleNames
         assert (
             conn.scalar(text("SELECT to_regprocedure('app.reject_horizon_input_update()')")) is None
         )
+        assert (
+            conn.scalar(text("SELECT to_regprocedure('app.reject_horizon_input_delete()')")) is None
+        )
     command.upgrade(world.config, "0037")
     with world.engine.begin() as conn:
         row = seed(conn)
@@ -103,10 +125,11 @@ def test_a192_a1a_single_head_empty_upgrade_guarded_downgrade(world: SimpleNames
         assert conn.scalar(text("SELECT version_num FROM public.alembic_version")) == "0037"
 
 
-def test_a192_a1a_append_only_no_history_backfill(world: SimpleNamespace) -> None:
+def test_a192_a1a_append_only_no_history_backfill(role_conn: Connection) -> None:
     from app.db.tables.horizon import horizon_input_versions as table
 
-    with world.engine.begin() as conn:
+    with role_conn.begin_nested():
+        conn = role_conn
         assert conn.scalar(select(func.count()).select_from(table)) == 0
         row = seed(conn)
         conn.execute(insert(table).values(**row))
@@ -136,8 +159,43 @@ def test_a192_a1a_append_only_no_history_backfill(world: SimpleNamespace) -> Non
             conn.scalar(select(table.c.supersedes_id).where(table.c.id == revised["id"]))
             == row["id"]
         )
+        conn.execute(text("SET ROLE aia_maint"))
+        assert conn.scalar(text("SELECT current_user")) == "aia_maint"
         conn.execute(table.delete().where(table.c.user_id == OWNER))
         assert conn.scalar(select(func.count()).select_from(table)) == 0
+        conn.execute(text("RESET ROLE"))
+
+
+def test_delete_requires_aia_maint(role_conn: Connection) -> None:
+    from app.db.tables.horizon import horizon_input_versions as table
+
+    row = seed(role_conn)
+    role_conn.execute(insert(table).values(**row))
+    role_conn.execute(text("SET ROLE aia_api"))
+    assert role_conn.scalar(text("SELECT current_user")) == "aia_api"
+    with pytest.raises(DBAPIError, match="DELETE forbidden"), role_conn.begin_nested():
+        role_conn.execute(table.delete().where(table.c.id == row["id"]))
+    assert role_conn.scalar(select(table.c.id)) == row["id"]
+    role_conn.execute(text("SET ROLE aia_maint"))
+    assert role_conn.scalar(text("SELECT current_user")) == "aia_maint"
+    role_conn.execute(table.delete().where(table.c.id == row["id"]))
+    assert role_conn.scalar(select(func.count()).select_from(table)) == 0
+    role_conn.execute(text("RESET ROLE"))
+
+
+@pytest.mark.parametrize("kind", ["adjust_factor", "feature"])
+def test_derived_kind_requires_computed_at(world: SimpleNamespace, kind: str) -> None:
+    from app.db.tables.horizon import horizon_input_versions as table
+
+    with world.engine.begin() as conn:
+        row = {**seed(conn), "kind": kind, "code": "SYNTHETIC"}
+        with (
+            pytest.raises(IntegrityError, match="ck_horizon_input_versions_derived_computed_at"),
+            conn.begin_nested(),
+        ):
+            conn.execute(insert(table).values(**row))
+        conn.execute(insert(table).values(**{**row, "computed_at": NOW}))
+        assert conn.scalar(select(table.c.computed_at)) == NOW
 
 
 def test_checks_defaults_and_migration_matches_metadata(world: SimpleNamespace) -> None:
@@ -178,7 +236,6 @@ def test_checks_defaults_and_migration_matches_metadata(world: SimpleNamespace) 
                     "computed_at": NOW + timedelta(seconds=1),
                 },
             ),
-            ("kind", {"kind": "unknown", "code": "SYNTHETIC"}),
             ("scope", {"scope": "unknown"}),
         ]
         for constraint, changes in invalid:
