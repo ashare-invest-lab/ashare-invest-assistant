@@ -146,3 +146,4 @@ tests:
   - {"file": "tests/backend/unit/test_worker_healthcheck_offline.py", "group": "parallel", "keywords": ["fake Redis/runner", "deny_network monkeypatch", "runpy with restored sys.argv"], "unverified": false}
   - {"file": "tests/replay/test_licence_t_t22.py", "group": "parallel", "keywords": ["RefIngest/RefScheduler fake clock", "pure synthetic licence state"], "unverified": false}
   - {"file": "tests/replay/test_replay_example.py", "group": "parallel", "keywords": ["ReplayClient/Tape fake clock", "read-only recordings", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_r_r3_exchange_calendar.py", "group": "parallel", "keywords": ["synthetic public notice HTML", "tmp_path only", "no network/PG/Redis/docker"], "unverified": false}
