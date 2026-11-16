@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -160,11 +161,11 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       <div className="sh-id">
         <span className="q-name">{profile.name}</span>
         <span className="mono muted">{code}</span>
-        {profile.type !== 'stock' ? <Tag color="blue" data-testid="security-type-tag">{SECURITY_TYPE[profile.type]}</Tag> : null}
-        {profile.board ? <Tag variant="outlined">{BOARD[profile.board]}</Tag> : null}
-        {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag" data-flag={profile.risk_flag} title={SECURITY_RISK_FLAG_TIP[profile.risk_flag]}>{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
+        {profile.type !== 'stock' ? <Tag color={labelOf(SECURITY_TYPE, profile.type) ? 'blue' : undefined} data-testid="security-type-tag">{(labelOf(SECURITY_TYPE, profile.type) ?? '未知')}</Tag> : null}
+        {profile.board ? <Tag variant="outlined">{(labelOf(BOARD, profile.board) ?? '未知')}</Tag> : null}
+        {profile.risk_flag ? <Tag color={labelOf(SECURITY_RISK_FLAG, profile.risk_flag) ? 'orange' : undefined} data-testid="risk-flag-tag" data-flag={profile.risk_flag} title={(labelOf(SECURITY_RISK_FLAG_TIP, profile.risk_flag) ?? '未知')}>{(labelOf(SECURITY_RISK_FLAG, profile.risk_flag) ?? '未知')}</Tag> : null}
         {suspended ? <Tag color="default" data-testid="suspended-tag">停牌</Tag> : null}
-        {profile.listing_status !== 'listed' ? <Tag color="default" data-testid="listing-status-tag">{LISTING_STATUS[profile.listing_status]}</Tag> : null}
+        {profile.listing_status !== 'listed' ? <Tag data-testid="listing-status-tag">{(labelOf(LISTING_STATUS, profile.listing_status) ?? '未知')}</Tag> : null}
         <AddToResearch origin="from_stock" securityCode={code} securityType={profile.type} />
         <WatchlistToggle code={code} securityType={profile.type} testId="watchlist-stock" />
       </div>
@@ -197,8 +198,8 @@ function ProfilePanel({ profile }: { profile: SecurityProfile }) {
   const etf = profile.type === 'etf';
   const none = etf ? '不适用' : '—';
   const rows: [string, React.ReactNode][] = [
-    ['类型', SECURITY_TYPE[profile.type]],
-    ['所属行业', profile.industry ? `${profile.industry.name}（${INDUSTRY_TAXONOMY[profile.industry.taxonomy]}）` : none],
+    ['类型', (labelOf(SECURITY_TYPE, profile.type) ?? '未知')],
+    ['所属行业', profile.industry ? `${profile.industry.name}（${(labelOf(INDUSTRY_TAXONOMY, profile.industry.taxonomy) ?? '未知')}）` : none],
     ['概念', profile.concepts.length ? profile.concepts.map((c) => c.name).join('、') : none],
     ['上市日期', profile.list_date ? `${profile.list_date}${profile.list_date_basis === 'neeq_select' ? '（精选层挂牌日）' : ''}` : '—'],
     ...(profile.delist_date ? [['退市日期', profile.delist_date] as [string, React.ReactNode]] : []),
@@ -226,7 +227,7 @@ function ProfilePanel({ profile }: { profile: SecurityProfile }) {
       {/* v0.2.7：attribution 原样展示；sources 说明各字段来源 */}
       <div className="muted small profile-attr" data-testid="profile-attribution">
         {profile.attribution}（主数据截至 {profile.master_as_of}）
-        {profile.sources.length ? ` · 来源：${[...new Set(profile.sources.map((x) => PROVIDER[x.provider]))].join('、')}` : ''}
+        {profile.sources.length ? ` · 来源：${[...new Set(profile.sources.map((x) => (labelOf(PROVIDER, x.provider) ?? '未知')))].join('、')}` : ''}
       </div>
     </section>
   );
@@ -257,7 +258,7 @@ function HorizonPanel({ code }: { code: string }) {
             const ok = q.data.suitable.includes(h);
             return (
               <div key={h} className={`hz-line${ok ? ' ok' : ''}`} data-testid={`hz-${h}`}>
-                <span className="hz-name">{HORIZON[h]}</span>
+                <span className="hz-name">{(labelOf(HORIZON, h) ?? '未知')}</span>
                 <span className="track"><span className="fill" style={{ width: `${score}%` }} /></span>
                 <span className="mono hz-score">{score}</span>
                 {ok ? <Tag color="blue" variant="outlined">适合</Tag>
@@ -265,7 +266,7 @@ function HorizonPanel({ code }: { code: string }) {
                     : <span className="hz-tag-gap" />}
                 {/* 评审 T-F22a m10：封顶/提示可 Tab 聚焦、Enter/Space 打开，读屏读到全文 */}
                 {caps.length ? (
-                  <KeyTip lines={caps.map((c) => `封顶 ${c.cap}（${CAP_KIND_TEXT[c.kind]}）：${capExplanation(c)}`)} className="warn small" testId={`cap-${h}`}>封顶</KeyTip>
+                  <KeyTip lines={caps.map((c) => `封顶 ${c.cap}（${(labelOf(CAP_KIND_TEXT, c.kind) ?? '未知')}）：${capExplanation(c)}`)} className="warn small" testId={`cap-${h}`}>封顶</KeyTip>
                 ) : null}
                 {hints.length ? (
                   <KeyTip lines={hints.map((x) => x.text)} className="muted small" testId={`hint-${h}`}>提示</KeyTip>

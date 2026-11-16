@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { additionalSignalInstances } from '../../lib/signalEvents';
 import { useMemo } from 'react';
 import type { Time } from 'lightweight-charts';
@@ -33,7 +34,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
     () =>
       (events.data?.items ?? [])
         .filter((e) => e.security_code === code && !!tradeDate && e.at.startsWith(tradeDate))
-        .map((e) => ({ time: (Math.ceil(bjToChartTime(e.at) / 60) * 60) as Time, action: null, label: [SIGNAL_KIND[e.kind], additionalSignalInstances(e)].filter(Boolean).join(' · ') })),
+        .map((e) => ({ time: (Math.ceil(bjToChartTime(e.at) / 60) * 60) as Time, action: null, label: [(labelOf(SIGNAL_KIND, e.kind) ?? '未知'), additionalSignalInstances(e)].filter(Boolean).join(' · ') })),
     [events.data, code, tradeDate],
   );
   const stops = chartStops(suggestion);

@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../../lib/explanations';
 import { useMemo } from 'react';
 import { Segmented, Tooltip } from 'antd';
 import { StarFilled } from '@ant-design/icons';
@@ -24,7 +25,7 @@ export function AccountStrip({ account }: { account: TerminalAccount | null | un
       <div><label>当日盈亏</label><b className={`mono ${pctClass(account.pnl_day)}`}>{account.pnl_day === null ? '—（缺少计算基准）' : signed(account.pnl_day, 0)}</b></div>
       <div>
         <label>大盘环境</label>
-        <b>{account.regime ? REGIME[account.regime] : '—'}</b>
+        <b>{account.regime ? (labelOf(REGIME, account.regime) ?? '未知') : '—'}</b>
         {r ? <span className="muted small"> 参考区间 {fmtNum(r.min_pct, 0)}–{fmtNum(r.max_pct, 0)}%</span> : null}
       </div>
       <div><label>数据</label><DataStatusTag status={account.data_status} /></div>
@@ -88,7 +89,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       key: 'exec', header: '可执行性', width: 86, sortable: false,
       render: (r) => {
         if (!r.suggestion) return <span className="muted">—</span>;
-        const e = EXECUTABILITY[r.suggestion.executability_status];
+        const e = tagOf(EXECUTABILITY, r.suggestion.executability_status);
         return (
           <Tooltip title={r.active_reason_count ? `${r.active_reason_count} 项不可执行原因（见右侧卡片的解除条件）` : undefined}>
             <span style={{ color: e.color === 'orange' ? '#f0883e' : e.color === 'green' ? '#3fb950' : '#7d8794' }}>
@@ -100,7 +101,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
     },
     {
       key: 'risk', header: '风控', width: 50, sortable: false,
-      render: (r) => (r.max_risk_level ? <span style={{ color: RISK_LEVEL[r.max_risk_level].color === 'red' ? '#ff7b72' : RISK_LEVEL[r.max_risk_level].color === 'orange' ? '#f0b429' : '#58a6ff' }}>{RISK_LEVEL[r.max_risk_level].text}</span> : <span className="muted">—</span>),
+      render: (r) => (r.max_risk_level ? <span style={{ color: tagOf(RISK_LEVEL, r.max_risk_level).color === 'red' ? '#ff7b72' : tagOf(RISK_LEVEL, r.max_risk_level).color === 'orange' ? '#f0b429' : labelOf(RISK_LEVEL, r.max_risk_level) ? '#58a6ff' : '#7d8794' }}>{tagOf(RISK_LEVEL, r.max_risk_level).text}</span> : <span className="muted">—</span>),
     },
     { key: 'ds', header: '数据', width: 72, sortable: false, render: (r) => <DataStatusTag status={r.data_status} asOf={r.quote?.t} /> },
   ], []);

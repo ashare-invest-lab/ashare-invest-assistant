@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 /** T-F23 研究候选某一版本的内容（契约 v0.2.9 §7.7A CandidateVersion）：创建时的快照，回看不读最新数据 */
 import { Tag } from 'antd';
 import { Link } from 'react-router';
@@ -13,10 +14,10 @@ function Facts({ items, evidence, testId }: { items: CandidateFact[]; evidence: 
     <>
       {items.map((f, i) => (
         <div key={i} className="tw" data-testid={`${testId}-${i}`}>
-          <Tag color={EPISTEMIC[f.epistemic_type].color}>{EPISTEMIC[f.epistemic_type].text}</Tag>
+          <Tag color={tagOf(EPISTEMIC, f.epistemic_type).color}>{tagOf(EPISTEMIC, f.epistemic_type).text}</Tag>
           <span>{f.text}</span>
           {f.expr ? <code>{f.expr}</code> : null}
-          <span className="muted small"> · {SOURCE_KIND[f.source_kind] ?? f.source_kind}</span>
+          <span className="muted small"> · {labelOf(SOURCE_KIND, f.source_kind) ?? f.source_kind}</span>
           <EvidenceChips ids={f.evidence_ids} evidence={evidence} />
         </div>
       ))}
@@ -36,7 +37,7 @@ export function VersionView({ v, testId = 'cand-version' }: { v: CandidateVersio
       {v.decision ? (
         <div className="sc-sec" data-testid={`${testId}-decision`}>
           <h4>本版决定</h4>
-          <Tag>{CANDIDATE_DECISION[v.decision]}</Tag><span>{v.decision_reason}</span>
+          <Tag>{(labelOf(CANDIDATE_DECISION, v.decision) ?? '未知')}</Tag><span>{v.decision_reason}</span>
         </div>
       ) : null}
       <div className="sc-sec">
@@ -47,11 +48,11 @@ export function VersionView({ v, testId = 'cand-version' }: { v: CandidateVersio
         <h4>成立条件（你填写，均为假设）</h4>
         {v.conditions_to_hold.length ? v.conditions_to_hold.map((c, i) => (
           <div key={i} className="tw" data-testid={`${testId}-cond-${i}`}>
-            <Tag color={EPISTEMIC[c.epistemic_type].color}>{EPISTEMIC[c.epistemic_type].text}</Tag>
+            <Tag color={tagOf(EPISTEMIC, c.epistemic_type).color}>{tagOf(EPISTEMIC, c.epistemic_type).text}</Tag>
             <span>{c.text}</span>
             <span className="muted small">
               {c.verify_by ? ` · 验证日期 ${c.verify_by}` : ''}{c.verify_method ? ` · 验证方式：${c.verify_method}` : ''}
-              {c.confidence ? ` · 把握 ${CONF_LEVEL[c.confidence].text}` : ''}
+              {c.confidence ? ` · 把握 ${tagOf(CONF_LEVEL, c.confidence).text}` : ''}
             </span>
           </div>
         )) : <span className="muted small">未填写</span>}
@@ -74,7 +75,7 @@ export function VersionView({ v, testId = 'cand-version' }: { v: CandidateVersio
         {fit.holdings_available ? null : (
           <div className="muted small" data-testid={`${testId}-no-holdings`}>未导入持仓，未做持仓类提示。<Link to="/portfolio/import">去导入</Link></div>
         )}
-        {fit.hints.map((h, i) => <div key={`h${i}`} className="tw"><Tag>{HORIZON[h.horizon]}</Tag><span>{h.text}</span></div>)}
+        {fit.hints.map((h, i) => <div key={`h${i}`} className="tw"><Tag>{(labelOf(HORIZON, h.horizon) ?? '未知')}</Tag><span>{h.text}</span></div>)}
         {fit.warnings.map((w, i) => (
           <div key={`w${i}`} className="tw" data-testid={`${testId}-warning-${i}`}><span className="warn">{w.text}</span><EvidenceChips ids={w.evidence_ids} evidence={v.evidence} /></div>
         ))}

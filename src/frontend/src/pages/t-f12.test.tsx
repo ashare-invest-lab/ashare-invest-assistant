@@ -166,3 +166,13 @@ describe('候选信号卡详情页补全', () => {
     expect(SUGGESTIONS.length).toBeGreaterThan(0);
   });
 });
+
+
+it.each(['future_status', '__proto__', 'constructor'])('T-F57 建议详情：状态 %s 显示未知中性色', async (status) => {
+  server.use(http.get(`${API}/suggestions/:id`, () => HttpResponse.json({ ...sgBank, status })));
+  renderAt(`/suggestions/${sgBank.id}`);
+  const tag = await screen.findByTestId('sg-status');
+  expect(tag).toHaveTextContent(/^未知$/);
+  expect(tag.className).not.toMatch(/ant-tag-(?:blue|red|orange|green|gold|cyan|purple)/);
+  expect(tag).not.toHaveAttribute('style');
+});
