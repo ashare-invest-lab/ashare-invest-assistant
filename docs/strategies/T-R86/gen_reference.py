@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T-A197 contract v1.0: frozen public snapshots, offline proxies, no network."""
+"""#225 contract: original public PDFs, offline acceptance values and isolated proxies."""
 import argparse
 import csv
 import hashlib
@@ -11,6 +11,7 @@ from bisect import bisect_right
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 from pathlib import Path
+import formal_reference
 
 HERE = Path(__file__).resolve().parent
 DATES = ('2026-06-30', '2026-09-30', '2026-11-09')
@@ -21,11 +22,12 @@ FEATURES = {
     'B12': ('dividend_continuous_years', 'years', (6, 7, 8, 9)),
 }
 SOURCE_SHA = '057dc4d4644e74cbbb3ac65a7811e0a50417bf29c23f2ecea471f4e05b96543f'
-PROXY_SHA = '755d2a8ee8b90bd2b31b45339d0a1ae1e96578cb4629fa510f023fc5d72fc3a4'
+PROXY_SHA = 'd91acbdf243d72197ce3f4ac5963b7023ce8e9c863e280e886e307d63cdad869'
 FIELDS = ('code,market,as_of,feature,input_key,value,unit,status,fq_basis,null_reason,'
           'available_at,source_ids,source_url,proxy_value,proxy_available_at,proxy_flags,'
           'ex_date_proxy_years,ex_date_proxy_null_reasons,'
-          'cash_distribution_plus_buyback_years,cash_distribution_plus_buyback_null_reasons').split(',')
+          'cash_distribution_plus_buyback_years,cash_distribution_plus_buyback_null_reasons,'
+          'dependency_version_ids,proxy_source_ids,proxy_source_url').split(',')
 BAR = struct.Struct('<IIIIIfII')
 
 
@@ -124,7 +126,7 @@ def dividend_gaps(data, income, calendar, d):
 
 def proxy(fid, data, calendar, d, listing):
     inc = reports(data, 'income', calendar, d, listing if fid == 'B9' else '0001-01-01')
-    flags = ['proxy_only', 'T_R86_applicability_pending', 'T_A197_contract_v1.0',
+    flags = ['proxy_only', 'A01_A03_authorized_separate_layer', 'contract_225_v1.0',
              'calendar_proxy=sh000001_bars', 'listing_first_bar_proxy', 'restated_value_risk']
     gaps, value, deps = [], 'null', []
     ex_gaps, years = [], []
@@ -191,6 +193,7 @@ def proxy(fid, data, calendar, d, listing):
 
 
 def generate(inputs, ledger, calendar, listings):
+    formal_inputs, formal_calendars = formal_reference.load()
     rows = []
     for data in inputs:
         code = data['code']
@@ -199,22 +202,30 @@ def generate(inputs, ledger, calendar, listings):
             for fid, (key, unit, questions) in FEATURES.items():
                 kinds = {'B9': ['income'], 'B10': ['income', 'balance'], 'B11': ['income'], 'B12': ['dividend']}[fid]
                 evidence = [r for r in ledger if r['code'] == code and r['kind'] in kinds]
-                require(evidence and all(r['first_seen_at'] == 'null' and r['available_at'] == 'null' for r in evidence),
-                        'new formal evidence requires review')
-                gaps = ['missing_visibility'] + {
-                    'B9': ['coverage_unknown', 'identity_unknown'],
-                    'B10': ['source_semantics_unverified', 'unit_unverified', 'incomparable_basis'],
-                    'B11': ['source_semantics_unverified', 'unit_unverified', 'incomparable_basis', 'identity_unknown'],
-                    'B12': ['source_semantics_unverified', 'payment_unconfirmed', 'year_unclosed', 'coverage_unknown', 'no_known_break'],
-                }[fid]
                 value, available, flags, ex_gaps = proxy(fid, data, calendar, d, listings[code])
                 row = dict.fromkeys(FIELDS, 'null')
                 row.update(code=code, market=market, as_of=d+'T15:05:00+08:00', feature=fid,
-                           input_key='f.'+key, unit=unit, status='依 T-A197（契约 v1.0）',
+                           input_key='f.'+key, unit=unit, status='依 #225 离线重算验收基准',
                            fq_basis=';'.join(f'F-Q{q:02}:Opt-A' for q in questions),
-                           null_reason=';'.join(gaps), source_ids=';'.join(r['source_id'] for r in evidence),
-                           source_url=';'.join(dict.fromkeys(r['source_url'] for r in evidence)),
+                           proxy_source_ids=';'.join(r['source_id'] for r in evidence),
+                           proxy_source_url=';'.join(dict.fromkeys(r['source_url'] for r in evidence)),
                            proxy_value=value, proxy_available_at=available, proxy_flags=flags)
+                formal, gaps, deps, visible = formal_reference.calculate(
+                    fid, formal_inputs[code], formal_calendars, d, roe, cagr)
+                row.update(value=formal, available_at=visible, null_reason=';'.join(gaps),
+                           dependency_version_ids=';'.join(r['version_id'] for r in deps) or 'null',
+                           source_ids=';'.join(r['version_id'] for r in deps) or 'null',
+                           source_url=';'.join(dict.fromkeys(r['source_url'] for r in deps)) or 'null')
+                if formal != 'null':
+                    calendars = [formal_calendars[y] for y in sorted({int(r['plrq'][:4]) for r in deps})]
+                    ids = [r['version_id'] for r in deps] + ['calendar:'+r['content_hash'] for r in calendars]
+                    urls = [r['source_url'] for r in deps+calendars]
+                    if fid == 'B11':
+                        identity = formal_inputs[code]['identity']
+                        ids.append('identity:'+identity['content_hash'])
+                        urls.append(identity['source_url'])
+                    row.update(dependency_version_ids=';'.join(ids), source_ids=';'.join(ids),
+                               source_url=';'.join(dict.fromkeys(urls)))
                 if fid == 'B12':
                     row['ex_date_proxy_null_reasons'] = ex_gaps
                     row['cash_distribution_plus_buyback_null_reasons'] = 'missing_component;coverage_unknown'
@@ -232,10 +243,10 @@ def main():
     parser.add_argument('--features', nargs='+', choices=FEATURES, default=list(FEATURES))
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
-    path = HERE/'sources/proxy_inputs.jsonl'
+    path = HERE/'sources/proxy_inputs.csv'
     require(sha256(args.sources) == SOURCE_SHA and sha256(path) == PROXY_SHA, 'source hash mismatch')
     ledger = list(csv.DictReader(args.sources.open()))
-    inputs = [json.loads(s) for s in path.read_text().splitlines()]
+    inputs = [json.loads(r['payload']) for r in csv.DictReader(path.open())]
     require(sha256(args.day_zip) == next(r['sha256'] for r in ledger if r['kind'] == 'day_zip'), 'day hash mismatch')
     with zipfile.ZipFile(args.day_zip) as archive:
         members = {n.replace('\\', '/'): n for n in archive.namelist()}
@@ -264,7 +275,7 @@ def main():
         require(args.output.read_bytes() == output, 'reference CSV differs')
     else:
         args.output.write_bytes(output)
-    print(f'OK: {len(rows)} rows; contract v1.0; formal nulls and isolated proxies reproduced')
+    print(f'OK: {len(rows)} rows; contract v1.0; offline acceptance values and isolated proxies reproduced')
 
 
 if __name__ == '__main__':

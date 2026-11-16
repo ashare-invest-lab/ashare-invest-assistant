@@ -1,41 +1,63 @@
-# T-R86｜B9–B12 离线参考（依 T-A197（契约 v1.0））
+# T-R86｜B9–B12 离线验收基准（依 #225）
 
-依据 `git show 2297d8f:docs/contracts/finance-inputs.md`，不再采用候选推荐口径。
-20只×3日×4键=240行；正式 `value` 仍全部 null，原因使用契约内部码，可同时记录多个。
-`proxy_value` 沿用 T-R81 先例，仅供离线对照；T-R86 适用性仍待编排者确认，不是正式证据或生产主源。
-涨停计数见 T-R81 B7，不在契约范围内。
+依据 `git show 2297d8f:docs/contracts/finance-inputs.md`，F-Q01–09 均 Opt-A。
+本 CSV 的正式 `value` 明确定义为**按 #225 离线重算口径的验收基准值**。
+它与主源适配器的值分开：生产主源仍为契约指定的 factor/quality、factor/growth、factor/dividend；本次不证明其语义、历史 PIT 或接线，不自动替换主源，不切 F44。
+20只×3日×4键=240行；正式39非空、201 null，10/20只至少一个 B9–B11 键非空。
+评估日2026-06-30、09-30、11-09；as_of=15:05+08:00，统一 t=当日15:00。
 
-| 键及 CSV input_key | F-Q（均 Opt-A） | proxy 非空/null |
-|---|---|---:|
-| B9 `f.fin_report_count` | 01–02 | 41/19 |
-| B10 `f.roe_ttm` | 01、03 | 38/22 |
-| B11 `f.profit_cagr_3y` | 03–05 | 26/34 |
-| B12 `f.dividend_continuous_years` | 06–09 | 0/60 |
+| 键 | 正式非空/null（涉及股数） | proxy非空/null |
+|---|---:|---:|
+| B9 fin_report_count | 0/60（0） | 41/19 |
+| B10 roe_ttm | 30/30（10） | 38/22 |
+| B11 profit_cagr_3y | 9/51（3） | 26/34 |
+| B12 dividend_continuous_years | 0/60（0） | 0/60 |
 
-原 F12→B9、F09→B11、F10→B12；新增 B10。评估日为 2026-06-30、09-30、11-09，CSV as_of=15:05+08:00，统一按当日15:00截止。
-正式主源仍为契约指定因子；公开快照缺首见、历史版本、完整性及可比链，离线结果不补位正式值。
+B10正式覆盖600519、600228、600825、600293、603159、603307、001225、688610、300502、300750，三个日期均有值。
+B11正式覆盖600825、603307、300502，分别为68.84%、−23.02%、119.32%，三个截点相同。
+代理层已按编排者裁定沿用 A01–A03 先例，单独承载 proxy_value/proxy_available_at/proxy_source_*，不得替代正式值。
+原代理数值保持不变；东财最新快照、tdx首K及指数交易日仅用于代理，保留 restated_value_risk。北交所 HG2 门禁保留。
+ex_date_proxy_years 与 cash_distribution_plus_buyback_years 仍为独立对照，各60个适用行全null；不把除息、回购或未观察到分红当成付款或明确零年。涨停计数见T-R81 B7。
 
-- 可见代理只取 NOTICE_DATE 的次一上证指数观察日09:30；派生值取依赖最大值，空值不伪造时点。法定期限不生成披露日，脚本已移除截止日/min逻辑。
-- 指数观察日只作日历代理；上市日用 tdx 首K，上市前拒绝。所有财务行保留 `restated_value_risk`；历史数值版本仍未证，不宣称严格历史PIT成立。北交所 HG2 门禁保留在 proxy_flags。
-- B9 仅用正式利润表接口（REPORT_TYPE_CODE=001），不收预告、快报、摘要；period_end、plrq均不早于首K，plrq须晚于period_end，按period_end去重。接口集合不证明全历史覆盖；未证空集合不能填0。
-- B10：年报直接取NP，季报 `TTM=NP_YTD(P)+NP_FY(上年)−NP_YTD(P−4)`；`100×TTM/((E(P)+E(P−4))/2)`。期末/平均权益≤0分别拒绝，期初负但期末及平均正允许，负利润保留。缺分量不回退。
-- B11：最新可见完整年报y与y−3、36个月；两端严格正，分别记录base_nonpositive/end_zero/end_negative；缺端点不退旧年，首K上市不足三年拒绝。B10/B11仅最终ROUND_HALF_UP至pct两位，计算精度50位。
-- B12：仅实际现金股利，需发放日日终及完成证据；除息日绝不补付款日。本快照无完成、事件全覆盖、最终决议、闭合及明确中断年证明，因此全部null/payment_unconfirmed等，不把缺年当零、不以最近有现金年为起点。
-- `ex_date_proxy_years` 为 F-Q06 Opt-B 独立列，只在B12行承载对照；除息日期只能改变事件代理，不能豁免F-Q07–08的归属、闭合、同年去重及中断证据，故60行均null。`observed_ex_cash_years`仅列正现金观察年，不是连续年数。
-- `cash_distribution_plus_buyback_years` 为 F-Q09 Opt-B 独立列，全列null：未取得可靠的已支付股利加已实施回购批次/金额/支付自然年完整数据；B12行原因missing_component;coverage_unknown。两列均不进入B12，也不直接比较大小。
+## 正式证据和重算
 
-[public_sources.csv](sources/public_sources.csv)记录104条来源、62个URL及原始响应SHA256。保留原40个利润/分红接口与行情包；移除无关ST公告及股本包，新增21个资产负债表请求（含银行通用接口空响应）。
-权益使用东财公开 `RPT_F10_FINANCE_GBALANCE`，000001使用 `RPT_F10_FINANCE_BBALANCE` 的 `TOTAL_PARENT_EQUITY`，币种CNY；不以总权益替代归母权益。字段语义未独立证实，所有B10保留source_semantics_unverified。
-[proxy_inputs.jsonl](sources/proxy_inputs.jsonl)每股一行按fields抽取，source_id关联URL/原始响应哈希；收入原响应逐一验哈希后补REPORT_TYPE_CODE，资产负债表原响应另行归档，响应pages=1且count逐一对齐。归档访问日2026-11-15不冒充历史首见日。
-脚本锁定两份来源文件与行情包SHA256；只读取公开归档，无网络、数据库或凭据访问。日期筛选排除未来报告/披露/除息；当前响应可能重述的风险单列保留。
+[formal_inputs.csv](sources/formal_inputs.csv)每股一行，payload保存152条报告版本元数据：issuer/security class/period/type/version、supersedes_id、announcementTime、plrq、first_seen_at、原始PDF URL+SHA256、归母利润及权益的当期/比较数、PDF物理页码和单位倍率。没有用东财数值填正式列。
+first_seen_at按本次任务定义取巨潮原始公告发布时间；不是本次下载时间或供应商入库首见，巨潮零点时间也不推定盘前可用。
+available_at=max(披露次交易日09:30,first_seen_at,全部依赖证据可见时点)，用带时区瞬时比较，缺日历拒绝。
+[formal_calendar.csv](sources/formal_calendar.csv)使用上交所2023–2026年度休市公告构造工作日减休市集合；公告均在对应年度之前公开，周末调休不当交易日。
+上市日取巨潮公司概况，并以 t 前原始报告/ESG报告中的上市记载复核；当前公司概况仅交叉核对，不拿当前页面的未来字段进公式。缺历史佐证的身份保持未知。
+F-Q01逐期法规历史版本尚未穷尽，rule_version留空并记录rule_audit_reason=rule_unknown；依契约原因码说明只使期限审计为空，不制造披露日，不以期限审计替代财务证据。
+B9检索仅覆盖2022-01-01至2026-11-09，不能证明上市以来完整集合，因此不按上市年龄、最近12行或接口行数输出正式计数。
+B10按累计利润展开TTM；逐项核对本期同期NP=上期原始NP、本期比较E=上年年报E、上期比较E=更早年报E、两年年报权益衔接。688610无合并报表的期间以明确“归属于上市公司股东”的指标表核对单体报表，未拿不明总权益替代归母权益。
+B11公式仅取最新可见完整年报y与y−3；中间年报只作逐年比较数可比链核验。两端严格正、跨度36个月且上市满3年；负末期不输出有符号CAGR。
+单位按原始表头归一到人民币元（宁德时代含千元/万元），季报仅写“元”时依赖可见年报的人民币定义/会计政策。B10/B11仅最终ROUND_HALF_UP至两位，计算精度50位。
+按 t 选最新公告版本；新版缺分量不得用旧版补洞，相关更正尚未被完整版本承接则拒绝。比较数不相等且调整桥接未核清时记 incomparable_basis，不使用统一自填ID冒充可比证明。
+CSV dependency_version_ids包含报告版本及日历哈希，B11另含身份来源哈希；来源页码在输入CSV。所有正式输出依赖均≤t。
+
+## 剩余 null：缺什么 → 去哪里拿 → 本次为何未齐
+
+| 类别/影响 | 缺哪类公开数据 | 去哪里拿 | 本次为何未拿到/不输出 |
+|---|---|---|---|
+| B9 60行 | 上市后全历史正式利润表、全覆盖截止/起止/缺口清单 | 巨潮逐年分页、沪深北交易所原始定期报告和上市/转板公告 | 本次索引从2022年开始，早年历史及换码链未穷尽；空检索不能证明完整空集合 |
+| B10其余10只/30行；B11部分 | 原始分量、单位币种和可比链 | 对应公司巨潮原始年/季报财务表、币种附注、更正公告 | 平安银行百万元/中芯国际千元跨表、000972更正链未逐项核证；新上市样本原始同期报表缺口；北交所身份/门禁未完成。原始PDF虽下载，不把未复核抽取升级为正式输入 |
+| B9/B11身份未知 | t前上市日、换码/转板连续身份 | 交易所上市公告、巨潮公司概况及历史原始报告 | 当前概况已查询20股；部分历史报告未找到明确上市日/身份佐证，不能以首K替代 |
+| B11可比链 | 逐项重述桥接/精度转换说明 | 茅台、和泰机电、宁德时代相关原始年报的政策变更和追溯调整附注 | 2022原值对次年比较数、或跨万元/千元数不完全相等；本次未核清调整量/舍入桥接，保持 incomparable_basis |
+| B11经济边界/缺端点 | 正端点、完整36个月、上市满三年 | 原始年报与上市公告 | 600228/600293/603159末期负；600293基期亦负。新股缺端点或不足三年；这些情况不能靠补数绕过契约 |
+| B12 60行 | 全部批次发放日与完成证据、最终决议、全年度事件覆盖和明确零中断年 | 巨潮权益分派实施公告、后续半年/年报“实施完毕”、股东会不分配决议、交易所分红公告 | 已核10份实施公告；新易盛/宁德时代半年报有部分完成说明，但晚于06-30，且不能证明全部历史年度闭合/中断。尚缺其他事件完成/覆盖，不以计划日或除息代替完成 |
+| 两种独立对照 | 年度闭合、归属、明确中断；回购批次金额与支付自然年覆盖 | 原始分红实施/完成公告及回购完成公告 | 事件、归属和覆盖未穷尽，不能输出连续年数，也不以回购计入B12 |
+
+## 复现与拆分
 
 ```sh
-DATA=../tdx-pack
 export PYTHONDONTWRITEBYTECODE=1
 python3 docs/strategies/T-R86/gen_reference.py --day-zip "$DATA/hsjday_20261110.zip"
 python3 docs/strategies/T-R86/gen_reference.py --check --day-zip "$DATA/hsjday_20261110.zip"
 python3 -O docs/strategies/T-R86/gen_reference.py --check --day-zip "$DATA/hsjday_20261110.zip"
+python3 docs/strategies/T-R86/check_reference.py
+python3 -O docs/strategies/T-R86/check_reference.py
 ```
 
-`--check`逐字节校验全部列；`--features B9`等只重算选定键；最终验收必须全量。旧--gbbq-zip/--rules参数仅为CLI兼容，不参与财务计算。
-手算、各层null分布、与cbc665b逐值差异及验收结果见团队报告T-R86c节。仅解释候选信号，不荐股、不承诺收益。
+DATA指向已有公开行情包目录，仅代理使用；正式计算不读行情。脚本无网络、数据库或凭据访问，锁定输入CSV及行情包SHA256。--check逐字节复现全部列；可选check_reference --pdf-dir核验重新下载的152条原始PDF记录。
+超过800行的来源材料已单列[sources_ext](sources_ext/)：report_excerpts.csv、announcement_indexes.csv、public_profiles.csv、calendar_excerpts.csv、dividend_excerpts.csv、url_status.csv，建议作为第二个PR及对应inventory登记项；不自行建分支。核心脚本只依赖sources下CSV，摘录不参与计算。
+URL状态逐项在url_status.csv：152个公告详情页、201个PDF、20个公司概况、4个官方日历、1个检索入口均HTTP 200；另3个探路失败入口未作证据。4个报告PDF也属于更正公告，去重仅计一次；状态只证明本次可访问。
+手算2例、全部门禁、净增行数及提交尝试见团队报告T-R86d节。仅作财务输入验收，不荐股、不承诺收益。
