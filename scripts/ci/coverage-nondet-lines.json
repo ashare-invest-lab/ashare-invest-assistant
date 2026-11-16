@@ -1,0 +1,28 @@
+{
+  "schema": "aia-coverage-nondet-lines-v1",
+  "files": [
+    {
+      "path": "src/backend/app/aggregates/calendar.py",
+      "lines": [
+        78,
+        79,
+        80,
+        81,
+        82,
+        84,
+        85
+      ],
+      "anchors": {
+        "78": "return MarketClock(trade_date=day, session=MarketSession(name))",
+        "79": "if time < periods.morning[0]:",
+        "80": "state = MarketSession.PRE_OPEN",
+        "81": "elif periods.morning[1] <= time < periods.afternoon[0]:",
+        "82": "state = MarketSession.LUNCH_BREAK",
+        "84": "state = MarketSession.CLOSED",
+        "85": "return MarketClock(trade_date=day, session=state)"
+      },
+      "reason": "API 调用依赖 datetime.now 的会话分支，盘前、盘中、午休、收盘互斥。",
+      "review_by": "2026-12-15"
+    }
+  ]
+}

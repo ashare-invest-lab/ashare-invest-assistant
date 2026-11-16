@@ -48,7 +48,7 @@ function SettingCard({ item }: { item: RiskControlSetting }) {
   const issues = validateRiskParams(draft);
   const systemDefault = restoredRiskDefault(item);
   const edit = (next: RiskControlSetting) => { save.reset(); setDraft(next); };
-  return <section className="panel" style={{ padding: 16 }} data-testid={`risk-setting-${item.control}`}>
+  return <section className="panel risk-setting-card" id={`risk-setting-${item.control}`} style={{ padding: 16 }} data-testid={`risk-setting-${item.control}`}>
     <h3>{RISK_CONTROL[item.control]} <Tag>{item.source === 'system' ? '系统有效值' : '本人覆盖值'}</Tag></h3>
     <fieldset disabled={save.isPending} style={{ border: 0, padding: 0 }}>
       <Checkbox checked={draft.enabled} onChange={(e) => edit({ ...draft, enabled: e.target.checked })}>启用 {RISK_CONTROL[item.control]}</Checkbox>
@@ -67,7 +67,12 @@ function SettingsPanel() {
   const settings = useRiskSettings();
   if (settings.isPending) return <Loading />;
   if (settings.isError) return <ErrorBox error={settings.error} />;
-  return <div className="stock-grid">{settings.data.map((s) => <SettingCard key={s.control} item={s} />)}</div>;
+  return <section aria-labelledby="risk-settings-title" data-testid="risk-settings-overview">
+    <h3 id="risk-settings-title">有效风控设置</h3>
+    <p className="small muted">以下为服务端当前有效设置。编辑后需点击对应保存按钮；当前评价与历史事件分别查看。</p>
+    <nav className="report-nav small" aria-label="风控设置定位">{settings.data.map((s) => <a key={s.control} href={`#risk-setting-${s.control}`}>{RISK_CONTROL[s.control]} · {s.enabled ? '已启用' : '已关闭'}</a>)}</nav>
+    <div className="stock-grid">{settings.data.map((s) => <SettingCard key={s.control} item={s} />)}</div>
+  </section>;
 }
 const STATE = { ok: '输入齐全，未触发', triggered: '已触发', unknown: '未知（输入不足）', disabled: '已关闭（不施加门控）' };
 function EvaluationPanel({ initialCode }: { initialCode: string }) {
