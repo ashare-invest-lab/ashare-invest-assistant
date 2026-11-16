@@ -10,6 +10,7 @@ import { newIdempotencyKey } from '../../api/client';
 import { usePortfolio } from '../../api/queries';
 import type { PortfolioPosition } from '../../api/types';
 import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import { CursorPager } from '../../components/CursorPager';
 import { DILUTED_COST_NOTE, IMPORT_STATUS, RECON_KIND, RECON_STATUS, TRADE_SIDE, voidReasonText } from '../../i18n/importLabels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { applyFieldErrors } from '../../lib/formErrors';
@@ -333,11 +334,11 @@ function ImportsTab({ accountId }: { accountId: string }) {
   const [dlErr, setDlErr] = useState<unknown>(null);
   return (
     <div data-testid="imports-tab">
-      {q.isError ? <ErrorBox error={q.error} /> : null}
+      {q.isError && !q.isFetchNextPageError ? <ErrorBox error={q.error} /> : null}
       {revert.isError ? <ErrorBox error={revert.error} prefix="撤销失败" /> : null}
       {dlErr ? <ErrorBox error={dlErr} prefix="下载失败" /> : null}
       <Table<ImportBatchSummary>
-        size="small" rowKey="batch_id" loading={q.isPending} dataSource={q.data?.items ?? []} pagination={false}
+        size="small" rowKey="batch_id" loading={q.isPending} dataSource={q.items} pagination={false}
         locale={{ emptyText: '暂无导入记录' }}
         columns={[
           { title: '上传时间', dataIndex: 'created_at', render: (v: string) => <span className="mono">{fmtTime(v)}</span> },
@@ -366,6 +367,7 @@ function ImportsTab({ accountId }: { accountId: string }) {
           },
         ]}
       />
+      <CursorPager query={q} loaded={q.items.length} testId="imports-pager" />
     </div>
   );
 }
