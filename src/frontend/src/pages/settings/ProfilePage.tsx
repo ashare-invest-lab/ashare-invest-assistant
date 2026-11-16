@@ -69,7 +69,13 @@ export function ProfilePage() {
           </Radio.Group>
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(a, b) => a.experience !== b.experience}>
-          {({ getFieldValue }) => <div className="muted form-hint">{(labelOf(EXPERIENCE, getFieldValue('experience') as keyof typeof EXPERIENCE) ?? { text: '未知', hint: '未知' })?.hint ?? ''}</div>}
+          {({ getFieldValue }) => {
+            const experience = getFieldValue('experience') as FormValues['experience'] | undefined;
+            const option = labelOf(EXPERIENCE, experience);
+            // 不填写不提示；已知选项可以没有描述，只有未知键才显示兜底。
+            const hint = experience == null || experience === UNSET ? '' : option ? option.hint ?? '' : '未知';
+            return <div className="muted form-hint">{hint}</div>;
+          }}
         </Form.Item>
         {/* v0.2.4 #7：5–50，最多 2 位小数（评审 m11） */}
         <Form.Item name="max_single_position_pct" label="单只股票最大仓位（%）" extra="用于计划条件里的仓位上限提示，范围 5–50"
