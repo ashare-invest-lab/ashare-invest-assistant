@@ -1049,7 +1049,7 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
 
 **结论与适用状态**：现有材料不能完成真实确认；可立即离线盘点、解析和准备验收，不能立即解锁 355 只 BJ。推荐「既有可信原始响应＋用户提供的新 TDX 离线副本＋R1 字节校验」，材料不足即停，不另造放行口径。（出处：§10.2、§10.10–§10.12；团队报告 T-B149「T-B149b」）
 本节报告引用均指团队报告 T-B149、T-B140、T-B143、T-B146c（仓库外，团队工作区 reports/），不要求读取其指向的其他文件。库存仅有 2026-11-13、旧包止于 2026-11-10 为报告事实，本次未连库或读取行情包复核。
-版本须区分：T-B149「T-B163r③」记录 PID 绑定已在分支实现；本工作树 `95967e1` 的 `app.bj_offline_volume` 只有进程全局集合，未见 PID 检查。目标版本的 PID 绑定、fork 不继承必须验收，不能把报告当当前部署证明；R1 仍未落地，旧函数算术通过也不得用于生产确认。（出处：§10.10、§10.12 第 1 条；`confirm_bj_offline_volume_units`、`_bj_write_unconfirmed`）
+版本须区分：T-B149「T-B163r③」记录 PID 绑定已在分支实现；本工作树 `95967e1` 的 `app.bj_offline_volume` 只有进程全局集合，未见 PID 检查（当前 main `ccd3eb2` 相对 95967e1 未改动该模块）。目标版本的 PID 绑定、fork 不继承必须验收，不能把报告当当前部署证明；R1 仍未落地，旧函数算术通过也不得用于生产确认。（出处：§10.10、§10.12 第 1 条；`confirm_bj_offline_volume_units`、`_bj_write_unconfirmed`）
 
 **候选方案比较**（所有“能”均以 R1 落地、真实材料合格及生命周期验收通过为前提）：
 
@@ -1080,9 +1080,9 @@ T-B146c 的 920682 单码证据不足 20 只，报告还称原始 K 线仅在内
    参数出处：`tdx_import._parser`、`_execute`、`tdx_local.check_audit_dir`；不带 `--apply` 为 dry-run，不写行情或 pipeline_runs。此命令是导入预演，不能生成 R1 原始证据或确认状态。（出处：`test_daily_execute_dry_run_captures_safe_defaults`、`test_run_uses_expected_transaction_and_rollback`）
    当前 `_execute` 仍要求过去开市日且 until≤recommended_until，market 范围拒绝、owned 不保证覆盖 355 只；不能填写 `--until 2026-11-13` 就声称可跑全量。解除既有窗口与覆盖范围的实现差异须另行验收，不在本节改参数绕过。纯文件取证复用第 3 步，不借导入扩大窗口。（出处：`recommended_until`、`_past_open`、`_execute`；`test_daily_execute_refusals_stop_before_import`）
    当前无 deps 注入时 `_run` 会构造 Settings 并连库，CLI 不能当作完全无配置的文件工具。此次禁读 `.env`／密钥、禁止网络时不执行该命令；离线测试用 `daily_main(..., deps=隔离依赖)`，生产预演须由已配置的授权运行环境承接。（出处：`tdx_import._run`、`daily_main`；`test_public_wrappers_accept_injected_dependencies`）
-8. 仅在材料、R1、PID 与逐入口验收均通过后，提交具体导入范围、差异、预期计数和事务回滚方案供用户本人批准；获批的生产 `--apply` 仍须在实际进程重新确认并经 `run_import`→`DbDeps.write`→`upsert_daily_bars`。TDX 股量不再 ×100，不覆盖麦蕊；被拦须报 partial／非零退出，不报全量成功。（出处：§10.10–§10.12；`tdx_import._execute`、`DbDeps.write`；`test_dbdeps_write_daily_uses_do_nothing_adapter`）
+8. 仅在材料、R1、PID 与逐入口验收均通过后，BJ 才可进入导入；在此之前 BJ 继续阻断。导入范围、差异、预期计数和事务回滚方案写入结案记录。t1110u 范围内的 TDX 导入（只导 A 股、只追加、不覆盖麦蕊行，走 `app.cli.tdx_import`，§10.12 第 2 条）沿用既有授权，不另请用户批准；超出该范围的动作仍按下方硬红线。BJ 的 `--apply` 仍须在实际进程重新确认并经 `run_import`→`DbDeps.write`→`upsert_daily_bars`。TDX 股量不再 ×100，不覆盖麦蕊；被拦须报 partial／非零退出，不报全量成功。（出处：§10.10–§10.12；`tdx_import._execute`、`DbDeps.write`；`test_dbdeps_write_daily_uses_do_nothing_adapter`）
 
-**硬红线与前视边界**：真调麦蕊、对外发送、动用户电脑、`--apply` 生产写库均须用户本人明确批准；本节及历史报告授权不替代批准。用户导出由本人操作，团队不读其电脑；本方法仅处理已提供副本，不读 `.env`／密钥、不联网。若离线材料不足，结束为“未确认”，不得自动请求；后续真调另按 §10.10 申请。（出处：本任务约束；§10.10、§10.12）
+**硬红线与前视边界**：硬红线以 TEAM-RULES 原文为准——真调麦蕊（日K、分钟、单 D）、生产部署、删除用户数据、对外发送、解除 HALT、恢复外网出口、backfill --apply 须用户本人批准；通达信真实全量导入已由用户 t1110u 授权，仍须走 `upsert_daily_bars` 并过写库门闩，绕开按误放处理。团队不动用户电脑。用户导出由本人操作，团队不读其电脑；本方法仅处理已提供副本，不读 `.env`／密钥、不联网。若离线材料不足，结束为“未确认”，不得自动请求；后续真调另按 §10.10 申请。（出处：本任务约束；§10.10、§10.12）
 晚于历史时点取得的包和原始响应须分别记录交易日、实际取得时间、审定时间、确认时间；只能证明本次单位确认，不回填为历史当时已知，不证明全体历史覆盖或每条数据正确。取证／导入日不改交易日，不能跨日借量。（出处：§10.2、§10.10；本节新增审计约束）
 
 **后端实现／测试验收清单**（本次不新增或运行功能测试）：
@@ -1100,4 +1100,4 @@ T-B146c 的 920682 单码证据不足 20 只，报告还称原始 K 线仅在内
 | `test_ta171_import_confirmation_same_process`（待新增） | 材料失败时 BJ 不进 writer；通过时同进程经公共入口，股量不变；新 CLI 默认拒绝，拒绝数／partial／非零退出正确。§10.10–§10.12；步骤 6、8 |
 | `test_ta171_evidence_dates_and_import_limits`（待新增） | 分别记交易日和取得／审定／确认时间；导入日期、owned 范围与取证日分离，不能默改窗口或宣称已覆盖 355 只。步骤 7、前视边界 |
 
-沿用 §10.11–§10.12 全部逐入口验收；上述清单不替代 SQL staging、整批回滚及平台验收。结案记录须列实现 SHA、测试名、平台、通过／失败／跳过及未验证项；真实原始材料齐备、R1 落地和用户写库批准是独立条件，缺一继续阻断。
+沿用 §10.11–§10.12 全部逐入口验收；上述清单不替代 SQL staging、整批回滚及平台验收。结案记录须列实现 SHA、测试名、平台、通过／失败／跳过及未验证项；真实原始材料齐备、R1 落地、PID 隔离与逐入口验收是独立条件，缺一 BJ 继续阻断；TDX 写库授权沿用 t1110u，不另设条件。
