@@ -37,6 +37,7 @@ from app.db.tables.market import (
 from app.db.tables.market import (
     security_risk_flag_history as risk,
 )
+from app.features.horizon_sources import EmptyEvidenceProvider
 from app.master.mairui_snapshot import (
     DATASETS,
     TASK,
@@ -173,8 +174,14 @@ def test_real_queue_worker_persistence_pit_and_consumer(
     assert flags(e)["f.is_delisting_period"] is False
     from app.strategy.horizon import inputs
 
-    monkeypatch.setattr(inputs, "now_utc", lambda: at(1, 9))
-    out = inputs.collect(e.conn, uuid.uuid4(), CODES[0], ["f.is_st", "f.is_delisting_period"])
+    out = inputs.collect(
+        e.conn,
+        uuid.uuid4(),
+        CODES[0],
+        ["f.is_st", "f.is_delisting_period"],
+        as_of=at(1, 9),
+        evidence_provider=EmptyEvidenceProvider(),
+    )
     assert out.values == {"f.is_st": True, "f.is_delisting_period": False}
     assert out.sources["f.is_st"]["provider"] == "mairui_list"
     assert flags(e, as_of=at(0, 23))["f.is_st"] is None

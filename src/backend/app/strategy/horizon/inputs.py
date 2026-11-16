@@ -27,9 +27,11 @@ from typing import Any
 from sqlalchemy import Connection, and_, exists, func, select
 from sqlalchemy.orm import aliased
 
-from app.auth.service import bj, latest_profile, now_utc
+from app.auth.service import bj, latest_profile
 from app.db.tables.accounts import accounts, holdings, trades
 from app.db.tables.market import securities
+from app.features.horizon_sources import HorizonEvidenceProvider, aware
+from app.features.horizon_windows import select_day
 from app.importing.preview import infer_board, infer_market
 
 #: UUIDv5 命名空间（固定值；只用于把输入快照映射成稳定 ID）
@@ -40,6 +42,8 @@ _UNITS = {"f.list_days": "trading_days"}
 
 @dataclass
 class Inputs:
+    d: dt.date | None = None
+    gaps: tuple[str, ...] = ()
     values: dict[str, Any] = field(default_factory=dict)
     #: 输入键 → Evidence（契约 §5.1 结构，不含 id；id 由 :func:`evidence` 分配）
     sources: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -67,12 +71,22 @@ def _src(
     }
 
 
-def collect(conn: Connection, user_id: uuid.UUID, code: str, features: list[str]) -> Inputs:
-    now = now_utc()
-    out = Inputs(values=dict.fromkeys(features))
+def collect(
+    conn: Connection,
+    user_id: uuid.UUID,
+    code: str,
+    features: list[str],
+    *,
+    as_of: dt.datetime,
+    evidence_provider: HorizonEvidenceProvider,
+) -> Inputs:
+    now = aware(as_of)
+    basis = evidence_provider.read_basis(user_id=user_id, licence_id=None, code=code, as_of=as_of)
+    selected = select_day(basis, user_id=user_id, licence_id=None, code=code, as_of=as_of)
+    out = Inputs(values=dict.fromkeys(features), d=selected.d, gaps=selected.gaps)
     vals, srcs = out.values, out.sources
 
-    prof = latest_profile(conn, user_id)
+    prof = latest_profile(conn, user_id, as_of=as_of)
     if prof is not None:
         p_at = prof.confirmed_at or prof.created_at
         pref = list(prof.horizon_pref) if prof.horizon_pref else None
@@ -86,7 +100,9 @@ def collect(conn: Connection, user_id: uuid.UUID, code: str, features: list[str]
                 vals[key] = value
                 srcs[key] = _src(key, value, "user_input", p_at, now)
 
-    sec = conn.execute(select(securities).where(securities.c.code == code)).first()
+    sec = conn.execute(
+        select(securities).where(securities.c.code == code, securities.c.updated_at <= as_of)
+    ).first()
     bare, _, market = code.partition(".")
     if sec is not None:
         s_at = sec.master_as_of or sec.updated_at
@@ -116,19 +132,19 @@ def collect(conn: Connection, user_id: uuid.UUID, code: str, features: list[str]
     live = and_(
         trades.c.user_id == user_id,
         trades.c.security_code == code,
-        trades.c.voided_at.is_(None),
+        trades.c.voided_at.is_(None) | (trades.c.voided_at > as_of),
+        trades.c.created_at <= as_of,
     )
     n_trades, last_trade = conn.execute(
         select(func.count(), func.max(trades.c.created_at)).where(live)
     ).one()
     held = conn.execute(
-        select(func.max(holdings.c.rebuilt_at), func.count()).where(
+        select(func.max(holdings.c.rebuilt_at), func.count().filter(holdings.c.quantity > 0)).where(
             holdings.c.account_id.in_(acc_ids),
             holdings.c.security_code == code,
-            holdings.c.quantity > 0,
         )
     ).one()
-    if "user.has_position" in vals:
+    if "user.has_position" in vals and (held[0] is None or held[0] <= as_of):
         vals["user.has_position"] = bool(held[1])
         srcs["user.has_position"] = _src(
             "user.has_position", bool(held[1]), "user_import", held[0] or last_trade, now
@@ -144,7 +160,8 @@ def collect(conn: Connection, user_id: uuid.UUID, code: str, features: list[str]
                         exists().where(
                             other.c.user_id == user_id,
                             other.c.security_code == code,
-                            other.c.voided_at.is_(None),
+                            other.c.voided_at.is_(None) | (other.c.voided_at > as_of),
+                            other.c.created_at <= as_of,
                             other.c.side == "sell",
                             other.c.account_id == trades.c.account_id,
                             other.c.trade_date == trades.c.trade_date,
