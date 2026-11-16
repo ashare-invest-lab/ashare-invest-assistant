@@ -1,4 +1,5 @@
-# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v2（T-R20；v1 为 T-R15）
+# W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v3（T-R88；v2 为 T-R20；v1 为 T-R15）
+> **v3 变更（T-R88，按 T-R87 出处表补参数出处）**：版本 v2 → v3；只补出处，不改规则、参数、阈值、data_needs、universe、screen、costs；夹具及期望值不变。v2 原文冻结在 `cards/history/sw_ma_trend_pullback.v2.md`。新版本须重新导入并重跑 G1–G6，lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
 > 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card` / `strategy-spec` / `validation`），导入器只读这三块，正文存为 `narrative`。
 > 夹具中全部价格、成交额、持仓与场景均为**虚构**；`688018.SH`、`688073.SH`、`300364.SZ`、`301218.SZ` 只作“科创板/创业板”场景标签写在 `desc` 中，不代表、不暗示任何真实行情。夹具期望值由 `golden/gen_T-R15.py` 本地确定性求值生成并自检。
@@ -11,7 +12,7 @@
 - **优先级**：持有中 → 只看 exit（exit > hold）；未持有 → veto > insufficient_data > entry_ok > not_triggered。G-01/N-01 由系统挂载，见 `system_components_T-R15.md`。
 
 ## 时点 / 单位 / 复权 / 预热
-- 日线盘后（`daily_close`）求值，只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价；季报类特征按 plrq 次一交易日 09:30 可见；公告按 2.12.2 次日开盘生效。无未来数据。
+- 日线盘后（`daily_close`）求值，只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价（出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154）；季报类特征按 plrq 次一交易日 09:30 可见；公告按 2.12.2 次日开盘生效。无未来数据。
 - **价格口径（plan 2.5.14 T-R15 裁定⓪）**：全部价格规则统一 qfq，基准日 = as_of（T）：`x_qfq(d)=x(d)×A(d)/A(T)`，A(d) 只用 T 日已可得的除权信息；T 日 qfq 值即不复权值。计划价持久化为不复权，规则只用求值器派生的 `plan.entry_price_qfq`；`ctx.last_price` 只与同为不复权的 `plan.stop_loss` 比较。用 qfq@T 算出的止损价就是 T 日不复权价。成交额 `f.amount` 单位元。ATR 为 Wilder（首值取前 14 个 TR 简单平均，warmup 15）。
 - 预热：MA60 + `trend_days`−1 = 64 根（默认），60 日最高 60 根，ATR14 15 根，RSI14 28 根 → **warmup 65 根有效日 K**（按参数上限 120+20−1=139）；停牌日不计入有效 K；不足 → `insufficient_data`。`for N days` 按有效日 K 计数。
 - 板块约束：涨跌停价按 `config/market_rules.yaml` 生效段计算（创业板/科创板现行 20%，**注册制新股上市前 5 个交易日无涨跌幅，`f.limit_*_price = null`**，不硬编码 20%）；止损/止盈价截断到次日涨跌停价之内。科创板买入 ≥200 股、200 股以上 1 股递增，其他板块 100 股整数倍；不足一个申报单位的零股卖出须一次性申报（`lot_rule` 在计划确认时按草案 `market_rule_version_id` 校验，不在卡内重算）。T+1：买入当日可卖 0，卖出信号照常、执行层 `T1_NOT_SELLABLE`。
@@ -30,7 +31,7 @@
 
 ```yaml strategy-card
 key: sw_ma_trend_pullback
-version_no: 2
+version_no: 3
 name: 波段·均线趋势回踩
 category: trend
 horizons: [swing]
@@ -124,7 +125,7 @@ fit: {effort: low, risk_tolerance_min: 3, experience_min: novice}
 
 ```yaml strategy-spec
 key: sw_ma_trend_pullback
-version_no: 2
+version_no: 3
 kind: rule_template
 horizons: [swing]
 params_schema:
