@@ -1,9 +1,10 @@
 """T-A192 §3.1：Horizon 追加式输入版本。"""
 
-from sqlalchemy import CheckConstraint, Index, Table, text
+from sqlalchemy import CheckConstraint, Index, Table, UniqueConstraint, text
 
 from app.db.base import (
     APP,
+    boolean,
     created_at,
     day,
     jsonb,
@@ -85,3 +86,33 @@ Index(
     ),
 )
 Index("ix_horizon_input_versions_supersedes_id", horizon_input_versions.c.supersedes_id)
+
+# T-A192 §3.2：可见性未知保持 NULL，登记时间不代替证据可见时间。
+horizon_completion_evidence = Table(
+    "horizon_completion_evidence",
+    metadata,
+    uuid_col("id", nullable=False, primary_key=True),
+    uuid_col("bar_version_id", nullable=False, fk="app.horizon_input_versions.id"),
+    uuid_col("pipeline_run_id", fk="app.pipeline_runs.id"),
+    boolean("is_final"),
+    ts("available_at"),
+    txt("proof_kind", nullable=False),
+    txt("proof_hash", nullable=False),
+    jsonb("proof", nullable=False),
+    created_at("recorded_at"),
+    UniqueConstraint("bar_version_id", "proof_hash"),
+    CheckConstraint("proof_hash ~ '^[0-9a-f]{64}$'", name="proof_hash_hex"),
+    CheckConstraint(
+        "is_final IS DISTINCT FROM true OR available_at IS NOT NULL", name="final_available"
+    ),
+    one_of("proof_kind", ["source_final_receipt", "synthetic"]),
+    schema=APP,
+)
+Index(
+    "ix_horizon_completion_evidence_read",
+    horizon_completion_evidence.c.bar_version_id,
+    horizon_completion_evidence.c.available_at,
+)
+Index(
+    "ix_horizon_completion_evidence_pipeline_run_id", horizon_completion_evidence.c.pipeline_run_id
+)
