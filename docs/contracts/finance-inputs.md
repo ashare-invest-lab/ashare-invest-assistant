@@ -1,7 +1,7 @@
 # B9–B12 财务输入契约
 
 版本：v1.0（2026-11-15，T-A197 裁定）；F-Q01–F-Q09 全部采用 Opt-A。
-依据：T-R83 `docs/strategies/T-R83/finance_inputs_audit.md` §2–§7；T-R85 `docs/strategies/T-R83/fq_options.md`「共同定义」及 F-Q01–F-Q09；本次读取其 `.codex-input/` 副本。
+依据：T-R83 `docs/strategies/T-R83/finance_inputs_audit.md` §2–§7；T-R85 `docs/strategies/T-R83/fq_options.md`「共同定义」及 F-Q01–F-Q09。方案与契约固定路径分别为 `docs/plan-finance-inputs.md`、`docs/contracts/finance-inputs.md`。
 范围：B9 报告期数、B10 归母 ROE TTM、B11 归母利润三年 CAGR、B12 现金分红连续年数；不含封板计数。
 PIT：一切输入及证据均须 `available_at≤as_of`，并截至评估交易日 d 收盘可见；统一截点 `t=min(as_of,d收盘时刻)`，时间按带时区瞬时比较。
 
@@ -24,7 +24,7 @@ PIT：一切输入及证据均须 `available_at≤as_of`，并截至评估交易
 - 内部结果至少保留 `value,unit,available_at,dependency_version_ids,null_reasons`；缺证时 `value=null` 并保留原因，原始证据及离线对照分别留存，不伪造派生可见时点。
 - ST/停牌不重置财务历史，B9 集合不限制其他项独立合格依赖；LG0/LG0B/LG3/LG4 等缺失处理及北交所既有门禁照旧。
 
-null 原因码为本契约待实现的内部证据码，可记录多个；不扩充公开接口原因码枚举：
+null 原因码为本契约待实现的内部证据码（T-B176 承接实现、接线与逐入口验收，依赖 T-A199 方案合入），可记录多个；不扩充公开接口原因码枚举：
 
 | 原因码 | 含义 |
 | --- | --- |
@@ -111,23 +111,24 @@ null 原因码为本契约待实现的内部证据码，可记录多个；不扩
 
 ## 受影响入口与逐入口验收（L-042/L-043）
 
-仅新增本契约一个文件；下列为测试名建议，全部待实现、未验证。模块从 `src/backend/` 起算；现有入口存在不代表已接通 B9–B12，拟增函数一律由后端命名。
+本 PR 文档范围为 `docs/plan-finance-inputs.md` 与 `docs/contracts/finance-inputs.md` 两份文档；下列为测试名建议，全部待实现、未验证。模块从 `src/backend/` 起算；现有入口存在不代表已接通 B9–B12，拟增函数一律由后端命名。
+正式承接任务为 T-B176（后端，依赖 T-A199 方案合入），负责本节全部缺口的实现、接线与逐入口验收；拆分见方案中的「T-B176 内的拆分 PR1–PR6」。方案引用 `tasks/T-A199.md`，验证引用 `tasks/T-R86.md` 与 `reports/T-R86.md`；T-A199 仅交方案，不算实现已派单（L-046）。
 同一份标为虚构的合成输入包须含财报/因子/事件版本、身份链、规则快照、日历、闭合证明及固定 d/as_of；各格式从同包派生，逐入口独立执行，不能用公共函数测试替代 HTTP、probe、SQL 或 Windows 验收。
 
 | 字段 | 受影响入口及状态 | 建议测试名与验收重点 |
 | --- | --- | --- |
-| B9 `f.fin_report_count` | `app/features/horizon_financial.py` 计数函数：待实现 | `test_ta197_b9_count`：上市边界/换码、占位/重复更正、缺披露/覆盖与完整空集合、期限不造公告日 |
-| B10 `f.roe_ttm` | `app/features/horizon_vendor.py` 主源适配函数：待实现 | `test_ta197_b10_vendor`：单位/窗口/PIT 缺证拒绝、负值保留、不切 F44 |
-| B10 | 逐分量可比链与 ROE 离线重算函数：待实现 | `test_ta197_b10_recompute`：TTM 展开、负利润、期末/平均权益边界、期初负仍合格、混重述拒绝、最终舍入 |
-| B11 `f.profit_cagr_3y` | `app/features/horizon_vendor.py` 主源适配函数：待实现 | `test_ta197_b11_vendor`：年报锚点/利润类型/单位/历史 PIT 未证均 null，无离线补位 |
-| B11 | 年报端点与 CAGR 离线重算函数：待实现 | `test_ta197_b11_recompute`：100→133.1 为10.00、零/负/缺端点、上市不足三年、非36个月、不回退及最终舍入 |
-| B12 `f.dividend_continuous_years` | `app/features/horizon_vendor.py` 主源适配函数：待实现 | `test_ta197_b12_vendor`：非负整数 years、闭合/支付映射缺证拒绝，不用本地事件填主源 |
-| B12 | 现金事件确认函数：待实现 | `test_ta197_b12_payment`：预案/发放日未终/缺完成/延期不生效，取消排除，分批范围与版本去重 |
-| B12 | 年度闭合与 Run 函数：待实现 | `test_ta197_b12_run`：Y 决议切换、跨年支付归属、未知/无完整年/无零中断年为 null、Y 明确零为0 |
-| B12 | 类别归并与回购隔离函数：待实现 | `test_ta197_b12_cash_only`：中期/特别/年度合并、含中期总额不重复、纯送转/回购不延续、拆分缺证 null |
-| B12 | 两种另名离线对照函数：待实现 | `test_ta197_b12_offline_isolation`：除息代理及股利加回购只在另名离线输出，均不可写 B12 |
-| B9–B12 | `app/features/pipeline.prepare`：现有，财务接线待实现 | `test_ta197_pipeline`：统一依赖版本及最大可见时点，不绕主源拒绝 |
-| B9–B12 | `app/strategy/horizon/inputs.collect`：现有，四字段未接通 | `test_ta197_collect`：显式内部 as_of 待接，逐字段保持 null 原因及可见证据 |
+| B9 `f.fin_report_count` | `app/features/horizon_financial.py` 计数函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b9_count`：上市边界/换码、占位/重复更正、缺披露/覆盖与完整空集合、期限不造公告日 |
+| B10 `f.roe_ttm` | `app/features/horizon_vendor.py` 主源适配函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b10_vendor`：单位/窗口/PIT 缺证拒绝、负值保留、不切 F44 |
+| B10 | 逐分量可比链与 ROE 离线重算函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b10_recompute`：TTM 展开、负利润、期末/平均权益边界、期初负仍合格、混重述拒绝、最终舍入 |
+| B11 `f.profit_cagr_3y` | `app/features/horizon_vendor.py` 主源适配函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b11_vendor`：年报锚点/利润类型/单位/历史 PIT 未证均 null，无离线补位 |
+| B11 | 年报端点与 CAGR 离线重算函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b11_recompute`：100→133.1 为10.00、零/负/缺端点、上市不足三年、非36个月、不回退及最终舍入 |
+| B12 `f.dividend_continuous_years` | `app/features/horizon_vendor.py` 主源适配函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b12_vendor`：非负整数 years、闭合/支付映射缺证拒绝，不用本地事件填主源 |
+| B12 | 现金事件确认函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b12_payment`：预案/发放日未终/缺完成/延期不生效，取消排除，分批范围与版本去重 |
+| B12 | 年度闭合与 Run 函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b12_run`：Y 决议切换、跨年支付归属、未知/无完整年/无零中断年为 null、Y 明确零为0 |
+| B12 | 类别归并与回购隔离函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b12_cash_only`：中期/特别/年度合并、含中期总额不重复、纯送转/回购不延续、拆分缺证 null |
+| B12 | 两种另名离线对照函数：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_b12_offline_isolation`：除息代理及股利加回购只在另名离线输出，均不可写 B12 |
+| B9–B12 | `app/features/pipeline.prepare`：现有，财务接线待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_pipeline`：统一依赖版本及最大可见时点，不绕主源拒绝 |
+| B9–B12 | `app/strategy/horizon/inputs.collect`：现有，四字段未接通（T-B176：实现、接线与逐入口验收） | `test_ta197_collect`：显式内部 as_of 待接，逐字段保持 null 原因及可见证据 |
 | B9–B12 | 同模块 `evidence` | `test_ta197_evidence`：证据与字段值、单位和版本一致，不为未知伪造数值证据 |
 | B9–B12 | 同模块 `snapshot_id` | `test_ta197_snapshot`：同输入版本可重放，后见版本不改旧评估 |
 | B9–B12 | `app/strategy/horizon/classifier.classify` | `test_ta197_classify`：分别参数化四字段 null/0/合法值，沿既有缺失封顶及评分 |
@@ -138,11 +139,11 @@ null 原因码为本契约待实现的内部证据码，可记录多个；不扩
 | B9–B12 | 同模块 `create_candidate`，`POST /candidates` | `test_ta197_create_candidate_http`：从新增候选原路调用，缺证/合法值均与同包结果一致 |
 | B9–B12 | 同模块 `create_version`，`POST /candidates/{candidate_id}/versions` | `test_ta197_create_version_http`：从新增版本原路调用，新证据不改旧版本 |
 | B9–B12 | `app/research/content.write_snapshot` | `test_ta197_write_snapshot`：原存档入口保留 null 与证据，不把另名离线值写入正式字段 |
-| B9/B10/B11 | `app/api/v1/security_financials.PlaceholderFinancialsReader.read`：占位，实读待实现 | `test_ta197_financials_reader`：空数据不冒充完整历史，年报 ROE 不冒充 TTM |
+| B9/B10/B11 | `app/api/v1/security_financials.PlaceholderFinancialsReader.read`：占位，实读待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_financials_reader`：空数据不冒充完整历史，年报 ROE 不冒充 TTM |
 | B9/B10/B11 | 同模块 `financials`，`GET /securities/{code}/financials` | `test_ta197_financials_http`：独立验证 as_of、可见版本及占位状态 |
-| B10/B11/B12 | `app/api/v1/security_factors.PlaceholderFactorsReader.read`：占位，实读待实现 | `test_ta197_factors_reader`：无主源证明不产正式值，保持占位状态 |
+| B10/B11/B12 | `app/api/v1/security_factors.PlaceholderFactorsReader.read`：占位，实读待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_factors_reader`：无主源证明不产正式值，保持占位状态 |
 | B10/B11/B12 | 同模块 `factors`，`GET /securities/{code}/factors` | `test_ta197_factors_http`：经原 HTTP 守卫不暴露合成因子或伪造版本 |
-| B9–B12 | 财报/因子/事件导入、版本存储与重算调度：待实现 | `test_ta197_ingest_versions`、`test_ta197_recompute_job`：各自验收晚导入、更正、来源隔离，不覆盖旧版本 |
+| B9–B12 | 财报/因子/事件导入、版本存储与重算调度：待实现（T-B176：实现、接线与逐入口验收） | `test_ta197_ingest_versions`、`test_ta197_recompute_job`：各自验收晚导入、更正、来源隔离，不覆盖旧版本 |
 | B9–B12 依赖 | `app/reports/dimensions.financial_pit`：现有，仅可见性校验 | `test_ta197_financial_pit`：次交易日下限/首见/缺日历，不以此证明财务公式已实现 |
 | B9–B12 依赖 | `src/backend/app/financial_basis.TradingCalendar.next_day` | `test_ta197_next_day`：开休市、缺覆盖；不能按自然日猜可见下限 |
 | B9/B10/B11 依赖 | `src/backend/probes/p11_gaps` 的 `analyze_fin_rows`、`classify_pit`、`batch_asof`、`compare_history` | `test_ta197_p11_fin_rows`、`test_ta197_p11_pit`、`test_ta197_p11_batch`、`test_ta197_p11_history`：各函数独立核验，旧宽松判据不能证明本契约 |

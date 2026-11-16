@@ -5,7 +5,7 @@
 核查仅依据仓库代码与迁移，未连接数据库，表内实际行数、历史覆盖及来源响应均为「未验证」，不把建表等同已有可用数据。
 研究基准目录 `docs/strategies/T-R86/` 当前不存在；所有 B9–B12 参考值均为「待 T-R86 交付后填值」，不编造数值，不改该目录。
 全程离线；不读写 `.env`、密钥或私有样本，不运行外呼探针，不真调麦蕊、不回填、不提交、不 push。
-需要新增数据或补齐证据时统一记「待编排者排期，需用户批准真调」；以下 PR 不授权采集或回填。
+新增数据或补齐证据按实际操作区分：离线已有数据、合成输入、补证整理不属于真调。依 TEAM-RULES 第二节，仅硬红线须用户本人批准：真调麦蕊（日K、分钟、单 D）、生产部署、删除用户数据、对外发送、解除 HALT、恢复外网出口、`backfill --apply`。通达信真实全量导入已由用户 11-14 t1110u 授权，仍须走 `upsert_daily_bars` 并过写库门闩；本 PR 不执行采集或回填。
 
 ## 一、现状与缺口
 
@@ -37,7 +37,7 @@
 
 `p11_gaps.analyze_fin_rows` 统计披露与重复行；`classify_pit` 用披露后窗口作必要不充分判据；`batch_asof` 可接受响应层日期；`compare_history` 比较历史改写，均非契约的完整证明。
 `p13_analyze.analyze/main` 是旧离线分析入口，已有现金流 TTM、版本差异、币种单位检查及除息线索，不是归母 ROE／CAGR／支付完成实现。
-`p13_fin_pit.main` 经 `_save` 调外部接口并写 manifest；仅阅读其代码，本任务不运行。需要新数据一律「待编排者排期，需用户批准真调」。
+`p13_fin_pit.main` 经 `_save` 调外部接口并写 manifest；仅阅读其代码，本任务不运行。补充数据或证据遵循前述边界：离线已有数据、合成输入、补证整理不归为真调；若需真调麦蕊或执行 `backfill --apply`，须用户本人批准。
 
 ## 二、存储与计算边界：优先零迁移
 
@@ -60,19 +60,21 @@
 不设动表 PR：目前可通过追加证据包满足留存；JSON 查询性能、固定策略、并发幂等及保留机制仍未验证，PR1 须验证。若发现必须动表，先另列具体表／字段／理由／回滚的修订方案，不在本任务预设迁移。
 零迁移回退：停止新导入／重算接线，恢复财务缺证路径与 API 占位；保留已有不可变包、版本、原始证据及引用，不删历史、不重写旧快照。
 
-## 三、按依赖顺序拆分 PR
+## 三、T-B176 内的拆分 PR1–PR6（按依赖顺序）
+
+正式承接任务为 T-B176（后端，依赖 T-A199 方案合入），负责下列全部实现、接线与逐入口验收。方案引用 `tasks/T-A199.md`，验证引用 `tasks/T-R86.md` 与 `reports/T-R86.md`；T-A199 仅交方案，不算实现已派单（L-046）。下文 PR1–PR6 均指 T-B176 内的拆分 PR1–PR6。
 
 净增行数为实现加测试及 CI 登记的估算，每个 PR 均不超过800行；超出须再拆，不能省略入口验收。下列测试文件全部「新建」。
 每个新增测试文件必须同 PR 登记 `tests/ci-groups.yaml` 的 `file/group/keywords/unverified`；未验证资源风险须串行并写原因，不得提前登记不存在文件。
 
 | PR／前置依赖／预计净增 | 模块与函数范围 | 新建测试文件与 CI 分组 |
 | --- | --- | --- |
-| PR1 证据与版本；无；780行 | 新建 `app/features/finance_evidence.py`：新建 `save_receipts/load_receipts/select_versions/cutoff`，离线导入、来源隔离、哈希、追加、固定依赖；复用 `TradingCalendar.next_day`，补 `reports/dimensions.financial_pit` 全依赖可见校验 | 新建 `tests/backend/unit/test_ta199_receipts.py`（parallel：纯函数／替身）；新建 `tests/backend/integration/test_ta199_storage.py`（serial_pg：隔离真实数据库） |
-| PR2 B9–B11；PR1；790行 | 新建 `app/features/horizon_financial.py`：新建 `count_reports/roe_ttm/profit_cagr_3y`，覆盖／身份／期限审计、TTM、端点及可比链；新建 `app/features/horizon_vendor.py`：新建 `adapt_vendor`，先实现 B10/B11 主源准入 | 新建 `tests/backend/unit/test_ta199_financial.py`（parallel：合成输入） |
-| PR3 B12；PR1、PR2；790行 | 新建 `app/features/horizon_dividend.py`：新建 `confirm_payment/close_years/cash_only/run_years/ex_date_proxy/cash_distribution_plus_buyback_years`；扩展 `horizon_vendor.adapt_vendor` 的 B12 校验，离线对照单独命名 | 新建 `tests/backend/unit/test_ta199_dividend.py`（parallel：合成事件） |
-| PR4 统一接线；PR1–3；790行 | 修改 `pipeline.prepare`、`horizon/inputs.collect/evidence/snapshot_id`、`classifier.classify`、`api/v1/horizon.get_horizon_assessment`；新建 `app/features/finance_jobs.py` 及新建 `recompute_job`，只重算已存证据，不外呼 | 新建 `tests/backend/unit/test_ta199_horizon.py`（parallel：替身）；新建 `tests/backend/api_app/test_ta199_horizon_http.py`（serial_pg：鉴权请求与存档） |
-| PR5 候选与资源入口；PR4；790行 | 修改 `research/content._fit/generate/write_snapshot`、`api/v1/candidates._new_version/create_candidate/create_version`，传同一内部 d/as_of；核验两类 `Placeholder*Reader.read` 及 `financials/factors` HTTP，占位守卫保留 | 新建 `tests/backend/api_app/test_ta199_finance_entries.py`（serial_pg：原鉴权／版本链／HTTP） |
-| PR6 探针与演练边界；PR1–5；780行 | 核验 `probes/p06_factors.main`、`p11_gaps.analyze_fin_rows/classify_pit/batch_asof/compare_history/main`、`p13_analyze.analyze/main`；增加 `p13_fin_pit.call_plan/main` 离线防外呼验收；分别执行既有 SQL／恢复脚本 | 新建 `tests/backend/unit/test_ta199_probes.py`（parallel：传输替身／临时文件）；新建 `tests/backend/integration/test_ta199_drill.py`（serial_pg：隔离演练库／容器，资源风险未验证） |
+| T-B176 内的拆分 PR1 证据与版本；无；780行 | 新建 `app/features/finance_evidence.py`：新建 `save_receipts/load_receipts/select_versions/cutoff`，离线导入、来源隔离、哈希、追加、固定依赖；复用 `TradingCalendar.next_day`，补 `reports/dimensions.financial_pit` 全依赖可见校验 | 新建 `tests/backend/unit/test_ta199_receipts.py`（parallel：纯函数／替身）；新建 `tests/backend/integration/test_ta199_storage.py`（serial_pg：隔离真实数据库） |
+| T-B176 内的拆分 PR2 B9–B11；PR1；790行 | 新建 `app/features/horizon_financial.py`：新建 `count_reports/roe_ttm/profit_cagr_3y`，覆盖／身份／期限审计、TTM、端点及可比链；新建 `app/features/horizon_vendor.py`：新建 `adapt_vendor`，先实现 B10/B11 主源准入 | 新建 `tests/backend/unit/test_ta199_financial.py`（parallel：合成输入） |
+| T-B176 内的拆分 PR3 B12；PR1、PR2；790行 | 新建 `app/features/horizon_dividend.py`：新建 `confirm_payment/close_years/cash_only/run_years/ex_date_proxy/cash_distribution_plus_buyback_years`；扩展 `horizon_vendor.adapt_vendor` 的 B12 校验，离线对照单独命名 | 新建 `tests/backend/unit/test_ta199_dividend.py`（parallel：合成事件） |
+| T-B176 内的拆分 PR4 统一接线；PR1–3；790行 | 修改 `pipeline.prepare`、`horizon/inputs.collect/evidence/snapshot_id`、`classifier.classify`、`api/v1/horizon.get_horizon_assessment`；新建 `app/features/finance_jobs.py` 及新建 `recompute_job`，只重算已存证据，不外呼 | 新建 `tests/backend/unit/test_ta199_horizon.py`（parallel：替身）；新建 `tests/backend/api_app/test_ta199_horizon_http.py`（serial_pg：鉴权请求与存档） |
+| T-B176 内的拆分 PR5 候选与资源入口；PR4；790行 | 修改 `research/content._fit/generate/write_snapshot`、`api/v1/candidates._new_version/create_candidate/create_version`，传同一内部 d/as_of；核验两类 `Placeholder*Reader.read` 及 `financials/factors` HTTP，占位守卫保留 | 新建 `tests/backend/api_app/test_ta199_finance_entries.py`（serial_pg：原鉴权／版本链／HTTP） |
+| T-B176 内的拆分 PR6 探针与演练边界；PR1–5；780行 | 核验 `probes/p06_factors.main`、`p11_gaps.analyze_fin_rows/classify_pit/batch_asof/compare_history/main`、`p13_analyze.analyze/main`；增加 `p13_fin_pit.call_plan/main` 离线防外呼验收；分别执行既有 SQL／恢复脚本 | 新建 `tests/backend/unit/test_ta199_probes.py`（parallel：传输替身／临时文件）；新建 `tests/backend/integration/test_ta199_drill.py`（serial_pg：隔离演练库／容器，资源风险未验证） |
 
 PR4 的 horizon HTTP 用请求时点和评估交易日生成内部截点，不新增公开查询参数；PR5 的财报日期查询须明确日终解释并再受评估收盘截点约束，不把日期猜作公告盘前瞬时。
 PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；不得用 Linux 纯函数通过代替 Windows 或 SQL 会话通过。
@@ -152,7 +154,7 @@ PR6 复查 CLI／Windows／SQL 执行链，新增入口必须逐一补验收；�
 ## 五、风险与未验证项
 
 - 契约 U01A–U09B 均保持「未验证」：规则历史／延期、上市边界与转板、可比桥接、主源端点及单位／窗口／历史 PIT、实际支付证据、年度闭合与特别分红归属、回购可拆分；缺证正式值 null。
-- 日历表无来源与覆盖元数据；新证据包必须显式提供可信覆盖，不能因查到几个开市日就宣称完整。证据所需新数据：「待编排者排期，需用户批准真调」。
+- 日历表无来源与覆盖元数据；新证据包必须显式提供可信覆盖，不能因查到几个开市日就宣称完整。补证整理离线已有数据及使用合成输入作离线验证均不属于真调；若需真调麦蕊或执行 `backfill --apply`，须用户本人批准，其他操作按前述硬红线边界处理。
 - 追加证据与财报唯一约束的并发一致性、原始响应固定及快照不可变触发器实际行为、来源授权与性能均待 PR1 在隔离数据库核验；本任务未连接数据库。
 - `deploy/db/drill/sample-schema.sql` 的 `factor_values` 用 `security_id`／整数 `factor_id`，与生产代码表结构不同；恢复演练通过也不能证明财务语义。Windows 未发现直接计算入口，仍须 PR6 复查并记录，未执行就是未验证。
 - T-R86 未交付，四组参考值和研究样本回归未解决；方案及本任务的静态检查通过不等于功能、真实 SQL、Windows 或主源准入已通过。
