@@ -1,4 +1,4 @@
-"""Fixed instants and fictional calendar rows; SQLite stays entirely in memory."""
+"""Fixed instants and fictional calendar rows in isolated PostgreSQL transactions."""
 
 from __future__ import annotations
 
@@ -13,7 +13,9 @@ from app.common.errors import AppError, ErrorCode
 from app.config_files import MarketRulesConfig
 from app.db.tables.market import trading_calendar
 from app.schemas.enums import MarketSession
-from sqlalchemy import Connection, create_engine, insert
+from sqlalchemy import Connection, create_engine, insert, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 
 pytestmark = pytest.mark.unit
 DAY = dt.date(2030, 6, 11)
@@ -28,12 +30,26 @@ def rules() -> MarketRulesConfig:
 
 
 @pytest.fixture
-def conn() -> Iterator[Connection]:
-    engine = create_engine("sqlite://", execution_options={"schema_translate_map": {"market": None}})
+def conn(pg_url: str) -> Iterator[Connection]:
+    """Start with an empty calendar and roll back each case's DDL and data."""
+    engine = create_engine(
+        make_url(pg_url).set(drivername="postgresql+psycopg"),
+        connect_args={"connect_timeout": 5},
+    )
     try:
-        with engine.connect() as connection:
-            trading_calendar.create(connection)
-            yield connection
+        try:
+            connection = engine.connect()
+        except OperationalError:
+            pytest.skip("PostgreSQL unavailable; skipping isolated calendar tests")
+        with connection:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("CREATE SCHEMA IF NOT EXISTS market"))
+                trading_calendar.create(connection, checkfirst=True)
+                connection.execute(text("TRUNCATE TABLE market.trading_calendar"))
+                yield connection
+            finally:
+                transaction.rollback()
     finally:
         engine.dispose()
 
