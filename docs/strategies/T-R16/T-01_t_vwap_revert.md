@@ -47,11 +47,36 @@ key `t_vwap_revert`；category `intraday_t`；horizons `[intraday_t]`；risk_lev
 ## 15–16 环境与节奏
 适用于 range、uptrend；趋势日不做。节奏：盘后重放统计；开放盘中运行需满足 C(5) 条件并经用户确认。
 
-## 17 A股约束
-T+1；做T必须有底仓（`sell_first` 卖的是旧股，`buy_first` 当日买入的股份当日不可卖，回补靠卖出等量旧股）；涨跌停价按 market_rules 计算，注册制新股上市前 5 日无涨跌幅；北交所不在范围内。
+## 17 A 股约束
+本卡保持 `lifecycle: draft`，G7：☐，当前仍不可导入；下列约束只说明候选信号的可执行边界，不构成荐股或收益承诺。
+
+| 项目 | 本卡约束与出处 |
+|---|---|
+| 涨跌停（按板块） | 普通主板 10%；创业板、科创板（含 ST/*ST）20%；北交所（含 ST/*ST）30%。来源：config/market_rules.yaml:8、config/market_rules.yaml:10、config/market_rules.yaml:11、config/market_rules.yaml:12。 |
+| 主板 ST 历史分段 | 沪深主板 ST/*ST 在已建模的 2023-04-10 至 2026-07-05 为 5%，2026-07-06 起为 10%，不得把历史 5% 用于全部板块或当前交易日。回看按成交日有效段；2023-04-10 之前标“交易规则未建模”。来源：config/market_rules.yaml:4、config/market_rules.yaml:6、config/market_rules.yaml:9、config/market_rules.yaml:66、config/market_rules.yaml:69、config/market_rules.yaml:126、config/market_rules.yaml:129。 |
+| 无涨跌幅及不可成交 | 沪深注册制新股前 5 个交易日、北交所新股首日、退市整理期首日按无涨跌幅限制处理，不套普通比例；一字涨停不能买，一字跌停不能卖，执行层记 `LIMIT_LOCKED` 并写明方向，不假定候选信号必然成交。来源：config/market_rules.yaml:13、config/market_rules.yaml:14、config/market_rules.yaml:15、config/market_rules.yaml:16、config/market_rules.yaml:58、config/market_rules.yaml:59；docs/strategies/_template.md:268。 |
+| T+1 | 当日买入股份当日不可卖；当日退出候选信号仍记录，但执行层记 `T1_NOT_SELLABLE`，顺延至满足可卖及可成交条件的交易日。来源：config/market_rules.yaml:36；docs/plan.md:1614；docs/strategies/_template.md:230。 |
+| ST / 退市整理 | G-01 阻断买入；已有持仓仍须评估退出候选信号并服从 T+1、停牌及跌停约束，不能把排除 ST 当作省略历史比例的理由。来源：docs/strategies/_template.md:236；docs/plan.md:1624；config/market_rules.yaml:36、config/market_rules.yaml:59、config/market_rules.yaml:60。 |
+| 停牌 | 记 `SUSPENDED`，候选信号冻结、不假定成交；停牌日不计入成本估算的有效成交额窗口，复牌后重新检查可交易性。来源：config/market_rules.yaml:60、config/market_rules.yaml:49；docs/strategies/_template.md:235、docs/strategies/_template.md:266。 |
+| 北交所 30% | 比例用于说明市场约束，本卡仍排除北交所，保持 `boards.bse=false`，不因补充规则扩大扫描范围。来源：config/market_rules.yaml:12；docs/plan.md:4085。 |
+| 交易单位 | 沪深主板、创业板买入为 100 股整数倍；科创板单笔买卖至少 200 股，超过部分按 1 股递增的仓库口径仅部分核实，本次仍标“未验证”；零股余额一次性卖出。来源：config/market_rules.yaml:18、config/market_rules.yaml:19、config/market_rules.yaml:20、config/market_rules.yaml:23；docs/plan.md:1619。 |
+
+做T只用昨日及以前形成的合规可卖底仓：`sell_first` 卖旧股；`buy_first` 也必须有足量旧股用于卖腿，当日新买股份不能充当可卖量。无底仓或可卖不足时不可执行；两腿配对仍未实现，保持盘后统计模式，不产生运行中的候选信号、草案或通知（来源：docs/strategies/_template.md:231；本卡 §4、§7 的既有边界）。
 
 ## 18 成本与滑点（estimate）
-佣金按用户费率，单笔最低 5 元，双边计；印花税仅卖出 0.05%；过户费 0.001%；滑点 10bp；冲击成本按 plan 2.13 的 5 档（0/5/15/30/60bp）。原稿自编的 5/10/20bp 档位已删除。成本门槛：`k × σ` 对应的价差须 ≥ `p.min_edge_cost_mult` × 往返成本。
+以下为候选信号研究的费用估算口径；有仓库出处不等于已用实际成交验证，费率、滑点及冲击成本校准均保留“未验证”。
+
+| 成本项 | 计算口径与出处 |
+|---|---|
+| 佣金 | 买卖双边各按 `max(单笔成交额 × 用户实际费率, 5 元)` 计算，单笔最低 5 元；实际费率未设置时不得填零，记“未验证”。来源：config/market_rules.yaml:45、config/market_rules.yaml:46；docs/plan.md:1621。 |
+| 印花税 | 只计卖出，按实际成交日取有效段：2023-04-10 至 2023-08-27 为 0.1%，2023-08-28 起为 0.05%；更早日期不外推。来源：config/market_rules.yaml:4、config/market_rules.yaml:126、config/market_rules.yaml:163、config/market_rules.yaml:66、config/market_rules.yaml:103、config/market_rules.yaml:43。 |
+| 过户费 | 买卖双边各计成交额的 0.001%。来源：config/market_rules.yaml:44、config/market_rules.yaml:104、config/market_rules.yaml:164；docs/plan.md:1621。 |
+| 基础滑点 | 单边默认 10 bp（0.1%），为估算初值、未验证；不视为真实成交偏差。来源：config/market_rules.yaml:47；docs/plan.md:1621。 |
+| 冲击成本 | 参与率 r = 拟成交额 ÷ 近 20 个有效交易日日成交额均值（停牌日不计），拟成交额 = 计划数量 × 参考价；各单边按 r≤0.1%、0.1%<r≤0.5%、0.5%<r≤1%、1%<r≤2%、r>2% 依次计 0/5/15/30/60 bp；最高档标“容量受限”。均为估算初值、未验证、待校准。来源：config/market_rules.yaml:48、config/market_rules.yaml:49、config/market_rules.yaml:50、config/market_rules.yaml:52、config/market_rules.yaml:53、config/market_rules.yaml:54、config/market_rules.yaml:55、config/market_rules.yaml:56；docs/plan.md:1622。 |
+
+往返成本 = 两边基础滑点与冲击成本 + 两笔佣金 + 两边过户费 + 卖出印花税；价格成本与费用只计一次（来源：docs/strategies/_template.md:264）。停牌或涨跌停不可成交时不计算冲击成本、不登记成交；均额为零或有效 K 少于 5 根时不做除法，按最高档并标“冲击成本无法可靠估算”（来源：docs/strategies/_template.md:266、docs/strategies/_template.md:267、docs/strategies/_template.md:268）。计划估算只用当时可得的成交额与参考价，不用未来成交补齐；金额或费率缺失时不能形成完整扣费结论（时点约束来源：docs/plan.md:1625）。
+
+做T按单腿拟成交额分别计算两腿成本，最低佣金逐笔应用（来源：docs/strategies/_template.md:269；config/market_rules.yaml:46）。保留既有研究条件：`k × σ` 对应价差须 ≥ `p.min_edge_cost_mult × 往返成本`；其中倍数默认 2.0 的成本门槛思路可追溯到 docs/strategies/_template.md:272，但等号边界、参数范围与本卡做T适用性均未验证，不据此判定晋级。
 
 ## 20 冲突
 与 W-01、H-01 并列展示，不合并；G-01、N-01 由系统挂载。
@@ -83,3 +108,6 @@ T+1；做T必须有底仓（`sell_first` 卖的是旧股，`buy_first` 当日买
 
 ## 缺口交叉引用
 见 [engine_gaps.md](engine_gaps.md)：ENG-1, ENG-2, ENG-4, RUL-2, DAT-1。
+
+## T-R91 补充复核
+本次仅补齐 §17、§18 的候选信号约束与费用出处；`lifecycle: draft`，G7：☐。§22 既有策略阈值、参数范围和步长仍为未验证假设；除上文明确引用的市场规则及费用默认值外，没有补充实测依据，不将其表述为验证结论。不可导入原因和引擎缺口保持原状。
