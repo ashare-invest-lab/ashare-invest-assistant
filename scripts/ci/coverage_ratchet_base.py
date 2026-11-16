@@ -215,7 +215,7 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError,
     try:
         artifacts = get("/actions/runs/" + str(run["id"]) + "/artifacts?per_page=100")["artifacts"]
     except urllib.error.HTTPError as exc:
-        if known_run_id is None or exc.code != 404:
+        if exc.code != 404 or (known_run_id is None and unavailable is ValueError):
             raise
         raise missing("Exact-base measurement artifacts not yet visible") from exc
     name = "coverage-ratchet-" + str(run["id"]) + "-" + str(run["run_attempt"])
@@ -228,7 +228,7 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError,
     try:
         data = get("/actions/artifacts/" + str(selected[0]["id"]) + "/zip", binary=True)
     except urllib.error.HTTPError as exc:
-        if known_run_id is None or exc.code != 404:
+        if exc.code != 404 or (known_run_id is None and unavailable is ValueError):
             raise
         raise missing("Exact-base measurement download not yet visible") from exc
     try:
@@ -236,7 +236,9 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError,
     except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         if unavailable is ValueError:
             raise
-        raise unavailable("Invalid exact-base main push measurement: " + str(exc)) from exc
+        # Recovery reasons are also printed on success; keep external archive
+        # exception text out of both receipts and stdout.
+        raise unavailable("Invalid exact-base main push measurement: " + _failure_reason(exc)) from exc
     if sha != requested_base:
         record["source"]["requested_base"] = requested_base
     return record
@@ -289,39 +291,46 @@ def wait_for_base(repo: str, sha: str, get, timeout: int, *, allow_fallback: boo
     settle_deadline = None
     unavailable = MeasurementUnavailable if allow_fallback else ValueError
     while True:
+        recovering = False
         try:
-            if known_run_id is not None:
-                return _freeze_exact(repo, sha, get, unavailable=unavailable,
-                                     known_run_id=known_run_id)
-            if allow_fallback:
-                return freeze(repo, sha, get, allow_fallback=True)
-            return freeze(repo, sha, get)
+            try:
+                if known_run_id is not None:
+                    return _freeze_exact(repo, sha, get, unavailable=unavailable,
+                                         known_run_id=known_run_id)
+                if allow_fallback:
+                    return freeze(repo, sha, get, allow_fallback=True)
+                return freeze(repo, sha, get)
+            except _MeasurementNotVisible as exc:
+                now = time.monotonic()
+                if settle_deadline is None:
+                    settle_deadline = min(exc.completed_at + SETTLE_SECONDS, hard_deadline)
+                remaining = settle_deadline - now
+                if remaining > 0:
+                    print(f"Waiting for trusted main run {known_run_id} artifact to settle", flush=True)
+                    time.sleep(min(15, remaining))
+                    continue
+                if not allow_fallback:
+                    raise unavailable(str(exc)) from exc
+            except MeasurementUnavailable:
+                if known_run_id is None or not allow_fallback:
+                    raise
+            # Invalid data or exhausted grace can enter recovery. Its list may
+            # still report pending even when the direct endpoint is completed;
+            # catch that below using the same deadlines and pinned-run loop.
+            recovering = True
+            return freeze(repo, sha, get, allow_fallback=True)
         except MeasurementPending as pending:
+            # A stale list for the already completed run must not turn the
+            # publication grace crossing the pending deadline into a timeout.
+            waiting_deadline = (hard_deadline if recovering and pending.run_id == known_run_id
+                                else min(deadline, hard_deadline))
             known_run_id = pending.run_id
-            remaining = min(deadline, hard_deadline,
-                            settle_deadline if settle_deadline is not None else hard_deadline) - time.monotonic()
+            remaining = waiting_deadline - time.monotonic()
             if remaining <= 0:
-                raise MeasurementPending(sha, known_run_id, timeout=timeout) from pending
+                raise MeasurementPending(sha, known_run_id,
+                                         timeout=int(waiting_deadline - started)) from pending
             print(f"Waiting for existing trusted main run {pending.run_id}; base={sha}", flush=True)
             time.sleep(min(15, remaining))
-        except _MeasurementNotVisible as exc:
-            now = time.monotonic()
-            if settle_deadline is None:
-                settle_deadline = min(exc.completed_at + SETTLE_SECONDS, hard_deadline)
-            remaining = settle_deadline - now
-            if remaining > 0:
-                print(f"Waiting for trusted main run {known_run_id} artifact to settle", flush=True)
-                time.sleep(min(15, remaining))
-                continue
-            if allow_fallback:
-                return freeze(repo, sha, get, allow_fallback=True)
-            raise unavailable(str(exc)) from exc
-        except MeasurementUnavailable:
-            if known_run_id is None or not allow_fallback:
-                raise
-            # Invalid data takes the existing recovery path immediately. Pending
-            # and data still settling never enter freeze's ancestor loop.
-            return freeze(repo, sha, get, allow_fallback=True)
 
 
 def _failure_reason(exc: Exception) -> str:
@@ -334,6 +343,7 @@ def _failure_reason(exc: Exception) -> str:
         "Baseline artifact exceeds bound", "Unexpected measurement archive", "Measurement exceeds bound",
         "Unexpected coverage archive entry", "Archived coverage.json counts disagree with measurement",
         "Artifact does not belong to exact trusted base run",
+        "Artifact ratchet_passed is not true",
         "Explicit recovery requires the approved first parent",
         "Explicit recovery could not verify the docs-only diff", "Explicit recovery requires a docs-only diff",
         "Trusted base commit is not present in fetched history", "Trusted base has no ratchet measurement policy",

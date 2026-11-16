@@ -565,6 +565,15 @@ def test_settle_artifact_http_404_is_retried(settle_clock, endpoint):
     assert settle_clock.now == 45
 
 
+def test_settle_direct_run_404_is_not_artifact_latency(settle_clock):
+    actions = SettlingActions(settle_clock)
+    actions.http_endpoint, actions.http_failures = "/actions/runs/123", 1
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        loader.wait_for_base(actions.repo, actions.sha, actions, 1800, allow_fallback=True)
+    assert caught.value.code == 404
+    assert settle_clock.now == 15 and actions.artifact_lists == 0
+
+
 @pytest.mark.parametrize("endpoint", ["/actions/runs/123", "/artifacts?", "/zip"])
 @pytest.mark.parametrize("code", [401, 403, 429, 500, 503])
 def test_settle_other_http_errors_fail_without_retry(settle_clock, endpoint, code):
@@ -637,8 +646,9 @@ def test_settle_cli_pending_timeout_includes_run_and_duration(monkeypatch, tmp_p
 
 
 @pytest.mark.parametrize("kind,reason", [
-    ("missing", "ValueError: No completed exact-base main measurement run"),
-    ("invalid", "ValueError: Artifact does not belong to exact trusted base run"),
+    ("missing", "MeasurementUnavailable: No usable trusted main push measurement within 0 first-parent ancestors"),
+    ("invalid", "MeasurementUnavailable: No usable trusted main push measurement within 0 first-parent ancestors"),
+    ("ratchet", "ValueError: Artifact ratchet_passed is not true"),
     ("http", "HTTPError: HTTP status 403"),
     ("network", "URLError: Could not read or validate trusted base measurement data"),
     ("external_value", "ValueError: Could not read or validate trusted base measurement data"),
@@ -647,13 +657,21 @@ def test_settle_cli_pending_timeout_includes_run_and_duration(monkeypatch, tmp_p
 def test_settle_cli_error_reason_never_echoes_token(monkeypatch, tmp_path, settle_clock, capsys, kind, reason):
     actions = SettlingActions(settle_clock, mode="failed_ratchet" if kind == "invalid" else "valid")
     setup_settle_cli(monkeypatch, tmp_path, actions)
+    if kind in {"missing", "invalid"}:
+        # Bound recovery explicitly: these error cases have no usable ancestor.
+        # The fake git runner supplies policy existence, not a real history.
+        monkeypatch.setattr(loader, "MAX_FALLBACK_ANCESTORS", 0)
     if kind == "missing":
         monkeypatch.setattr(loader, "api_reader", Mock(return_value=Mock(return_value={"workflow_runs": []})))
+    elif kind == "ratchet":
+        monkeypatch.setattr(loader, "api_reader", Mock(return_value=Mock(
+            side_effect=ValueError("Artifact ratchet_passed is not true"))))
     elif kind == "http":
         actions.http_endpoint, actions.http_failures, actions.http_code = "/actions/runs/123", 1, 403
     elif kind in {"network", "external_value", "key"}:
         error = {"network": urllib.error.URLError, "external_value": ValueError, "key": KeyError}[kind]
-        monkeypatch.setattr(loader, "api_reader", Mock(return_value=Mock(side_effect=error("synthetic-private"))))
+        monkeypatch.setattr(loader, "api_reader", Mock(return_value=Mock(side_effect=error(
+            "synthetic-private Authorization: Bearer synthetic-private https://example.invalid/private"))))
     assert loader.main() == 1
     output = capsys.readouterr().out
     error_line = next(line for line in output.splitlines() if line.startswith("::error"))
