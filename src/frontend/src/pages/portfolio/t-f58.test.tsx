@@ -54,6 +54,7 @@ describe('T-F58 成交筛选与游标分页', () => {
     ];
     const seen = observeTrades();
     renderAt('/portfolio?tab=trades');
+    await screen.findByTestId('portfolio-page');
     expect(await screen.findByText('区间内')).toBeInTheDocument();
     expect(seen[0].get('account_id')).toBe(ACCOUNT_ID);
     expect(seen[0].get('limit')).toBe('200');
