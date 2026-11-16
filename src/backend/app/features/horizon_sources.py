@@ -30,6 +30,8 @@ class SourceVersion:
 class DailyBarVersion(SourceVersion):
     code: str
     trade_date: date
+    volume_unit: str | None = None
+    amount_unit: str | None = None
     adj_type: str = "none"
     is_suspended: bool | None = None
     fetched_at: datetime | None = None
