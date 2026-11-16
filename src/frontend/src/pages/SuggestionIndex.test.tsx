@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { createMemoryRouter } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
@@ -34,14 +34,19 @@ function renderAt(search = '') {
 
 describe('候选信号卡列表', () => {
   it('加载后展示各列内容，追加下一页并可打开详情', async () => {
+    const cursors: (string | null)[] = [];
     server.use(http.get(API, async ({ request }) => {
-      await delay(30);
       const cursor = new URL(request.url).searchParams.get('cursor');
-      return HttpResponse.json({ items: [cursor ? second : first], next_cursor: cursor ? null : 'page-2' });
+      cursors.push(cursor);
+      await delay(30);
+      if (cursor === null) return HttpResponse.json({ items: [first], next_cursor: 'page-2' });
+      if (cursor === 'page-2') return HttpResponse.json({ items: [second], next_cursor: null });
+      return new HttpResponse(null, { status: 400 });
     }));
     renderAt();
     expect(screen.getByText('加载中…')).toBeInTheDocument();
     const link = await screen.findByRole('link', { name: /补测银行/ });
+    expect(cursors).toEqual([null]);
     expect(link).toHaveAttribute('href', `/suggestions/${first.id}`);
     const row = within(link.closest('tr')!);
     for (const text of ['2026-11-02 10:40', '当前', '单策略', '88', '可执行']) {
@@ -50,6 +55,7 @@ describe('候选信号卡列表', () => {
     expect(row.getByText(/模拟中/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
     const next = await screen.findByRole('link', { name: /补测科技/ });
+    expect(cursors).toEqual([null, 'page-2']);
     expect(within(next.closest('tr')!).getByText('—')).toBeInTheDocument();
     expect(within(next.closest('tr')!).getByText('已过期')).toBeInTheDocument();
     expect(within(next.closest('tr')!).getByText('暂不可执行')).toBeInTheDocument();
@@ -89,6 +95,8 @@ describe('候选信号卡列表', () => {
     renderAt(search);
     expect(await screen.findByText('筛选参数格式不正确')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // 跨过任务队列边界并刷新 React 更新，让误发的请求有机会进入 MSW。
+    await act(async () => { await delay(0); });
     expect(requested).not.toHaveBeenCalled();
   });
 

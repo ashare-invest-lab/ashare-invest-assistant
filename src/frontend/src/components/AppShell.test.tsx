@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { delay, http, HttpResponse } from 'msw';
 import { createMemoryRouter } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
@@ -12,12 +12,18 @@ import { AppShell } from './AppShell';
 
 const API = '/api/v1';
 const paths = ['/terminal', '/today', '/market', '/notifications', '/settings/profile', '/settings/data-licence', '/admin/users'];
+const originalViewport = {
+  innerWidth: Object.getOwnPropertyDescriptor(window, 'innerWidth')!,
+  innerHeight: Object.getOwnPropertyDescriptor(window, 'innerHeight')!,
+};
 
 beforeEach(() => {
   mockLoginAs('demo_user');
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
   Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
 });
+
+afterEach(() => Object.defineProperties(window, originalViewport));
 
 function renderAt(path = '/today') {
   const router = createMemoryRouter([
@@ -85,7 +91,7 @@ describe('应用外壳', () => {
     ['已读且有目标', '2026-11-02T10:41:00+08:00', true],
     ['未读且无目标', null, false],
   ] as const)('点击%s通知，仅未读项标记已读，有目标才跳转', async (_label, readAt, hasTarget) => {
-    let reads = 0;
+    const readIds: string[] = [];
     const item: Notification = {
       ...NOTIFICATIONS[0], title: '补测通知', read_at: readAt,
       target: { type: 'none', id: null, route: null },
@@ -94,7 +100,12 @@ describe('应用外壳', () => {
     if (hasTarget) item.target = { type: 'daily_report', id: '2026-11-02', route: '/daily-reports/2026-11-02' };
     server.use(
       http.get(`${API}/notifications`, () => HttpResponse.json({ items: [item], next_cursor: null })),
-      http.post(`${API}/notifications/:id/read`, () => { reads++; item.read_at = '2026-11-02T10:42:00+08:00'; return new HttpResponse(null, { status: 204 }); }),
+      http.post(`${API}/notifications/:id/read`, ({ params }) => {
+        readIds.push(String(params.id));
+        if (params.id !== item.id) return new HttpResponse(null, { status: 404 });
+        item.read_at = '2026-11-02T10:42:00+08:00';
+        return new HttpResponse(null, { status: 204 });
+      }),
     );
     const router = createMemoryRouter([
       { element: <AppShell />, children: [
@@ -106,7 +117,13 @@ describe('应用外壳', () => {
     fireEvent.click(screen.getByRole('button', { name: '通知' }));
     fireEvent.click(await screen.findByText('补测通知'));
     expect(await screen.findByRole('heading', { name: hasTarget ? '日报详情' : '今日关注页面' })).toBeInTheDocument();
-    await waitFor(() => expect(reads).toBe(readAt ? 0 : 1));
+    if (readAt) {
+      // 跨过任务队列边界并刷新 React 更新，让误发的请求有机会进入 MSW。
+      await act(async () => { await delay(0); });
+      expect(readIds).toEqual([]);
+    } else {
+      await waitFor(() => expect(readIds).toEqual([item.id]));
+    }
   });
 
   it('退出登录请求结束后显示登录页', async () => {
@@ -120,9 +137,26 @@ describe('应用外壳', () => {
   });
 
   it('安全令牌失效时显示可关闭的刷新提示', async () => {
-    server.use(http.get(`${API}/notifications/unread-count`, () => HttpResponse.json({ error: { code: 'CSRF_FAILED', message: '失效', details: null } }, { status: 403 })));
+    const item: Notification = {
+      ...NOTIFICATIONS[0], title: '令牌失效通知', read_at: null,
+      target: { type: 'none', id: null, route: null },
+    };
+    const readIds: string[] = [];
+    server.use(
+      http.get(`${API}/notifications`, () => HttpResponse.json({ items: [item], next_cursor: null })),
+      http.post(`${API}/notifications/:id/read`, ({ params }) => {
+        readIds.push(String(params.id));
+        if (params.id !== item.id) return new HttpResponse(null, { status: 404 });
+        return HttpResponse.json({ error: { code: 'CSRF_FAILED', message: '失效', details: null } }, { status: 403 });
+      }),
+    );
     renderAt();
+    fireEvent.click(screen.getByRole('button', { name: '通知' }));
+    const notification = await screen.findByText('令牌失效通知');
+    expect(screen.queryByTestId('csrf-refresh')).not.toBeInTheDocument();
+    fireEvent.click(notification);
     const alert = await screen.findByTestId('csrf-refresh');
+    expect(readIds).toEqual([item.id]);
     expect(alert).toHaveTextContent('刚才的操作没有提交');
     expect(within(alert).getByRole('button', { name: '刷新页面' })).toBeInTheDocument();
     fireEvent.click(within(alert).getByRole('button', { name: /close/i }));
