@@ -105,7 +105,6 @@ tests:
   - {"file": "tests/backend/unit/test_master_sources_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "in-memory ZIP"], "unverified": false}
   - {"file": "tests/backend/unit/test_master_sync_pg_s2.py", "group": "serial_pg", "keywords": ["conn->owned_engine->pg_url", "psycopg.connect", "docker", "tmp_path.parent UUID filename"], "unverified": false}
   - {"file": "tests/backend/unit/test_master_terms_offline.py", "group": "parallel", "keywords": ["fake DB calls", "deny_network monkeypatch"], "unverified": false}
-  - {"file": "tests/backend/unit/test_tb163r2_bj_gate.py", "group": "parallel", "keywords": ["monkeypatch offline gate", "no DB/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_logging_redact_exc_t_o90.py", "group": "parallel", "keywords": ["pure RedactFilter LogRecord", "no DB/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_master_xlsx_offline_r_b3.py", "group": "parallel", "keywords": ["in-memory ZIP/XML", "forbid_network monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_quotes_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "subprocess import check", "socket monkeypatch"], "unverified": false}
