@@ -106,7 +106,7 @@ N-01 数据不在本轮来源中，保持 unknown；研究侧可登记技术候�
 | P03 环境防抖 | 连续2日确认 | docs/strategies/feature_spec.md §F25、§F50 | 未验证；待复测 |
 | P04 环境预热 | F50 61根；F25 MA60加防抖沿同窗口推导，完整宽度还需覆盖 | docs/strategies/feature_spec.md §F50、§F25；F25具体整体预热未验证 | 未验证；待复测 |
 | P05 派生覆盖边界组 | F01/F11至少15；F25指数至少45、宽度至少15；F32至少90非null值 | docs/strategies/feature_spec.md §F01、§F11、§F25、§F32；其中覆盖比例仍属建议 | 未验证；待复测 |
-| P06 佣金费率 | 待冻结实际或研究费率，无确定默认值 | config/market_rules.yaml §segments.fees.commission_rate_default_pct；docs/strategies/_template.md §18 | 未验证；待复测 |
+| P06 佣金费率 | 待冻结实际或研究费率，无确定默认值 | config/market_rules.yaml §segments.fees.commission_rate_default_pct；docs/strategies/_template.md §18 | 用户配置项（券商个体费率，不找出处；复测须冻结所用费率） |
 | P07 冲击成本档表 | ADV20；参与率上界0.1%/0.5%/1%/2%/其余，对应0/5/15/30/60bp；超过2%容量受限 | docs/strategies/_template.md §18 | 未验证；待复测 |
 | P08 冲击成本缺失回退 | 有效K<5或ADV为0取最高档 | docs/strategies/_template.md §18 | 未验证；待复测 |
 | P09 冷却/事件去重 | 同模板同证券3日；还需检查持有期重叠 | docs/strategies/validation.md §4.2 | 未验证；待复测 |
@@ -116,7 +116,7 @@ N-01 数据不在本轮来源中，保持 unknown；研究侧可登记技术候�
 | P13 多重比较 | BH q=0.10，原文建议值 | docs/strategies/validation.md §5.2 | 未验证；待复测 |
 | P14 G-01低价门槛 | none价格低于2元阻断买入（既有初值） | docs/strategies/catalog.md §3 G-01 | 未验证；待复测 |
 
-因此未验证登记项合计 **79**＝31 个具名参数＋34 个固定参数组＋14 个共用参数组；这不是 79 个互异标量参数。滑点按卡分别计，佣金和整张冲击档表只计一次。未裁定的 R、计日、结构锚点字段/I1 角色及指数接入来源属于语义/数据事项，列 §7，不暗填数值。
+因此未验证登记项合计 **78**＝31 个具名参数＋34 个固定参数组＋13 个共用参数组；用户配置项合计 **1**（P06 佣金费率），登记项总数仍为 **79**，不是 79 个互异标量参数。滑点按卡分别计，佣金和整张冲击档表只计一次；四卡 M14 与费用正文的实际费率均对应 P06，不重复计数。未裁定的 R、计日、结构锚点字段/I1 角色及指数接入来源属于语义/数据事项，列 §7，不暗填数值。
 
 法规/既有执行约束不是可调策略参数：T+1、最低佣金5元、印花税交易日分段（2023-04-10至08-27卖出0.1%，08-28起卖出0.05%）、双边过户费0.001%、主板及ST/创业板/科创板涨跌幅、0.01元半入舍入和无涨跌幅日，沿 config/market_rules.yaml §segments、docs/strategies/feature_spec.md §F35/F36。上市30日闸门、长停牌5日后复牌首日阻断沿 docs/strategies/_template.md §7.3；买卖申报数量与零股规则沿 docs/strategies/market_rules_T-R10.md §1–§2。科创板1股递增保留“部分核实”状态。不把这些约束当作本轮检验得出的最优值。
 

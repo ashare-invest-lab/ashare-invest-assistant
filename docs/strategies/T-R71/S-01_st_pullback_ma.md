@@ -158,7 +158,7 @@ T-R94 制度事实核验：以下登记只核对本卡已有市场制度，不�
 
 ## 18. 成本与滑点
 
-佣金双边分别按 max(单笔成交额×实际费率，5 元) 计算。实际费率未知，记“未验证、待复测”，不默认填零；复测费率需冻结。最低佣金出处：config/market_rules.yaml §segments.fees.commission_min_yuan；双边口径：docs/strategies/_template.md §18。
+佣金双边分别按 max(单笔成交额×实际费率，5 元) 计算。实际费率记“用户配置项（券商个体费率，不找出处；复测须冻结所用费率）”，不默认填零。最低佣金出处：config/market_rules.yaml §segments.fees.commission_min_yuan；双边口径：docs/strategies/_template.md §18。
 
 印花税按实际卖出交易日分段：2023-04-10 至 2023-08-27 为 0.1%；2023-08-28 起为 0.05%，仅卖出计。过户费在仓库已建模区间为双边 0.001%；更早日期不外推。来源：config/market_rules.yaml §segments（2023-04-10、2023-08-28、2026-07-06）.fees。
 
@@ -167,7 +167,7 @@ T-R94 费用制度核验（仅制度事实；仓内定义及原值保留）：
 
 | 编号／制度项 | 仓内定义 | 官方出处（条款、URL、访问日期）及生效区间 | 核验结论 |
 |---|---|---|---|
-| M14／实际佣金费率 | config/market_rules.yaml §segments.fees.commission_rate_default_pct；docs/strategies/_template.md §18 | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，2002-05-01起；证监会，[《证券经纪业务管理办法》（第204号令）第十三、二十八、五十三条及发布令](https://www.csrc.gov.cn/csrc/c101953/c6987676/content.shtml)，2023-02-28起；访问日期 2026-11-16 | 制度上下限已核对：佣金（含代收规费等）不高于成交金额3‰，不低于代收证券交易监管费和交易所手续费等；2023年办法另禁止明显低于经纪服务成本。实际佣金费率仍未验证：按券商协议，继续待冻结、待复测；不将制度边界设为默认费率 |
+| M14／实际佣金费率 | config/market_rules.yaml §segments.fees.commission_rate_default_pct；docs/strategies/_template.md §18 | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，2002-05-01起；证监会，[《证券经纪业务管理办法》（第204号令）第十三、二十八、五十三条及发布令](https://www.csrc.gov.cn/csrc/c101953/c6987676/content.shtml)，2023-02-28起；访问日期 2026-11-16 | 制度上下限已核对：佣金（含代收规费等）不高于成交金额3‰，不低于代收证券交易监管费和交易所手续费等；2023年办法另禁止明显低于经纪服务成本。实际佣金费率为用户配置项（券商个体费率，不找出处；复测须冻结所用费率）；不将制度边界设为默认费率 |
 | M15／A股单笔最低佣金 | config/market_rules.yaml §segments.fees.commission_min_yuan | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，访问日期 2026-11-16；2002-05-01起，法规库标现行有效 | 已核对最低收费制度；不等于M14费率或用户实际账单已验证 |
 | M16／卖出印花税及日期分段 | config/market_rules.yaml §segments.fees.stamp_duty_sell_pct；docs/strategies/_template.md:252 | 国家税务总局官网，[《中华人民共和国印花税法》第三、四、五、二十条及附表“证券交易”税目](https://shanghai.chinatax.gov.cn/zcfw/zcfgk/yhs/202106/t458595.html)，2022-07-01起；财政部、国家税务总局，[《关于减半征收证券交易印花税的公告》（2023年第39号）正文](https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm)，2023-08-28起；访问日期均为 2026-11-16 | 已核对单向征收、成交额基数及本卡两个税率区间；未向建模起点前外推 |
 | M17／双向过户费 | config/market_rules.yaml §segments.fees.transfer_fee_pct；docs/strategies/_template.md:253 | 中国结算，[《中国结算关于降低股票交易过户费收费标准的通知》正文唯一调整段（2022-04-28发布）](https://www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml)，自2022-04-29起，沪深市场A股、北京市场A股和挂牌公司股份统一按成交金额0.01‰双向收取；[《上海市场证券登记结算业务收费及代收税费一览表》“投资者业务收费—交易过户费—A股”](https://m.chinaclear.cn/zdjs/fbzyls/202512/922adc26c2ff4865930c7fb77688bb8a/files/上海市场证券登记结算业务收费及代收税费一览表.pdf)及[深圳市场同表同项](https://m.chinaclear.cn/zdjs/fbzyls/202512/a59388fbfa714c5fa546784891a42e30/files/深圳市场证券登记结算业务收费及代收税费一览表.pdf)，2026-01-01更新；访问日期 2026-11-16 | 已核对：0.01‰＝0.001%，2022年通知与现行沪深收费表一致，覆盖本卡2023-04-10起全部已建模区间；仅摘除该范围的未验证标记。北交所旧0.025‰起始日仍未验证，2022年通知只证明调整前费率，不能倒推起始日；不扩展卡内市场或历史区间 |
