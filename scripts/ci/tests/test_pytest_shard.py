@@ -1,5 +1,6 @@
 """Small partition, report-validation and JUnit merge regressions."""
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 import xml.etree.ElementTree as ET
@@ -129,13 +130,94 @@ def test_union_summary_with_junit(tmp_path, monkeypatch, capsys):
     for i, report in enumerate(reports, 1):
         (tmp_path / f"backend-pytest-shard-{i}.xml").write_text(
             '<testsuites><testsuite>' + ''.join(
-                f'<testcase name="{node}" time="{time}"/>'
+                f'<testcase classname="{node.split("::")[0][:-3].replace("/", ".")}" '
+                f'name="{node.split("::")[1]}" time="{time}"/>'
                 for node, time in zip(report["selected"], (1.2, 2.3))) + '</testsuite></testsuites>')
     assert check_shard_union.main(args + ["--junit", str(tmp_path)] + write_reports(tmp_path, reports)) == 0
     output = capsys.readouterr().out
     assert "| 1 | 2 | 3.5 |" in output
     assert "| 2 | 1 | 1.2 |" in output
     assert summary.read_text() == output
+
+
+@pytest.mark.parametrize("nodeid,expected", [
+    ("backend/a.py::test_a", ("backend.a", "test_a")),
+    ("backend/a.py::Class::test_a[x::y[z]]", ("backend.a.Class", "test_a[x::y[z]]")),
+    ("backend/a.py::Outer::Inner::test_a[x.py]", ("backend.a.Outer.Inner", "test_a[x.py]")),
+    ("backend/a.py", ("", "backend.a")),
+    ("backend/a[1].py", ("", "backend.a[1]")),
+    ("backend/a[1].py::test_a[x]", ("backend.a[1]", "test_a[x]")),
+])
+def test_junit_node_mapping(nodeid, expected):
+    assert check_shard_union.junit_node(nodeid) == expected
+
+
+@pytest.fixture
+def runtime_union_inputs(tmp_path):
+    args, reports = union_inputs(tmp_path)
+    contract = "backend/contract/test_contract_stub.py"
+    reports[0]["selected"] = [f"{contract}::{name}" for name in (
+        "test_stub_conforms_to_contract", "test_contract_checker_catches_violation",
+        "test_stub_paths_exist_in_api_contract_doc")]
+    reports[0]["files"] = [f"tests/{contract}"]
+    nodes = reports[0]["selected"] + reports[1]["selected"]
+    (tmp_path / "baseline.txt").write_text("\n".join(nodes))
+    for report in reports:
+        report["collected"] = nodes
+    with (tmp_path / "ci-groups.yaml").open("a") as groups:
+        groups.write(f"  - {{file: tests/{contract}, group: parallel}}\n")
+    # Five cases extracted from run 43802901765, shard 4; no full artifact needed.
+    root = ET.parse(Path(__file__).parent / "fixtures/contract-runtime-junit.xml").getroot()
+    (tmp_path / "backend-pytest-shard-2.xml").write_text(
+        '<testsuite><testcase classname="backend.c" name="test_c"/></testsuite>')
+    return args + ["--junit", str(tmp_path)] + write_reports(tmp_path, reports), root
+
+
+@pytest.mark.parametrize("keep_parent", [True, False])
+def test_union_accepts_real_runtime_expansion(tmp_path, runtime_union_inputs, keep_parent, capsys):
+    args, root = runtime_union_inputs
+    if not keep_parent:
+        root.remove(root[0])
+    ET.ElementTree(root).write(tmp_path / "backend-pytest-shard-1.xml")
+    assert check_shard_union.main(args) == 0
+    output = capsys.readouterr().out
+    assert "Shard union: OK" in output
+    assert "| 1 | 3 | 1.1 |" in output if keep_parent else "| 1 | 3 | 0.2 |" in output
+
+
+@pytest.mark.parametrize("invalid", ["missing", "extra", "foreign-class", "wrong-name", "failure", "error",
+                                     "already-parametrized", "unterminated-child"])
+def test_union_rejects_runtime_mismatch(tmp_path, runtime_union_inputs, invalid, capsys):
+    args, root = runtime_union_inputs
+    if invalid == "missing":
+        root.remove(root[3])
+    elif invalid == "extra":
+        ET.SubElement(root, "testcase", classname=root[0].get("classname"), name="test_other[x]")
+    elif invalid == "foreign-class":
+        root[1].set("classname", "backend.other")
+    elif invalid == "wrong-name":
+        root[3].set("name", "test_other")
+    elif invalid in {"failure", "error"}:
+        ET.SubElement(root[1], invalid)
+        # Keep the passing parent and make the raw count equal selected (three).
+        root.remove(root[4])
+        root.remove(root[2])
+    elif invalid == "already-parametrized":
+        for path in [tmp_path / "baseline.txt", *tmp_path.glob("report-*.json")]:
+            path.write_text(path.read_text().replace(
+                "::test_stub_conforms_to_contract", "::test_stub_conforms_to_contract[GET /health]"))
+        root[0].set("name", "test_stub_conforms_to_contract[GET /health]")
+        root[1].set("name", "test_stub_conforms_to_contract[GET /health][extra]")
+    else:
+        root[1].set("name", "test_stub_conforms_to_contract[unfinished")
+    ET.ElementTree(root).write(tmp_path / "backend-pytest-shard-1.xml")
+    assert check_shard_union.main(args) == 1
+    output = capsys.readouterr().out
+    assert f"selected=3 junit={len(root)}" in output
+    if invalid in {"missing", "wrong-name"}:
+        assert "missing selected nodes=[('backend.contract.test_contract_stub', 'test_contract_checker_catches_violation')]" in output
+    if invalid == "extra":
+        assert "unaccounted JUnit nodes=[('backend.contract.test_contract_stub', 'test_other[x]')]" in output
 
 
 def test_merge_junit_preserves_suites_and_case_details(tmp_path):
@@ -283,7 +365,8 @@ def test_union_rejects_bad_junit(tmp_path, invalid):
     for report in reports:
         root = ET.Element("testsuite")
         for node in report["selected"]:
-            ET.SubElement(root, "testcase", classname="backend", name=node, time="1.2")
+            path, name = node.split("::")
+            ET.SubElement(root, "testcase", classname=path[:-3].replace("/", "."), name=name, time="1.2")
         roots.append(root)
     if invalid in {"failure", "error"}:
         ET.SubElement(roots[1][0], invalid)
@@ -295,8 +378,10 @@ def test_union_rejects_bad_junit(tmp_path, invalid):
         ET.SubElement(roots[1], "testcase", classname="backend", name="extra")
     elif invalid == "duplicate-node":
         roots[0][1].set("name", roots[0][0].get("name"))
+        roots[0][1].set("classname", roots[0][0].get("classname"))
     else:
         roots[1][0].set("name", roots[0][0].get("name"))
+        roots[1][0].set("classname", roots[0][0].get("classname"))
     for i, root in enumerate(roots, 1):
         ET.ElementTree(root).write(tmp_path / f"backend-pytest-shard-{i}.xml")
     assert check_shard_union.main(args + ["--junit", str(tmp_path)] + write_reports(tmp_path, reports)) == 1

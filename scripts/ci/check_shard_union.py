@@ -21,6 +21,18 @@ def stable_id(nodeid: str) -> str:
     return function + bracket + UUID.sub("<uuid>", params)
 
 
+def junit_node(nodeid: str) -> tuple[str, str]:
+    """Map a nodeid like pytest 9.2's mangle_test_address, without pytest."""
+    path, separator, tail = nodeid.partition("::")
+    names = [re.sub(r"\.py$", "", path.replace("/", "."))]
+    if separator:
+        name, bracket, params = tail.partition("[")
+        names.extend(name.split("::"))
+        if bracket:
+            names[-1] += "[" + params.removesuffix("]") + "]"
+    return ".".join(names[:-1]), names[-1]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", type=Path, required=True)
@@ -73,9 +85,30 @@ def main(argv=None):
                 paths = list(args.junit.rglob(f"backend-pytest-shard-{report['shard']}.xml"))
                 if len(paths) != 1:
                     raise ValueError(f"shard {report['shard']}: expected exactly one JUnit")
-                cases = validate_junit(ET.parse(paths[0]).getroot(), seen)
-                if len(cases) != len(report["selected"]):
-                    raise ValueError(f"shard {report['shard']}: JUnit testcase count differs from selected")
+                root = ET.parse(paths[0]).getroot()
+                counts = (f"shard {report['shard']}: selected={len(report['selected'])} "
+                          f"junit={sum(1 for _ in root.iter('testcase'))}")
+                try:
+                    cases = validate_junit(root, seen)
+                except ValueError as error:
+                    raise ValueError(f"{counts}: {error}") from error
+                selected = {junit_node(node) for node in report["selected"]}
+                parents = {node for node in selected if "[" not in node[1]}
+                covered = set()
+                extra = []
+                for case in cases:
+                    node = (case.get("classname", ""), case.get("name", ""))
+                    parent = (node[0], node[1].partition("[")[0])
+                    if node in selected:
+                        covered.add(node)
+                    elif "[" in node[1] and node[1].endswith("]") and parent in parents:
+                        covered.add(parent)
+                    else:
+                        extra.append(node)
+                missing = sorted(selected - covered)
+                if missing or extra:
+                    raise ValueError(f"{counts}: missing selected nodes={missing[:5]}; "
+                                     f"unaccounted JUnit nodes={extra[:5]}")
                 seconds = f"{sum(float(c.get('time', '0')) for c in cases):.1f}"
             lines.append(f"| {report['shard']} | {len(report['selected'])} | {seconds} |")
         summary = "\n".join(lines) + "\n"
