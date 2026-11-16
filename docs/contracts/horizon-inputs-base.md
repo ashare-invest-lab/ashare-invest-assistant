@@ -66,20 +66,23 @@ TEAM-RULES 第二节原文：「硬红线仍须用户本人批准：真调麦蕊
 
 结论｜采用 §3 的两张追加式证据表，承载源/派生版本与逐证券完成证明；复用已有 horizon 快照/评估表，不改共享现值表主键或历史行。｜出处｜A188 Q12/A1；`app/db/tables/market.py` 的 daily_bars、ex_rights_events、factor_values、feature_bars_daily；`app/db/tables/reviews.py` 的 data_snapshots；`app/db/tables/strategy.py` 的 symbol_horizon_assessments；迁移 `0036_tb143_ex_rights_minute_catalog.py`。｜验收测试名（待新增）｜`test_a192_a1a_schema_keys_nullability_indexes`、`test_a192_a1a_append_only_no_history_backfill`。
 
-本地 `src/backend/migrations/versions/` 的唯一 head 为 `0036`（父 `0035`），`paused/0021` 不属活动链；建议迁移文件 `0037_tb172b1_horizon_input_evidence.py`，revision=`0037`、down_revision=`0036`。实施前若 head 前移，重核父节点并改号，不能制造双 head。
+本地 `src/backend/migrations/versions/` 的唯一 head 为 `0036`（父 `0035`），`paused/0021` 不属活动链；按 §A1-2 拆为两个迁移：`0037`（down_revision=`0036`，be/T-B172b1a，`horizon_input_versions`）与 `0038`（down_revision=`0037`，be/T-B172b1b，`horizon_completion_evidence`），文件名由实现方按既有命名规则定。实施前若 head 前移，重核父节点并改号，不能制造双 head。
 **不改 daily_bars 现有写入口**：`upsert_daily_bars`、`daily_bar_write_allowed` 门闩语义保持不变，不另造 INSERT/UPDATE 旁路，不借证据表授权写行情。此基点未找到名为 `daily_bar_write_allowed` 的实现；实际为 `upsert_daily_bars` 调 `_bj_write_unconfirmed`，不得把目标名称当已落地证明（W §10.10–§10.12）。
 
 ### A1-2 拆单与规模
 
-结论｜撤销 A1 必须一个 PR 的安排，改为 **A1a＝be/T-B172b1、A1b＝be/T-B172b2**，各单独 PR、净增各 ≤800 行，包含迁移/模型/实现/测试。｜出处｜A188「后端单草稿」A1 的已有两段估算及 T-B172 阻塞 2；本契约 §3–§5。｜验收测试名（待新增）｜`test_a192_a1a_single_head_empty_upgrade_guarded_downgrade`、`test_a192_a1b_provider_revision_isolation`。
+结论｜撤销 A1 必须一个 PR 的安排，改为 **A1a＝be/T-B172b1a、b1b（按迁移 0037/0038 拆）；A1b＝be/T-B172b2a、b2b、b2c**（编排者 11-15 裁定），每单独立 PR、净增 ≤800 行，包含迁移/模型/实现/测试及 tests/ci-groups.yaml 登记。｜出处｜A188「后端单草稿」A1 的已有两段估算及 T-B172 阻塞 2；本契约 §3–§5。｜验收测试名（待新增）｜`test_a192_a1a_single_head_empty_upgrade_guarded_downgrade`、`test_a192_a1b_provider_revision_isolation`。
 
 | 单 | 范围与先后 | 验收（均待新增） |
 | --- | --- | --- |
 | A0（沿用 be/T-B172a） | 显式 as_of、d/窗口、§4 协议及默认空/假提供者；用假提供者测 PIT，不导入 A1 模型。原估算 450–650 行，未验证 | 本节 A0 三项测试；`test_a188_calendar_gap_and_suspension_window` |
-| A1a | 两表迁移、模型、约束/索引、不可变性与空库迁移验收；无数据回填、无生产执行、无外呼接线。原估算 350–550 行，未验证；硬上限 ≤800 | 本节 A1-1 两项及 single_head/upgrade/downgrade 测试 |
-| A1b | A1a 后实现版本登记/读取、完成证据提供者、权息可见性适配及向 prepare 的参数转换；仅接已有可证材料，无新采集器、无真实 gbbq 连乘启用。原估算 450–650 行，未验证；硬上限 ≤800 | provider_revision_isolation；`test_a188_source_revision_and_licence_isolation`；§A1-3 测试 |
+| A1a-1（be/T-B172b1a） | 迁移 0037：`horizon_input_versions` 表、模型、约束/索引、不可变性、空库 upgrade/downgrade 与非空拒绝降级；无回填、无生产执行、无外呼。估 400–600 行，未验证；硬上限 ≤800 | A1-1 版本表相关测试及 single_head/upgrade/downgrade 测试 |
+| A1a-2（be/T-B172b1b，依赖 b1a） | 迁移 0038：`horizon_completion_evidence` 表、模型、约束/索引及同等迁移验收。估 400–600 行，未验证；硬上限 ≤800 | A1-1 完成证据表相关测试及 single_head/upgrade/downgrade 测试 |
+| A1b-1（be/T-B172b2a，依赖 b1a/b1b） | 版本与完成证据登记、校验、依赖链与幂等（register_version/register_completion）。估 422–522 行，未验证；硬上限 ≤800 | 登记幂等、修订链、来源隔离测试 |
+| A1b-2（be/T-B172b2b，依赖 b2a） | 版本读取与完成证据提供者（实现 §4 协议），本人/证书/来源隔离。估 352–452 行，未验证；硬上限 ≤800 | provider_revision_isolation；`test_a188_source_revision_and_licence_isolation` |
+| A1b-3（be/T-B172b2c，依赖 b2b） | `read_adjustment_factors` 权息可见性适配及向 prepare 的参数转换；仅接已有可证材料，无新采集器、无真实 gbbq 连乘启用，缺因子不补 1。估 292–372 行，未验证；硬上限 ≤800 | §A1-3 测试 |
 
-若估算无法满足，实施前按边界另拆并重新派单，不压缩格式凑行数。两单合计可超过 800，不能合成一个超限 PR；A1b 不包含 B/C 特征算法、FIFO、分位池算法或 T-B177 承接的 C2 快照持久化/复用服务。A1b 预估超 800，实施前须再拆，见 reports/T-A192.md 末节。
+若估算无法满足，实施前按边界另拆并重新派单，不压缩格式凑行数。两单合计可超过 800，不能合成一个超限 PR；A1b 不包含 B/C 特征算法、FIFO、分位池算法或 T-B177 承接的 C2 快照持久化/复用服务。拆分依据为 reports/T-A192.md 末节的估算（A1b 合计 852–1062 行，未验证）；顺序 A0 → b1a → b1b → b2a → b2b → b2c。
 
 ### A1-3 PN-03 权息可见性接口
 
