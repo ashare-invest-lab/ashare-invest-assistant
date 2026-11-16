@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from coverage_ratchet import (NONDET_PATH, SELECTION, adjusted_measurement, compare,
-                              load_nondet_lines, load_policy, validate_record)
+                              load_nondet_lines, load_policy, validate_base_anchors, validate_record)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -17,6 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("coverage_json", type=Path)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--base-coverage", type=Path)
+    parser.add_argument("--base-source-root", type=Path,
+                        help="Read base anchor source from this tree instead of the trusted commit")
     parser.add_argument("--nondet-lines", type=Path, default=NONDET_PATH)
     parser.add_argument("--policy", type=Path, default=Path(__file__).with_name("coverage-baseline.json"))
     parser.add_argument("--output", type=Path, required=True)
@@ -29,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         exclusions = load_nondet_lines(args.nondet_lines)
         if exclusions and args.base_coverage is None:
             raise ValueError("Nonempty nondeterministic whitelist requires --base-coverage coverage.json")
+        validate_base_anchors(exclusions, trusted.get("commit"), source_root=args.base_source_root)
         counts, adjusted, current_audit = adjusted_measurement(args.coverage_json, exclusions, label="current")
         base_adjusted, base_audit = trusted["counts"], []
         if args.base_coverage is not None:

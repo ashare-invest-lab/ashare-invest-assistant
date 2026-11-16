@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from datetime import date, datetime, timezone
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
@@ -135,11 +137,36 @@ def load_nondet_lines(path: Path, *, root: Path | None = None,
         source = (root / name).resolve()
         if not source.is_relative_to((root / "src/backend/app").resolve()):
             raise ValueError(location + ": source outside measured app")
-        text = source.read_text(encoding="utf-8").splitlines()
-        for line in lines:
-            if line > len(text) or text[line - 1].strip() != anchors[str(line)]:
-                raise ValueError(f"{name}:{line}: anchor mismatch")
+        validate_source_anchors(entry, source.read_text(encoding="utf-8"))
     return policy["files"]
+
+
+def validate_source_anchors(entry: dict, source: str, *, label: str = "") -> None:
+    name, lines, anchors = entry["path"], entry["lines"], entry["anchors"]
+    text = source.splitlines()
+    for line in lines:
+        if line > len(text) or text[line - 1].strip() != anchors[str(line)]:
+            raise ValueError(f"{name}:{line}: {label}anchor mismatch")
+
+
+def validate_base_anchors(exclusions: list[dict], commit: str | None, *,
+                          source_root: Path | None = None) -> None:
+    """Validate the same anchors against the trusted commit before base deductions."""
+    if exclusions and source_root is None and not (
+            isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}", commit)):
+        raise ValueError("Missing or invalid trusted base commit for base anchor validation")
+    for entry in exclusions:
+        name = entry["path"]
+        try:
+            if source_root is not None:
+                source = (source_root / name).read_text(encoding="utf-8")
+            else:
+                source = subprocess.run(
+                    ["git", "-C", str(ROOT), "show", f"{commit}:{name}"],
+                    check=True, capture_output=True, text=True, encoding="utf-8").stdout
+        except (OSError, subprocess.CalledProcessError, UnicodeError) as exc:
+            raise ValueError(f"{name}:{entry['lines'][0]}: missing or unreadable base source") from exc
+        validate_source_anchors(entry, source, label="base ")
 
 
 def adjusted_measurement(path: Path, exclusions: list[dict], *, label: str) -> tuple[dict, dict, list[dict]]:

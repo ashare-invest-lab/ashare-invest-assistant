@@ -1,6 +1,7 @@
 """Nondeterministic statement exclusions: synthetic coverage only, no backend imports."""
 import io
 import json
+import subprocess
 import sys
 import zipfile
 from copy import deepcopy
@@ -56,6 +57,7 @@ def case(tmp_path):
     frozen = write_json(tmp_path / "base.json", trusted)
     output = tmp_path / "measurement.json"
     argv = [str(current), "--base", str(frozen), "--base-coverage", str(before),
+            "--base-source-root", str(REPO),
             "--nondet-lines", str(whitelist), "--output", str(output)]
     return {"policy": policy, "whitelist": whitelist, "before": before, "current": current,
             "trusted": trusted, "frozen": frozen, "output": output, "argv": argv}
@@ -145,6 +147,123 @@ def test_anchor_changes_or_source_line_drift_fail_with_location(case, tmp_path, 
     assert check.main(case["argv"]) == 1
     assert f"{CALENDAR}:78: anchor mismatch" in capsys.readouterr().err
     assert not case["output"].exists()
+
+
+@pytest.fixture
+def base_anchor_drift_case(case, tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    source = root / CALENDAR
+    source.parent.mkdir(parents=True)
+    source.write_text("\n".join(f"value_{n} = {n}" if n != 83 else ""
+                                for n in range(1, 86)) + "\n", encoding="utf-8")
+
+    def git(*args):
+        return subprocess.check_output([
+            "git", "-C", str(root), "-c", "user.name=Synthetic Review",
+            "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false",
+            *args], text=True).strip()
+
+    git("init", "-q")
+    git("add", CALENDAR)
+    git("commit", "-qm", "deterministic base source")
+    case["trusted"]["commit"] = git("rev-parse", "HEAD")
+    source.write_text((REPO / CALENDAR).read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(ratchet, "ROOT", root)
+    write_json(case["before"], coverage(LINES))
+    case["trusted"]["counts"] = ratchet.measured(case["before"])
+    write_json(case["frozen"], case["trusted"])
+    index = case["argv"].index("--base-source-root")
+    del case["argv"][index:index + 2]  # Exercise the production git-show path.
+    assert case["trusted"]["counts"]["total"] == [19267, 25198]
+    assert ratchet.measured(case["current"])["total"] == [19261, 25198]
+    return case
+
+
+def assert_base_anchor_drift_rejected(main, case, capsys):
+    assert main(case["argv"]) == 1, "Base anchor drift must fail"
+    assert f"{CALENDAR}:78: base anchor mismatch" in capsys.readouterr().err
+    assert not case["output"].exists()
+
+
+def test_base_anchor_drift_must_fail(base_anchor_drift_case, capsys):
+    assert_base_anchor_drift_rejected(check.main, base_anchor_drift_case, capsys)
+
+
+def test_mutation_removing_base_anchor_validation_is_caught(base_anchor_drift_case, tmp_path, capsys):
+    text = Path(check.__file__).read_text(encoding="utf-8")
+    needle = "        validate_base_anchors(exclusions, trusted.get(\"commit\"), source_root=args.base_source_root)\n"
+    assert text.count(needle) == 1
+    mutant_path = tmp_path / "mutant_check_coverage.py"
+    mutant_path.write_text(text.replace(needle, "", 1), encoding="utf-8")
+    namespace = {"__file__": check.__file__}  # Keep the real default policy paths.
+    exec(compile(mutant_path.read_text(), str(mutant_path), "exec"), namespace)
+    assert_base_anchor_drift_rejected(check.main, base_anchor_drift_case, capsys)
+    with pytest.raises(AssertionError, match="Base anchor drift must fail"):
+        assert_base_anchor_drift_rejected(namespace["main"], base_anchor_drift_case, capsys)
+    result = json.loads(base_anchor_drift_case["output"].read_text())
+    assert result["ratchet_passed"] is True
+    assert result["comparison"]["counts"]["total"] == [19260, 25191]
+    assert result["comparison"]["base_counts"]["total"] == [19260, 25191]
+
+
+@pytest.mark.parametrize("change", ["anchor", "shift", "truncated", "missing"])
+def test_injected_base_source_must_match_anchors(case, tmp_path, capsys, change):
+    root = tmp_path / "base-source"
+    source = root / CALENDAR
+    source.parent.mkdir(parents=True)
+    lines = (REPO / CALENDAR).read_text(encoding="utf-8").splitlines()
+    if change == "anchor":
+        lines[77] += " # changed"
+    elif change == "shift":
+        lines.insert(77, "# an inserted line")
+    elif change == "truncated":
+        lines = lines[:77]
+    if change != "missing":
+        source.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    case["argv"][case["argv"].index("--base-source-root") + 1] = str(root)
+    assert check.main(case["argv"]) == 1
+    message = "missing or unreadable base source" if change == "missing" else "base anchor mismatch"
+    assert f"{CALENDAR}:78: {message}" in capsys.readouterr().err
+    assert not case["output"].exists()
+
+
+@pytest.mark.parametrize("change", ["missing_commit", "unknown_commit", "missing_file"])
+def test_git_base_source_is_required(base_anchor_drift_case, monkeypatch, capsys, change):
+    case = base_anchor_drift_case
+    if change == "missing_commit":
+        case["trusted"].pop("commit")
+    elif change == "unknown_commit":
+        case["trusted"]["commit"] = "f" * 40
+    else:
+        case["policy"]["files"][0]["path"] = "src/backend/app/aggregates/other.py"
+        root = ratchet.ROOT
+        (root / case["policy"]["files"][0]["path"]).write_text(
+            (REPO / CALENDAR).read_text(encoding="utf-8"), encoding="utf-8")
+        write_json(case["whitelist"], case["policy"])
+    write_json(case["frozen"], case["trusted"])
+    assert check.main(case["argv"]) == 1
+    error = capsys.readouterr().err
+    assert ("trusted base commit" if change == "missing_commit" else "base source") in error
+    assert not case["output"].exists()
+
+
+def test_git_base_allows_differences_outside_anchors(base_anchor_drift_case, capsys):
+    case = base_anchor_drift_case
+    # The parent is the deterministic base; this new commit has matching anchors
+    # but differs from the working tree outside the registered lines.
+    source = ratchet.ROOT / CALENDAR
+    current = source.read_text(encoding="utf-8")
+    source.write_text(current + "\n# unrelated base-only comment\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(ratchet.ROOT), "add", CALENDAR], check=True)
+    subprocess.run(["git", "-C", str(ratchet.ROOT), "-c", "user.name=Synthetic Review",
+                    "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "-qm", "matching base anchors"], check=True)
+    case["trusted"]["commit"] = subprocess.check_output(
+        ["git", "-C", str(ratchet.ROOT), "rev-parse", "HEAD"], text=True).strip()
+    write_json(case["frozen"], case["trusted"])
+    source.write_text(current, encoding="utf-8")
+    assert check.main(case["argv"]) == 0
+    assert not capsys.readouterr().err
 
 
 @pytest.mark.parametrize("today", [date(2026, 12, 15), date(2026, 12, 16)])
