@@ -7,6 +7,8 @@
  */
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import type { TodayResponse } from '../../src/frontend/src/api/types';
+import { requiresTodayAccount } from './mainline-real.helpers';
 
 const enabled = Boolean(process.env.E2E_BASE_URL && process.env.E2E_USER && process.env.E2E_PASS);
 
@@ -38,6 +40,7 @@ async function expectMarketStructure(scope: Locator) {
     /^(最新|已过期|拉取中|部分缺失|不可用|不适用)$/,
   );
   // 分时视图只在持仓行出现；无证书/缺数据时必须明确说明，不能用空白冒充行情。
+  // 没有 t-view 节点（无持仓或日报页）时下方循环为空，属预期；分时空态暂无统一文案，不强造断言（架构师非阻塞项，T-F42d）。
   const unavailable = scope.locator('[data-testid^="t-view-"][data-state="unavailable"]');
   for (const cell of await unavailable.all()) {
     await expect(cell).toBeVisible();
@@ -105,7 +108,12 @@ test.describe('主线真数据只读链路', () => {
     });
 
     await test.step('今日关注标题及各卡片区', async () => {
+      const todayResponse = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === '/api/v1/today'
+        && response.request().method() === 'GET' && response.status() === 200,
+      );
       await page.goto('/today');
+      const todayData: TodayResponse = await (await todayResponse).json();
       const today = page.getByTestId('today-page');
       await expect(today).toBeVisible();
       await expect(today.getByText('今日关注', { exact: true })).toBeVisible();
@@ -116,10 +124,11 @@ test.describe('主线真数据只读链路', () => {
       ]) {
         await expect(today.getByTestId(id)).toBeVisible();
       }
-      // 账户总览仅在日报 ready 且详情返回后出现，不要求无日报账号具备此卡片。
-      const readyReport = today.getByTestId('today-daily-report').getByRole('link');
-      if (await readyReport.count()) {
+      // 与页面共用日报请求规则：S1/S3 即便 ready、有日报链接也不渲染账户卡。
+      if (requiresTodayAccount(todayData)) {
         await expect(today.getByTestId('today-account')).toBeVisible();
+      } else {
+        await expect(today.getByTestId('today-account')).toHaveCount(0);
       }
       await expectMarketStructure(today);
       await expectHealthyPage(page);
