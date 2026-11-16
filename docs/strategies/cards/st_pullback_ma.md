@@ -1,5 +1,5 @@
 # S-01 短线·强势股回踩 `st_pullback_ma` — 正式卡 v3（T-R88；v2 为 T-R55；v1 为 T-R25 首次正式化）
-> **v3 变更（T-R88，按 T-R87 出处表补参数出处）**：版本 v2 → v3；只补出处，不改规则、参数、阈值、data_needs、universe、screen、costs；夹具及期望值不变。v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`。新版本须重新导入并重跑 G1–G6，lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
+> **v3 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v2 → v3；本版除补参数出处外，还补 A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`。新版本须重新导入并重跑 G1–G6，lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 > **v2 变更（T-R55，按编排者裁定 S-01 升 v2）**：v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`（v1 原文冻结＝提交 055105a 的卡，即 T-B100 导入库内的 v1 内容；库内 v1 审核作废，须按 v2 重新导入并重跑 G1–G6）。相对 055105a，v1 版本号下曾有两次未升号的改动，现随 v2 一并生效：① fe2afa5（T-R40）：S01-FX1–FX8 八个夹具的 desc 前缀改为「【虚构】」（原为【入场】【不满足】等场景标签），夹具数值与期望不变；② 4c00ae7（T-R43）：卡头「与草稿的差异」增 ③「v1 选股只扫持仓 ∪ 自选」说明（screen:null、全市场 DSL 暂缓，T-A83 ④）；validation 末尾新增 S01-FX9（反证 C1 正例）与 S01-FX10（反证 C2 正例）两个【虚构】夹具。规则、参数、阈值、data_needs、universe、screen、costs 均未改；本次只把 version_no 1→2（:29、:92），并改本标题与本行。
 > 正式卡（由 T-R16/S-01_st_pullback_ma.md 草稿正式化；草稿保留过程记录）。导入格式：plan 2.5.14 A 节三个带标签块，导入器只读这三块，正文存为 `narrative`。
 > 夹具全部数值**虚构**；`600000.SH` 为 plan 2.5.14 A 允许的虚构示例代码，不代表任何真实行情。期望值由规则确定性推得（与 T-R15 卡同法）；导入时若 T-B71 fixture 执行器 diff，以实跑为准回修。
@@ -19,8 +19,23 @@
 - 预热：MA20 + 20 日涨幅 = 21 根；5/10/20 日均线与涨幅取最大窗口 21 根 → **warmup 25 根有效日 K**（含缓冲）；停牌日不计入有效 K；不足 → `insufficient_data`。
 - 板块约束：主板/创业板/科创板（北交所不含）；涨跌停价按 `config/market_rules.yaml` 生效段（创业板/科创板 20%；注册制新股前 5 日无涨跌幅，`f.limit_*_price = null`）；止损价截断到涨跌停价之内。T+1：买入当日可卖 0，卖出信号照常、执行层 `T1_NOT_SELLABLE`。整手：科创板 ≥200 股、1 股递增，其余 100 股整数倍；零股一次性卖出。
 
+## A 股约束（补充执行口径）
+- 仅解释候选信号的交易边界，不构成荐股，不承诺收益；候选信号不等于可成交。
+- 沿用 universe 对 ST、停牌的排除；ST/*ST、退市整理阻断买入方向候选信号的执行，持仓退出仍按原规则评估，不以排除买入替代风险监控。（docs/strategies/cards/st_pullback_ma.md:97；docs/strategies/_template.md:134；docs/strategies/system_components_T-R15.md:8）。
+- 普通有涨跌幅限制交易日：主板普通股 10%；主板 ST/*ST 在 2026-07-06 前为 5%，当天起为 10%；创业板/科创板含风险警示均为 20%，北交所含风险警示为 30%。按交易日读取 config/market_rules.yaml 的有效段；2023-04-10 前未建模。本卡仍不扫描北交所，列出 30% 不扩大 universe（config/market_rules.yaml:4；config/market_rules.yaml:6；config/market_rules.yaml:8；config/market_rules.yaml:9；config/market_rules.yaml:10；config/market_rules.yaml:11；config/market_rules.yaml:12；config/market_rules.yaml:69；config/market_rules.yaml:129）。
+- 沪深注册制新股上市前 5 个交易日、北交所新股首日及退市整理首日为配置列出的无涨跌幅例外，不把常规比例硬套到无涨跌幅日；北交所例外仅作完整口径说明（config/market_rules.yaml:14；config/market_rules.yaml:15；config/market_rules.yaml:16）。
+- T+1：当日新买股份不可当日卖出；原退出候选信号照常评估，执行时受可卖数量限制（config/market_rules.yaml:36；docs/strategies/cards/st_pullback_ma.md:20）。
+- 停牌买卖均不可执行；一字涨停阻买、一字跌停阻卖，原卖出候选信号可以保留但不得记为成交；不得靠加大滑点模拟不可成交交易（config/market_rules.yaml:58；config/market_rules.yaml:59；config/market_rules.yaml:60；docs/strategies/system_components_T-R15.md:13；docs/strategies/_template.md:268）。
+- 买入沿用科创板至少 200 股，其余所含板块 100 股整数倍；零股一次性卖出。科创板 200 股以上按 1 股递增在配置中仅部分核实，完整依据未验证（config/market_rules.yaml:18；config/market_rules.yaml:19；config/market_rules.yaml:20；config/market_rules.yaml:23）。
+
 ## 成本与滑点（estimate）
-佣金按用户费率（单笔最低 5 元）；印花税卖出 0.05%；过户费双向 0.001%；基础滑点 `slippage_bp` 10bp；冲击成本按参与率 5 档（plan 2.13，待校准）。
+- 佣金按用户实际费率逐笔计算，买卖双向各有最低 5 元；费率缺失不能当作零费率，配置未提供统一默认值。真实佣金费率未验证（config/market_rules.yaml:45；config/market_rules.yaml:46；docs/strategies/_template.md:245）。
+- 印花税仅卖出收取：2023-04-10 至 2023-08-27 为成交额的 0.1%，2023-08-28 起为 0.05%；按成交日有效段取值，2023-04-10 前未建模（config/market_rules.yaml:4；config/market_rules.yaml:66；config/market_rules.yaml:126；config/market_rules.yaml:163；config/market_rules.yaml:43）。
+- 过户费按每笔成交额双向各收 0.001%（config/market_rules.yaml:44）。
+- 单边基础滑点沿用 10 bp（0.1%）默认估算；参数不改，真实成交校准未验证（config/market_rules.yaml:47）。
+- 冲击成本：r=计划数量×参考价/近20个有效交易日日成交额均值，停牌日不计。r≤0.1%取0 bp，0.1%<r≤0.5%取5 bp，0.5%<r≤1%取15 bp，1%<r≤2%取30 bp，r>2%取60 bp；均为单边估算，初值校准未验证（config/market_rules.yaml:49；config/market_rules.yaml:50；config/market_rules.yaml:52；config/market_rules.yaml:53；config/market_rules.yaml:54；config/market_rules.yaml:55；config/market_rules.yaml:56；docs/strategies/_template.md:253）。
+- 单边价格成本=基础滑点+冲击成本；往返按两边分别计价并加入佣金、印花税及过户费。ADV为零或有效K不足5根时不做除法，按I5并提示估算不可靠；停牌/封板不可成交不计算冲击成本，不得当作零成本成交（docs/strategies/_template.md:264；docs/strategies/_template.md:267；docs/strategies/_template.md:268）。
+- 本节仅补成本解释和出处，保留现有 costs/params_schema 及默认数值；不得据此声称引擎已按历史费率重算，历史执行一致性未验证。候选信号不构成荐股，不承诺收益。
 
 ## 反证 / 失效（研究侧）
 反证：缩量回踩若发生在放量下跌后（C1/C2 命中），抛压未必出清。失效：多头排列消失（I1）后本卡前提不再成立。证伪见 `hypothesis.falsified_by`。
@@ -84,7 +99,13 @@ pitfalls:
   - 把下跌趋势中的反弹当作回踩（由 E2 多头排列与 V1 大盘否决防护）
   - 忽略 T+1：入场当天无法止损
   - 用在成交稀少的股票上，成交价远离参考价（由 F1 与冲击成本防护）
-a_share_constraints: T+1；涨跌停按 config/market_rules.yaml 生效段；止损价截断到涨跌停价内；科创板整手 ≥200 股后 1 股递增，零股一次性卖出；北交所不含
+a_share_constraints: >-
+  沿用 universe 对 ST、停牌的排除；ST/*ST、退市整理阻断买入方向候选信号的执行，持仓退出仍按原规则评估，不以排除买入替代风险监控。
+  T+1：当日新买股份不可当日卖出；停牌买卖均不可执行，一字涨停阻买、一字跌停阻卖。
+  涨跌停按 config/market_rules.yaml 有效段：主板普通股10%；主板ST/*ST在2026-07-06前5%、当天起10%；创业板/科创板含风险警示20%；北交所含风险警示30%，但本卡仍不含北交所。
+  沪深注册制新股前5个交易日、北交所新股首日及退市整理首日按配置不设涨跌幅；2023-04-10前未建模。
+  科创板买入至少200股、其余所含板块100股整数倍；科创板1股递增完整依据未验证；零股一次性卖出；原止损价截断口径不变，仅在存在有效涨跌停价时适用。
+  参数出处及未验证边界见正文“A 股约束（补充执行口径）”；仅为候选信号，不荐股、不承诺收益。
 validation_summary: {type: rule, window: 未执行, benchmark: 所属申万一级行业指数；对照中证全指, cost_model: plan 2.13 默认（含冲击成本分档）, oos_result: 未验证, trade_log_ref: null}
 ```
 

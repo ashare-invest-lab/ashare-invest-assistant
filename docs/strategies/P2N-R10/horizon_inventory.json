@@ -955,7 +955,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 27,
+          "line": 43,
           "quote": "v1 原文冻结在 `cards/history/hold_risk_monitor.v1.md`"
         }
       ],
@@ -993,7 +993,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 125,
+          "line": 147,
           "quote": "v2 原文冻结在 `cards/history/hold_risk_monitor.v2.md`"
         }
       ],
@@ -1063,7 +1063,7 @@
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 27,
+          "line": 43,
           "quote": "v1 原文冻结在 `cards/history/sw_ma_trend_pullback.v1.md`"
         }
       ],
@@ -1091,12 +1091,12 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 33,
+          "line": 49,
           "quote": "version_no: 4"
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 36,
+          "line": 52,
           "quote": "horizons: [intraday_t, short, swing, long]"
         },
         {
@@ -1126,12 +1126,12 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 34,
+          "line": 50,
           "quote": "version_no: 3"
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 37,
+          "line": 53,
           "quote": "horizons: [swing]"
         },
         {
@@ -1314,12 +1314,12 @@
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 30,
+          "line": 45,
           "quote": "version_no: 3"
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 33,
+          "line": 48,
           "quote": "horizons: [short]"
         }
       ],
