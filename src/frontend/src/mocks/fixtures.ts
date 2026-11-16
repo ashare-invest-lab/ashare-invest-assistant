@@ -163,6 +163,16 @@ export const QUOTES: QuoteItem[] = SPECS.map((s) => ({
   data_status: s.data_status, data_as_of: s.data_as_of, gaps: quoteGaps(s),
 }));
 
+// 来源元数据仅用于示例夹具，不增加 /quotes 响应键。
+export const STALE_QUOTE_EXAMPLE = {
+  source: '示例',
+  item: {
+    security_code: '688001.SH', name: '演示芯片', price: '86.90', change_pct: '-1.81',
+    volume: null, amount: null, t: '2026-10-30T15:00:00+08:00',
+    data_status: 'stale', data_as_of: '2026-11-02T08:20:00+08:00', gaps: [],
+  } satisfies QuoteItem,
+};
+
 export const WATCHLIST: WatchlistResponse = {
   items: SPECS.filter((s) => s.in_watchlist).map((s, i): WatchlistItem => ({
     security_code: s.code, name: s.name, focus: s.focus, group: s.holding ? '持仓相关' : null, note: null,
@@ -562,7 +572,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     const maxLevel = sg.risk_flags.reduce<RiskLevel | null>((m, f) => (m === null || LEVEL_RANK[f.level] > LEVEL_RANK[m] ? f.level : m), null);
     return {
       security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus,
-      quote: s.data_status === 'unavailable' ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
+      quote: s.data_status === 'unavailable' || q.price == null || q.change_pct == null || q.amount == null || q.t == null ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
       holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct, security_type: pos.security_type, estimated: pos.estimated } : null,
       suggestion: summarize(sg),
       active_reason_count: REASONS.filter((r) => r.status === 'active' && sg.candidate_signal_ids.includes(r.signal_id)).length,

@@ -27,3 +27,13 @@ e31ed6c76d48738c14e48148057de20808bab95d:src/backend/selfchecks/test_ta13_featur
 #   确认方式：check_real_secrets 本机真实值精确比对 0 命中（运维核对）；T-B116g 起改为非字面量写法。历史不改写，故按指纹豁免。
 #   详见 reports/T-O68.md「⓪ 指纹豁免」；需 CODEOWNERS 评审。
 221c28df040c46d63d43620dfb9e5ab6f3ce798b:src/backend/selfchecks/test_tb116b_a6_lock_deny.py:S2-secret-assign:28
+# 测试夹具虚构常量 FAKE_LICENCE；4a5defc（T-T44）起已改为运行时拼接，HEAD 不再含该字面量。T-O91 运维掩码核对 2026-11-15；新增须 CODEOWNERS 评审
+7c2569eda133f09aceba5d303c613e049f42ba2d:tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py:S1-mairui-licence-assign:33
+# 同一测试夹具虚构常量行号移动后的版本。T-O91 运维掩码核对 2026-11-15；新增须 CODEOWNERS 评审
+fd8e49ed12950f2d712a2fb1d1c0fd03317ab512:tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py:S1-mairui-licence-assign:35
+# ds/T-R60 分支词表导出元数据的 key 字段为词表名，不是密钥。T-O91 运维掩码核对 2026-11-15；新增须 CODEOWNERS 评审
+918b4f2a06d009ba7a58fbb90f6250795844df92:docs/strategies/T-R60/f23_lexicon_export.yaml:generic-api-key:23
+# 同一词表导出脚本 EXPORT_META 的 key 为词表名，不是密钥。T-O91 运维掩码核对 2026-11-15；新增须 CODEOWNERS 评审
+918b4f2a06d009ba7a58fbb90f6250795844df92:docs/strategies/T-R60/export_lexicon.py:generic-api-key:39
+# 运维手册命令中 --secret-path= 后为文件名，不是密钥值。T-O91 运维掩码核对 2026-11-15；新增须 CODEOWNERS 评审
+c62a79507d111328a0b95b8d5d1eb78f9caaac69:docs/handover/team/reports/T-O46.md:generic-api-key:6

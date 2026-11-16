@@ -9,7 +9,7 @@
  * 因此本单只对齐 mock 与响应形状；调用这些判定的用例等 #19 合入后由后续单接管。
  * 行号对照：`t-f08.test.tsx` 保持 main 原样（今日关注 13 例），本文件是 F-08 增量唯一入口。
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { TRADE_DATE } from '../mocks/fixtures';
 import { http, HttpResponse } from 'msw';
@@ -152,6 +152,7 @@ describe('④ 页面层：空态不编造时间', () => {
     // 不能把ErrorBoundary替换掉原页面当作「没有更新时间」；同时要求头部与本响应空图正向在场。
     await waitFor(() => expect(head).toHaveTextContent('10.24'));
     const chart = within(page).getByTestId('price-chart');
+    fireEvent.click(within(chart).getByText('分时'));
     expect(await within(chart).findByTestId('chart-empty')).toHaveTextContent('无分时数据');
     expect(within(chart).getByTestId('chart-gap-note')).toHaveTextContent('行情读取源尚未接入（示例数据）');
     expect(page).toContainElement(head);
