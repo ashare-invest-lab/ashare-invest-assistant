@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip } from 'antd';
+import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
@@ -10,6 +10,7 @@ import { newIdempotencyKey } from '../../api/client';
 import { usePortfolio } from '../../api/queries';
 import type { PortfolioPosition } from '../../api/types';
 import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import { CursorPager } from '../../components/CursorPager';
 import { DILUTED_COST_NOTE, IMPORT_STATUS, RECON_KIND, RECON_STATUS, TRADE_SIDE, voidReasonText } from '../../i18n/importLabels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { applyFieldErrors } from '../../lib/formErrors';
@@ -211,7 +212,16 @@ const TRADE_FIELDS = ['trade_date', 'trade_time', 'security_code', 'side', 'qty'
 
 
 function TradesTab({ accountId }: { accountId: string }) {
-  const q = useTrades(accountId);
+  const [code, setCode] = useState('');
+  const [dates, setDates] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  // 延续原成交页：作废后仍能看见记录及原因。
+  const [includeVoided, setIncludeVoided] = useState(true);
+  const q = useTrades(accountId, {
+    security_code: code.trim().toUpperCase() || undefined,
+    from: dates?.[0]?.format('YYYY-MM-DD'),
+    to: dates?.[1]?.format('YYYY-MM-DD'),
+    include_voided: includeVoided,
+  });
   const create = useCreateTrade();
   const voidTrade = useVoidTrade();
   const [open, setOpen] = useState(false);
@@ -254,16 +264,24 @@ function TradesTab({ accountId }: { accountId: string }) {
         <Button type="primary" size="small" onClick={() => openCreate(null)}>手工录入成交</Button>
         <span className="muted">原记录不可修改；录错时请录入一条更正记录或作废该条，导入的记录也可撤销整批。</span>
       </Space>
-      {q.isError ? <ErrorBox error={q.error} /> : null}
+      <Space wrap className="kv-line">
+        <Input.Search aria-label="证券代码筛选" placeholder="证券代码，如 600000.SH" allowClear style={{ width: 240 }} onSearch={setCode} />
+        <DatePicker.RangePicker aria-label="成交日期范围" placeholder={['开始日期', '结束日期']} value={dates} onChange={setDates} allowEmpty={[true, true]} />
+        <Space><Switch aria-label="含已作废" checked={includeVoided} onChange={setIncludeVoided} />含已作废</Space>
+      </Space>
+      {q.isError && !q.isFetchNextPageError ? <ErrorBox error={q.error} /> : null}
       <Table<Trade>
-        size="small" rowKey="id" loading={q.isPending} dataSource={q.data?.items ?? []} pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        size="small" rowKey="id" loading={q.isPending} dataSource={q.items} pagination={false}
         rowClassName={(r) => (r.voided ? 'row-voided' : '')}
         locale={{ emptyText: '暂无成交' }}
         columns={[
           { title: TERM.tradeDate, dataIndex: 'trade_date', render: (v: string, r) => <span className="mono">{v} {r.trade_time ?? ''}</span> },
           { title: '代码', dataIndex: 'security_code', render: (v: string) => <span className="mono">{v}</span> },
           { title: '名称', dataIndex: 'name' },
-          { title: '方向', dataIndex: 'side', render: (s: Trade['side']) => <Tag color={TRADE_SIDE[s].color}>{TRADE_SIDE[s].text}</Tag> },
+          { title: '方向', dataIndex: 'side', render: (s: Trade['side']) => {
+            const label = Object.hasOwn(TRADE_SIDE, s) ? TRADE_SIDE[s] : { text: '未知', color: 'default' };
+            return <Tag color={label.color}>{label.text}</Tag>;
+          } },
           { title: '数量', dataIndex: 'qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
           { title: '价格', dataIndex: 'price', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 3)}</span> },
           { title: '金额', dataIndex: 'amount', align: 'right', render: (v: string) => <span className="mono">{fmtAmount(v)}</span> },
@@ -272,7 +290,7 @@ function TradesTab({ accountId }: { accountId: string }) {
             title: '来源', dataIndex: 'source',
             render: (s: Trade['source'], r) => (
               <Space size={4}>
-                <Tag>{s === 'import' ? '导入' : '手工'}</Tag>
+                <Tag>{s === 'import' ? '导入' : s === 'manual' ? '手工' : '未知'}</Tag>
                 {r.voided ? <Tooltip title={voidReasonText(r)}><Tag color="purple" data-testid={`voided-${r.id}`}>已作废</Tag></Tooltip> : null}
                 {r.corrects_trade_id ? <Tag>更正记录</Tag> : null}
               </Space>
@@ -289,6 +307,7 @@ function TradesTab({ accountId }: { accountId: string }) {
           },
         ]}
       />
+      <CursorPager query={q} loaded={q.items.length} testId="trades-pager" />
       <Modal
         open={!!voiding} title="作废这条成交？" okText="作废" okButtonProps={{ danger: true, disabled: !voidReason.trim(), loading: voidTrade.isPending }}
         onCancel={() => setVoiding(null)} destroyOnHidden
