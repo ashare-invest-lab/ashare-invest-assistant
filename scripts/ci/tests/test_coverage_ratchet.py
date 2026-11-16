@@ -116,7 +116,10 @@ def test_cli_missing_measurement_is_nonzero_not_default_pass(tmp_path):
     base = deepcopy(ratchet.bootstrap_record())
     path = tmp_path / "base.json"
     path.write_text(json.dumps(base))
+    empty = tmp_path / "nondet.json"
+    empty.write_text(json.dumps({"schema": "aia-coverage-nondet-lines-v1", "files": []}))
     assert check.main([str(tmp_path / "missing.json"), "--base", str(path),
+                       "--nondet-lines", str(empty),
                        "--output", str(tmp_path / "out.json")]) == 1
     assert not (tmp_path / "out.json").exists()
 
@@ -144,6 +147,30 @@ def test_event_base_is_main_not_pr_head():
     event["pull_request"]["base"]["repo"]["full_name"] = "foreign/repo"
     with pytest.raises(ValueError):
         loader.base_identity(event, {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "pull_request"})
+
+
+def test_merge_group_base_is_main_not_queue_head():
+    base = "b" * 40
+    event = {"merge_group": {"base_ref": "refs/heads/main", "base_sha": base,
+                             "head_sha": "a" * 40}}
+    env = {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group",
+           "GITHUB_REF": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
+    assert loader.base_identity(event, env) == ("owner/repo", base)
+
+
+@pytest.mark.parametrize("base_ref", ["refs/heads/develop", "main", "refs/tags/main", ""])
+def test_merge_group_rejects_non_main_base(base_ref):
+    with pytest.raises(ValueError, match="trusted main"):
+        loader.base_identity({"merge_group": {"base_ref": base_ref, "base_sha": "b" * 40}},
+                             {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group"})
+
+
+@pytest.mark.parametrize("fields", [{}, {"base_sha": "0" * 40}, {"base_sha": ""},
+                                   {"base_sha": "b" * 39}, {"base_sha": "g" * 40}])
+def test_merge_group_rejects_missing_or_invalid_base_sha(fields):
+    with pytest.raises(ValueError, match="Missing trusted base commit"):
+        loader.base_identity({"merge_group": {"base_ref": "refs/heads/main", **fields}},
+                             {"GITHUB_REPOSITORY": "owner/repo", "GITHUB_EVENT_NAME": "merge_group"})
 
 
 def archive(record):
@@ -223,7 +250,10 @@ def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     assert "--cov=src/backend/app --cov-report=term-missing:skip-covered" in workflow
     assert "--cov-fail-under=80" not in workflow
     assert "timeout-minutes: 30" in workflow
-    assert "steps.coverage_ratchet.outcome == 'success'" in workflow
+    assert "!cancelled() && steps.coverage_ratchet.outcome != 'skipped'" in workflow
+    assert "steps.coverage_ratchet.outcome == 'success'" not in workflow
+    assert '--base-coverage "${RUNNER_TEMP}/coverage-base-coverage.json"' in workflow
+    assert "--nondet-lines scripts/ci/coverage-nondet-lines.json" in workflow
     assert "fetch-depth: 0" in workflow and "GH_TOKEN: ${{ github.token }}" in workflow
 
 
@@ -287,6 +317,7 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     backend = jobs["backend"]
+    assert "if" not in ready and "if" not in backend  # Required on merge_group too.
     assert "needs" not in backend
     # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
     assert backend["timeout-minutes"] == 75
@@ -307,7 +338,8 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     assert pytest_index < freeze_index == ratchet_index - 1
     frozen = steps[freeze_index]
     assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
-                             '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"')
+                             '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" '
+                             '--coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"')
     assert frozen["if"] == steps[ratchet_index]["if"]
     assert frozen["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert not frozen.get("continue-on-error", False)

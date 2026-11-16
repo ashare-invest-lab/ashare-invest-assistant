@@ -30,6 +30,7 @@ case "$1" in
   volume) [ -e "$st/vol_$3" ] ; exit $? ;;
   run) cat "$st/imports_count" 2>/dev/null || echo 0 ; exit 0 ;;
   ps) v="${4#volume=}"; cat "$st/ps_$v" 2>/dev/null; exit 0 ;;
+  inspect) echo true; exit 0 ;;
   exec) cat > "$st/sql"; cat "$st/psql_out" 2>/dev/null; exit "$(cat "$st/psql_rc" 2>/dev/null || echo 0)" ;;
 esac
 exit 99

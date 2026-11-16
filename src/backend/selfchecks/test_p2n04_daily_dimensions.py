@@ -27,9 +27,11 @@ from app.reports.models import DailyDimensionAnalysis, DailyReport
 from app.reports.service import build
 from app.workers import jobs
 from app.workers.daily import REPORT
+from selfchecks import test_p2n02_risk_controls as shared
 from selfchecks import test_p2n03_tracking as base
 from selfchecks.test_p2n02_risk_controls import env, no_network  # noqa: F401
 from selfchecks.test_p2n03_tracking import produced  # noqa: F401
+from selfchecks.unix_test_resources import from_env
 
 DATE = dt.date(2026, 10, 30)
 OPERANDS = json.loads((Path(__file__).parent / "fixtures/p2n04_operands.json").read_text())
@@ -48,12 +50,18 @@ def cache_values(**values: Any) -> Any:
 
 @pytest.fixture(scope="module")
 def database() -> Any:
-    old = base.SOCKET, base.REDIS
-    base.SOCKET, base.REDIS = "/tmp/tb70-p2n04-pg-socket", "unix:///tmp/p2n04-redis/redis.sock?db=0"
-    try:
+    resources = from_env(
+        "AIA_TEST_P2N04",
+        pg_socket="/tmp/tb70-p2n04-pg-socket",
+        redis_url="unix:///tmp/p2n04-redis/redis.sock?db=0",
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(base, "SOCKET", resources.pg_socket)
+        patch.setattr(base, "REDIS", resources.redis_url)
+        # The inherited fixture mutates this before its socket/connection checks.
+        # Restore it even when setup skips or raises before reaching its finally.
+        patch.setattr(shared, "REDIS", resources.redis_url)
         yield from base.database.__wrapped__()
-    finally:
-        base.SOCKET, base.REDIS = old
 
 
 @pytest.mark.parametrize("row", OPERANDS, ids=[str(r["group"]) + "_" + r["case"] for r in OPERANDS])
