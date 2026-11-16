@@ -32,7 +32,7 @@ from app.schemas.enums import (
     RiskLevel,
     SecurityType,
 )
-from app.suggestions.service import summary
+from app.suggestions.service import summary, view
 
 
 def unavailable(issue: str) -> AppError:
@@ -84,6 +84,9 @@ def terminal(
     *,
     _focus_only: bool = False,
 ) -> m.Terminal:
+    # Keep the daily_snapshot -> daily_bars -> aggregates.service import path acyclic.
+    from app.marketdata.quotes_read import read_quotes
+
     gaps = [
         gap("aggregation", "行情与部分事件来源尚未接线，已存在的本人建议按实际产物聚合。"),
         gap("account.pnl_day", "缺少上日基准，日盈亏不可计算。"),
@@ -125,6 +128,25 @@ def terminal(
         if codes
         else {}
     )
+    quotes = (
+        {
+            item.security_code: item
+            for item in read_quotes(conn, user_id, tuple(sorted(master))).items
+        }
+        if master
+        else {}
+    )
+    licence_gap = next(
+        (
+            source_gap
+            for item in quotes.values()
+            for source_gap in item.gaps
+            if source_gap.reason == GapReason.DATA_LICENCE_UNAVAILABLE
+        ),
+        None,
+    )
+    if licence_gap is not None:
+        gaps.append(gap(licence_gap.key, licence_gap.message, licence_gap.reason))
     values = {
         code: position.qty
         * (
@@ -151,6 +173,29 @@ def terminal(
     for code in codes:
         position = positions.get(code)
         info = master.get(code)
+        item = quotes.get(code)
+        quote = (
+            m.TerminalQuote(
+                price=item.price,
+                change_pct=item.change_pct,
+                amount=item.amount,
+                t=dt.datetime.fromisoformat(item.t),
+            )
+            if item is not None and item.price is not None and item.t is not None
+            else None
+        )
+        suggestion = (
+            m.SuggestionSummary.model_validate_json(products.encoded(summary(current[code])))
+            if code in current
+            else None
+        )
+        data_times = []
+        if quote is not None and item is not None and item.data_as_of is not None:
+            data_times.append(dt.datetime.fromisoformat(item.data_as_of))
+        if suggestion is not None:
+            suggestion_as_of = view(current[code])["data_as_of"]
+            if suggestion_as_of is not None:
+                data_times.append(dt.datetime.fromisoformat(suggestion_as_of))
         holding = None
         if position is not None:
             if not position.cost_known:
@@ -186,13 +231,9 @@ def terminal(
                 name=info.name if info else code,
                 in_watchlist=code in watch_codes,
                 focus=code in focused,
-                quote=None,
+                quote=quote,
                 holding=holding,
-                suggestion=m.SuggestionSummary.model_validate_json(
-                    products.encoded(summary(current[code]))
-                )
-                if code in current
-                else None,
+                suggestion=suggestion,
                 active_reason_count=reason_counts[code],
                 max_risk_level=max(
                     (RiskLevel(f["level"]) for f in current[code].risk_flags or []),
@@ -205,8 +246,8 @@ def terminal(
                 )
                 if code in current
                 else None,
-                data_status=DataStatus.PARTIAL,
-                data_as_of=None,
+                data_status=item.data_status if item is not None else DataStatus.UNAVAILABLE,
+                data_as_of=min(data_times, key=lambda at: at.astimezone(dt.UTC), default=None),
             )
         )
     watch_order = {code: index for index, code in enumerate(watch_codes)}

@@ -1,9 +1,6 @@
 import { theme, type ThemeConfig } from 'antd';
 
 /** 深色 + 紧凑主题（与 T-F00 原型一致）。红涨绿跌颜色见 styles.css 的 --up/--down。 */
-export const UP_COLOR = '#f5384a';
-export const DOWN_COLOR = '#1fb36b';
-
 export const appTheme: ThemeConfig = {
   algorithm: [theme.darkAlgorithm, theme.compactAlgorithm],
   token: {
