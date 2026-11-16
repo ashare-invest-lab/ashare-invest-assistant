@@ -7,6 +7,11 @@ G1–G7、不改生命周期、不发任何请求、不写任何表。
 T-R31：阈值写死于 docs/strategies/T-R28/f21_ready_thresholds.json，
 启动时校验同目录 .sha256；拒绝 CLI/环境变量覆盖。F21 保持 declared。
 
+T-R77：未设 DATABASE_URL 时仍先拒绝覆盖并校验锁定阈值，再输出
+status=skipped_no_db、ready=null，rc=0：未做实库扫描，结论未验证。
+--require-db 可强制要求目标库，缺失时沿用原错误文案并返回 rc=1。
+配置目标库时继续原有只读扫描和报告行为。
+
 口径背景（全部来自仓库既有权威，不新创设）：
 - F21 当前 status=declared；本脚本不升级。
 - 阈值语义：T-A19 F21 项覆盖规模（5 只股 × 最近 20 交易日有效记录 ≥15 日）。
@@ -175,6 +180,14 @@ def build_report(thresholds: dict, days: list[str], fv: dict, fb: dict) -> dict:
 def main() -> int:
     reject_override_attempts()
     thresholds = load_locked_thresholds()
+    if not os.environ.get("DATABASE_URL") and "--require-db" not in sys.argv[1:]:
+        print(json.dumps({
+            "status": "skipped_no_db",
+            "f21_status": "declared",
+            "ready": None,
+            "message": "未做实库扫描，结论未验证",
+        }, ensure_ascii=False, indent=2))
+        return 0
     conn = _conn()
     try:
         days = _calendar_open_days(conn, int(thresholds["window_days"]))
