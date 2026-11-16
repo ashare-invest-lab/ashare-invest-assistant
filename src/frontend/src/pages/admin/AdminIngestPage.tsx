@@ -74,7 +74,7 @@ export function AdminIngestPage() {
         <Card size="small" title="全部证书合计">
           <Descriptions size="small" column={3}>
             <Descriptions.Item label="采集心跳"><Tag color={heartbeatView(d.heartbeat).color} data-testid="ingest-heartbeat">{heartbeatView(d.heartbeat).text}</Tag></Descriptions.Item>
-            <Descriptions.Item label="采集主实例">{d.leader ? `${dash(d.leader.instance_id)}（出口 ${dash(d.leader.egress_ip_masked)}，租约到 ${d.leader.lease_expires_at ? fmtTime(d.leader.lease_expires_at) : '—'}）` : '无（没有未过期的租约）'}</Descriptions.Item>
+            <Descriptions.Item label="采集主实例">{d.leader ? `${d.leader.instance_id}（出口 ${dash(d.leader.egress_ip_masked)}，租约到 ${fmtTime(d.leader.lease_expires_at)}）` : '无（没有未过期的租约）'}</Descriptions.Item>
             <Descriptions.Item label="近 1 分钟调用 / 上限">{d.budget.used_last_minute} / {d.budget.per_minute_limit}</Descriptions.Item>
             <Descriptions.Item label="24 小时 IP 受限告警">{d.ip_limit_alerts_24h}</Descriptions.Item>
             <Descriptions.Item label="队列">{d.queues.map((x) => `${PRIORITY[x.priority] ?? x.priority} ${x.depth}（最久 ${x.oldest_age_s} 秒）`).join('；')}</Descriptions.Item>
