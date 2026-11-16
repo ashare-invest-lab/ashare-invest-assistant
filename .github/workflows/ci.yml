@@ -56,7 +56,23 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/ci/docs_only_paths.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+        # pull_request 工作流文件本身来自 PR；改 .github/ 会被分类为非文档。
+        # 分类程序只取事件给定的可信 base 版本，在 PR 工作树外保存并隔离执行。
+        run: |
+          set -euo pipefail
+          classifier_dir=$(mktemp -d "$RUNNER_TEMP/docs-only.XXXXXX")
+          trap 'rm -rf "$classifier_dir"' EXIT
+          docs_only=false
+          if ! git show "$BASE_SHA:scripts/ci/docs_only_paths.py" > "$classifier_dir/classifier.py"; then
+            echo '::notice::Base classifier unavailable; running full CI.'
+          elif ! python3 -I "$classifier_dir/classifier.py" "$BASE_SHA" "$HEAD_SHA" > "$classifier_dir/output"; then
+            echo '::warning::Base classifier failed; running full CI.'
+          elif cmp -s "$classifier_dir/output" <(printf 'docs_only=true\n'); then
+            docs_only=true
+          elif ! cmp -s "$classifier_dir/output" <(printf 'docs_only=false\n'); then
+            echo '::warning::Invalid classifier output; running full CI.'
+          fi
+          printf 'docs_only=%s\n' "$docs_only" >> "$GITHUB_OUTPUT"
 
   # Wait only for an already-running exact-main push, in parallel with backend.
   # Retain this required readiness check; never run another measurement.

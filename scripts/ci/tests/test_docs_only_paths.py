@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from collections import Counter
@@ -147,12 +148,140 @@ def test_classifier_only_checks_out_and_runs_stdlib_script_for_prs():
         "BASE_SHA": "${{ github.event.pull_request.base.sha }}",
         "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
     }
-    assert classify["run"] == (
-        'python3 scripts/ci/docs_only_paths.py "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"'
-    )
+    assert 'git show "$BASE_SHA:scripts/ci/docs_only_paths.py"' in classify["run"]
+    assert "python3 -I" in classify["run"]
+    assert "python3 scripts/ci/docs_only_paths.py" not in classify["run"]
     for event in ("pull_request", "push", "merge_group", "workflow_dispatch"):
         for step in changes["steps"]:
             assert _condition(step["if"], event, "") is (event == "pull_request")
+
+
+@pytest.fixture
+def workflow_repo(tmp_path):
+    """Commit synthetic base/head trees; execute the actual workflow run verbatim."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runner_temp = tmp_path / "runner temp"
+    runner_temp.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=CI test", "-c", "user.email=ci@example.invalid",
+             "-c", "core.hooksPath=/dev/null", *args],
+            cwd=repo, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def write(path, content):
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    def commit():
+        git("add", ".")
+        git("commit", "-m", "fixture")
+        return git("rev-parse", "HEAD")
+
+    def prepare(base_script, changes):
+        git("init", "-b", "base")
+        write("src/x.py", "# base\n")
+        if base_script is not None:
+            write("scripts/ci/docs_only_paths.py", base_script)
+        base = commit()
+        git("checkout", "-b", "pr")
+        for path, content in changes.items():
+            write(path, content)
+        return base, commit()
+
+    def run(base, head, extra_env=None):
+        output = tmp_path / "github-output"
+        env = {**os.environ, "BASE_SHA": base, "HEAD_SHA": head,
+               "GITHUB_OUTPUT": str(output), "RUNNER_TEMP": str(runner_temp),
+               **(extra_env or {})}
+        result = subprocess.run(
+            ["bash", "-e", "-c", WORKFLOW["jobs"]["changes"]["steps"][1]["run"]],
+            cwd=repo, env=env, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return output.read_text(encoding="utf-8"), result
+
+    return repo, prepare, run
+
+
+def _current_classifier():
+    return Path(classifier.__file__).read_text(encoding="utf-8")
+
+
+def test_workflow_rejects_pr_classifier_tampering_with_source(workflow_repo):
+    repo, prepare, run = workflow_repo
+    base, head = prepare(_current_classifier(), {
+        "src/x.py": "# changed source\n",
+        "scripts/ci/docs_only_paths.py": "print('docs_only=true')\n",
+    })
+    # Control: the old workflow really would trust the malicious head script.
+    control = subprocess.run(
+        [sys.executable, "scripts/ci/docs_only_paths.py", base, head],
+        cwd=repo, check=True, capture_output=True, text=True,
+    )
+    assert control.stdout == "docs_only=true\n"
+    assert run(base, head)[0] == "docs_only=false\n"
+
+
+@pytest.mark.parametrize("base_script", [
+    None,
+    "print('docs_only=true')\nraise SystemExit(1)\n",
+    "print('docs_only=true\\ndocs_only=true')\n",
+    "print('docs_only=true\\n')\n",
+    "print('docs_only=maybe')\n",
+    "print('docs_only=true', end='')\n",
+    "import sys\nsys.stdout.buffer.write(b'docs_only=true\\x00\\n')\n",
+    "print('')\n",
+], ids=["missing-script", "nonzero-exit", "multiple-lines", "extra-blank-line",
+        "invalid-value", "missing-newline", "nul-byte", "empty-line"])
+def test_workflow_fails_closed_on_unavailable_or_invalid_classifier(workflow_repo, base_script):
+    _, prepare, run = workflow_repo
+    base, head = prepare(base_script, {"docs/guide.md": "# docs\n"})
+    output, result = run(base, head)
+    assert output == "docs_only=false\n"
+    assert "::notice::" in result.stdout or "::warning::" in result.stdout
+
+
+def test_workflow_fails_closed_when_base_object_is_missing(workflow_repo):
+    _, prepare, run = workflow_repo
+    _, head = prepare(_current_classifier(), {"docs/guide.md": "# docs\n"})
+    output, result = run("0" * 40, head)
+    assert output == "docs_only=false\n"
+    assert "::notice::" in result.stdout
+
+
+def test_workflow_fails_closed_when_diff_fails(workflow_repo):
+    _, prepare, run = workflow_repo
+    base, _ = prepare(_current_classifier(), {"docs/guide.md": "# docs\n"})
+    output, result = run(base, "0" * 40)
+    assert output == "docs_only=false\n"
+    assert "::warning::" in result.stdout
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("docs/guide.md", "true"),
+    ("scripts/ci/docs_only_paths.py", "false"),
+    (".github/workflows/ci.yml", "false"),
+])
+def test_workflow_classifies_trusted_paths(workflow_repo, path, expected):
+    _, prepare, run = workflow_repo
+    content = _current_classifier() + "\n# PR change\n" if path.endswith(".py") else "# change\n"
+    base, head = prepare(_current_classifier(), {path: content})
+    assert run(base, head)[0] == f"docs_only={expected}\n"
+
+
+def test_workflow_ignores_pythonpath_injection(workflow_repo, tmp_path):
+    _, prepare, run = workflow_repo
+    base, head = prepare(_current_classifier(), {"src/x.py": "# source change\n"})
+    injection = tmp_path / "python injection"
+    injection.mkdir()
+    (injection / "sitecustomize.py").write_text(
+        "import os\nos.write(1, b'docs_only=true\\n')\nos._exit(0)\n", encoding="utf-8",
+    )
+    assert run(base, head, {"PYTHONPATH": str(injection)})[0] == "docs_only=false\n"
 
 
 @pytest.mark.parametrize("key,commands", [
