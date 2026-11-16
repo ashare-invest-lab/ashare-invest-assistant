@@ -39,13 +39,21 @@ function trackRequests() {
 const onlyLocalApi = (urls: string[]) => urls.every((u) => new URL(u).origin === window.location.origin && new URL(u).pathname.startsWith('/api/v1/'));
 
 describe('个股档案 /stocks/:code', () => {
-  it('行情头、基本信息、周期分类、默认分时图', async () => {
+  it('非停牌个股：行情头、基本信息、周期分类、默认选中日K并请求日线', async () => {
     const urls = trackRequests();
     renderAt('/stocks/600000.SH');
     const head = await screen.findByTestId('stock-head');
     expect(within(head).getByText('示例银行')).toBeInTheDocument();
     expect(within(head).getByText('主板')).toBeInTheDocument();
-    expect(await screen.findByTestId('intraday')).toBeInTheDocument();
+    expect(screen.queryByTestId('suspended-tag')).not.toBeInTheDocument();
+    const chart = within(screen.getByTestId('price-chart'));
+    expect(chart.getByRole('radio', { name: '日K' })).toBeChecked();
+    expect(chart.getByRole('radio', { name: '分时' })).not.toBeChecked();
+    expect(await chart.findByTestId('kline')).toBeInTheDocument();
+    expect(urls.some((u) => {
+      const url = new URL(u);
+      return url.pathname === '/api/v1/securities/600000.SH/bars' && url.searchParams.get('freq') === 'd';
+    })).toBe(true);
     expect(within(screen.getByTestId('profile-panel')).getByText('上交所')).toBeInTheDocument();
     const hz = screen.getByTestId('horizon-panel');
     await waitFor(() => expect(within(hz).getByTestId('hz-long')).toBeInTheDocument());
@@ -54,9 +62,11 @@ describe('个股档案 /stocks/:code', () => {
     expect(onlyLocalApi(urls)).toBe(true);
   });
 
-  it('切换日K / 周K', async () => {
+  it('默认日K，仍可手动切换分时 / 日K / 周K', async () => {
     renderAt('/stocks/600000.SH');
-    await screen.findByTestId('intraday');
+    await screen.findByTestId('kline');
+    fireEvent.click(screen.getByText('分时'));
+    expect(await screen.findByTestId('intraday')).toBeInTheDocument();
     fireEvent.click(screen.getByText('日K'));
     expect(await screen.findByTestId('kline')).toBeInTheDocument();
     fireEvent.click(screen.getByText('周K'));

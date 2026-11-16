@@ -45,6 +45,7 @@ export const DATA_STATUS: Record<DataStatus, { text: string; color: string }> = 
   partial: { text: '部分缺失', color: '#faad14' },
   unavailable: { text: '不可用', color: '#ff4d4f' },
 };
+export const QUOTE_CLOSE_PRICE = '收盘价';
 export const SIGNAL_STATE: Record<CandidateSignalState, { text: string; color: string }> = {
   open: { text: '待检查', color: 'default' },
   drafted: { text: '可拟定草案', color: 'green' },

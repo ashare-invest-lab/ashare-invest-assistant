@@ -198,3 +198,120 @@ BEGIN
 END $$;
 SQL
 printf 'PASS: daily_bars=6; meta=2+2; seeded mairui/tdx_local rows unchanged (all columns)\n'
+
+# 以下代码和量价均为虚构夹具。默认未建对照：沪深提交，所有 BJ 前缀/后缀跳过。
+# runner 同样仅传 csv/before；-v confirmed=1 也不能代替本会话的对照校验。
+cat > "$root/bj_default.csv" <<'CSV'
+code,trade_date,adj_type,open,high,low,close,volume,amount
+FAKE_SH.SH,2022-02-01,none,10,11,9,10,100,1000
+FAKE_SZ.SZ,2022-02-01,none,10,11,9,10,100,1000
+920801.BJ,2022-02-01,none,10,11,9,10,100,1000
+FAKE_SUFFIX.BJ,2022-02-01,none,10,11,9,10,100,1000
+CSV
+for prefix in {430..439} {830..839} {870..879} 920; do
+    for suffix in '' .BJ .SH .SZ SH SZ; do
+        printf '%s899%s,2022-02-01,none,10,11,9,10,100,1000\n' "$prefix" "$suffix" \
+            >> "$root/bj_default.csv"
+    done
+done
+psql_test -A -t -v "csv=$root/bj_default.csv" -v before=2023-11-13 \
+    -v confirmed=1 -f "$probes/tb143_load_day.sql" > "$root/bj_default.out"
+expect_line "$root/bj_default.out" '190|2|188'
+expect_line "$root/bj_default.out" 'COMMIT'
+psql_test -q <<'SQL'
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM market.daily_bars) <> 8
+    OR (SELECT count(*) FROM market.daily_bars
+        WHERE code IN ('FAKE_SH.SH', 'FAKE_SZ.SZ') AND source = 'tdx_local') <> 2
+    OR EXISTS (SELECT 1 FROM market.daily_bars WHERE code ~ '[.]BJ$'
+      OR code ~ '^(43[0-9]|83[0-9]|87[0-9]|920)[0-9]{3}') THEN
+    RAISE EXCEPTION 'default BJ gate failed or mixed SH/SZ transaction did not commit';
+  END IF;
+END $$;
+SQL
+printf 'BJ default: PASS 190|2|188; mixed SH/SZ committed; wrong suffixes blocked; boolean ignored\n'
+
+# 对照只在本 psql 会话内建立，不读取磁盘确认产物；20 只样本不含待加载代码。
+# 同一会话先成功，再逐一破坏对照，验证没有残留确认位，也不跨调用累加。
+cat > "$root/bj_confirm.csv" <<'CSV'
+code,trade_date,adj_type,open,high,low,close,volume,amount
+920802.BJ,2022-02-02,none,10,11,9,10,100,1000
+CSV
+cat > "$root/bj_session.sql" <<'SQL'
+CREATE TEMP TABLE tb143_bj_volume_pairs (
+  mairui_code text, mairui_t date, mairui_v numeric,
+  code text, trade_date date, volume numeric, source text
+);
+INSERT INTO tb143_bj_volume_pairs
+SELECT '920' || n || '.BJ', '2022-01-04'::date, 1.25,
+       '920' || n || '.BJ', '2022-01-04'::date, 125, 'tdx_local'
+FROM generate_series(901, 920) AS n;
+SQL
+for scenario in valid insufficient duplicate units extra_bad source code date illegal null negative fractional nan infinity; do
+    case "$scenario" in
+        valid) change='' ;;
+        insufficient) change="DELETE FROM tb143_bj_volume_pairs WHERE code = '920920.BJ';" ;;
+        duplicate) change="INSERT INTO tb143_bj_volume_pairs SELECT * FROM tb143_bj_volume_pairs;" ;;
+        units) change="UPDATE tb143_bj_volume_pairs SET volume = 126 WHERE code = '920919.BJ';" ;;
+        extra_bad) change="INSERT INTO tb143_bj_volume_pairs VALUES ('920921.BJ', '2022-01-04', 1, '920921.BJ', '2022-01-04', 101, 'tdx_local');" ;;
+        source) change="UPDATE tb143_bj_volume_pairs SET source = 'other';" ;;
+        code) change="UPDATE tb143_bj_volume_pairs SET mairui_code = '920999.BJ';" ;;
+        date) change="UPDATE tb143_bj_volume_pairs SET mairui_t = '2022-01-05';" ;;
+        illegal) change="UPDATE tb143_bj_volume_pairs SET code = 'FAKE_ILLEGAL.BJ', mairui_code = 'FAKE_ILLEGAL.BJ' WHERE code = '920920.BJ';" ;;
+        null) change='UPDATE tb143_bj_volume_pairs SET mairui_v = NULL;' ;;
+        negative) change='UPDATE tb143_bj_volume_pairs SET mairui_v = -1, volume = -100;' ;;
+        fractional) change='UPDATE tb143_bj_volume_pairs SET mairui_v = 0.001, volume = 0.1;' ;;
+        nan) change="UPDATE tb143_bj_volume_pairs SET mairui_v = 'NaN', volume = 'NaN';" ;;
+        infinity) change="UPDATE tb143_bj_volume_pairs SET mairui_v = 'Infinity', volume = 'Infinity';" ;;
+    esac
+    # 除不足/重复码（连续操作同一集合）外，每次先恢复 20 个合法样本。
+    if [[ $scenario != valid && $scenario != insufficient && $scenario != duplicate ]]; then
+        cat >> "$root/bj_session.sql" <<'SQL'
+TRUNCATE tb143_bj_volume_pairs;
+INSERT INTO tb143_bj_volume_pairs
+SELECT '920' || n || '.BJ', '2022-01-04'::date, 1.25,
+       '920' || n || '.BJ', '2022-01-04'::date, 125, 'tdx_local'
+FROM generate_series(901, 920) AS n;
+SQL
+    fi
+    cat >> "$root/bj_session.sql" <<SQL
+$change
+DELETE FROM market.daily_bars WHERE code = '920802.BJ';
+\i $probes/tb143_load_day.sql
+SELECT '$scenario', count(*) FROM market.daily_bars WHERE code = '920802.BJ';
+SQL
+done
+psql_test -A -t -v "csv=$root/bj_confirm.csv" -v before=2023-11-13 \
+    -f "$root/bj_session.sql" > "$root/bj_session.out"
+expect_line "$root/bj_session.out" 'valid|1'
+expect_line "$root/bj_session.out" '1|1|0'
+for scenario in insufficient duplicate units extra_bad source code date illegal null negative fractional nan infinity; do
+    expect_line "$root/bj_session.out" "$scenario|0"
+done
+if [[ $(grep -Fxc 'COMMIT' "$root/bj_session.out") != 14 \
+    || $(grep -Fxc '1|0|1' "$root/bj_session.out") != 13 ]]; then
+    cat "$root/bj_session.out" >&2
+    printf 'ERROR: BJ confirmation cases did not commit expected counts\n' >&2
+    exit 1
+fi
+printf 'BJ session: PASS valid 20 distinct codes; insufficient/duplicate/mismatch/invalid proofs rejected\n'
+
+# 单独确认成功再退出；新 psql 会话仍拒绝 BJ，确认不得跨进程恢复。
+psql_test -A -t -v "csv=$root/bj_confirm.csv" -v before=2023-11-13 \
+    > "$root/bj_confirmed_session.out" <<SQL
+CREATE TEMP TABLE tb143_bj_volume_pairs AS
+SELECT '920' || n || '.BJ' AS mairui_code, '2022-01-04'::date AS mairui_t,
+       1.25 AS mairui_v, '920' || n || '.BJ' AS code,
+       '2022-01-04'::date AS trade_date, 125 AS volume, 'tdx_local'::text AS source
+FROM generate_series(901, 920) AS n;
+\i $probes/tb143_load_day.sql
+DELETE FROM market.daily_bars WHERE code = '920802.BJ';
+SQL
+expect_line "$root/bj_confirmed_session.out" '1|1|0'
+expect_line "$root/bj_confirmed_session.out" 'COMMIT'
+psql_test -A -t -v "csv=$root/bj_confirm.csv" -v before=2023-11-13 \
+    -f "$probes/tb143_load_day.sql" > "$root/bj_new_session.out"
+expect_line "$root/bj_new_session.out" '1|0|1'
+expect_line "$root/bj_new_session.out" 'COMMIT'
+printf 'BJ new session: PASS confirmation is not inherited\n'

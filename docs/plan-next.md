@@ -74,16 +74,18 @@ PN 为暂定编号，由编排者正式编号；负责与 Codex 档位均为建�
 |---|---|---|---|---|---|
 | PN-01 | 定稿契约与当前实现差异收口 | Grok | L3 | T-A150、T-A151、T-A152、T-A153 | 按四份定稿及 T-B142 评审列出已兑现/待实现项（§9.3 的 503、跨日与 22:45 含等于边界由 PR #131 落文，本单只核对），不重开已裁定问题。 |
 | PN-02 | C2(b) DB halted 人工恢复入口 | Grok | L3 | PN-01 | `docs/contracts/C2-successors.md` (b) 的 dry-run、精确范围、审计、最小权限及不重排队用例通过；解除 HALT——关口：需用户本人批准。 |
-| PN-03 | 日历、gbbq 与多源读写对齐 | Grok | L3 | PN-01、T-B143 | 按 `docs/contracts/multi-source-ingest.md` §2、§4–§6 验证历史日历、复权缺口、替换留证与日报排除 tdx_local；未验证算法保持关闭。 |
+| PN-03 | 日历、gbbq 与多源读写对齐 | Grok | L3 | PN-01、T-B143 | 按 `docs/contracts/multi-source-ingest.md` §2、§4–§6 验证历史日历、复权缺口、替换留证与日报排除 tdx_local；未验证算法保持关闭。主线契约见 [trading-calendar-exrights.md](contracts/trading-calendar-exrights.md) §1–§11。 |
 | PN-04 | C2(a) 新标的 codes 与研究范围守卫 | Grok | L2 | PN-01、PN-03 | `docs/contracts/C2-successors.md` (a) 的子集校验、codes 幂等续接、日常额度、延后及 market 默认拒绝全部离线通过。 |
 | PN-05 | C2(c) 日 K live adapter 离线接线 | Grok | L3 | PN-01、PN-02、T-B141、T-B142 | `docs/contracts/C2-successors.md` (c) 的默认未接线、持有租约、停止及零出网用例通过，K3 绑定核实留证；真调麦蕊——关口：需用户本人批准。 |
-| PN-06 | 盘后信号、风险、建议与跟踪缺口收敛 | Grok | L3 | PN-03、PN-04、PN-05 | 复用 P2N-02/03/04，在合成源串起五段，晚到/缺数仍出有缺口日报，同输入幂等且旧修订不变。 |
+| PN-06 | 盘后信号、风险、建议与跟踪缺口收敛 | Grok | L3 | PN-03、PN-04、PN-05 | 复用 P2N-02/03/04，在合成源串起五段，晚到/缺数仍出有缺口日报，同输入幂等且旧修订不变。主线契约见 [post-close-synthetic-loop.md](contracts/post-close-synthetic-loop.md) §1–§11。 |
 | PN-07 | 策略版本与知识卡只读关联 | Grok | L2 | PN-01、T-A151 | `docs/contracts/strategy-detail.md` §2–§6 的读取、版本绑定、分页与越权行为逐项覆盖，空态不猜关联。 |
 | PN-08 | today、日报、风险与策略详情实联 | DS 团队 | L2 | PN-06、PN-07 | 按 P2N-05、`docs/contracts/today-view.md` §1、§7–§9 展示缺口、分歧和模拟结果，仅 ready 时取日报，跨时区显示一致。 |
 | PN-09 | 盘后闭环定点测试与覆盖缺口 | DS 团队 | L2 | PN-06、PN-07、PN-08 | 按 P2N-10 首切片报告隔离、PIT、不可变性、恢复与零外呼证据，覆盖率缺口按既有门槛交编排者集中收口。 |
 | PN-10 | 公开数据与口径交叉核对 | DS 团队 | L2 | PN-01、PN-03、T-A152、T-A153 | 按矩阵 §3–§5 与多源契约 §2、§6 整理日历、单位、来源差异，无法核实者保持未验证，不据核对自行升级特征。 |
 | PN-11 | 本地栈与迁移版本同步准备 | DS 团队 | L2 | T-B143、PN-09、PN-10 | 按 PR #141（T-B143）与团队 `reports/T-B143.md` 核对镜像、迁移、只读挂载及文件校验并交可审阅清单；生产部署、通达信真实全量导入——关口：需用户本人批准。 |
 | PN-12 | 阶段评审与合并收口 | Grok | L3 | PN-01–PN-11 | 沿 P2N-10 集中评审首切片及 T-A150 K1–K3，合并与生产启用分开记录，未验证项与用户批准关口均可追溯。 |
+
+T-A160 第②部分实际范围为 PN-03/PN-06；建议编号见契约实施单；§7 原占位冲突见待裁定（[PN-03](contracts/trading-calendar-exrights.md) §10–§11、[PN-06](contracts/post-close-synthetic-loop.md) §10–§11）。
 
 ## §4 需用户本人批准的关口
 

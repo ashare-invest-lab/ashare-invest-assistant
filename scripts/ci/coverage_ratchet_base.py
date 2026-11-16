@@ -2,8 +2,9 @@
 """Freeze a trusted base measurement, never the PR's own editable baseline.
 
 Only the first approved pre-ratchet main commit uses the reviewed 4c02 counts.
-Later baselines use validated main push artifacts. Only main events may recover
-through a bounded first-parent history; PR events remain exact-base.
+Later baselines use validated main push artifacts. Apart from one approved docs-only
+pair, PR and merge-group events remain exact-base; only main events may recover
+through a bounded first-parent history.
 """
 from __future__ import annotations
 
@@ -19,12 +20,14 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from coverage_ratchet import BOOTSTRAP_BASE, bootstrap_record, validate_record
+from coverage_ratchet import BOOTSTRAP_BASE, bootstrap_record, coverage_counts, validate_record
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "scripts/ci/coverage-baseline.json"
 LIMIT = 8 * 1024 * 1024
 MAX_FALLBACK_ANCESTORS = 50
+EXPLICIT_RECOVERY_BASE = "f6c939d6ed4af94144e7dd669f206c96d6aeaf6b"
+EXPLICIT_RECOVERY_PARENT = "90ef8ff16abb7204b7c4ffd54174aeeb8f712455"
 
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -45,6 +48,11 @@ def base_identity(event: dict, env: dict) -> tuple[str, str]:
         if base["repo"]["full_name"] != repo or base["ref"] != "main":
             raise ValueError("Only this repository's trusted main base is accepted")
         sha = base["sha"]
+    elif kind == "merge_group":
+        group = event["merge_group"]
+        if group["base_ref"] != "refs/heads/main":
+            raise ValueError("Only the trusted main merge group base is accepted")
+        sha = group.get("base_sha", "")
     elif kind == "push" and env["GITHUB_REF"] == "refs/heads/main":
         sha = event["before"]
     elif kind == "workflow_dispatch" and env["GITHUB_REF"] == "refs/heads/main":
@@ -86,6 +94,17 @@ def read_artifact(data: bytes, sha: str, run_id: int, attempt: int) -> dict:
         if entry.file_size > LIMIT:
             raise ValueError("Measurement exceeds bound")
         record = validate_record(json.loads(archive.read(entry)))
+        # Carry the paired raw JSON only in memory; main removes this payload
+        # before writing the frozen official measurement.
+        record.pop("_coverage_json", None)
+        coverage_name = "coverage.json"
+        if coverage_name in names:
+            if names.count(coverage_name) != 1 or archive.getinfo(coverage_name).file_size > LIMIT:
+                raise ValueError("Unexpected coverage archive entry")
+            coverage = json.loads(archive.read(coverage_name))
+            if coverage_counts(coverage) != record["counts"]:
+                raise ValueError("Archived coverage.json counts disagree with measurement")
+            record["_coverage_json"] = coverage
     if (record.get("commit") != sha or record.get("run_id") != str(run_id)
             or record.get("attempt") != str(attempt) or record.get("ratchet_passed") is not True):
         raise ValueError("Artifact does not belong to exact trusted base run")
@@ -112,6 +131,21 @@ class MeasurementUnavailable(ValueError):
 
 
 def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
+    requested_base = sha
+    if sha == EXPLICIT_RECOVERY_BASE:
+        # One approved docs-only recovery, before querying any requested-base run.
+        parent = subprocess.run(["git", "rev-parse", "--verify", sha + "^1"],
+                                cwd=ROOT, capture_output=True, text=True, check=False)
+        if parent.returncode or parent.stdout.strip() != EXPLICIT_RECOVERY_PARENT:
+            raise ValueError("Explicit recovery requires the approved first parent")
+        diff = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z",
+                               EXPLICIT_RECOVERY_PARENT, sha],
+                              cwd=ROOT, capture_output=True, text=True, check=False)
+        if diff.returncode:
+            raise ValueError("Explicit recovery could not verify the docs-only diff")
+        if any(not path.startswith("docs/") for path in diff.stdout.split("\0") if path):
+            raise ValueError("Explicit recovery requires a docs-only diff")
+        sha = EXPLICIT_RECOVERY_PARENT
     # Keep PR selection, trust checks and failure behavior exact. Main recovery
     # classifies only missing/invalid measurement data, never git or API failures.
     exists = subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=ROOT,
@@ -121,7 +155,7 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
     policy = subprocess.run(["git", "show", sha + ":" + POLICY_PATH], cwd=ROOT,
                             capture_output=True, check=False)
     if policy.returncode:
-        if sha != BOOTSTRAP_BASE:
+        if sha != BOOTSTRAP_BASE or sha != requested_base:
             raise ValueError("Trusted base has no ratchet measurement policy")
         record = bootstrap_record()
         record["source"] = record["source"] | {"base_commit": sha}
@@ -148,11 +182,14 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
         raise unavailable("Missing, expired or ambiguous exact-base measurement")
     data = get("/actions/artifacts/" + str(selected[0]["id"]) + "/zip", binary=True)
     try:
-        return read_artifact(data, sha, run["id"], run["run_attempt"])
+        record = read_artifact(data, sha, run["id"], run["run_attempt"])
     except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         if unavailable is ValueError:
             raise
         raise unavailable("Invalid exact-base main push measurement") from exc
+    if sha != requested_base:
+        record["source"]["requested_base"] = requested_base
+    return record
 
 
 def freeze(repo: str, sha: str, get, *, allow_fallback: bool = False) -> dict:
@@ -209,6 +246,7 @@ def wait_for_base(repo: str, sha: str, get, timeout: int, *, allow_fallback: boo
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--coverage-output", type=Path)
     parser.add_argument("--wait-for-main-seconds", type=int, default=0)
     args = parser.parse_args()
     if not 0 <= args.wait_for_main_seconds <= 1800:
@@ -223,8 +261,15 @@ def main() -> int:
                                    allow_fallback=True)
         else:
             record = wait_for_base(repo, sha, get, args.wait_for_main_seconds)
-        if args.output.exists():
+        coverage = record.pop("_coverage_json", None)
+        if args.output.exists() or (args.coverage_output is not None and args.coverage_output.exists()):
             raise ValueError("Refuse to replace a frozen baseline")
+        if args.coverage_output is not None:
+            if coverage is None:
+                raise ValueError("Trusted base artifact has no coverage.json")
+            if args.coverage_output.resolve() == args.output.resolve():
+                raise ValueError("Frozen measurement and coverage outputs must differ")
+            args.coverage_output.write_text(json.dumps(coverage, separators=(",", ":")) + "\n", encoding="utf-8")
         args.output.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
         source = record["source"]
         selected = source.get("commit", sha)
