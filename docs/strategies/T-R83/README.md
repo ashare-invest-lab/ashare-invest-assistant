@@ -5,6 +5,7 @@
 ## 范围与交付
 
 - [finance_inputs_audit.md](finance_inputs_audit.md)：逐项对照报告计数、ROE TTM、利润三年CAGR、现金分红连续年数，涵盖北交所、新股、ST及重述边界；末尾交架构师表列 F-Q01–F-Q09。
+- [fq_options.md](fq_options.md)：T-R85 对 F-Q01–F-Q09 逐项给出备选、公开出处及推荐，均待架构师 T-A197 裁定。
 - 规格基线为 `origin/docs/T-R78` 提交 `dd683be9e7763ea9b385820ed51427b98b56a7a9`，文件 `docs/strategies/T-R78/horizon_inputs_spec.md`（PR #205，定稿待批）；后端背景为团队报告 `T-R78.md` 两个 T-A188 小节。
 - B9/B10/B11/B12 分别对应规格 §3.12/§3.8/§3.9/§3.10；§3.11 封板计数不属于本次财务审计。
 - 两份文档按 #178/#205 的非策略身份格式登记到 `docs/strategies/P2N-R10/horizon_inventory.json`；不修改其余规格、策略卡、checker或运行代码。
