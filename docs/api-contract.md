@@ -1060,7 +1060,7 @@ evidence: Evidence[]
 
 ### 7.7 计划草案与计划（确认草案是生成计划的唯一入口）
 
-**T-A198：PlanDraft 字段口径**（沿用 §7.11.4 T-A40）：`max_loss_amount`、`max_loss_pct` 都必填可空；无止损且 RC1 关闭时两值为 null 并警示，总资产未知时 `max_loss_pct=null` 并保留 gap；RC1 关闭但有有效止损时继续计算。`user_context_snapshot.sector_pct` 必填可空，行业数据未接入或无法计算时为 null，零占比必须返回 `"0"`。新增快照的缺失原因放在 `user_context_snapshot.gaps`（非 null 的数组，可为 `[]`；旧快照可缺键，不能以 null 代替数组）；`reason` 为原因字符串，允许已有 `rc1_disabled`、`no_source`，不新增公共 `gap_reason` 枚举。`qty_range.lot` 沿用 §1 数量字符串规则。**当前未落地/未验证**：后端 `QuantityRange.lot` 仍为 int，类型与生成/读取投影修正归 DS-B-1115b；上述可空字段、gaps 与生成链的逐入口核验也归 DS-B-1115b，当前未验证。前端 PlanDraft 可空类型当前未落地，类型、空值展示、mock 与入口断言归 T-F48（正式任务出处见 §9.1）。上述规则覆盖创建、列表、详情和放弃响应，逐入口验收见 §9.1。
+**T-A198：PlanDraft 字段口径**（沿用 §7.11.4 T-A40）：`max_loss_amount`、`max_loss_pct` 都必填可空；无止损且 RC1 关闭时两值为 null 并警示，总资产未知时 `max_loss_pct=null` 并保留 gap；RC1 关闭但有有效止损时继续计算。`user_context_snapshot.sector_pct` 必填可空，行业数据未接入或无法计算时为 null，零占比必须返回 `"0"`。新增快照的缺失原因放在 `user_context_snapshot.gaps`（非 null 的数组，可为 `[]`；旧快照可缺键，不能以 null 代替数组）；`reason` 为原因字符串，允许已有 `rc1_disabled`、`no_source`，不新增公共 `gap_reason` 枚举。`qty_range.lot` 沿用 §1 数量字符串规则。**当前未落地/未验证**：后端 `QuantityRange.lot` 仍为 int，类型与生成/读取投影修正归 DS-B-1115b；上述可空字段、gaps 与生成链的逐入口核验也归 DS-B-1115b，当前未验证。前端 PlanDraft 的 `max_loss_amount/max_loss_pct/sector_pct` 可空类型已由 #215（T-F48）合入；空值展示、mock 与逐入口断言的本轮验收仍未验证，后续核验归 T-F48（正式任务出处见 §9.1）。上述规则覆盖创建、列表、详情和放弃响应，逐入口验收见 §9.1。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -1619,17 +1619,17 @@ evidence: Evidence[]
 
 本裁定覆盖差异清单处理列含「待架构师」的全部记录：`TerminalQuote.amount/change_pct` 合为一项，共十项；相邻 `TodayResponse.account_id` 同步覆盖。非枚举字段不新增取值集合；所有 `T | null` 均为必填可空，不改成可省略。`TerminalRow` 在 §5.1 已按 T-F42c 可空，本次核对未发现其他 TerminalQuote 非空定义，维持原裁定；`price` 为非空 decimal 字符串、`t` 为非空 datetime 字符串，二者缺失时整个 quote 为 null。§8 SSE `quote` 为独立结构，不从 HTTP 外推可空性。
 
-落实责任（L-046）：后端类型、生成/读取投影链与后端入口断言归正式后继单 DS-B-1115b（`tasks/DS-B-1115b.md`）；前端类型、展示、mock 与前端入口断言归 T-F48（`tasks/T-F48.md`）。下表逐项登记当前未落地/未验证范围，保留已落地部分的事实，不把契约裁定视为实现完成。
+落实责任（L-046）：后端类型、生成/读取投影链与后端入口断言归正式后继单 DS-B-1115b（`tasks/DS-B-1115b.md`）；前端类型、展示、mock 与前端入口断言归 T-F48（`tasks/T-F48.md`）。下表分列已合实现与逐入口未验证范围；#215（T-F48）已落实下列前端可空类型及 `/today` 账户键类型/mock，逐入口验收仍须分别核证。
 
 | 条目 | 唯一裁定与正文位置 | 实现责任与出处（章节、函数/测试名） |
 |---|---|---|
-| Q 成交额/涨跌幅 | §5.1：`amount/change_pct` 必填 `string(decimal) \| null`；金额单位元，涨跌幅为百分数；无枚举 | 后端已允许空，当前逐入口未验证，类型与读取投影核验归 DS-B-1115b（`aggregates.service.terminal`、`marketdata.quotes_read.read_quotes`）；前端类型当前未落地，T-F47 继续承接两字段可空修复，T-F48 负责类型对账、展示、排序、mock 与两入口断言，当前未验证 |
-| M 最大亏损金额 | §7.7 同步 §7.11.4：必填 `string(decimal) \| null`，无止损且 RC1 关闭时为 null；无枚举 | 前端可空类型当前未落地，类型、空态展示、mock 与入口断言归 T-F48；后端类型、`plans.generation.generate` 的可空计算、警示及逐入口断言核验归 DS-B-1115b，当前未验证 |
-| P 最大亏损比例 | §7.7 同步 §7.11.4：必填 `string(decimal) \| null`；同 M，另总资产未知时为 null 并记 gap；无枚举 | 前端可空类型当前未落地，类型、空态展示、mock 与入口断言归 T-F48；后端类型、`plans.generation.generate` 的计算、资产未知 gap 及逐入口断言核验归 DS-B-1115b，当前未验证 |
-| S 行业占比 | §7.7：`sector_pct` 必填 `string(decimal) \| null`；行业数据未接入/不能计算时 null，真实零值为 `"0"`；无枚举 | 前端可空类型当前未落地，类型、空态展示、mock 与入口断言归 T-F48；后端类型、`plans.generation.generate` 的缺失值、真实零值、快照 gaps 及逐入口断言核验归 DS-B-1115b，当前未验证 |
+| Q 成交额/涨跌幅 | §5.1：`amount/change_pct` 必填 `string(decimal) \| null`；金额单位元，涨跌幅为百分数；无枚举 | 后端已允许空，当前逐入口未验证，类型与读取投影核验归 DS-B-1115b（`aggregates.service.terminal`、`marketdata.quotes_read.read_quotes`）；前端 `TerminalQuote.amount/change_pct` 可空类型已由 #215（T-F48）合入，T-F47 原类型缺口已被承接；展示、排序、mock 与两入口断言的本轮验收仍未验证，后续核验归 T-F48 |
+| M 最大亏损金额 | §7.7 同步 §7.11.4：必填 `string(decimal) \| null`，无止损且 RC1 关闭时为 null；无枚举 | 前端可空类型已由 #215（T-F48）合入；空态展示、mock 与逐入口断言的本轮验收仍未验证，后续核验归 T-F48；后端类型、`plans.generation.generate` 的可空计算、警示及逐入口断言核验归 DS-B-1115b，当前未验证 |
+| P 最大亏损比例 | §7.7 同步 §7.11.4：必填 `string(decimal) \| null`；同 M，另总资产未知时为 null 并记 gap；无枚举 | 前端可空类型已由 #215（T-F48）合入；空态展示、mock 与逐入口断言的本轮验收仍未验证，后续核验归 T-F48；后端类型、`plans.generation.generate` 的计算、资产未知 gap 及逐入口断言核验归 DS-B-1115b，当前未验证 |
+| S 行业占比 | §7.7：`sector_pct` 必填 `string(decimal) \| null`；行业数据未接入/不能计算时 null，真实零值为 `"0"`；无枚举 | 前端可空类型已由 #215（T-F48）合入；空态展示、mock 与逐入口断言的本轮验收仍未验证，后续核验归 T-F48；后端类型、`plans.generation.generate` 的缺失值、真实零值、快照 gaps 及逐入口断言核验归 DS-B-1115b，当前未验证 |
 | B 券商名 | §7.2：响应 `broker_name` 必填 `string \| null`，无枚举；POST 请求仍为非空 string(1–32) | 当前前端同步与逐入口验收未验证；T-F48 负责类型、账户选择器空值展示、mock 与入口断言；DS-B-1115b 负责后端 `Account`、`account_out` 历史 null 类型/投影与 `create_account` 请求校验的入口断言核验，当前未验证 |
 | C 候选快照 | §7.7A：版本 `snapshot_id` 必填 `string \| null`，历史无快照时 null，无枚举 | 当前前端同步与逐入口验收未验证；T-F48 负责类型、版本页空值展示、mock 与五入口断言；DS-B-1115b 负责后端类型、`candidates._version_out`、`_versions_out` 及新建版本冻结快照生成链的入口核验，当前未验证 |
-| A 聚合账户 | §7.3：两响应顶层 `account_id` 必填 `string(uuid) \| null`；选中账户回显，无账户 null；无枚举 | `/today` mock 的 UUID 字符串键及 `TodayResponse.account_id: Uuid \| null` 由前端补（补丁见 `reports/T-F42c/today-mock-account_id.patch`，当前未落地）；其余类型、展示、mock 与两入口账户三态断言归 T-F48，当前未验证；后端保持 T-A12，类型、`aggregates.service.select_account`、`terminal`、`today` 及入口断言核验归 DS-B-1115b，当前未验证 |
+| A 聚合账户 | §7.3：两响应顶层 `account_id` 必填 `string(uuid) \| null`；选中账户回显，无账户 null；无枚举 | `TodayResponse.account_id: Uuid \| null` 及 `/today` mock 的账户键已由 #215（T-F48）合入（`reports/T-F42c/today-mock-account_id.patch` 仅留作历史补丁出处）；两入口账户三态、展示与 mock 的本轮逐入口验收仍未验证，后续核验归 T-F48；后端保持 T-A12，类型、`aggregates.service.select_account`、`terminal`、`today` 及入口断言核验归 DS-B-1115b，当前未验证 |
 | L 递增股数 | §1/§7.7：`qty_range.lot` 必填非空 `string(decimal)`，数值为正整数股数，非 number；无枚举，规则示例为 `"100"`、`"1"` | 后端字符串类型/生成链当前未落地、逐入口未验证；DS-B-1115b 修 `plans.models.QuantityRange`、`plans.generation.generate`、`plans.drafts.output` 并补入口断言，库内股数规则不变；T-F48 负责前端字符串类型、展示、计算转换、mock 与入口断言，当前未验证 |
 | E 提醒严重度 | §3/§7.3/§7.7B：必填非空 string，唯一枚举 `info/attention/important`，不加 warning | 后端 attention 类型/生产链当前未落地、逐入口未验证；DS-B-1115b 修 `plans.models.Alert`、`plans.service.alert_body`、生产/投影链与 `plans.api` 筛选，补旧 warning → attention 的入口断言；T-F48 核验前端类型、展示、mock 与入口断言，当前未验证；Today 告警链由 T-B178（后端）承接，当前未实现/未验证 |
 | I 对账差异 ID | §1/§7.9：必填非空 string，不要求 UUID 格式；整数主键转字符串，不是 number；无枚举 | 后端字符串 id 类型/序列化当前未落地、入口未验证；DS-B-1115b 修 `admin.get_master_reconciliation` 输出并补入口断言，库内整数排序/游标不变；T-F48 核验前端 string 类型、展示、mock 与入口断言，当前未验证 |
