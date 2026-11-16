@@ -86,7 +86,8 @@
 - 先核 owner/hash、版本/实例一致，以及 input.data_as_of、signal.created_at≤建议生成时刻；取 signal.proposed_action 与 signal.confidence.level，动作须与当前 result.action 一致。
 - 不取合并置信度、不读当前候选信号或可变实例配置、不按当前 confidence.value 重新分箱；生成后修订不得改变分组。
 - 同版本实例沿 `bind_instances` 已选结果：生成绑定实例 created_at 最早者，并列 id 最小；聚合只验证选中实例，不重选。
-- 缺生成快照、置信度或可验证绑定，推荐归 confidence_level=null 并列 gap（U10），不猜 low、不填 0、不回填旧建议。
+- 缺生成快照、置信度或可验证绑定，归 confidence_level=null 并列 gap `generation_confidence`（U10），不猜 low、不填 0、不回填旧建议。
+- gap 登记：key=`generation_confidence`，经 `app.tracking.engine.gap` 构造（reason 沿 no_source，message 为既有前缀加 key）；含义：该观测的生成时置信度、生成快照或实例绑定缺失或不可验证，因此归入 null 置信度组。出处：编排者 11-16 裁定 U10；现有 gap key（§2.3 表）均为价格/日历/可交易性含义，无可复用者，故新登记。
 - owner/hash 冲突沿现有拒绝路径；不得当作普通缺置信度继续返回跨归属数据，不能用 null 分组掩盖冲突。
 
 ### 3.2 当前结果与读时聚合
@@ -155,9 +156,9 @@
 ## 6 未验证与待裁定清单
 
 按 U01–U12 去重计 **12 项未验证**（含 §7 两项估算）；指定章节和函数存在性已核实，不计入未验证数。
-U01–U10 均为“推荐，待编排者确认”，推荐不等于已裁定，也不由本文授权发布待定字段。
+U01–U10 已由编排者 11-16 裁定按下表执行（/workspace/team/tasks/T-A201-ruling.md）；U01、U02 保持硬依赖，T-B171、T-B172 合入后由架构师逐条复核一次。U11、U12 仍未验证，不阻断。
 
-| 编号 | 未验证项 | 推荐，待编排者确认 |
+| 编号 | 原未验证项 | 已裁定（编排者 11-16） |
 | --- | --- | --- |
 | U01 | T-B171 裁定原件缺失，①–⑤仅见草稿转述 | 以合入后的 T-B171 与 API T-A33(1) 核对；D+5 含末次补算、D+6 冻结及首次晚跑一次沿原单，不在 G2/G3 自造规则 |
 | U02 | T-B172 具体职责、合入状态及接口差异未验证 | 保持“合入后实施”的硬依赖，合入后复核，本文不猜其实现内容 |
@@ -168,7 +169,7 @@ U01–U10 均为“推荐，待编排者确认”，推荐不等于已裁定，�
 | U07 | 补算使用本次 as_of 与快照契 §14/日历契 §6 的“不补跑历史”表面冲突 | 仅 API T-A33(1) 未完成模拟观测为例外；不重建建议/日报/信号，不放宽 owned 就绪条件，complete 缺基准也冻结 |
 | U08 | 草稿对齐表“其余 done”可能覆盖未到期 pending / 既有 not_applicable | 仅解释为到期待补算分支；保留原分支及 result.pending 原义，complete/untradable/excluded 全冻结；由 T-B171 解决 |
 | U09 | by_action_confidence、confidence_level 响应及稳定顺序未验证，API §7.4 尚无此字段 | 推荐增量嵌套、保留旧数组；仅输出有观测组，空集合 []；按既有 Action、ConfidenceLevel 枚举顺序且 null 最后，确认后发布 |
-| U10 | 旧快照缺置信度处理及其专用 gap key 未验证，草稿未给码名 | 推荐沿已验证 result.action 归 null 置信度组，复用 Gap 结构保留缺失原因；具体 key 须确认后登记，不杜撰新码，不放过 owner/hash 冲突 |
+| U10 | 旧快照缺置信度处理及其专用 gap key 未验证，草稿未给码名 | 推荐沿已验证 result.action 归 null 置信度组，复用 Gap 结构保留缺失原因；gap key 定为 `generation_confidence`（见 §3.1 登记行），不放过 owner/hash 冲突 |
 
 ## 7 估算与拆单
 
