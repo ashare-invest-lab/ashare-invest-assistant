@@ -37,6 +37,46 @@ function mount(batchId: string) {
 }
 
 describe('T-F55 导入预览服务端分页', () => {
+  it.each([
+    ['not_a_status', 'not_a_dedup', 'not_a_side'],
+    ['__proto__', '__proto__', '__proto__'],
+    ['constructor', 'constructor', 'constructor'],
+  ])('异常枚举 %s / %s / %s 不崩溃，显示中性未知标签', async (status, dedup_status, side) => {
+    const b = seed(1);
+    const row = b.rows_data[0];
+    server.use(http.get(ROWS, () => HttpResponse.json({
+      items: [{ ...row, status, dedup_status, normalized: { ...row.normalized, side } }], next_cursor: null,
+    })));
+    mount(b.batch_id);
+    const table = await screen.findByTestId('rows-table');
+    const tags = await within(table).findAllByText('未知');
+    expect(tags).toHaveLength(3);
+    for (const tag of tags) {
+      expect(tag).toHaveClass('ant-tag');
+      expect(tag.className).not.toMatch(/ant-tag-(?:has-color|red|green|gold|orange|blue|purple|processing|success|warning|error|default)\b/);
+      expect(tag.style.color).toBe('');
+      expect(tag.style.backgroundColor).toBe('');
+    }
+    expect(screen.getByTestId('confirm-panel')).toBeInTheDocument();
+    expect(screen.queryByText('Unexpected Application Error!')).not.toBeInTheDocument();
+  });
+
+  it('未知及原型键处理选项不崩溃，均显示未知字符串', async () => {
+    const b = seed(1);
+    const f = finding('IMPORT_UNKNOWN_SECURITY', { row_no: 1, params: { code: '110001.SH' } });
+    f.resolution_choices = ['not_a_choice', '__proto__', 'constructor'];
+    f.default_resolution = '__proto__';
+    b.rows_data[0] = { ...b.rows_data[0], status: 'warning', findings: [f] };
+    mount(b.batch_id);
+    const item = await screen.findByTestId(`finding-${f.id}`);
+    const choices = within(item).getAllByRole('radio');
+    expect(choices).toHaveLength(3);
+    for (const choice of choices) expect(choice).toHaveAccessibleName(/^未知/);
+    expect(within(item).getAllByText('未知')).toHaveLength(3);
+    expect(screen.getByTestId('confirm-panel')).toBeInTheDocument();
+    expect(screen.queryByText('Unexpected Application Error!')).not.toBeInTheDocument();
+  });
+
   it('200 行之后的警告可加载、逐项处理，已取的预览行保留', async () => {
     const b = seed();
     const f = finding('IMPORT_UNKNOWN_SECURITY', { row_no: 201, params: { code: '110001.SH' } });
