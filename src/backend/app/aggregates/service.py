@@ -369,7 +369,9 @@ def today(
                 now=now,
                 trading_day=clock.session is not MarketSession.NON_TRADING_DAY
                 and clock.trade_date == now.astimezone(t_view.BEIJING).date(),
-                # M3 盘中采集未接线，没有排程信息，按 §3.7⑥ 没数据即 unavailable。
+                # 未接调度事实源（T-B185 裁定②）：仓库里没有分时拉取排程（任务注册和 ingest
+                # 入口都没有），无法得出真值，先保留 False，按 §3.7⑥ 没数据即 unavailable。
+                # 事实源随 T-A209 M0（真实盘中采集器）立项后再接。
                 scheduled=False,
                 interval_s=interval_s,
                 thresholds=t_view.THRESHOLDS,
