@@ -148,3 +148,5 @@ tests:
   - {"file": "tests/backend/unit/test_worker_healthcheck_offline.py", "group": "parallel", "keywords": ["fake Redis/runner", "deny_network monkeypatch", "runpy with restored sys.argv"], "unverified": false}
   - {"file": "tests/replay/test_licence_t_t22.py", "group": "parallel", "keywords": ["RefIngest/RefScheduler fake clock", "pure synthetic licence state"], "unverified": false}
   - {"file": "tests/replay/test_replay_example.py", "group": "parallel", "keywords": ["ReplayClient/Tape fake clock", "read-only recordings", "tmp_path"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata only", "no IO"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}

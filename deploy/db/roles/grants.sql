@@ -313,6 +313,8 @@ DECLARE
     'app.claims|DELETE|',
     'app.daily_bars_outbox|SELECT|id,user_id',
     'app.daily_bars_outbox|DELETE|',
+    'app.horizon_input_versions|SELECT|id,user_id',
+    'app.horizon_input_versions|DELETE|',
     'app.daily_report_items|SELECT|report_id',
     'app.daily_report_items|DELETE|',
     'app.daily_reports|SELECT|id,llm_call_id,user_id',
