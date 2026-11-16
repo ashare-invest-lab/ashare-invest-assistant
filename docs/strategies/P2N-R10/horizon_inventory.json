@@ -269,7 +269,7 @@
     {
       "path": "docs/strategies/T-R28/test_check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides; T-R77 offline subprocess coverage for skipped_no_db, --require-db, override and hash-tamper rejection, including python -O"
     },
     {
       "path": "docs/strategies/T-R31/checklist_reconcile.md",
@@ -385,7 +385,7 @@
     {
       "path": "docs/strategies/check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger)"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger); T-R77 validates locked thresholds before skipped_no_db (ready=null, unverified); --require-db preserves missing-DB failure; F21 remains declared"
     },
     {
       "path": "docs/strategies/check_p2n01_dimension_mapping.py",
@@ -906,6 +906,46 @@
       "path": "docs/strategies/T-R74/param_audit.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/audit_public_lists.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/check_result.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/sources.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/st_current.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/termination_current.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/test_audit_public_lists.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
     },
     {
       "path": "docs/strategies/T-R86/README.md",
@@ -2686,5 +2726,23 @@
     "identity_records_unchanged": true,
     "runtime_changed": false,
     "change": "scope 196→197（合入 T-R73b 后）；身份45、来源身份文件23、records/stats不变"
+  },
+  "t_r71c_refresh": {
+    "basis": "T-R71c 用户任务：登记 main 上 R-R1 公开名单审计 8 文件，修复 census",
+    "previous_scope_files": 197,
+    "scope_files": 205,
+    "added_paths": [
+      "docs/strategies/R-R1/README.md",
+      "docs/strategies/R-R1/audit_public_lists.py",
+      "docs/strategies/R-R1/check_result.json",
+      "docs/strategies/R-R1/differences.csv",
+      "docs/strategies/R-R1/sources.json",
+      "docs/strategies/R-R1/st_current.csv",
+      "docs/strategies/R-R1/termination_current.csv",
+      "docs/strategies/R-R1/test_audit_public_lists.py"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 197→205：登记 main 上 R-R1 公开名单审计 8 文件，T-R71c；来源提交 bec079a；身份45、来源身份文件23、records/stats不变"
   }
 }
