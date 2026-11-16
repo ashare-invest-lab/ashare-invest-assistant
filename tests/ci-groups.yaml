@@ -99,6 +99,7 @@ tests:
   - {"file": "tests/backend/unit/test_import_cases_skeleton.py", "group": "parallel", "keywords": ["read-only mapping/fixtures", "pure parser"], "unverified": false}
   - {"file": "tests/backend/unit/test_import_codes_generated.py", "group": "parallel", "keywords": ["read-only expected JSON", "pure importing parser"], "unverified": false}
   - {"file": "tests/backend/unit/test_import_resolutions_t_b02x.py", "group": "parallel", "keywords": ["read-only resolution table", "pure findings calculations"], "unverified": false}
+  - {"file": "tests/backend/unit/test_importing_decoding_cov_t6.py", "group": "parallel", "keywords": ["autouse deny_network rejects socket.connect/create_connection", "synthetic bytes; no external resources"], "unverified": false}
   - {"file": "tests/backend/unit/test_importing_preview_coverage_repair.py", "group": "parallel", "keywords": ["pure synthetic preview context"], "unverified": false}
   - {"file": "tests/backend/unit/test_ingest_expiry_offline.py", "group": "parallel", "keywords": ["synthetic dates", "deny_network monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ingest_intents_offline.py", "group": "parallel", "keywords": ["synthetic intents", "deny_network monkeypatch", "SHARING read-only"], "unverified": false}
