@@ -139,11 +139,42 @@ KEY_DATA_MISSING / DATA_STALE：对应字段与≤T 可见性证据补齐且快�
 
 沪深主板/创业板买入为 100 股整数倍；科创板单笔买卖≥200 股，200 以上按 1 股递增为“部分核实”口径；不足申报单位的卖出余额须一次性申报，且不得超过可卖量。单笔数量上限沿 config/market_rules.yaml §segments.lot，不在本稿重新设值。来源：docs/strategies/market_rules_T-R10.md §1.1–§1.3、§2.1–§2.2。
 
+
+T-R94 制度事实核验：以下登记只核对本卡已有市场制度，不验证策略有效性、数据覆盖或成交能力。仓内定义及原有来源保留；“沪23/沪26/深23/深26”分别为下列官方原文，表中条款按版本对应。访问日期均为 2026-11-16。历史版核对范围为本卡已建模的 2023-04-10 至 2026-07-05，现行版自 2026-07-06 施行；不外推未来修订。
+
+| 编号／位置／制度项 | 仓内定义 | 官方原文条款 | 核验结论 |
+|---|---|---|---|
+| M01／§8／09:30 执行时点的交易时段依据 | docs/strategies/_template.md §7.2；config/market_rules.yaml §segments.sessions | 沪23/沪26 第2.4.2条；深23/深26 第2.3.2条 | 已核对连续竞价起点；“最早次日执行”及开盘价回放仍是卡内执行约定，不声称集合竞价不能成交 |
+| M02／§17／买入当日不可卖（T+1） | docs/strategies/_template.md §17；config/market_rules.yaml §segments.t_plus | 沪23/沪26、深23/深26 第3.1.4–3.1.5条 | 已核对普通A股不属当日回转品种；本卡信号日与买入日的偏移不改变 |
+| M03／§17／普通主板涨跌幅 | config/market_rules.yaml §segments.price_limit_pct.main_board | 沪23/沪26、深23/深26 第3.3.13条 | 已核对；无涨跌幅限制的例外仍按本卡原规则处理 |
+| M04／§17／创业板涨跌幅（含风险警示） | config/market_rules.yaml §segments.price_limit_pct.chinext | 深23 第3.3.13、4.5.5条；深26 第3.3.13条 | 已核对，历史及现行区间取值一致 |
+| M05／§17／科创板涨跌幅（含风险警示） | config/market_rules.yaml §segments.price_limit_pct.star | 沪23 第6.1.6、6.1.14条；沪26 第6.6、6.14条 | 已核对；科创板风险警示股票不进入主板风险警示板 |
+| M06／§17／主板ST/*ST涨跌幅分段 | config/market_rules.yaml §segments.price_limit_pct.main_board_st | 沪23 第4.4.10条、深23 第4.5.5条；沪26/深26 第3.3.13条及两所2026版发布通知 | 已核对旧段与2026-07-06起新段；不将现行比例回填历史 |
+| M07／§17／最小价位、四舍五入及限价边界 | docs/strategies/feature_spec.md §F35/F36；config/market_rules.yaml §segments.price_limit_pct | 沪23/沪26 第3.3.11、3.3.13、3.3.17、4.3.3条；深23/深26 第3.3.11、3.3.14、3.3.19、4.4.3条 | 已核对制度计算口径；pre_close数据及ROUND_HALF_UP实现的正确性仍需复测 |
+| M08／§17／注册制新股前五个交易日无涨跌幅 | docs/strategies/_template.md §7.3；config/market_rules.yaml §segments.no_limit | 沪23 第3.3.13、6.1.6条；沪26 第3.3.13、6.6条；深23/深26 第3.3.15条 | 已核对沪深股票规则；不核实卡内上市年龄及波动窗口过滤阈值 |
+| M09／§17／主板及创业板买入申报单位 | docs/strategies/market_rules_T-R10.md §1.3；config/market_rules.yaml §segments.lot.buy_lot | 沪23/沪26、深23/深26 第3.3.8条 | 已核对竞价买入申报单位及整数倍要求 |
+| M10／§17／科创板买卖申报下限 | docs/strategies/market_rules_T-R10.md §1.1；config/market_rules.yaml §segments.lot.star_min_buy | 沪23 第6.1.7、6.2.6条；沪26 第6.7条 | 已核对；不足单位的卖出余额按M12 |
+| M11／§17／科创板递增单位 | docs/strategies/market_rules_T-R10.md §1.2；config/market_rules.yaml §segments.lot.star_step | 沪23 第6.1.7条、沪26 第6.7条仅明确上下限；未找到递增单位的规则明文 | 未验证：保留原“部分核实”；投教解释不能作为本轮摘标依据，未认定与原文不符 |
+| M12／§17／不足申报单位的卖出余额一次申报 | docs/strategies/market_rules_T-R10.md §2.1–§2.2；config/market_rules.yaml §segments.lot | 沪23/沪26、深23/深26 第3.3.8条；沪23 第6.1.7、6.2.6条；沪26 第6.7条 | 已核对；可卖量数据及订单实际成交不在本结论内 |
+| M13／§17／已引用的各板块单笔数量上限 | config/market_rules.yaml §segments.lot | 沪23/沪26、深23/深26 第3.3.9条；沪23 第6.1.7、6.2.6条；沪26 第6.7条 | 已逐项核对主板、创业板限价/市价及科创板限价/市价/盘后上限；不新增上限或交易方式 |
+
+官方原文：上交所，[《上海证券交易所交易规则（2023年修订）》及发布通知（沪23）](https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/c_20250612_10824490.shtml)；上交所，[《上海证券交易所交易规则（2026年修订）》及发布通知（沪26）](https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml)；深交所，[《深圳证券交易所交易规则（2023年修订）》（深23）](https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf)；深交所，[《深圳证券交易所交易规则（2026年修订）》（深26）](https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf)；深交所，[2026版发布通知（深证上〔2026〕551号）](https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html)。条款见上表；访问日期 2026-11-16。2023版施行事件按发布通知及深23第10.9条，上市日期对照上交所[《关于中信金属股份有限公司人民币普通股股票上市交易的公告》正文](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20230407_88930832.shtml)，访问日期 2026-11-16。
+
 ## 18. 成本与滑点
 
 佣金双边分别按 max(单笔成交额×实际费率，5 元) 计算。实际费率未知，记“未验证、待复测”，不默认填零；复测费率需冻结。最低佣金出处：config/market_rules.yaml §segments.fees.commission_min_yuan；双边口径：docs/strategies/_template.md §18。
 
 印花税按实际卖出交易日分段：2023-04-10 至 2023-08-27 为 0.1%；2023-08-28 起为 0.05%，仅卖出计。过户费在仓库已建模区间为双边 0.001%；更早日期不外推。来源：config/market_rules.yaml §segments（2023-04-10、2023-08-28、2026-07-06）.fees。
+
+
+T-R94 费用制度核验（仅制度事实；仓内定义及原值保留）：
+
+| 编号／制度项 | 仓内定义 | 官方出处（条款、URL、访问日期）及生效区间 | 核验结论 |
+|---|---|---|---|
+| M14／实际佣金费率 | config/market_rules.yaml §segments.fees.commission_rate_default_pct；docs/strategies/_template.md §18 | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、六、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，访问日期 2026-11-16；2002-05-01起 | 未验证：具体费率按券商协议，官方没有本卡统一实际费率；继续待冻结、待复测 |
+| M15／A股单笔最低佣金 | config/market_rules.yaml §segments.fees.commission_min_yuan | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，访问日期 2026-11-16；2002-05-01起，法规库标现行有效 | 已核对最低收费制度；不等于M14费率或用户实际账单已验证 |
+| M16／卖出印花税及日期分段 | config/market_rules.yaml §segments.fees.stamp_duty_sell_pct；docs/strategies/_template.md:252 | 国家税务总局官网，[《中华人民共和国印花税法》第三、四、五、二十条及附表“证券交易”税目](https://shanghai.chinatax.gov.cn/zcfw/zcfgk/yhs/202106/t458595.html)，2022-07-01起；财政部、国家税务总局，[《关于减半征收证券交易印花税的公告》（2023年第39号）正文](https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm)，2023-08-28起；访问日期均为 2026-11-16 | 已核对单向征收、成交额基数及本卡两个税率区间；未向建模起点前外推 |
+| M17／双向过户费 | config/market_rules.yaml §segments.fees.transfer_fee_pct；docs/strategies/_template.md:253 | 中国结算，[《上海市场证券登记结算业务收费及代收税费一览表》“投资者业务收费—交易过户费—A股”](https://m.chinaclear.cn/zdjs/fbzyls/202512/922adc26c2ff4865930c7fb77688bb8a/files/上海市场证券登记结算业务收费及代收税费一览表.pdf)及[深圳市场同表同项](https://m.chinaclear.cn/zdjs/fbzyls/202512/a59388fbfa714c5fa546784891a42e30/files/深圳市场证券登记结算业务收费及代收税费一览表.pdf)，访问日期 2026-11-16；所获版本为2026-01-01更新 | 未验证：现行收费表取值一致，但未取到2022年调整通知原文以闭合本卡全部历史适用区间；不摘标，不认定冲突 |
 
 单边基础滑点见 §22（estimate，未验证；仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:74；成本校准未验证（待复测））；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate，档表及回退口径未验证，成本校准未验证（待复测），不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。仓内定义：docs/strategies/_template.md:252；仓内定义：docs/strategies/_template.md:253；仓内定义：docs/strategies/_template.md:258；仓内定义：docs/strategies/_template.md:259；仓内定义：docs/strategies/_template.md:260；仓内定义：docs/strategies/_template.md:261；仓内定义：docs/strategies/_template.md:262；仓内定义：docs/strategies/_template.md:266；仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:268。
 
