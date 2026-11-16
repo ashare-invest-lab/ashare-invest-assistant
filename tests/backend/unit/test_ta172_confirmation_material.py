@@ -1,4 +1,9 @@
-"""§10.12 第 1 条最小增量：synthetic / source=fake，绝非生产材料。
+"""可信确认材料最小增量：synthetic / source=fake，绝非生产材料。
+
+契约出处：docs/contracts/daily-bars-source.md，origin/main 当前 f4e3525 上该文件
+blob 与 d02b0ac（docs(T-A180b): §10.12 治理员必改两处与建议 a–d）相同；
+章节「### 10.12 可信确认材料、tb143 SQL 定位与演练链（T-A180）」第 1 条
+「可信确认材料（T-A179 残项 R1）」。本条不在 PR base be/T-B163r3@444dae9 的 docs 中。
 
 raw_bytes 是虚构 JSON/CSV；解析字段仅兼容当前 confirm，不模拟可信解析器。
 隔离哈希清单按代码绑定接口族、请求范围及两侧 sha256，只交 bj_isolated_list。
@@ -21,9 +26,14 @@ from app.marketdata import daily_bars as writer
 
 DAY = date(2031, 1, 2)
 CODES = tuple(f"9209{i:02d}.BJ" for i in range(20))
+TRUST_CONTRACT_SOURCE = (
+    "docs/contracts/daily-bars-source.md，origin/main 当前 f4e3525 上该文件 blob 与 "
+    "d02b0ac（docs(T-A180b): §10.12 治理员必改两处与建议 a–d）相同；"
+    "章节「### 10.12 可信确认材料、tb143 SQL 定位与演练链（T-A180）」"
+    "第 1 条「可信确认材料（T-A179 残项 R1）」"
+)
 TRUST_PENDING = pytest.mark.xfail(
     strict=True,
-    reason="§10.12第1条可信材料方案另单，confirm 仍接受已解析字段",
     raises=pytest.fail.Exception,  # 只容许预期的“应拒绝却未抛错”，不掩盖构造错误。
 )
 
@@ -102,7 +112,10 @@ def upsert_one():
     return stats
 
 
-@TRUST_PENDING
+@TRUST_PENDING(reason=(
+    "T-B182（待编排者建）：只给已解析对加自填 source 应拒绝；"
+    "缺口：confirm 仍接受已解析字段；出处：" + TRUST_CONTRACT_SOURCE
+))
 def test_ta172_parsed_pairs_with_self_filled_source_are_rejected(bj_isolated_list):
     pairs, manifest = synthetic_material()
     install_valid_material(bj_isolated_list, pairs, manifest)
@@ -114,7 +127,10 @@ def test_ta172_parsed_pairs_with_self_filled_source_are_rejected(bj_isolated_lis
         gate.confirm_bj_offline_volume_units(pairs)
 
 
-@TRUST_PENDING
+@TRUST_PENDING(reason=(
+    "T-B183（待编排者建）：sha256 不在清单中应拒绝；"
+    "缺口：现有夹具丢弃哈希，confirm 未校验清单 sha256；出处：" + TRUST_CONTRACT_SOURCE
+))
 def test_ta172_sha256_absent_from_isolated_list_is_rejected(bj_isolated_list):
     pairs, manifest = synthetic_material()
     install_valid_material(bj_isolated_list, pairs, manifest)
@@ -126,7 +142,10 @@ def test_ta172_sha256_absent_from_isolated_list_is_rejected(bj_isolated_list):
         gate.confirm_bj_offline_volume_units(pairs)
 
 
-@TRUST_PENDING
+@TRUST_PENDING(reason=(
+    "T-B184（待编排者建）：字节被改动一位应拒绝；"
+    "缺口：confirm 忽略 raw_bytes，未拒绝字节篡改；出处：" + TRUST_CONTRACT_SOURCE
+))
 def test_ta172_one_bit_flip_in_raw_bytes_is_rejected(bj_isolated_list):
     pairs, manifest = synthetic_material()
     install_valid_material(bj_isolated_list, pairs, manifest)
