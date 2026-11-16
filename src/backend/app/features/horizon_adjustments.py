@@ -31,7 +31,7 @@ class FactorBundle:
     factors: tuple[FactorObservation, ...]
     dependency_ids: tuple[str, ...]
     snapshot_sha256: str
-    coverage: tuple[date, ...]  # 覆盖结构契约未定，未验证；仅列实际满足的请求日期。
+    coverage: tuple[date, ...]  # 实际成功请求日期；不代表窗口完整或事件已全证。
     gaps: tuple[str, ...]
 
 
@@ -45,7 +45,11 @@ def read_adjustment_factors(
     as_of: datetime,
     snapshot_sha256: str,
 ) -> FactorBundle:
-    """由 b2b 统一执行范围/PIT/修订选择；仅按选中 ID 读取原材料。"""
+    """由 b2b 统一执行范围/PIT/修订选择；仅按选中 ID 读取原材料。
+
+    coverage 为「实际成功请求日期」集合，不代表窗口完整或事件已全证；
+    请求缺日或因子 issues 非空即 missing，不以 1 补齐。
+    """
     anchor = aware(as_of).astimezone(BEIJING).date()
     targets = sorted(set(dates))
     provider = DatabaseHorizonEvidenceProvider(conn)
@@ -83,13 +87,21 @@ def read_adjustment_factors(
     }
     by_day: dict[date, list[tuple[SourceVersion, dict[str, Any]]]] = defaultdict(list)
     chosen = {UUID(v.version_id): v for v in selected.versions}
+
+    def audits_verified(v: SourceVersion, p: dict[str, Any]) -> bool:
+        # verified 键为本裁定读取门禁；槽内结构仍未验证。
+        if all(p[slot].get("verified") is True for slot in ("algo_audit", "integrity_audit")):
+            return True
+        gaps.append(f"adjust_factor_unverified:{v.version_id}")
+        return False
+
     for row in conn.execute(
         select(c.id, c.data_date, c.payload).where(c.id.in_(chosen))
     ).mappings():
         v = chosen[row["id"]]
         p = row["payload"]
         try:
-            # §3.4 algo_audit/integrity_audit 内部结构未验证；沿 b2a 校验非空证据槽。
+            # §3.4 槽内结构仍未验证；先沿 b2a 校验非空证据槽，再应用读取门禁。
             validate_payload(
                 "adjust_factor",
                 p,
@@ -101,6 +113,9 @@ def read_adjustment_factors(
                 raise EvidenceRejected("adjust_factor:date_mismatch")
         except EvidenceRejected as exc:
             gaps.append(f"adjust_factor_invalid:{v.version_id}:{exc.reason}")
+            blocked.add(row["data_date"])
+            continue
+        if not audits_verified(v, p):
             blocked.add(row["data_date"])
             continue
         if p["snapshot_sha256"] != snapshot_sha256:
@@ -115,6 +130,8 @@ def read_adjustment_factors(
             return checked[v.version_id]
         checked[v.version_id] = None  # 同时拒绝损坏材料中的依赖环。
         used: list[str] = []
+        reference_days: list[date] = []
+        ex_days: list[date] = []
         for dep_id in v.dependency_ids:
             # 引用 ID 的类型/日期目录仅用于调用 b2b；未经其选择不读取 payload。
             meta = (
@@ -124,11 +141,15 @@ def read_adjustment_factors(
             )
             if meta is None:
                 return None
-            bundle = provider.read_versions(
-                **{**identity, "code": meta["code"] or code},
-                kind=meta["kind"],
-                dates=[meta["data_date"]],
-            )
+            try:
+                bundle = provider.read_versions(
+                    **{**identity, "code": meta["code"] or code},
+                    kind=meta["kind"],
+                    dates=[meta["data_date"]],
+                )
+            except KeyError:
+                # 历史材料缺字段可能在 b2b 投影时失败；拒绝依赖，不绕过其选择。
+                return None
             dep = next((d for d in bundle.versions if d.version_id == dep_id), None)
             if dep is None or bundle.gaps:
                 return None
@@ -150,12 +171,29 @@ def read_adjustment_factors(
                     return None
                 if meta["kind"] == "adjust_factor" and p["snapshot_sha256"] != snapshot_sha256:
                     return None
+                if meta["kind"] == "adjust_factor" and not audits_verified(dep, p):
+                    return None
+                # 参考价 daily_bar 的字段/日期/单位口径仍未验证；仅作保守读取门禁。
+                if meta["kind"] == "daily_bar":
+                    if (
+                        p["close"] is None
+                        or p.get("price_unit") is None
+                        or dep.available_at is None
+                        or dep.available_at > as_of
+                    ):
+                        return None
+                    reference_days.append(date.fromisoformat(p["trade_date"]))
+                if meta["kind"] == "ex_rights":
+                    ex_days.append(date.fromisoformat(p["ex_date"]))
             except EvidenceRejected:
                 return None
             nested = dependencies(dep)
             if nested is None:
                 return None
             used.extend((dep_id, *nested))
+        # 多依赖配对口径未验证；保守要求每个参考日都早于每个依赖除权日。
+        if reference_days and ex_days and max(reference_days) >= min(ex_days):
+            return None
         checked[v.version_id] = tuple(dict.fromkeys(used))
         return checked[v.version_id]
 
