@@ -243,9 +243,12 @@ def test_download_redirect_removes_token_across_hosts():
 
 def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    # T-O90 分片：目录发现循环移除；全量选择以两片目录并集等价锚定（Chief 14:2x 批）。
+    # T-O90 分片：目录发现循环移除；全量选择以两片目录并集＋分片互斥忽略清单等价锚定（Chief 14:2x 批）。
     assert "tests/backend/api_app tests/replay" in workflow
     assert "tests/backend/unit tests/backend/integration tests/backend/milestone tests/backend/contract tests/backend/golden" in workflow
+    # 分片互斥：A 收 p2n10 四件套与 enqueue_diagnostics；B 以 AIA_SHARD_IGNORE 显式排除防重复。
+    assert "tests/backend/integration/test_p2n10_loop.py" in workflow
+    assert "AIA_SHARD_IGNORE:" in workflow
     assert "--cov=src/backend/app --cov-report=term-missing:skip-covered" in workflow
     assert "--cov-fail-under=80" not in workflow
     assert "timeout-minutes: 30" in workflow
