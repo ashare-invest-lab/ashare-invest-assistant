@@ -13,6 +13,7 @@
 > O-CI1-PROFILE-CONTRACT（2026-11-12）：§7.3 因子响应的 `factor_set_version` 增加限定的 `null`，空集无真实因子集不造版本，真实因子集保留真实版本；旧消费者的必为字符串假设需同步，详见该节及 `reviews/O-CI1-PROFILE-CONTRACT.md`。
 >
 > S1-3（2026-11-12）承接 A-12、T-A157、T-A158 与 Notification/ST205 的文档增量，保留上述真实版本/缺口原因与四 GET provider/cache 未接限制；各处标注目标规则与实现差距。可空类型的客户端兼容影响、源资产例外及受影响任务见 [汇总](reviews/S1-3-consolidation.md)。
+> T-A207（2026-11-16）：§7.3 明确 TodayAlert 的 id 升序及未合入实现出处，新增所有 severity 渲染页面的未知档位兜底与服务端顺序保留规则。
 
 
 ### v0.2.9（2026-11-02，T-A10：处理前端 T-A09、T-F17、T-F18 与 review-fixes 遗留的待定项（报告 `T-A10-pending.md` P01–P21，按建议裁定采纳），并入测试 T-T23 的三项裁定；同版并入 T-A11（研究候选接口，#19–#25，版本号不升）与管理端证书遗留裁定（T-F22 遗留 1–5，#26）；**含不兼容变更**：#6（候选信号事件改为分页包装）、#11（放弃草案的请求体）、#12（`/non-executable-reasons` 默认只返回 `active`）；其余为新增字段、可空性放宽或规则写明）
@@ -933,7 +934,8 @@ evidence: Evidence[]
 - 范围：`status ∈ {new, read}` 的提醒（未处理的一直显示，不限日期）；**不含** `origin=plan_condition` 的提醒，这类放进 `plan_triggers`，避免重复。
 - `title`：“发生了什么”的事实陈述（例如“示例银行发布业绩预告”），经过禁用词校验，不包含动作建议。`security_code` 为 `null` 时 `name` 也为 `null`（账户级提醒）。
 - `evidence_ids` 非空，每个 id 都能在同一响应的 `evidence[]` 中找到（提醒的“事实 + 来源”）。
-- 排序：`severity`（important > attention > info）→ `triggered_at` 降序 → `id`。最多 50 条，`more=true` 时到 `/alerts?status=new,read` 查看。
+- 排序：`severity`（important > attention > info）→ `triggered_at` 降序 → `id` 升序（按 uuid 值升序；与 #256@5086bc3 `aggregates/products.py:今日提醒查询 order_by`（未合入）一致）。最多 50 条，`more=true` 时到 `/alerts?status=new,read` 查看。
+- 未知档位兜底：后端只输出 `important`、`attention`、`info` 三档（模型层拒绝契约外值）；前端消费 `severity` 时只按三档自有键取映射（不得取到原型链属性，例如 `__proto__`、`constructor`、`toString`），其他任何值（含空串、带空格、未来新档）显示固定文案「未知」与默认（中性）颜色，条目照常显示、不崩溃、不在客户端重排，保留服务端顺序。该口径适用于所有渲染 `severity` 的页面。
 
 **`TodayPlanTrigger`**（plan “计划触发”；来源：`plan_conditions` 的满足记录，即 SSE `plan_triggered` 与 `origin=plan_condition` 的提醒）
 `{plan_id: uuid, plan_version_no: int, security_code: string, name: string, condition_id: uuid, condition_kind: plan_condition_kind, condition_text: string, triggered_at: string(datetime), alert_id: uuid | null, evidence_ids: string[]}`
