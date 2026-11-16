@@ -9,6 +9,8 @@ import xml.etree.ElementTree as ET
 
 import yaml
 
+from junit_validation import validate_junit
+
 
 def case_file(case: ET.Element, files: set[str]) -> str | None:
     """Map a JUnit testcase to its tests/ file (classname may carry a class suffix)."""
@@ -37,17 +39,21 @@ def main(argv: list[str] | None = None) -> int:
         files = {row["file"] for row in yaml.safe_load(args.groups.read_text(encoding="utf-8"))["tests"]
                  if row["group"] == args.group}
         counts = {"passed": 0, "skipped": 0, "failed": 0}
-        for case in ET.parse(args.junit).getroot().iter("testcase"):
+        root = ET.parse(args.junit).getroot()
+        for case in root.iter("testcase"):
             if case_file(case, files) is None:
                 continue
-            if case.find("skipped") is not None:
-                counts["skipped"] += 1
-            elif case.find("failure") is not None or case.find("error") is not None:
+            if case.find("failure") is not None or case.find("error") is not None:
                 counts["failed"] += 1
+            elif case.find("skipped") is not None:
+                counts["skipped"] += 1
             else:
                 counts["passed"] += 1
         print(f"{args.group}: passed={counts['passed']} skipped={counts['skipped']} "
               f"failed={counts['failed']} (max_skipped={limit} min_passed={min_passed})")
+        if counts["failed"] > 0:
+            raise ValueError(f"{args.group}: {counts['failed']} failed testcases")
+        validate_junit(root)
         if counts["passed"] == 0:
             raise ValueError(f"{args.group}: no test ran")
         if counts["passed"] < min_passed:

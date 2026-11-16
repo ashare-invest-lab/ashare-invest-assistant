@@ -337,6 +337,15 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     assert len(freezes) == 1
     freeze_index = freezes[0]
     merge_index = next(i for i, step in enumerate(steps) if "coverage combine" in step.get("run", ""))
+    merge = steps[merge_index]
+    assert "set -euo pipefail" in merge["run"]
+    assert merge["run"].index('"$py" scripts/ci/check_coverage_data.py') < merge["run"].index('"$py" -m coverage combine')
+    assert 'scripts/ci/check_coverage_data.py "${RUNNER_TEMP}"/shards/*/coverage-shard-*.data' in merge["run"]
+    assert not merge.get("continue-on-error", False)
+    union_index = next(i for i, step in enumerate(steps) if "scripts/ci/check_shard_union.py" in step.get("run", ""))
+    assert union_index < merge_index
+    assert '--junit "${RUNNER_TEMP}/shards"' in steps[union_index]["run"]
+    assert "scripts/ci/merge_junit.py" in merge["run"]
     ratchet_index = next(i for i, step in enumerate(steps) if step.get("id") == "coverage_ratchet")
     assert merge_index < freeze_index == ratchet_index - 1
     frozen = steps[freeze_index]

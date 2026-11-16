@@ -5,14 +5,20 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import xml.etree.ElementTree as ET
 from collections import Counter
 
+from junit_validation import validate_junit
+
+
+UUID = re.compile(r"(?<![0-9a-fA-F])(?:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})(?![0-9a-fA-F])")
+
 
 def stable_id(nodeid: str) -> str:
-    """Compare per test function: a few existing params use random ids (uuid4), so the
-    bracketed part differs between processes. Counts per function must still match exactly."""
-    return nodeid.split("[", 1)[0]
+    """Normalize only UUID values in parameters; preserve every other parameter."""
+    function, bracket, params = nodeid.partition("[")
+    return function + bracket + UUID.sub("<uuid>", params)
 
 
 def main(argv=None):
@@ -60,13 +66,17 @@ def main(argv=None):
             if unknown:
                 raise ValueError(f"files missing from {args.groups}: {unknown[:5]}")
         lines = ["Shard union: OK", "", "| Shard | Tests | JUnit seconds |", "| --- | ---: | ---: |"]
+        seen = set()
         for report in sorted(reports, key=lambda r: r["shard"]):
             seconds = "—"
             if args.junit:
                 paths = list(args.junit.rglob(f"backend-pytest-shard-{report['shard']}.xml"))
                 if len(paths) != 1:
                     raise ValueError(f"shard {report['shard']}: expected exactly one JUnit")
-                seconds = f"{sum(float(c.get('time', '0')) for c in ET.parse(paths[0]).iter('testcase')):.1f}"
+                cases = validate_junit(ET.parse(paths[0]).getroot(), seen)
+                if len(cases) != len(report["selected"]):
+                    raise ValueError(f"shard {report['shard']}: JUnit testcase count differs from selected")
+                seconds = f"{sum(float(c.get('time', '0')) for c in cases):.1f}"
             lines.append(f"| {report['shard']} | {len(report['selected'])} | {seconds} |")
         summary = "\n".join(lines) + "\n"
         print(summary, end="")

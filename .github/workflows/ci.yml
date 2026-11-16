@@ -360,7 +360,7 @@ jobs:
           shutil.copyfile(next(root.rglob("selfcheck-a1s-a32.xml")), temp / "selfcheck-a1s-a32.xml")
           PYTHON
       # T-T93：分组以 tests/ci-groups.yaml 为准；每片独立 runner（自有 PG/docker/端口/tmp）且单 worker 顺序执行，
-      # serial_* 不与任何并发测试共享资源。并集按「测试函数→用例数」比对（少数参数 id 为随机 uuid）。
+      # serial_* 不与任何并发测试共享资源。并集精确比对参数，仅归一化随机 UUID。
       - name: 校验分片并集与串行资源组
         run: |
           uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_shard_union.py \
@@ -371,6 +371,7 @@ jobs:
         run: |
           set -euo pipefail
           py=src/backend/.venv/bin/python
+          "$py" scripts/ci/check_coverage_data.py "${RUNNER_TEMP}"/shards/*/coverage-shard-*.data
           "$py" -m coverage combine --keep --data-file="${RUNNER_TEMP}/.coverage" "${RUNNER_TEMP}"/shards/*/coverage-shard-*.data
           "$py" -m coverage json --data-file="${RUNNER_TEMP}/.coverage" -o "${RUNNER_TEMP}/coverage.json"
           "$py" -m coverage report --data-file="${RUNNER_TEMP}/.coverage" --skip-covered
