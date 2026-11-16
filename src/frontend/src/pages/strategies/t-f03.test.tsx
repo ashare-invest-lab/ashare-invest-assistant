@@ -4,17 +4,15 @@
  * 覆盖：① 路由不再是占位页、页面按实例视角渲染；② 状态、范围、周期展示与后端返回一致（前端不重算）；
  * ③ 暂停/恢复/确认三种操作转发到正确的 §6.0A 端点；④ 空态文案；⑤ 归档实例默认收起。
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
-import { AppProviders } from '../../app/AppProviders';
-import { makeQueryClient } from '../../app/queryClient';
 import { routes } from '../../app/routes';
 import type { StrategyInstance } from '../../api/strategyTypes';
 import { errorBody } from '../../mocks/handlerUtils';
 import { server } from '../../mocks/server';
 import { mockLoginAs } from '../../mocks/session';
 import { preloadRoutes } from '../../test/preloadRoutes';
+import { renderAt } from '../../test/renderAt';
 
 vi.mock('../../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -25,18 +23,6 @@ beforeEach(() => mockLoginAs('demo_user'));
 afterEach(() => server.resetHandlers());
 
 const API = '/api/v1';
-
-function renderAt(path: string) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(
-    <AppProviders client={makeQueryClient(true)}>
-      <RouterProvider router={router} />
-    </AppProviders>,
-  );
-  return router;
-}
 
 const inst = (over: Partial<StrategyInstance>): StrategyInstance => ({
   id: 'i-1',
