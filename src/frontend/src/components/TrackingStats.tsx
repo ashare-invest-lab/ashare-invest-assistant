@@ -1,10 +1,11 @@
+import { Fragment } from 'react';
 import { trackingDecimal } from '../lib/trackingDecimal';
 import type { Stat, Suggestion } from '../api/types';
 import type { StrategyTracking } from '../api/strategyTypes';
 import { useStrategyTemplates } from '../api/strategyQueries';
 import { useStrategyTracking } from '../api/signalQueries';
 import { DataStatusTag, ErrorBox, Loading } from './common';
-import { GAP_REASON } from '../i18n/labels';
+import { ACTION_SHORT, CONF_LEVEL, GAP_REASON } from '../i18n/labels';
 
 export function TrackingStatValue({ stat, kind = 'percent', testId }: { stat: Stat; kind?: 'percent' | 'fraction' | 'ratio'; testId?: string }) {
   const missing = stat.value === null || stat.n < 5;
@@ -18,10 +19,22 @@ export function StrategyTrackingStats({ data }: { data: StrategyTracking }) {
     <DataStatusTag status={data.data_status} />
     <p className="small muted">策略版本聚合（{data.scope === 'site' ? '全站匿名' : '本人'}），不是实例级统计；n按各项有效样本，待到期/不可成交/排除不冒充有效n。</p>
     <div className="stat-wrap"><table className="stat-table"><thead><tr><th>持有期</th><th>胜率</th><th>平均收益</th><th>平均超额</th><th>盈亏比</th><th>最长连亏</th><th>待到期</th><th>不可成交</th><th>排除</th></tr></thead>
-      <tbody>{data.by_horizon.map((row) => <tr key={row.horizon_days} data-testid={`track-${row.horizon_days}`}>
+      <tbody>{data.by_horizon.map((row) => <Fragment key={row.horizon_days}><tr data-testid={`track-${row.horizon_days}`}>
         <td>{row.horizon_days} 日</td><td><TrackingStatValue stat={row.win_rate} kind="fraction" /></td><td><TrackingStatValue stat={row.avg_return_pct} /></td><td><TrackingStatValue stat={row.avg_excess_pct} /></td><td><TrackingStatValue stat={row.profit_loss_ratio} kind="ratio" /></td>
         <td>{count(row.max_loss_streak)}</td><td>{count(row.pending_count)}</td><td>{count(row.untradable_count)}</td><td>{count(row.excluded_count)}</td>
-      </tr>)}</tbody></table></div>
+      </tr>
+        {row.by_action_confidence.length ? <tr><td colSpan={9}>
+          <div className="stat-wrap"><table className="stat-table">
+            <caption>{row.horizon_days} 日 · 动作×置信度</caption>
+            <thead><tr><th>动作</th><th>生成时置信度</th><th>胜率</th><th>平均收益</th><th>平均超额</th><th>盈亏比</th><th>最长连亏</th><th>待到期</th><th>不可成交</th><th>排除</th></tr></thead>
+            <tbody>{row.by_action_confidence.map((group) => <tr key={`${group.action}-${group.confidence_level ?? 'null'}`}>
+              <td>{ACTION_SHORT[group.action]}</td><td>{group.confidence_level === null ? '置信度缺失' : CONF_LEVEL[group.confidence_level].text}</td>
+              <td><TrackingStatValue stat={group.win_rate} kind="fraction" /></td><td><TrackingStatValue stat={group.avg_return_pct} /></td><td><TrackingStatValue stat={group.avg_excess_pct} /></td><td><TrackingStatValue stat={group.profit_loss_ratio} kind="ratio" /></td>
+              <td>{count(group.max_loss_streak)}</td><td>{count(group.pending_count)}</td><td>{count(group.untradable_count)}</td><td>{count(group.excluded_count)}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </td></tr> : null}
+      </Fragment>)}</tbody></table></div>
     {!data.by_horizon.length ? <p>缺口：暂无策略版本聚合结果，不填0。</p> : null}
     {data.gaps.map((gap, i) => <p key={`${gap.key}-${i}`}>缺口 · <code>{gap.key}</code> · {GAP_REASON[gap.reason]}：{gap.message}</p>)}
   </div>;

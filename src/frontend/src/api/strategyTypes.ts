@@ -1,5 +1,5 @@
 /** 策略库类型（契约 v0.2.7 §5.1 StrategyInstance、§6.0A、§7.4 /strategies、§7.5 /strategy-instances） */
-import type { CardRiskLevel, Dimension, Horizon, InstanceEventKind, InstanceOrigin, InstanceStatus, Lifecycle, ReasonCode, RuleRole } from './enums';
+import type { Action, CardRiskLevel, ConfidenceLevel, Dimension, Horizon, InstanceEventKind, InstanceOrigin, InstanceStatus, Lifecycle, ReasonCode, RuleRole } from './enums';
 import type { DataStatusBlock, DateStr, DateTime, Decimal, Stat, Uuid } from './types';
 
 /** GET /strategies 元素 */
@@ -105,7 +105,14 @@ export interface StrategyTrackingRow {
   pending_count: number;
   untradable_count: number;
   excluded_count: number;
+  by_action_confidence: StrategyActionConfidenceTracking[];
 }
+
+/** 仅含有观测的动作×生成时置信度组；null 表示生成时置信度缺失或不可验证。 */
+export type StrategyActionConfidenceTracking = Omit<StrategyTrackingRow, 'horizon_days' | 'by_action_confidence'> & {
+  action: Action;
+  confidence_level: ConfidenceLevel | null;
+};
 
 export interface StrategyTracking extends DataStatusBlock {
   scope: 'mine' | 'site';

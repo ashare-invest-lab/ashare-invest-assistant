@@ -29,6 +29,63 @@ function renderAt(path: string) {
 const template = (key: string) => STRATEGY_TEMPLATES.find((item) => item.key === key)!;
 
 describe('T-F40 策略详情', () => {
+  it('t-f50 每个期限展示动作×置信度的指标和计数，保留期限汇总', async () => {
+    const item = template('st_pullback_ma');
+    const data = trackingOf(item, 'mine');
+    const first = data.by_horizon[0].by_action_confidence[0];
+    data.by_horizon[0].by_action_confidence = [
+      { ...first, avg_return_pct: { value: '7.1250', n: 30, window: '1d', small_sample: false }, pending_count: 2, untradable_count: 3, excluded_count: 4 },
+      { ...first, confidence_level: 'medium', avg_return_pct: { value: '-2.4000', n: 5, window: '1d', small_sample: true } },
+      { ...first, action: 'sell', confidence_level: 'low' },
+    ];
+    server.use(http.get(`${API}/strategies/:id/versions/:vid/tracking`, () => HttpResponse.json(data)));
+    renderAt(`/strategies/${item.id}`);
+    const table = await screen.findByRole('table', { name: '1 日 · 动作×置信度' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.map((row) => within(row).getAllByRole('cell').slice(0, 2).map((cell) => cell.textContent))).toEqual([
+      ['买入', '高'], ['买入', '中'], ['卖出', '低'],
+    ]);
+    const cells = within(rows[0]).getAllByRole('cell');
+    expect(cells[2]).toHaveTextContent('52.00%');
+    expect(cells[3]).toHaveTextContent('7.13% n=30');
+    expect(cells[3]).not.toHaveTextContent('样本少');
+    expect(cells[4]).toHaveTextContent('0.10%');
+    expect(cells[5]).toHaveTextContent('1.20');
+    expect(cells.slice(-4).map((cell) => cell.textContent)).toEqual(['2', '2', '3', '4']);
+    expect(rows[1]).toHaveTextContent('-2.40% n=5（样本少）');
+    expect(screen.getByTestId('track-1')).toHaveTextContent('0.40%');
+    expect(screen.getByRole('table', { name: '5 日 · 动作×置信度' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '20 日 · 动作×置信度' })).toBeInTheDocument();
+    expect(within(screen.getByRole('table', { name: '5 日 · 动作×置信度' })).queryByText('7.13%')).toBeNull();
+  });
+
+  it('t-f50 null 组显示置信度缺失、原始样本量和 generation_confidence 缺口提示', async () => {
+    const item = template('st_pullback_ma');
+    renderAt(`/strategies/${item.id}`);
+    const table = await screen.findByRole('table', { name: '1 日 · 动作×置信度' });
+    const row = within(table).getByText('置信度缺失').closest('tr')!;
+    expect(row).toHaveTextContent('买入');
+    expect(row).toHaveTextContent('缺口：样本不足');
+    expect(row).toHaveTextContent('n=3（样本少）');
+    expect(within(row).getAllByRole('cell')[1]).not.toHaveTextContent('低');
+    const gap = screen.getByText('generation_confidence').closest('p')!;
+    expect(gap).toHaveTextContent('缺口 · generation_confidence · 无数据源：示例数据：生成时置信度、生成快照或实例绑定缺失或不可验证');
+    expect(within(table).getAllByRole('row').at(-1)).toBe(row);
+  });
+
+  it('t-f50 空分组数组保留期限汇总且不生成空分组表', async () => {
+    const item = template('demo_gate_draft');
+    expect(trackingOf(item, 'mine').by_horizon.every((row) => row.by_action_confidence.length === 0)).toBe(true);
+    renderAt(`/strategies/${item.id}`);
+    expect(await screen.findByTestId('strategy-tracking-stats')).toBeInTheDocument();
+    for (const horizon of [1, 5, 20]) {
+      expect(screen.getByTestId(`track-${horizon}`)).toBeInTheDocument();
+      expect(screen.queryByRole('table', { name: `${horizon} 日 · 动作×置信度` })).toBeNull();
+    }
+    expect(screen.queryByText('置信度缺失')).toBeNull();
+    expect(screen.queryByText('generation_confidence')).toBeNull();
+  });
+
   it('t-f40 打开已有模板详情并展示版本配置与跟踪表', async () => {
     const item = template('st_pullback_ma');
     renderAt(`/strategies/${item.id}`);

@@ -90,14 +90,29 @@ export function trackingOf(t: StrategyTemplate, scope: 'mine' | 'site'): Strateg
   const base = (TRACK_N[t.key] ?? (t.health?.n ?? 0)) * (scope === 'site' ? 3 : 1);
   return {
     scope, data_status: 'partial', data_as_of: '2026-11-06T15:00:00+08:00',
-    gaps: t.key === 'demo_reversal' ? [{ key: 'no_losing_samples', reason: 'no_source', message: '示例数据：无亏损样本，盈亏比未知' }] : [{ key: 'example_tracking', reason: 'no_source', message: '示例数据：合成策略版本统计，不代表实际收益' }],
+    gaps: [
+      t.key === 'demo_reversal' ? { key: 'no_losing_samples', reason: 'no_source', message: '示例数据：无亏损样本，盈亏比未知' } : { key: 'example_tracking', reason: 'no_source', message: '示例数据：合成策略版本统计，不代表实际收益' },
+      ...(base ? [{ key: 'generation_confidence', reason: 'no_source' as const, message: '示例数据：生成时置信度、生成快照或实例绑定缺失或不可验证' }] : []),
+    ],
     by_horizon: ([1, 5, 20] as const).map((d, i) => {
       const n = Math.max(0, Math.round(base / (1 + i * 0.6)));
       const w = `${d}d`;
+      const totals = {
+        win_rate: stat(0.52 + i * 0.02, n, w), avg_return_pct: stat(0.4 * (i + 1), n, w),
+        avg_excess_pct: stat(0.1 * (i + 1), n, w), profit_loss_ratio: t.key === 'demo_reversal' ? { ...stat(1, n, w), value: null } : stat(1.2 + i * 0.1, n, w), max_loss_streak: n ? Math.min(n, 2 + i) : 0,
+        pending_count: n ? i + 1 : 0, untradable_count: n && i === 0 ? 1 : 0, excluded_count: n ? 1 : 0,
+      };
+      const highN = Math.floor(n / 2);
+      const mediumN = Math.floor(n / 3);
       return {
-        horizon_days: d, win_rate: stat(0.52 + i * 0.02, n, w), avg_return_pct: stat(0.4 * (i + 1), n, w),
-        avg_excess_pct: stat(0.1 * (i + 1), n, w), profit_loss_ratio: t.key === 'demo_reversal' ? { ...stat(1, n, w), value: null } : stat(1.2 + i * 0.1, n, w), max_loss_streak: 2 + i,
-        pending_count: i + 1, untradable_count: i === 0 ? 1 : 0, excluded_count: 1,
+        horizon_days: d, ...totals,
+        by_action_confidence: [highN, mediumN, n - highN - mediumN].map((groupN, index) => ({
+          action: 'buy' as const, confidence_level: (['high', 'medium', null] as const)[index],
+          win_rate: stat(0.52 + i * 0.02, groupN, w), avg_return_pct: stat(0.4 * (i + 1), groupN, w),
+          avg_excess_pct: stat(0.1 * (i + 1), groupN, w), profit_loss_ratio: { ...stat(1.2 + i * 0.1, groupN, w), ...(t.key === 'demo_reversal' ? { value: null } : {}) },
+          max_loss_streak: Math.min(groupN, totals.max_loss_streak), pending_count: index === 0 ? totals.pending_count : 0,
+          untradable_count: index === 0 ? totals.untradable_count : 0, excluded_count: index === 0 ? totals.excluded_count : 0,
+        })).filter((group) => group.win_rate.n > 0 || group.pending_count + group.untradable_count + group.excluded_count > 0),
       };
     }),
   };
