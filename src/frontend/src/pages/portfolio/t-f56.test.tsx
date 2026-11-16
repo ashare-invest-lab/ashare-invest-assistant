@@ -34,6 +34,36 @@ function batchRow(batchId: string) {
 }
 
 describe('T-F56 导入历史分页', () => {
+  it.each(['not_a_status', '__proto__', 'constructor', 'toString'].flatMap((status) =>
+    [false, true].map((nextPage) => ({ status, nextPage })),
+  ))('异常状态 $status（后续页：$nextPage）显示中性的「未知」，保留列表且无空白标签', async ({ status, nextPage }) => {
+    const batches = seedBatches(nextPage ? 51 : 1);
+    const target = batches[batches.length - 1];
+    server.use(http.get('/api/v1/imports', ({ request }) => {
+      const result = page(batches, new URL(request.url));
+      return HttpResponse.json({
+        ...result,
+        items: result.items.map((batch) => batch.batch_id === target.batch_id ? { ...batch, status } : batch),
+      });
+    }));
+    renderHistory();
+    if (nextPage) fireEvent.click(await screen.findByTestId('imports-pager-more'));
+    expect(await screen.findByTestId('imports-pager-end')).toHaveTextContent(`已显示全部 ${batches.length} 条`);
+    const row = batchRow(target.batch_id) as HTMLElement;
+    expect(row).toBeInTheDocument();
+    const tag = within(row).getByText('未知');
+    expect(tag).toHaveClass('ant-tag');
+    expect(tag.className).not.toMatch(/ant-tag-(?:has-color|default|processing|blue|green|red|purple)\b/);
+    expect(tag).not.toHaveAttribute('color');
+    expect(tag.style.color).toBe('');
+    expect(tag.style.backgroundColor).toBe('');
+    expect(screen.getByTestId('imports-tab').querySelectorAll('tr[data-row-key]')).toHaveLength(batches.length);
+    for (const label of screen.getByTestId('imports-tab').querySelectorAll('.ant-tag')) {
+      expect(label.textContent?.trim()).not.toBe('');
+    }
+    expect(screen.queryByText('Unexpected Application Error!')).toBeNull();
+  });
+
   it('默认 50 条，加载第 51 条后到底，后续批次仍可查看', async () => {
     const batches = seedBatches();
     const calls: URL[] = [];
