@@ -946,6 +946,41 @@
       "path": "docs/strategies/R-R1/test_audit_public_lists.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 B9–B12 正式缺证与独立代理参考；依 T-A197（契约 v1.0），非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/gen_reference.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 B9–B12 正式缺证与独立代理参考；依 T-A197（契约 v1.0），非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/reference_values.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 B9–B12 正式缺证与独立代理参考；依 T-A197（契约 v1.0），非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources/public_sources.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 B9–B12 正式缺证与独立代理参考；依 T-A197（契约 v1.0），非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources/proxy_inputs.jsonl",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 B9–B12 正式缺证与独立代理参考；依 T-A197（契约 v1.0），非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/inputs/calendar.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86r 通达信公开日线最小日期切片；离线代理输入，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/inputs/listings.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86r 通达信公开日线最小日期切片；离线代理输入，非策略身份"
     }
   ],
   "records": [
@@ -2719,5 +2754,17 @@
     "identity_records_unchanged": true,
     "runtime_changed": false,
     "change": "scope 197→205：登记 main 上 R-R1 公开名单审计 8 文件，T-R71c；来源提交 bec079a；身份45、来源身份文件23、records/stats不变"
+  },
+  "t_r86r_refresh": {
+    "basis": "T-R86r 用户任务：将复现所需公开行情切片入库并登记",
+    "previous_scope_files": 210,
+    "scope_files": 212,
+    "added_paths": [
+      "docs/strategies/T-R86/inputs/calendar.csv",
+      "docs/strategies/T-R86/inputs/listings.csv"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 210→212；身份45、来源身份文件23、records/stats不变"
   }
 }
