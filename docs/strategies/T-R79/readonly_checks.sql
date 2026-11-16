@@ -2,7 +2,7 @@
 -- T-R79c：独立 SELECT/WITH 草稿；本单没有连接数据库或执行本文件。
 -- 参数须由运维绑定，不拼接：:code、:date_from、:date_to、:as_of、:source、
 -- :observation_snapshot_id、:result_snapshot_id、:suggestion_id。
--- 日期窗口含两端；:as_of 是带时区时间，按原观察截止而非当前时间绑定。
+-- 日期窗口含两端；:as_of 是带时区时间，绑定所审计修订冻结的实际运行/补算时点。
 -- 快照/建议标识只可绑定另行授权范围内的本地对象；不输出账户、持仓或快照全文。
 -- 缺行、空集、NULL、类型转换失败均不能判作通过；先确认目标对象/日历覆盖。
 -- JSON 路径来自 service.py:98-116,246-254,346-358 及 models.py:14-38，
@@ -91,7 +91,7 @@ WHERE code = :code AND adj_type = 'none'
 GROUP BY source
 ORDER BY source;
 
--- Q04 / U06：按库存日历核对指定来源整窗OHLC；是覆盖诊断，不裁定D03。
+-- Q04 / U06：按库存日历核对指定来源整窗OHLC；是覆盖诊断，D03已裁定端点与完整性分开。
 -- 日历表列：src/backend/migrations/versions/0001_baseline.py:650-654；
 -- src/backend/app/db/tables/market.py:354-359。
 -- 行情表列同Q03，OHLC：0001_baseline.py:506-509；market.py:368-371。
@@ -143,25 +143,75 @@ SELECT items ->> 'schema_version' = 'p2n03-tracking-v1' AS schema_matches,
 FROM app.data_snapshots
 WHERE id = CAST(:result_snapshot_id AS uuid) AND purpose = 'review';
 
--- Q06 / U10：按一条建议的1/5/20窗口，诊断持久化状态与截止是否晚于到期日结束。
--- 表列：src/backend/migrations/versions/0001_baseline.py:1914-1936,316-325；
--- src/backend/app/db/tables/realtime.py:229-251；reviews.py:23-31,55。
--- JSON键同Q05；state定义：src/backend/app/tracking/models.py:14-19。
--- 判读：应与已存在窗口逐一对上；as_of超到期日结束的数量期望0，缺as_of或空results不能通过。
--- done可含unavailable，不能只看顶层status；computed_at晚于到期日是作业时间，不等于输入穿越。
--- 单次库存查询不能证明到期后5个开市日每日重算或冻结历史，需D04及另行授权的跨日审计。
-SELECT t.horizon_days, t.due_date, t.status, t.computed_at,
-       s.items ->> 'as_of' AS as_of,
-       s.items ->> 'as_of' IS NULL AS missing_as_of,
-       CAST(s.items ->> 'as_of' AS timestamptz) >=
-         ((t.due_date + 1)::timestamp AT TIME ZONE 'Asia/Shanghai') AS as_of_after_due_day,
-       jsonb_array_length(s.items -> 'results') AS result_count,
-       (SELECT count(*) FROM jsonb_array_elements(s.items -> 'results') AS r(value)
-        WHERE r.value ->> 'state' = 'unavailable') AS unavailable_results
-FROM app.suggestion_tracking AS t
-LEFT JOIN app.data_snapshots AS s ON s.id = t.snapshot_id
-WHERE t.suggestion_id = CAST(:suggestion_id AS uuid)
-ORDER BY t.horizon_days;
+-- Q06 / U10：每次绑定一版冻结结果快照，核对该次实际as_of及行情输入门禁。
+-- 只读草稿，未执行；表列：0001_baseline.py:1914-1936,316-325；
+-- 均在src/backend/migrations/versions/下；模型：src/backend/app/db/tables/
+-- realtime.py:229-251、reviews.py:23-31,55；JSON键同Q05及tracking/service.py:55-95。
+-- :result_snapshot_id逐次绑定首次评估/补算修订/旧版，不以当前时间替代快照as_of。
+-- :suggestion_id限定建议；窗口按results中的horizon_days与持久化due_date匹配。
+-- 判读：每个快照/窗口应恰一行，result_count>0且input_bar_count>0；
+-- missing_*须false/0，unverified_*、future_*、after_due_bars均须为0，
+-- 且as_of_timezone_verified=true，才满足本条行情门禁。
+-- available_at、first_seen_at、as_of均须显式时区，按timestamptz瞬时比较，等号有效；
+-- trade_date<=due_date(D_h)，as_of晚于到期日是合法补算，不据此拒绝。
+-- 当前raw_stock/raw_benchmark通常没有available_at：报告未验证，不用first_seen_at代证。
+-- 非法日期/时间导致转换失败即不能通过，不隐式补时区；只查字段不能证明时点来源真实。
+-- 此处仅审计冻结包内股票/主基准日线；缺端点、final及来源版本另按R03/R09/R12核对，
+-- 因子/事实见Q02；辅槽/分钟及未来扩展字段不假定已有schema，不据此宣称全输入通过。
+-- current_container_status/computed_at仅作当前状态参照，不代表本版结果或历史冻结时点。
+-- 混合终态容器须逐结果核对原冻结包，不能借另一unavailable的新as_of解冻终态。
+-- 单次SELECT不证明五日逐日作业、旧版重放或冻结历史；须另行跨日审计，日历未知不推进5日。
+-- 股票complete缺基准仍冻结、新增对照仅研究包；第5日作业具体钟点「未验证」。
+WITH snapshot AS (
+    SELECT id, items
+    FROM app.data_snapshots
+    WHERE id = CAST(:result_snapshot_id AS uuid) AND purpose = 'review'
+      AND items ->> 'schema_version' = 'p2n03-tracking-v1'
+), windows AS (
+    SELECT s.id, s.items, t.horizon_days, t.due_date, t.status, t.computed_at,
+           (SELECT count(*) FROM jsonb_array_elements(s.items -> 'results') AS r(value)
+            WHERE CAST(r.value ->> 'horizon_days' AS integer) = t.horizon_days) AS result_count
+    FROM snapshot AS s
+    JOIN app.suggestion_tracking AS t
+      ON t.suggestion_id = CAST(:suggestion_id AS uuid)
+    WHERE EXISTS (
+        SELECT 1 FROM jsonb_array_elements(s.items -> 'results') AS r(value)
+        WHERE CAST(r.value ->> 'horizon_days' AS integer) = t.horizon_days
+    )
+), input_rows AS (
+    SELECT s.id, b.value AS item
+    FROM snapshot AS s
+    CROSS JOIN LATERAL (
+        SELECT value FROM jsonb_array_elements(s.items -> 'raw_stock' -> 'bars')
+        UNION ALL
+        SELECT value FROM jsonb_array_elements(s.items -> 'raw_benchmark' -> 'bars')
+    ) AS b
+), checked AS (
+    SELECT w.*, i.item,
+           w.items ->> 'as_of' ~ '(Z|[+-][0-9]{2}:[0-9]{2})$' AS as_of_has_zone,
+           i.item ->> 'available_at' ~ '(Z|[+-][0-9]{2}:[0-9]{2})$' AS available_has_zone,
+           i.item ->> 'first_seen_at' ~ '(Z|[+-][0-9]{2}:[0-9]{2})$' AS first_seen_has_zone
+    FROM windows AS w LEFT JOIN input_rows AS i ON i.id = w.id
+)
+SELECT id AS result_snapshot_id, horizon_days, due_date,
+       status AS current_container_status, computed_at, items ->> 'as_of' AS as_of,
+       (items ->> 'as_of' IS NULL) AS missing_as_of,
+       bool_and(as_of_has_zone IS TRUE) AS as_of_timezone_verified,
+       due_date IS NULL AS missing_due_date, result_count,
+       count(item) AS input_bar_count,
+       count(*) FILTER (WHERE item ->> 'trade_date' IS NULL) AS missing_trade_dates,
+       count(*) FILTER (WHERE available_has_zone IS DISTINCT FROM true) AS unverified_available_at,
+       count(*) FILTER (WHERE first_seen_has_zone IS DISTINCT FROM true) AS unverified_first_seen_at,
+       count(*) FILTER (WHERE CASE WHEN as_of_has_zone AND available_has_zone THEN
+           CAST(item ->> 'available_at' AS timestamptz) > CAST(items ->> 'as_of' AS timestamptz)
+           ELSE false END) AS future_available_at,
+       count(*) FILTER (WHERE CASE WHEN as_of_has_zone AND first_seen_has_zone THEN
+           CAST(item ->> 'first_seen_at' AS timestamptz) > CAST(items ->> 'as_of' AS timestamptz)
+           ELSE false END) AS future_first_seen_at,
+       count(*) FILTER (WHERE CAST(item ->> 'trade_date' AS date) > due_date) AS after_due_bars
+FROM checked
+GROUP BY id, horizon_days, due_date, status, computed_at, items, result_count
+ORDER BY horizon_days;
 
 -- Q07 / U12/U11：指定结果快照按策略版本/周期/基准分组重数，输出匿名计数、hold可用数。
 -- 表列：src/backend/migrations/versions/0001_baseline.py:316-325；

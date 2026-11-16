@@ -219,7 +219,7 @@ def main():
     args = parser.parse_args()
     random.seed(SEED)
     sha = verify_archive(args.archive, args.sha256sums)
-    with tempfile.TemporaryDirectory(prefix="u11-", dir="/tmp") as tmp:
+    with tempfile.TemporaryDirectory(prefix="u11-") as tmp:
         with zipfile.ZipFile(args.archive) as z:
             result = collect(z, Path(tmp))
     result["protocol"] = {
