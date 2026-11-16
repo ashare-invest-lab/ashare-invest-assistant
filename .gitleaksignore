@@ -37,5 +37,5 @@ fd8e49ed12950f2d712a2fb1d1c0fd03317ab512:tests/backend/unit/test_ta75_ip_limit_e
 918b4f2a06d009ba7a58fbb90f6250795844df92:docs/strategies/T-R60/export_lexicon.py:generic-api-key:39
 # 运维手册命令中 --secret-path= 后为文件名，不是密钥值。T-O91 运维掩码核对 2026-11-15；新增须 CODEOWNERS 评审
 c62a79507d111328a0b95b8d5d1eb78f9caaac69:docs/handover/team/reports/T-O46.md:generic-api-key:6
-# PR283裁定6920537325：c57843f该行为公开SHA256摘要，S7-statement-header误报；仅此提交+文件+规则+行精确豁免。
+# PR283裁定6920537325：c57843f第35行为公开权息原包SHA256，第37行命中为公开切片及隐私说明，S7-statement-header误报；仅此提交+文件+规则+行精确豁免。
 c57843f1dc14b108a2a638e63504e6b85507f0cf:docs/strategies/T-R86/README.md:S7-statement-header:37
