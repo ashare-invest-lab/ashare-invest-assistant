@@ -24,6 +24,9 @@ SAMPLES = (
     "sz300750", "sh688981", "sh688801", "sz001246", "sz001381",
     "sz301569", "sz301718", "bj920000", "bj920085", "sz000972",
 )
+# README T-R82 current SH/SZ snapshot hits; conservative B7 proxy exclusion only.
+# This is not evaluation-date PIT ST identity; no BSE snapshot was obtained.
+ST_CURRENT_SNAPSHOT_HITS = frozenset({"sz000972"})
 HASHES = (
     "b6c2a5043a76d8f9b9752b3cca1952ed697ac7bd5eebe88cd7a96809f47cee46",
     "c1cbc818d748079aa79749393729dbcf378adf258a22734762d19b885ed0eeab",
@@ -133,7 +136,7 @@ def proxy_context(rows, calendar, board, segments):
     return valid, previous, limits, unlimited, suspected
 
 
-def proxies(rows, calendar, d, board, context):
+def proxies(rows, calendar, d, board, context, st_current_snapshot_hit):
     valid, previous, limits, unlimited, suspected = context
     history = calendar[:bisect_right(calendar, d)]
     w20, w60, span = history[-20:], history[-60:], history[-61:]
@@ -156,6 +159,9 @@ def proxies(rows, calendar, d, board, context):
             if index == 6:
                 if board == "main_board":
                     flags.append("st_unverified")
+                if st_current_snapshot_hit:
+                    gaps.append("excluded_st_suspected")
+                    flags.append("st_current_snapshot_hit")
                 if any(r[0] not in limits for r in chosen):
                     gaps.append("limit_price_unavailable")
             else:
@@ -266,7 +272,8 @@ def generate(day_zip, gbbq_zip):
                 context = proxy_context(rows, ref, board, segments)
                 for d in DATES:
                     diag = diagnostics(rows, ref, d, board, segments)
-                    proxy_rows = list(proxies(rows, ref, d, board, context))
+                    proxy_rows = list(proxies(rows, ref, d, board, context,
+                                              stem in ST_CURRENT_SNAPSHOT_HITS))
                     for index, (key, unit, precision) in enumerate(FEATURES):
                         gaps = ["calendar_missing", "pit_finality_missing", "spec_ambiguous:A01"]
                         if index:
