@@ -906,6 +906,31 @@
       "path": "docs/strategies/T-R74/param_audit.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 F09–F12 正式缺证与独立代理参考；待 T-A197 裁定，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/gen_reference.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 F09–F12 正式缺证与独立代理参考；待 T-A197 裁定，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/reference_values.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 F09–F12 正式缺证与独立代理参考；待 T-A197 裁定，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources/public_sources.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 F09–F12 正式缺证与独立代理参考；待 T-A197 裁定，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources/proxy_inputs.jsonl",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86 F09–F12 正式缺证与独立代理参考；待 T-A197 裁定，非策略身份"
     }
   ],
   "records": [
@@ -2661,5 +2686,19 @@
     "identity_records_unchanged": true,
     "runtime_changed": false,
     "change": "scope 196→197（合入 T-R73b 后）；身份45、来源身份文件23、records/stats不变"
+  },
+  "t_r86_refresh": {
+    "basis": "T-R86 用户任务：F09–F12 离线参考及公开来源登记",
+    "previous_scope_files": 197,
+    "scope_files": 202,
+    "added_paths": [
+      "docs/strategies/T-R86/README.md",
+      "docs/strategies/T-R86/gen_reference.py",
+      "docs/strategies/T-R86/reference_values.csv",
+      "docs/strategies/T-R86/sources/public_sources.csv",
+      "docs/strategies/T-R86/sources/proxy_inputs.jsonl"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false
   }
 }
