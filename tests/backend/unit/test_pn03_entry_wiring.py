@@ -596,7 +596,9 @@ def test_pn03_entry_day_runner_ps1(tmp_path) -> None:
             "import json, os, sys\n"
             "with open(os.environ['PN03_DOCKER_LOG'], 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
             "if 'find' in sys.argv: print('./day_2030.csv\\n./day_2031.csv')\n"
-            "if 'psql' in sys.argv: print('1 | 1 | 0')\n",
+            "if 'psql' in sys.argv:\n"
+            "    print('1 | 1 | 0')\n"
+            "    print('blocked_bj_unconfirmed | 0')\n",
             encoding="utf-8",
         )
         bindir = tmp_path / (directory.name + "_bin")
@@ -676,7 +678,8 @@ def test_pn03_entry_load_day_sql(pg_conn) -> None:
     counts = _run_sql(
         pg_conn, schema, "tb143_load_day.sql", {"day_stage": [header, row]}
     )
-    assert counts == [(1, 1, 0)]
+    # T-B163 在 candidates/inserted/skipped 后新增 blocked_bj 计数。
+    assert counts == [(1, 1, 0, 0)]
     assert pg_conn.execute(
         f'SELECT source FROM "{schema}".daily_bars WHERE code=%s AND trade_date=%s',
         (CODE_A, D0),
