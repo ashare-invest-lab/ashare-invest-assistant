@@ -9,7 +9,7 @@ import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import {
   ACTION_SHORT, ALERT_STATUS, DATA_GAP_SCOPE, EXECUTABILITY, GAP_REASON, PLAN_CONDITION_KIND, PLAN_DRAFT_STATUS, REASON_CODE, RECONCILIATION, REGIME,
-  RISK_CONTROL, RISK_LEVEL, SESSION, SEVERITY, SEVERITY_TEXT,
+  RISK_CONTROL, RISK_LEVEL, SESSION, severityTag,
 } from '../../i18n/labels';
 import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
@@ -221,7 +221,7 @@ export function TodayPage() {
           <ul className="today-list">
             {t.alerts.items.map((a) => (
               <li key={a.id} data-testid={`alert-${a.id}`}>
-                <Tag color={Object.hasOwn(SEVERITY, a.severity) ? SEVERITY[a.severity] : undefined}>{Object.hasOwn(SEVERITY_TEXT, a.severity) ? SEVERITY_TEXT[a.severity] : '未知级别'}</Tag>
+                <Tag color={severityTag(a.severity).color}>{severityTag(a.severity).text}</Tag>
                 {a.status === 'new' ? <span className="today-unread-dot" data-testid="alert-unread" aria-label={ALERT_STATUS.new} title={ALERT_STATUS.new} /> : null}
                 <span>{a.title}</span>
                 {stockLink(a.security_code, a.name)}

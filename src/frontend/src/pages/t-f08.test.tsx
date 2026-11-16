@@ -256,7 +256,7 @@ describe('T-F08 今日关注', () => {
       expect(alerts).toBeInTheDocument();
       const li = within(alerts).getByTestId(`alert-${alert.id}`);
       expect(li).toHaveTextContent(alert.title);
-      const tag = within(li).getByText('未知级别', { exact: true });
+      const tag = within(li).getByText('未知', { exact: true });
       expect(tag).toHaveClass('ant-tag');
       for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
       expect(tag.style.color).toBe('');
