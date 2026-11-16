@@ -920,7 +920,7 @@
     {
       "path": "docs/strategies/T-R83/fq_options.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-R85 F-Q01–F-Q09 备选口径、出处与推荐，待 T-A196 裁定；非策略身份，不改变运行周期"
+      "note": "T-R85 F-Q01–F-Q09 备选口径、出处与推荐，已由 T-A197 / #225 裁定采用 Opt-A；非策略身份，不改变运行周期"
     }
   ],
   "records": [
