@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ta172_bj_gate_support import (
     BJ, CODES, DAY, IDENT, NOW, OTHER, ROOT, SCENARIOS, SH, SZ, MemoryDB,
     Observation, TARGET_DML, bar, check_observation, confirm, entry, executable_sql,
-    fail_findings, function_source, instrument, module, normalized, pairs, raw,
+    fail_findings, function_source, instrument, module, normalized, pairs as original_pairs, raw,
     revoke, run_public, setup_scenario, source, sql_findings,
 )
 
@@ -58,7 +58,7 @@ scenarios = pytest.mark.parametrize("scenario", SCENARIOS)
 
 
 @pytest.fixture(autouse=True)
-def offline_and_unconfirmed(monkeypatch):
+def offline_and_unconfirmed(monkeypatch, bj_isolated_list):
     """Reject even localhost DB/network and external commands; no real credentials."""
     monkeypatch.delenv("MAIRUI_LICENCE", raising=False)
 
@@ -71,9 +71,20 @@ def offline_and_unconfirmed(monkeypatch):
         monkeypatch.setattr(socket, name, denied)
     monkeypatch.setattr(subprocess, "Popen", denied)
     monkeypatch.setattr(os, "system", denied)
+    # Positive controls require explicit isolation and a matched code.
+    import ta172_bj_gate_support as support
+    monkeypatch.setattr(support, "pairs", pairs)
+    bj_isolated_list([BJ])
     revoke()
     yield
     revoke()
+
+
+def pairs(scenario="valid"):
+    material = original_pairs(scenario)
+    for side in ("mairui", "tdx_local"):
+        material[-1][side]["code"] = BJ
+    return material
 
 
 def exercise(monkeypatch, tmp_path, scenario, name, *, source_name="mairui"):
@@ -299,8 +310,8 @@ def test_ta172_load_day_sql_session_bj_gate(scenario):
     creates = re.findall(r'\bCREATE\s+((?:TEMP(?:ORARY)?\s+)?TABLE)\b', code, re.I)
     if any(not kind.upper().startswith("TEMP") for kind in creates):
         issues.append("§10.12 SQL cannot create persistent tables")
-    if re.search(r'\bCOMMIT\b(?!\s+DROP\b)', code, re.I):
-        issues.append("§10.12 staging SQL cannot COMMIT; load_day owns the transaction")
+    if re.search(r'\b(?:COMMIT\b(?!\s+DROP\b)|ROLLBACK\b)', code, re.I):
+        issues.append("§10.12 staging SQL cannot COMMIT/ROLLBACK; load_day owns the transaction")
     if scenario == "bj_default_blocked":
         if re.search(r"v_bj_confirmed\s*(?::=|boolean\s+default)\s*true", text, re.I):
             issues.append("§10.10 new SQL session cannot start confirmed")

@@ -92,3 +92,14 @@ def pg_conn(pg_url: str):  # type: ignore[no-untyped-def]
     with psycopg.connect(pg_url, autocommit=False) as conn:
         yield conn
         conn.rollback()
+
+
+@pytest.fixture
+def bj_isolated_list(monkeypatch):
+    """仅合成测试显式注入 BJ 隔离清单。"""
+    from app import bj_offline_volume
+
+    def inject(codes):
+        monkeypatch.setattr(bj_offline_volume, "_BJ_ISOLATED_CONFIRMATIONS", frozenset(codes))
+
+    return inject

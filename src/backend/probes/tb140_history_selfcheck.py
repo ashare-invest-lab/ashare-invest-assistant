@@ -19,6 +19,8 @@ PROBES = Path(__file__).resolve().parent
 if str(PROBES) not in sys.path:
     sys.path.insert(0, str(PROBES))
 
+from app import bj_offline_volume as bj_gate  # noqa: E402
+
 import tb140_history_backfill as bf  # noqa: E402
 import tb140_history_load as ld  # noqa: E402
 import tb140_history_supervisor as sv  # noqa: E402
@@ -921,16 +923,19 @@ def test_non_200_body_failure_does_not_retry() -> None:
 
 
 def test_cross_batch_db_and_checkpoint() -> None:
-    # 20 只人工合成 BJ 对照，只确认量单位，不读取真实行情或证券样本。
-    ld.confirm_bj_offline_volume_units([
-        {
-            "mairui": {"code": f"{920801 + offset}.BJ", "t": "2024-01-04", "v": 2 + offset},
-            "tdx_local": {"code": f"{920801 + offset}.BJ", "trade_date": "2024-01-04",
-                          "source": "tdx_local", "volume": 200 + offset * 100},
-        }
-        for offset in range(20)
-    ])
-    with tempfile.TemporaryDirectory() as raw:
+    codes = [*range(920801, 920820), 920982]
+    # 自检临时注入隔离清单，退出（含异常）后恢复；不提供生产入口。
+    with patch.object(bj_gate, "_BJ_ISOLATED_CONFIRMATIONS",
+                      frozenset(f"{code}.BJ" for code in codes)), tempfile.TemporaryDirectory() as raw:
+        # 仅合成数据：20 只对照包含本次写入码，不读取真实行情或证券样本。
+        ld.confirm_bj_offline_volume_units([
+            {
+                "mairui": {"code": f"{code}.BJ", "t": "2024-01-04", "v": 2 + offset},
+                "tdx_local": {"code": f"{code}.BJ", "trade_date": "2024-01-04",
+                              "source": "tdx_local", "volume": 200 + offset * 100},
+            }
+            for offset, code in enumerate(codes)
+        ])
         tmp = Path(raw)
         ws = _workspace(tmp)
         script: list[Any] = [
@@ -1097,7 +1102,10 @@ def _check_interval(*, supervised: bool, interval: float, accepted: bool) -> Non
         else:
             assert accepted, "interval below floor should be rejected"
             expected = 3 if supervised else 2
-            assert summary["done"] == expected and summary["halt"] is None
+            # 无隔离注入：沪深完成，BJ 保持阻断；不能依赖前例遗留确认。
+            assert summary["done"] == 2 and summary["halt"] is None
+            if supervised:
+                assert summary["blocked_bj_unconfirmed"] == ["920982"]
             assert len(conn.requests) == expected
             assert len(sleeps) == expected and all(s >= 0.2 for s in sleeps)
         state = bf.load_counter(ws["counter"])

@@ -7,7 +7,7 @@
 - 库内 volume 为股：daily-bars-tdx 契约「两侧均为股」，故 volume = v × 100。
 - 主键 (code, trade_date, adj_type)，ON CONFLICT DO NOTHING：app/db/tables/market.py。
 - active 证书判定对齐 owned_daily_read._licence（status=active、未删除、未暂停、未过期、无 hold）。
-- T-A158 第 5 项：BJ 写库前须 confirm_bj_offline_volume_units 离线对算至少 20 只。
+- 契约 §10.12 第 1 条：可信材料未落地，生产 BJ 阻断；自填对照不构成许可。
 """
 from __future__ import annotations
 
@@ -281,7 +281,7 @@ def render_insert_sql(
     blocked_bj = len(material) - len(writable)
     blocked_note = (
         f"-- BJ INSERT blocked: bj_offline_volume_units_unconfirmed ({blocked_bj} rows); "
-        "call confirm_bj_offline_volume_units first.\n"
+        "契约 §10.12 第 1 条：可信材料未落地，生产 BJ 阻断。\n"
     ) if blocked_bj else ""
     payload = json.dumps({"bars": material, "licence_id": licence_id}, ensure_ascii=False, default=str)
     material = writable

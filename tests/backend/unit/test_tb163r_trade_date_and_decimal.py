@@ -81,7 +81,10 @@ def test_confirm_rejects_mismatch_hidden_by_default_decimal_precision(lots_text)
     "12345678901234567890123456789",
     "98765432109876543210987654321.09",
 ])
-def test_confirm_accepts_exact_high_precision_volume_for_twenty_codes(lots_text):
+@pytest.mark.parametrize("isolated", [False, True])
+def test_confirm_accepts_exact_high_precision_volume_for_twenty_codes(lots_text, isolated, bj_isolated_list):
+    if isolated:
+        bj_isolated_list(_codes())
     lots = Decimal(lots_text)
     assert len(lots.as_tuple().digits) > 28
     # 独立高精度乘法构造股数，避免用默认上下文，也不复制被测 as_tuple 算法。
@@ -96,4 +99,5 @@ def test_confirm_accepts_exact_high_precision_volume_for_twenty_codes(lots_text)
         assert gate.confirm_bj_offline_volume_units(
             _pairs(lots=lots_text, shares=str(shares))
         ) == _codes()
-        assert not gate._bj_write_unconfirmed({"code": "920999.BJ"})
+        assert gate._bj_write_unconfirmed({"code": "920000.BJ"}) is (not isolated)
+        assert gate._bj_write_unconfirmed({"code": "920999.BJ"})
