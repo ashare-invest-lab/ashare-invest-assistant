@@ -2,9 +2,8 @@
 """Freeze a trusted base measurement, never the PR's own editable baseline.
 
 Only the first approved pre-ratchet main commit uses the reviewed 4c02 counts.
-Later baselines use validated main push artifacts. Apart from one approved docs-only
-pair, PR and merge-group events remain exact-base; only main events may recover
-through a bounded first-parent history.
+Later baselines use validated main push artifacts. All supported events may recover
+an unavailable exact main measurement through a bounded first-parent history.
 """
 from __future__ import annotations
 
@@ -109,8 +108,10 @@ def read_artifact(data: bytes, sha: str, run_id: int, attempt: int) -> dict:
             if coverage_counts(coverage) != record["counts"]:
                 raise ValueError("Archived coverage.json counts disagree with measurement")
             record["_coverage_json"] = coverage
+    if record.get("ratchet_passed") is not True:
+        raise ValueError("Artifact ratchet_passed is not true")
     if (record.get("commit") != sha or record.get("run_id") != str(run_id)
-            or record.get("attempt") != str(attempt) or record.get("ratchet_passed") is not True):
+            or record.get("attempt") != str(attempt)):
         raise ValueError("Artifact does not belong to exact trusted base run")
     record["source"] = {"kind": "trusted-main-push-artifact", "commit": sha,
                         "run_id": run_id, "attempt": attempt}
@@ -162,8 +163,8 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError,
         if any(not path.startswith("docs/") for path in diff.stdout.split("\0") if path):
             raise ValueError("Explicit recovery requires a docs-only diff")
         sha = EXPLICIT_RECOVERY_PARENT
-    # Keep PR selection, trust checks and failure behavior exact. Main recovery
-    # classifies only missing/invalid measurement data, never git or API failures.
+    # Recovery classifies only missing/invalid measurement data, never git or API
+    # failures. Source selection and trust checks remain exact for each candidate.
     exists = subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=ROOT,
                             capture_output=True, check=False)
     if exists.returncode:
@@ -235,7 +236,7 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError,
     except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         if unavailable is ValueError:
             raise
-        raise unavailable("Invalid exact-base main push measurement") from exc
+        raise unavailable("Invalid exact-base main push measurement: " + str(exc)) from exc
     if sha != requested_base:
         record["source"]["requested_base"] = requested_base
     return record
@@ -245,14 +246,16 @@ def freeze(repo: str, sha: str, get, *, allow_fallback: bool = False) -> dict:
     if not allow_fallback:
         return _freeze_exact(repo, sha, get)
     requested = sha
+    reason = ""
     for skipped in range(MAX_FALLBACK_ANCESTORS + 1):
         try:
             record = _freeze_exact(repo, sha, get, unavailable=MeasurementUnavailable)
         except MeasurementPending:
             if skipped == 0:
                 raise  # Retain the existing wait for this head's active push.
-        except MeasurementUnavailable:
-            pass
+        except MeasurementUnavailable as exc:
+            if skipped == 0:
+                reason = str(exc)
         else:
             if skipped == 0:
                 return record  # Including the original exact bootstrap behavior.
@@ -261,6 +264,7 @@ def freeze(repo: str, sha: str, get, *, allow_fallback: bool = False) -> dict:
             record["source"]["fallback"] = {
                 "requested_base_commit": requested, "skipped_heads": skipped,
                 "ancestor_limit": MAX_FALLBACK_ANCESTORS,
+                "reason": reason,
             }
             return record
         if skipped == MAX_FALLBACK_ANCESTORS:
@@ -364,12 +368,8 @@ def main() -> int:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         repo, sha = base_identity(event, os.environ)
         get = api_reader(repo)
-        if (os.environ["GITHUB_EVENT_NAME"] in {"push", "workflow_dispatch"}
-                and os.environ.get("GITHUB_REF") == "refs/heads/main"):
-            record = wait_for_base(repo, sha, get, args.wait_for_main_seconds,
-                                   allow_fallback=True)
-        else:
-            record = wait_for_base(repo, sha, get, args.wait_for_main_seconds)
+        record = wait_for_base(repo, sha, get, args.wait_for_main_seconds,
+                               allow_fallback=True)
         coverage = record.pop("_coverage_json", None)
         if args.output.exists() or (args.coverage_output is not None and args.coverage_output.exists()):
             raise ValueError("Refuse to replace a frozen baseline")
@@ -385,6 +385,8 @@ def main() -> int:
         print("Frozen coverage baseline: " + selected + "; source=" + source["kind"])
         if "fallback" in source:
             print("Recovered requested base: " + sha
+                  + "; reason=" + source["fallback"]["reason"]
+                  + "; first-parent fallback commit=" + selected
                   + "; skipped_heads=" + str(source["fallback"]["skipped_heads"]))
         return 0
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError) as exc:
