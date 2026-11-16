@@ -9,8 +9,9 @@ from app.features.horizon_adjustments import FactorBundle, FactorObservation, to
 from app.features.pipeline import prepare
 
 
-@pytest.mark.parametrize("missing", [False, True])
-def test_prepare_iso_time_and_missing_anchor(missing: bool) -> None:
+@pytest.mark.parametrize("gap", [None, "adjust_factor_missing:2026-11-16", "evidence_unavailable"])
+def test_prepare_iso_time_and_missing_anchor(gap: str | None) -> None:
+    missing = gap is not None
     day = date(2026, 11, 15)
     at = datetime(2026, 11, 15, 9, tzinfo=UTC)
     factor = FactorObservation(day, "2", at, "synthetic-version")
@@ -19,7 +20,7 @@ def test_prepare_iso_time_and_missing_anchor(missing: bool) -> None:
         (factor.version_id,),
         "a" * 64,
         (day,),
-        ("adjust_factor_missing:2026-11-16",) if missing else (),
+        (gap,) if gap else (),
     )
     assert to_prepare_factors(bundle) == (
         [] if missing else [{"date": str(day), "value": "2", "available_at": at.isoformat()}]

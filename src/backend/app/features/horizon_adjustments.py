@@ -9,12 +9,12 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, RowMapping, and_, or_, select
 
 from app.db.tables.horizon import horizon_input_versions as versions
 from app.features.horizon_evidence_provider import DatabaseHorizonEvidenceProvider
 from app.features.horizon_evidence_store import EvidenceRejected, validate_payload
-from app.features.horizon_sources import SourceVersion, aware
+from app.features.horizon_sources import aware
 from app.features.horizon_windows import BEIJING
 
 
@@ -45,157 +45,173 @@ def read_adjustment_factors(
     as_of: datetime,
     snapshot_sha256: str,
 ) -> FactorBundle:
-    """由 b2b 统一执行范围/PIT/修订选择；仅按选中 ID 读取原材料。
-
-    coverage 为「实际成功请求日期」集合，不代表窗口完整或事件已全证；
-    请求缺日或因子 issues 非空即 missing，不以 1 补齐。
-    """
+    """先限定快照再选择修订；复用 b2b 资格门禁，整个依赖闭包保守校验。"""
     anchor = aware(as_of).astimezone(BEIJING).date()
     targets = sorted(set(dates))
     provider = DatabaseHorizonEvidenceProvider(conn)
-    identity: dict[str, Any] = {
-        "user_id": user_id,
-        "licence_id": licence_id,
-        "code": code,
-        "as_of": as_of,
-    }
+    identity: dict[str, Any] = {"user_id": user_id, "licence_id": licence_id}
+    identity.update(code=code, as_of=as_of)
     c = versions.c
-    # 只发现当前用户稀疏观测的日期目录，其余隔离或可见性判断交给 b2b。
-    catalogue = (
-        list(
-            conn.scalars(
-                select(c.data_date)
-                .where(
-                    c.user_id == user_id,
-                    c.kind == "adjust_factor",
-                    c.code == code,
-                    c.data_date <= anchor,
-                )
-                .distinct()
-            )
-        )
-        if targets
-        else []
-    )
-    selected = provider.read_versions(**identity, kind="adjust_factor", dates=catalogue)
-    # 稀疏累计观测不要求每日落库；目录上无可见版本不等于请求日缺因子。
-    gaps = [g for g in selected.gaps if not g.startswith("version_missing:")]
-    blocked = {
-        date.fromisoformat(g.split(":", 3)[2])
-        for g in gaps
-        if g.startswith("version_conflict:adjust_factor:")
-    }
-    by_day: dict[date, list[tuple[SourceVersion, dict[str, Any]]]] = defaultdict(list)
-    chosen = {UUID(v.version_id): v for v in selected.versions}
-
-    def audits_verified(v: SourceVersion, p: dict[str, Any]) -> bool:
-        # verified 键为本裁定读取门禁；槽内结构仍未验证。
-        if all(p[slot].get("verified") is True for slot in ("algo_audit", "integrity_audit")):
-            return True
-        gaps.append(f"adjust_factor_unverified:{v.version_id}")
-        return False
-
+    gaps: list[str] = []
+    blocked: set[date] = set()
+    unknown_events: set[date] = set()
+    groups: dict[tuple[object, ...], list[RowMapping]] = defaultdict(list)
+    # 目录保留未知/晚可见材料；其他快照不参与审计或修订图，避免误挡与回退。
+    scope = and_(c.licence_id.is_(None), c.scope.in_(("public", "synthetic")))
     for row in conn.execute(
-        select(c.id, c.data_date, c.payload).where(c.id.in_(chosen))
+        select(versions).where(
+            c.user_id == user_id,
+            or_(scope, and_(c.scope == "per_licence", c.licence_id == licence_id))
+            if licence_id is not None
+            else scope,
+            c.code == code,
+            c.kind.in_(("adjust_factor", "ex_rights")),
+            c.data_date <= anchor,
+        )
     ).mappings():
-        v = chosen[row["id"]]
-        p = row["payload"]
+        groups[
+            tuple(row[k] for k in ("kind", "source", "data_date", "source_key", "licence_id"))
+        ].append(row)
+    selected: dict[UUID, RowMapping] = {}
+    for group in groups.values():
+        foreign = {
+            r["id"]
+            for r in group
+            if r["payload"].get("snapshot_sha256") not in (None, snapshot_sha256)
+        }
+        group = [r for r in group if r["id"] not in foreign]
+        if not group:
+            continue
+        invalid = [r for r in group if provider._qualified(r, user_id, licence_id, as_of) is None]
+        parents = {
+            r["id"]: None if r["supersedes_id"] in foreign else r["supersedes_id"] for r in group
+        }
+        tips = [r for r in group if r["id"] not in parents.values()]
+        current = tips[0]["id"] if len(tips) == 1 else None
+        seen = set()
+        while current in parents and current not in seen:
+            seen.add(current)
+            current = parents[current]
+        if invalid or len(seen) != len(group) or current is not None:
+            for r in invalid or group:
+                reason = (
+                    "visibility_or_qualification"
+                    if invalid
+                    else f"version_conflict:{r['kind']}:{r['data_date']}"
+                )
+                gaps.append(f"adjust_factor_invalid:{r['id']}:{reason}")
+                (blocked if r["kind"] == "adjust_factor" else unknown_events).add(r["data_date"])
+        else:
+            selected[tips[0]["id"]] = tips[0]
+    by_day: dict[date, list[RowMapping]] = defaultdict(list)
+    for row in selected.values():
+        if row["kind"] == "adjust_factor":
+            by_day[row["data_date"]].append(row)
+
+    def closure(root: RowMapping) -> tuple[str, ...] | None:
+        # 后序迭代：缓存携带整个子树的类型、业务日期和最大可见时刻。
+        summaries: dict[UUID, tuple[set[date], set[date], datetime]] = {}
+        active: set[UUID] = set()
+        rows = {root["id"]: root}
+        pending = [(root["id"], 0, False)]
         try:
-            # §3.4 槽内结构仍未验证；先沿 b2a 校验非空证据槽，再应用读取门禁。
-            validate_payload(
-                "adjust_factor",
-                p,
-                dependency_ids=[UUID(d) for d in v.dependency_ids],
-                transform_version=v.transform_version,
-                available_at=v.available_at,
-            )
-            if p["date"] != str(row["data_date"]):
-                raise EvidenceRejected("adjust_factor:date_mismatch")
-        except EvidenceRejected as exc:
-            gaps.append(f"adjust_factor_invalid:{v.version_id}:{exc.reason}")
-            blocked.add(row["data_date"])
-            continue
-        if not audits_verified(v, p):
-            blocked.add(row["data_date"])
-            continue
-        if p["snapshot_sha256"] != snapshot_sha256:
-            gaps.append(f"adjust_factor_snapshot_mismatch:{v.version_id}")
-            continue
-        by_day[row["data_date"]].append((v, p))
-
-    checked: dict[str, tuple[str, ...] | None] = {}
-
-    def dependencies(v: SourceVersion) -> tuple[str, ...] | None:
-        if v.version_id in checked:
-            return checked[v.version_id]
-        checked[v.version_id] = None  # 同时拒绝损坏材料中的依赖环。
-        used: list[str] = []
-        reference_days: list[date] = []
-        ex_days: list[date] = []
-        for dep_id in v.dependency_ids:
-            # 引用 ID 的类型/日期目录仅用于调用 b2b；未经其选择不读取 payload。
-            meta = (
-                conn.execute(select(c.kind, c.code, c.data_date).where(c.id == UUID(dep_id)))
-                .mappings()
-                .first()
-            )
-            if meta is None:
-                return None
-            try:
-                bundle = provider.read_versions(
-                    **{**identity, "code": meta["code"] or code},
-                    kind=meta["kind"],
-                    dates=[meta["data_date"]],
-                )
-            except KeyError:
-                # 历史材料缺字段可能在 b2b 投影时失败；拒绝依赖，不绕过其选择。
-                return None
-            dep = next((d for d in bundle.versions if d.version_id == dep_id), None)
-            if dep is None or bundle.gaps:
-                return None
-            p = conn.scalar(select(c.payload).where(c.id == UUID(dep_id)))
-            if p is None:
-                return None
-            try:
-                validate_payload(
-                    meta["kind"],
-                    p,
-                    dependency_ids=[UUID(d) for d in dep.dependency_ids],
-                    transform_version=dep.transform_version,
-                    available_at=dep.available_at,
-                )
-                if meta["kind"] == "ex_rights" and (
-                    date.fromisoformat(p["ex_date"]) > anchor
-                    or p["snapshot_sha256"] != snapshot_sha256
-                ):
-                    return None
-                if meta["kind"] == "adjust_factor" and p["snapshot_sha256"] != snapshot_sha256:
-                    return None
-                if meta["kind"] == "adjust_factor" and not audits_verified(dep, p):
-                    return None
-                # 参考价 daily_bar 的字段/日期/单位口径仍未验证；仅作保守读取门禁。
-                if meta["kind"] == "daily_bar":
+            while pending:
+                item, depth, exiting = pending.pop()
+                if depth > 128 or len(rows) > 1024 or len(pending) > 2048:
+                    raise EvidenceRejected("closure_limit:depth=128:nodes=1024")
+                if item in summaries:
+                    continue
+                r = rows.get(item)
+                if r is None:
+                    r = conn.execute(select(versions).where(c.id == item)).mappings().first()
+                    if r is None:
+                        raise EvidenceRejected("dependency_missing")
+                    rows[item] = r
+                p, kind, deps = r["payload"], r["kind"], r["dependency_ids"]
+                if not exiting:
+                    if item in active:
+                        raise EvidenceRejected("dependency_cycle")
+                    if r["code"] != code:
+                        raise EvidenceRejected("code_mismatch")
+                    if kind in ("adjust_factor", "ex_rights"):
+                        if item not in selected:
+                            raise EvidenceRejected("snapshot_or_revision_unavailable")
+                    else:
+                        bundle = provider.read_versions(
+                            **identity, kind=kind, dates=[r["data_date"]]
+                        )
+                        if bundle.gaps or str(item) not in {v.version_id for v in bundle.versions}:
+                            raise EvidenceRejected(";".join(bundle.gaps) or "revision_not_selected")
+                    validate_payload(
+                        kind,
+                        p,
+                        dependency_ids=deps,
+                        transform_version=r["transform_version"],
+                        available_at=r["available_at"],
+                    )
+                    key = {
+                        "daily_bar": "trade_date",
+                        "ex_rights": "ex_date",
+                        "adjust_factor": "date",
+                    }[kind]
+                    if p.get("code", code) != code or p[key] != str(r["data_date"]):
+                        raise EvidenceRejected("payload_outer_mismatch:code/date")
                     if (
-                        p["close"] is None
-                        or p.get("price_unit") is None
-                        or dep.available_at is None
-                        or dep.available_at > as_of
+                        kind in ("adjust_factor", "ex_rights")
+                        and p["snapshot_sha256"] != snapshot_sha256
                     ):
-                        return None
-                    reference_days.append(date.fromisoformat(p["trade_date"]))
-                if meta["kind"] == "ex_rights":
-                    ex_days.append(date.fromisoformat(p["ex_date"]))
-            except EvidenceRejected:
-                return None
-            nested = dependencies(dep)
-            if nested is None:
-                return None
-            used.extend((dep_id, *nested))
-        # 多依赖配对口径未验证；保守要求每个参考日都早于每个依赖除权日。
-        if reference_days and ex_days and max(reference_days) >= min(ex_days):
+                        raise EvidenceRejected("snapshot_mismatch")
+                    if kind == "adjust_factor":
+                        if not all(
+                            p[s].get("verified") is True for s in ("algo_audit", "integrity_audit")
+                        ):
+                            gaps.append(f"adjust_factor_unverified:{item}")
+                            raise EvidenceRejected("unverified")
+                        if p["issues"]:
+                            raise EvidenceRejected(f"issues:{p['issues']}")
+                        if (
+                            not deps
+                            or str(r["data_date"]) not in p["trade_dates"]
+                            or not all(
+                                p["coverage_start"] <= d <= p["coverage_end"]
+                                for d in p["trade_dates"]
+                            )
+                        ):
+                            raise EvidenceRejected("factor_coverage_or_dependencies")
+                    if kind == "daily_bar" and (p["close"] is None or p.get("price_unit") is None):
+                        raise EvidenceRejected("reference_price_or_unit_missing")
+                    active.add(item)
+                    pending.append((item, depth, True))
+                    pending.extend((d, depth + 1, False) for d in reversed(deps))
+                    continue
+                refs: set[date] = set()
+                events: set[date] = set()
+                latest = r["computed_at"] if kind == "adjust_factor" else r["available_at"]
+                if latest is None:
+                    raise EvidenceRejected("computed_at_or_visibility_missing")
+                for dep in deps:
+                    ref, ex, at = summaries[dep]
+                    refs.update(ref)
+                    events.update(ex)
+                    latest = max(latest, at)
+                if kind == "daily_bar":
+                    refs.add(r["data_date"])
+                if kind == "ex_rights":
+                    events.add(r["data_date"])
+                if refs and events and max(refs) >= min(events):
+                    raise EvidenceRejected("reference_date_not_before_ex_date")
+                if kind == "adjust_factor":
+                    if not {"ex_rights", "daily_bar"} <= {rows[d]["kind"] for d in deps}:
+                        raise EvidenceRejected("dependency_required:ex_rights/daily_bar")
+                    if latest != r["available_at"]:
+                        raise EvidenceRejected("closure_available_at_mismatch")
+                summaries[item] = refs, events, latest
+                active.remove(item)
+        except (EvidenceRejected, KeyError, TypeError, ValueError) as exc:
+            reason = exc.reason if isinstance(exc, EvidenceRejected) else str(exc)
+            gaps.append(f"adjust_factor_dependency_unavailable:{root['id']}:{item}:{reason}")
             return None
-        checked[v.version_id] = tuple(dict.fromkeys(used))
-        return checked[v.version_id]
+        return tuple(str(i) for i in summaries if i != root["id"])
 
     factors: list[FactorObservation] = []
     used_ids: list[str] = []
@@ -204,22 +220,23 @@ def read_adjustment_factors(
         prior = [d for d in observation_days if d <= target]
         day = prior[-1] if prior and target <= anchor else None
         candidates = by_day.get(day, []) if day is not None else []
-        valid = day not in blocked and len(candidates) == 1
-        if valid:
-            v, p = candidates[0]
-            deps = dependencies(v)
-            if deps is None:
-                gaps.append(f"adjust_factor_dependency_unavailable:{v.version_id}")
-            valid = (
+        if (
+            day not in blocked
+            and len(candidates) == 1
+            and not any(d <= target for d in unknown_events)
+        ):
+            row = candidates[0]
+            deps = closure(row)
+            p = row["payload"]
+            if (
                 deps is not None
-                and not p["issues"]
                 and p["coverage_start"] <= str(target) <= p["coverage_end"]
                 and str(target) in p["trade_dates"]
-            )
-            if valid and v.available_at is not None and deps is not None:
-                # 按 prepare 的最近观测规则解析到请求日，保留原版本/可见时点。
-                factors.append(FactorObservation(target, p["value"], v.available_at, v.version_id))
-                used_ids.extend((v.version_id, *deps))
+            ):
+                factors.append(
+                    FactorObservation(target, p["value"], row["available_at"], str(row["id"]))
+                )
+                used_ids.extend((str(row["id"]), *deps))
                 continue
         gaps.append(f"adjust_factor_missing:{target}")
     return FactorBundle(
@@ -233,9 +250,13 @@ def read_adjustment_factors(
 
 def to_prepare_factors(bundle: FactorBundle) -> list[dict[str, Any]]:
     """只转换参数，qfq 比值由 prepare 计算；缺口时不让其沿用旧观测填洞。"""
-    if any(g.startswith("adjust_factor_missing:") for g in bundle.gaps):
+    if bundle.gaps:
         return []
     return [
-        {"date": f.date.isoformat(), "value": f.value, "available_at": f.available_at.isoformat()}
+        {
+            "date": f.date.isoformat(),
+            "value": f.value,
+            "available_at": f.available_at.isoformat(),
+        }
         for f in bundle.factors
     ]

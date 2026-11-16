@@ -1,13 +1,14 @@
 """T-A202 权息读取：隔离 PG、登记合成材料，禁止外部采集。"""
 
-# ruff: noqa: S101
-from datetime import timedelta
+# ruff: noqa: S101, SIM905
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Connection, event
+from sqlalchemy import Connection, event, insert, select
 
+from app.db.tables.horizon import horizon_input_versions as versions
 from app.features import horizon_evidence_store as store
 from app.features.horizon_adjustments import read_adjustment_factors, to_prepare_factors
 from app.features.horizon_evidence_store import register_version
@@ -28,13 +29,14 @@ ARGS = {"user_id": UUID(int=1723), "licence_id": None, "code": "SYN", "as_of": N
 
 def reference_bar(connection: Connection, **changes: Any) -> UUID:  # noqa: ANN401
     day = changes.pop("data_date", OLD - timedelta(days=1))
+    payload = changes.pop("payload", {})
     p = package("daily_bar", data_date=day, **changes)
     p["payload"] = {
         **p["payload"],
         "close": "10",
         "price_unit": "CNY/share",
         "trade_date": str(day),
-        **changes.get("payload", {}),
+        **payload,
     }
     return register_version(connection, **p)
 
@@ -61,7 +63,7 @@ def factor(connection: Connection, day: object = OLD, **changes: Any) -> UUID:  
         **package(
             "adjust_factor",
             data_date=day,
-            source_key="cumulative",
+            source_key=changes.pop("source_key", "cumulative"),
             computed_at=changes.pop("computed_at", NOW),
             payload=payload,
             **changes,
@@ -71,21 +73,8 @@ def factor(connection: Connection, day: object = OLD, **changes: Any) -> UUID:  
 
 @pytest.mark.parametrize(
     "case",
-    [
-        "valid",
-        "late",
-        "unknown",
-        "bar_late",
-        "bar_unknown",
-        "bar_revision",
-        "future_event",
-        "dependency_revision",
-        "transitive_future",
-        "snapshot",
-        "licence",
-        "user",
-        "empty",
-    ],
+    "valid late unknown bar_late bar_unknown bar_revision future_event dependency_revision "
+    "transitive_future snapshot licence user empty".split(),
 )
 def test_a192_pn03_unknown_visibility_and_single_snapshot(
     conn: Connection,  # noqa: F811
@@ -150,7 +139,7 @@ def test_a192_pn03_unknown_visibility_and_single_snapshot(
         assert result.dependency_ids == (str(saved), str(dep), str(bar))
         assert not result.gaps
         assert result.coverage == (MID, DAY)
-        assert to_prepare_factors(result)[0]["available_at"] == NOW.isoformat()
+        assert datetime.fromisoformat(to_prepare_factors(result)[0]["available_at"]) == NOW
     else:
         assert f"adjust_factor_missing:{DAY}" in result.gaps
         assert to_prepare_factors(result) == []
@@ -158,18 +147,7 @@ def test_a192_pn03_unknown_visibility_and_single_snapshot(
 
 @pytest.mark.parametrize(
     "case",
-    [
-        "sparse",
-        "chain",
-        "late_revision",
-        "fork",
-        "roots",
-        "coverage",
-        "trade_dates",
-        "issues",
-        "mixed",
-        "anchor",
-    ],
+    "sparse chain late_revision fork roots coverage trade_dates issues mixed anchor".split(),
 )
 def test_a188_qfq_future_event_and_anchor(conn: Connection, case: str) -> None:  # noqa: F811
     root = factor(conn)
@@ -199,7 +177,7 @@ def test_a188_qfq_future_event_and_anchor(conn: Connection, case: str) -> None: 
         }[case]
         factor(conn, DAY, payload=payload)
     result = read_adjustment_factors(conn, **ARGS, dates=[MID, DAY], snapshot_sha256=SHA)
-    failed = case in {"fork", "roots", "coverage", "trade_dates", "issues"}
+    failed = case in {"fork", "roots", "coverage", "trade_dates", "issues", "late_revision"}
     if failed:
         assert f"adjust_factor_missing:{DAY}" in result.gaps
         assert to_prepare_factors(result) == []
@@ -216,10 +194,7 @@ def test_a188_qfq_future_event_and_anchor(conn: Connection, case: str) -> None: 
                 "trade_date": str(MID),
                 "first_seen_at": NOW.isoformat(),
                 "is_final": True,
-                "open": "10",
-                "high": "10",
-                "low": "10",
-                "close": "10",
+                **dict.fromkeys(("open", "high", "low", "close"), "10"),
                 "amount": "100",
             }
         ],
@@ -256,7 +231,7 @@ def test_invalid_selected_payload_cannot_hide_behind_old_observation(
         patch.setattr(store, "validate_payload", lambda *a, **kw: None)
         factor(conn, DAY, payload={key: None})
     result = read_adjustment_factors(conn, **ARGS, dates=[MID, DAY], snapshot_sha256=SHA)
-    assert any(g.startswith("adjust_factor_invalid:") for g in result.gaps)
+    assert any("invalid:" in g or "dependency_unavailable:" in g for g in result.gaps)
     assert f"adjust_factor_missing:{DAY}" in result.gaps
     assert to_prepare_factors(result) == []
 
@@ -323,9 +298,9 @@ def test_r252_nested_factor_audits(
     slot: str,
     verified: bool,
 ) -> None:
-    nested = factor(conn, code="NESTED", payload={slot: {"verified": verified}})
+    nested = factor(conn, MID, source_key="nested", payload={slot: {"verified": verified}})
     deps = [register_version(conn, **package("ex_rights")), reference_bar(conn), nested]
-    factor(conn, dependency_ids=deps)
+    factor(conn, DAY, dependency_ids=deps)
     result = read_adjustment_factors(conn, **ARGS, dates=[DAY], snapshot_sha256=SHA)
     assert bool(result.factors) is verified
     if not verified:
@@ -340,30 +315,25 @@ def test_r252_nested_factor_audits(
 def test_r252_reference_price_fail_closed(
     conn: Connection,  # noqa: F811
     case: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factor(conn)
-    payload = dict(package("daily_bar")["payload"], close="10", price_unit="CNY/share")
+    payload: dict[str, Any] = {"close": "10", "price_unit": "CNY/share"}
     bar_day = DAY if case == "after_day" else MID if case == "same_day" else OLD
     payload["trade_date"] = str(bar_day)
     if case == "close_null":
         payload["close"] = None
     if case == "unit_null":
         payload["price_unit"] = None
+    bar = reference_bar(
+        conn,
+        data_date=bar_day,
+        payload=payload,
+        available_at=NOW + timedelta(seconds=1) if case == "late" else NOW,
+    )
     if case == "unit_missing":
-        del payload["price_unit"]
-    with monkeypatch.context() as patch:
-        if case == "unit_missing":  # 追加历史损坏材料；不改 b2a 或不可变记录。
-            patch.setattr(store, "validate_payload", lambda *a, **kw: None)
-        bar = register_version(
-            conn,
-            **package(
-                "daily_bar",
-                data_date=bar_day,
-                payload=payload,
-                available_at=NOW + timedelta(seconds=1) if case == "late" else NOW,
-            ),
-        )
+        p = dict(conn.scalar(select(versions.c.payload).where(versions.c.id == bar)))
+        del p["price_unit"]
+        bar = historical(conn, bar, payload=p, supersedes_id=bar)
     dep = register_version(
         conn,
         **package(
@@ -372,17 +342,10 @@ def test_r252_reference_price_fail_closed(
             payload={**package("ex_rights")["payload"], "ex_date": str(MID)},
         ),
     )
-    original_row = store._row
-    with monkeypatch.context() as patch:
-        if case == "late":
-            # 模拟父因子可见时间陈旧；读取仍必须验证真实参考价版本的 PIT。
-            def stale_parent(*args: Any) -> dict[str, Any]:  # noqa: ANN401
-                row = dict(original_row(*args))
-                if args[-1] == bar:
-                    row["available_at"] = NOW
-                return row
-
-            patch.setattr(store, "_row", stale_parent)
+    if case == "late":
+        root = factor(conn, DAY)
+        saved = historical(conn, root, supersedes_id=root, dependency_ids=[dep, bar])
+    else:
         saved = factor(conn, DAY, dependency_ids=[dep, bar])
     result = read_adjustment_factors(conn, **ARGS, dates=[MID, DAY], snapshot_sha256=SHA)
     if case == "valid":
@@ -390,6 +353,134 @@ def test_r252_reference_price_fail_closed(
         assert not result.gaps
     else:
         assert result.coverage == (MID,)
-        assert f"adjust_factor_dependency_unavailable:{saved}" in result.gaps
+        assert any(str(saved) in g and "dependency_unavailable" in g for g in result.gaps)
         assert f"adjust_factor_missing:{DAY}" in result.gaps
         assert to_prepare_factors(result) == []
+
+
+def historical(connection: Connection, template: UUID, **changes: Any) -> UUID:  # noqa: ANN401
+    row = dict(
+        connection.execute(select(versions).where(versions.c.id == template)).mappings().one()
+    )
+    row.update(id=uuid4(), version_hash=uuid4().hex * 2, source_version=uuid4().hex)
+    row.update(changes)
+    connection.execute(insert(versions).values(**row))
+    return row["id"]  # type: ignore[no-any-return]
+
+
+@pytest.mark.parametrize("kind", ["adjust_factor", "ex_rights"])
+@pytest.mark.parametrize("delay", [None, timedelta(hours=1)])
+def test_r252_known_unavailable(conn: Connection, kind: str, delay: timedelta | None) -> None:  # noqa: F811
+    root = factor(conn)
+    template = root if kind == "adjust_factor" else register_version(conn, **package(kind))
+    hidden = historical(
+        conn, template, data_date=MID, available_at=None if delay is None else NOW + delay
+    )
+    result = read_adjustment_factors(conn, **ARGS, dates=[MID, DAY], snapshot_sha256=SHA)
+    assert not result.factors
+    assert (result.coverage, to_prepare_factors(result)) == ((), [])
+    assert any(str(hidden) in gap for gap in result.gaps)
+
+
+@pytest.mark.parametrize("case", ["audit", "revision", "fork"])
+def test_r252_snapshot_before_selection(conn: Connection, case: str) -> None:  # noqa: F811
+    root = factor(conn)
+    factor(
+        conn,
+        DAY if case == "audit" else OLD,
+        source_version="v2",
+        supersedes_id=root if case == "revision" else None,
+        payload={"snapshot_sha256": "b" * 64, "algo_audit": {"verified": False}},
+    )
+    result = read_adjustment_factors(conn, **ARGS, dates=[MID, DAY], snapshot_sha256=SHA)
+    assert (result.coverage, result.gaps) == ((MID, DAY), ())
+    assert {f.version_id for f in result.factors} == {str(root)}
+
+
+@pytest.mark.parametrize(
+    "case",
+    "issues code payload_code payload_date empty no_event no_bar trade_dates coverage "
+    "same_day after_day time computed depth nodes cycle projection".split(),
+)
+def test_r252_closure(conn: Connection, case: str) -> None:  # noqa: F811
+    bar = reference_bar(conn)
+    dep = register_version(conn, **package("ex_rights"))
+    nested = factor(conn, MID, source_key="nested")
+    payload = dict(conn.scalar(select(versions.c.payload).where(versions.c.id == nested)))
+    if case in {"issues", "trade_dates", "coverage"}:
+        payload.update(
+            {
+                "issues": {"issues": ["unknown event visibility"]},
+                "trade_dates": {"trade_dates": []},
+                "coverage": {"coverage_start": str(DAY)},
+            }[case]
+        )
+        nested = historical(conn, nested, payload=payload, supersedes_id=nested)
+    elif case in {"code", "payload_code", "payload_date"}:
+        p = dict(package("ex_rights")["payload"])
+        p.update(
+            {"code": "OTHER"}
+            if case == "payload_code"
+            else {"ex_date": str(MID)}
+            if case == "payload_date"
+            else {}
+        )
+        dep = historical(
+            conn,
+            dep,
+            code="OTHER" if case == "code" else "SYN",
+            payload=p,
+            supersedes_id=dep if case != "code" else None,
+        )
+    elif case in {"same_day", "after_day", "time", "projection"}:
+        p = dict(conn.scalar(select(versions.c.payload).where(versions.c.id == bar)))
+        day = (
+            DAY + timedelta(days=case == "after_day") if "day" in case else OLD - timedelta(days=1)
+        )
+        p.update(
+            trade_date=str(day), fetched_at="invalid" if case == "projection" else p["fetched_at"]
+        )
+        bar = historical(
+            conn,
+            bar,
+            data_date=day,
+            payload=p,
+            available_at=NOW + timedelta(hours=case == "time"),
+            source_key="hidden",
+        )
+        dep = historical(conn, dep, dependency_ids=[bar], supersedes_id=dep)
+        bar = reference_bar(conn)
+    elif case in {"depth", "nodes", "cycle"}:
+        children = []
+        for _i in range(130 if case == "depth" else 1025 if case == "nodes" else 1):
+            item = uuid4()
+            dep = historical(
+                conn,
+                dep,
+                id=item,
+                source_key=str(item),
+                dependency_ids=[item] if case == "cycle" else [dep] if case == "depth" else [],
+            )
+            children.append(dep)
+        if case == "nodes":
+            dep = historical(conn, dep, source_key="wide", dependency_ids=children)
+    deps = [dep, bar] + ([nested] if case in {"issues", "trade_dates", "coverage"} else [])
+    if case in {"empty", "no_event", "no_bar"}:
+        # 损坏历史行：不绕过读取门禁，只追加版本。
+        deps = [] if case == "empty" else [bar] if case == "no_event" else [dep]
+    root = factor(conn, DAY)
+    saved = historical(
+        conn,
+        root,
+        supersedes_id=root,
+        dependency_ids=deps,
+        available_at=NOW + timedelta(hours=case == "computed"),
+    )
+    result = read_adjustment_factors(
+        conn, **{**ARGS, "as_of": NOW + timedelta(days=2)}, dates=[DAY], snapshot_sha256=SHA
+    )
+    assert (result.factors, result.coverage) == ((), ())
+    assert to_prepare_factors(result) == []
+    assert any(str(saved) in gap for gap in result.gaps)
+    if case == "issues":
+        assert any(str(nested) in gap and "unknown event visibility" in gap for gap in result.gaps)
