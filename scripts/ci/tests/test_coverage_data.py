@@ -6,11 +6,9 @@ import sys
 
 import pytest
 import yaml
+from coverage import CoverageData
 
 from conftest import CI_DIR, REPO
-
-CoverageData = pytest.importorskip("coverage").CoverageData
-
 
 def coverage_shards(tmp_path):
     paths = []
@@ -81,3 +79,36 @@ def test_workflow_stops_before_combine_for_bad_coverage(tmp_path, invalid):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "::error title=coverage data::" in result.stdout
     assert not (tmp_path / ".coverage").exists()
+
+
+def test_missing_coverage_fails_collection():
+    # Block just coverage: pytest/yaml still import normally in the child process.
+    code = '''
+import sys
+class NoCoverage:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "coverage" or fullname.startswith("coverage."):
+            raise ModuleNotFoundError("No module named 'coverage'", name="coverage")
+sys.meta_path.insert(0, NoCoverage())
+import pytest
+raise SystemExit(pytest.main(["-v", "-p", "no:cacheprovider", sys.argv[1]]))
+'''
+    result = subprocess.run([sys.executable, "-c", code, str(CI_DIR / "tests/test_coverage_data.py")],
+                            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "ModuleNotFoundError" in result.stdout
+    assert "1 error" in result.stdout
+    assert "1 skipped" not in result.stdout
+
+
+def test_selftest_installs_coverage_and_runs_verbose_regressions():
+    workflow = yaml.safe_load((REPO / ".github/workflows/secret-scan.yml").read_text())
+    assert workflow["env"]["COVERAGE_VERSION"] == "7.17.3"
+    steps = workflow["jobs"]["selftest"]["steps"]
+    verbose = next(step["run"] for step in steps
+                   if "scripts/ci/tests/test_coverage_data.py" in step.get("run", ""))
+    assert "python -m pytest -v " in verbose
+    assert "--with \"coverage==${COVERAGE_VERSION}\"" in verbose
+    full = next(step["run"] for step in steps if step.get("name") == "pytest scripts/ci/tests")
+    assert "--with \"coverage==${COVERAGE_VERSION}\"" in full

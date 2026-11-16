@@ -414,3 +414,132 @@ def test_serial_rejects_bad_junit_at_minimum(tmp_path, invalid, capsys):
     output = capsys.readouterr().out
     if invalid in {"failure", "error"}:
         assert "passed=1190 skipped=0 failed=1" in output
+
+
+@pytest.mark.parametrize("invalid", ["ordinary-extra-child", "ordinary-child-replaces-parent"])
+def test_union_rejects_ordinary_expansion(tmp_path, invalid, capsys):
+    args, reports = union_inputs(tmp_path)
+    for index, report in enumerate(reports, 1):
+        root = ET.Element("testsuite")
+        for node in report["selected"]:
+            classname, name = check_shard_union.junit_node(node)
+            ET.SubElement(root, "testcase", classname=classname, name=name)
+        if index == 2:
+            if invalid == "ordinary-child-replaces-parent":
+                root.remove(root[0])
+            ET.SubElement(root, "testcase", classname="backend.c", name="test_c[unexpected]")
+        ET.ElementTree(root).write(tmp_path / f"backend-pytest-shard-{index}.xml")
+    assert check_shard_union.main(args + ["--junit", str(tmp_path)] + write_reports(tmp_path, reports)) == 1
+    output = capsys.readouterr().out
+    assert "unaccounted JUnit nodes=[('backend.c', 'test_c[unexpected]')]" in output
+    if invalid == "ordinary-child-replaces-parent":
+        assert "missing selected nodes=[('backend.c', 'test_c')]" in output
+
+
+@pytest.mark.parametrize("invalid", ["missing-runtime-child", "all-runtime-children-missing",
+                                     "extra-runtime-child", "same-count-wrong-child"])
+def test_union_rejects_incomplete_runtime_set(tmp_path, runtime_union_inputs, invalid, capsys):
+    args, root = runtime_union_inputs
+    if invalid in {"missing-runtime-child", "all-runtime-children-missing"}:
+        root.remove(root[2])
+        if invalid == "all-runtime-children-missing":
+            root.remove(root[1])
+    elif invalid == "extra-runtime-child":
+        ET.SubElement(root, "testcase", classname=root[0].get("classname"),
+                      name="test_stub_conforms_to_contract[GET /unexpected]")
+    else:
+        root[2].set("name", "test_stub_conforms_to_contract[GET /unexpected]")
+    ET.ElementTree(root).write(tmp_path / "backend-pytest-shard-1.xml")
+    assert check_shard_union.main(args) == 1
+    output = capsys.readouterr().out
+    if invalid != "extra-runtime-child":
+        assert "test_stub_conforms_to_contract[GET /me]" in output
+    if invalid in {"extra-runtime-child", "same-count-wrong-child"}:
+        assert "unaccounted JUnit nodes=[('backend.contract.test_contract_stub', 'test_stub_conforms_to_contract[GET /unexpected]')]" in output
+
+
+def test_runtime_allowlist_matches_schema_and_pytest_evidence():
+    from conftest import REPO
+
+    schema = json.loads((REPO / "tests/backend/contract/openapi_v1_stub.json").read_text())
+    parent = ("backend.contract.test_contract_stub", "test_stub_conforms_to_contract")
+    methods = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+    children = {(parent[0], f"{parent[1]}[{method.upper()} {path}]")
+                for path, item in schema["paths"].items() for method in item if method in methods}
+    assert check_shard_union.RUNTIME_CHILDREN == {parent: children}
+    root = ET.parse(Path(__file__).parent / "fixtures/contract-runtime-junit.xml").getroot()
+    recorded = {(c.get("classname"), c.get("name")) for c in root}
+    assert recorded == children | {parent, (parent[0], "test_contract_checker_catches_violation"),
+                                  (parent[0], "test_stub_paths_exist_in_api_contract_doc")}
+
+
+def junit_entry(entry, tmp_path, root):
+    """Use the same document through all four executable validation paths."""
+    import check_serial_skips
+    from junit_validation import validate_junit
+
+    args, reports = union_inputs(tmp_path)
+    path = tmp_path / "backend-pytest-shard-2.xml"
+    ET.ElementTree(root).write(path)
+    if entry == "shared-validator":
+        try:
+            validate_junit(ET.parse(path).getroot())
+        except ValueError:
+            return 1
+        return 0
+    if entry == "merge":
+        return merge_junit.main(["--output", str(tmp_path / "merged.xml"), str(path)])
+    if entry == "serial":
+        config = tmp_path / "serial.json"
+        config.write_text(json.dumps({"min_passed": {"serial_pg": 1}, "max_skipped": {"serial_pg": 1}}))
+        return check_serial_skips.main([str(path), "--groups", str(tmp_path / "ci-groups.yaml"),
+                                       "--config", str(config)])
+    (tmp_path / "backend-pytest-shard-1.xml").write_text(
+        '<testsuite><testcase classname="backend.a" name="test_a"/>'
+        '<testcase classname="backend.b" name="test_b"/></testsuite>')
+    return check_shard_union.main(args + ["--junit", str(tmp_path)] + write_reports(tmp_path, reports))
+
+
+@pytest.mark.parametrize("entry", ["union", "merge", "serial", "shared-validator"])
+@pytest.mark.parametrize("invalid", ["count-mismatch", "tests", "failures", "errors", "skipped", "disabled",
+                                     "negative", "non-integer", "nested-outer", "nested-inner"])
+def test_junit_rejects_declared_count_mismatch(tmp_path, entry, invalid):
+    root = ET.fromstring('<testsuite tests="1" failures="0" errors="0" skipped="0" disabled="0">'
+                         '<testcase classname="backend.c" name="test_c"/></testsuite>')
+    if invalid == "count-mismatch":
+        # T-G15 exact declarations: a passing detail, tests=999 and failures=1.
+        root.set("tests", "999")
+        root.set("failures", "1")
+    elif invalid in {"tests", "failures", "errors", "skipped", "disabled"}:
+        root.set(invalid, "2" if invalid == "tests" else "1")
+    elif invalid in {"negative", "non-integer"}:
+        root.set("tests", "-1" if invalid == "negative" else "1.0")
+    else:
+        outer = ET.Element("testsuites", tests="1", failures="0", errors="0", skipped="0")
+        outer.append(root)
+        (outer if invalid == "nested-outer" else root).set("tests", "2")
+        root = outer
+    assert junit_entry(entry, tmp_path, root) == 1
+
+
+@pytest.mark.parametrize("entry", ["union", "merge", "serial", "shared-validator"])
+def test_junit_accepts_consistent_nested_counts(tmp_path, entry):
+    root = ET.fromstring('<testsuites tests="1" failures="0" errors="0" skipped="0">'
+                         '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+                         '<testsuite tests="1"><testcase classname="backend.c" name="test_c"/>'
+                         '</testsuite></testsuite></testsuites>')
+    assert junit_entry(entry, tmp_path, root) == 0
+
+
+def test_junit_nested_skips_count_details_once():
+    from junit_validation import validate_junit
+
+    root = ET.fromstring('<testsuites tests="3" skipped="1" failures="0" errors="0">'
+                         '<testsuite tests="2" skipped="1"><testcase name="a"/>'
+                         '<testsuite tests="1" skipped="1"><testcase name="b"><skipped/>'
+                         '</testcase></testsuite></testsuite>'
+                         '<testsuite tests="1" skipped="0"><testcase name="c"/></testsuite></testsuites>')
+    assert [case.get("name") for case in validate_junit(root)] == ["a", "b", "c"]
+    root.set("skipped", "0")
+    with pytest.raises(ValueError, match="skipped=.*differs from details=1"):
+        validate_junit(root)

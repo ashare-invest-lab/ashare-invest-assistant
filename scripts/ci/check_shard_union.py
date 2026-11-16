@@ -14,6 +14,17 @@ from junit_validation import validate_junit
 
 UUID = re.compile(r"(?<![0-9a-fA-F])(?:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})(?![0-9a-fA-F])")
 
+# Only this schemathesis test expands after collection. Exact operations come from
+# tests/backend/contract/openapi_v1_stub.json; pytest run 43802901765 shard 4
+# recorded these children (see scripts/ci/tests/fixtures/contract-runtime-junit.xml).
+# Keep this explicit: an arbitrary selected parent must never authorize children.
+RUNTIME_CHILDREN = {
+    ("backend.contract.test_contract_stub", "test_stub_conforms_to_contract"): {
+        ("backend.contract.test_contract_stub", "test_stub_conforms_to_contract[GET /health]"),
+        ("backend.contract.test_contract_stub", "test_stub_conforms_to_contract[GET /me]"),
+    },
+}
+
 
 def stable_id(nodeid: str) -> str:
     """Normalize only UUID values in parameters; preserve every other parameter."""
@@ -93,19 +104,14 @@ def main(argv=None):
                 except ValueError as error:
                     raise ValueError(f"{counts}: {error}") from error
                 selected = {junit_node(node) for node in report["selected"]}
-                parents = {node for node in selected if "[" not in node[1]}
-                covered = set()
-                extra = []
-                for case in cases:
-                    node = (case.get("classname", ""), case.get("name", ""))
-                    parent = (node[0], node[1].partition("[")[0])
-                    if node in selected:
-                        covered.add(node)
-                    elif "[" in node[1] and node[1].endswith("]") and parent in parents:
-                        covered.add(parent)
-                    else:
-                        extra.append(node)
-                missing = sorted(selected - covered)
+                expanded = selected & RUNTIME_CHILDREN.keys()
+                required = selected - expanded
+                for parent in expanded:
+                    required.update(RUNTIME_CHILDREN[parent])
+                actual = {(case.get("classname", ""), case.get("name", "")) for case in cases}
+                # Pytest may retain the container parent; all children are mandatory.
+                missing = sorted(required - actual)
+                extra = sorted(actual - required - expanded)
                 if missing or extra:
                     raise ValueError(f"{counts}: missing selected nodes={missing[:5]}; "
                                      f"unaccounted JUnit nodes={extra[:5]}")
