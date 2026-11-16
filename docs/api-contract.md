@@ -405,7 +405,7 @@
 | `severity` | `info` `attention` `important` |
 | `channel` | `in_app` `email` `wecom_app`（预留） |
 | `data_status` | `fresh` `stale` `pending` `partial` `unavailable`（含义见 1.1） |
-| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable` `not_applicable`（`gaps[].reason`，1.1；v0.2.6 加 `data_licence_unavailable`；v0.2.8 加 `not_applicable`） |
+| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable` `not_applicable`（`gaps[].reason`，1.1；v0.2.6 加 `data_licence_unavailable`；v0.2.8 加 `not_applicable`；BACKLOG A2b 加 `suspended`：来源明确确认该证券该交易日停牌（依据该日、可追溯来源的 `daily_bars.is_suspended=true`），不是缺数故障；不得据缺行、零成交或价格不变推断停牌；停牌日不生成有效 K，不插值、不以前值补齐、不前视；停牌说明保留但不计入缺数故障数；缺行或无来源仍用 `no_source`） |
 | `data_provider` | `mairui` `user_import` `user_input` `system` `exchange`（`Evidence.provider` 与 `ProviderRef.provider`；`system` = 系统计算；v0.2.3 起 `Evidence.provider` 只用此枚举，没有 `local`；v0.2.7 加 `exchange` = 沪深北交易所公开证券列表（T007），只用于证券公开主数据，且只在 Q2 / T-A04 确认来源为交易所公开列表时使用；若确认改由管理员本人证书拉取，则这些字段的 `provider` 为 `mairui`） |
 | `source_kind` | `market_data` `disclosure` `user_input` `system_calc`（证据来源类别，plan 3.1） |
 | `trade_side` | `buy` `sell` |
