@@ -233,11 +233,14 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
         ).first()
         today = at.astimezone(BEIJING).date()
         within_window, elapsed = True, 0
+        calendar_covered = True
         for offset in range(1, (today - due).days + 1):
             day = due + dt.timedelta(days=offset)
-            # T-A33: missing calendar never advances the count. Conservatively
-            # treat unknown coverage as outside the window; do not guess weekdays.
-            if day not in days or elapsed >= UNAVAILABLE_RECOMPUTE_DAYS:
+            # D04/T-A33: unknown coverage cannot advance or expire the window.
+            if day not in days:
+                calendar_covered = False
+                break
+            if days[day] and elapsed >= UNAVAILABLE_RECOMPUTE_DAYS:
                 within_window = False
                 break
             elapsed += int(days[day])
@@ -387,6 +390,8 @@ def run_one(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, at: dt.da
                 minutes=minute_inputs,
                 recompute=previous_result is not None and previous_result["state"] == "unavailable",
             )
+            if not calendar_covered and result.state == "unavailable":
+                result.gaps.append(gap("calendar_not_covered"))
             bound_instances = bindings[str(conclusion["strategy_version_id"])]
             for index, instance in enumerate(bound_instances):
                 evidence = Evidence(

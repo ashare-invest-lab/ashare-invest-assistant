@@ -8,12 +8,15 @@ import os
 import uuid
 from argparse import Namespace
 from collections.abc import Iterator
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi import Response
 from sqlalchemy import Connection, create_engine, delete, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine, make_url
@@ -25,6 +28,7 @@ from app.db.tables.reviews import data_snapshots
 from app.db.tables.strategy import strategies, strategy_instances, strategy_versions
 from app.db.tables.users import users
 from app.tracking import service
+from app.tracking.api import strategy_tracking_view
 from app.tracking.engine import BEIJING, close_at
 from selfchecks.test_p2n03_tracking import sample
 
@@ -48,7 +52,7 @@ def engine() -> Iterator[Engine]:
 
 
 @pytest.fixture
-def case(engine: Engine) -> Iterator[Any]:
+def case(engine: Engine, request: pytest.FixtureRequest) -> Iterator[Any]:
     # All synthetic rows and market changes roll back, including failed assertions.
     with engine.connect() as conn, conn.begin() as transaction:
         args = sample()
@@ -64,7 +68,7 @@ def case(engine: Engine) -> Iterator[Any]:
         )
         conn.execute(insert(accounts).values(id=account, user_id=owner, name="T-B171 synthetic"))
         conclusions = []
-        for action in ("buy", "sell"):
+        for action in getattr(request, "param", ("buy", "sell")):
             strategy, version, instance = [uuid.uuid4() for _ in range(3)]
             conn.execute(insert(strategies).values(id=strategy, key=strategy.hex, name="synthetic"))
             conn.execute(
@@ -147,18 +151,34 @@ def case(engine: Engine) -> Iterator[Any]:
         transaction.rollback()
 
 
-def observe(case: Any, at: dt.datetime, *, missing_sell_fact: bool = False) -> None:
+def observe(
+    case: Any,
+    at: dt.datetime,
+    *,
+    missing_sell_fact: bool = False,
+    fact_at: dt.datetime | None = None,
+    suspended_on: dt.date | None = None,
+) -> None:
     values = dict(case["args"]["facts"][case["due"].isoformat()])
     if missing_sell_fact:
         values["limit_locked_down"] = None
+    facts = {
+        case["due"].isoformat(): {
+            "available_at": (fact_at or at).isoformat(),
+            "values": values,
+        }
+    }
+    if suspended_on is not None:
+        facts[suspended_on.isoformat()] = {
+            "available_at": at.isoformat(),
+            "values": {"is_suspended": True},
+        }
     body = {
         "schema_version": service.OBS_SCHEMA,
         "instruments": {
             "TB171.SYN": {
                 "factors": case["args"]["factors"],
-                "facts": {
-                    case["due"].isoformat(): {"available_at": at.isoformat(), "values": values}
-                },
+                "facts": facts,
             }
         },
     }
@@ -174,12 +194,12 @@ def observe(case: Any, at: dt.datetime, *, missing_sell_fact: bool = False) -> N
     )
 
 
-def bar(case: Any, day: dt.date, fetched: dt.datetime) -> None:
+def bar(case: Any, day: dt.date, fetched: dt.datetime, code: str = "TB171.SYN") -> None:
     value = case["args"]["instrument"]["bars"][0]
     case["conn"].execute(
         pg_insert(daily_bars)
         .values(
-            code="TB171.SYN",
+            code=code,
             trade_date=day,
             adj_type="none",
             **{key: value[key] for key in ("open", "high", "low", "close", "amount")},
@@ -210,77 +230,210 @@ def run(case: Any, at: dt.datetime) -> tuple[Any, Any]:
 
 
 @pytest.mark.parametrize("offset", [1, 2, 3, 4, 5])
-def test_late_due_bar_completes_within_each_trading_day(case: Any, offset: int) -> None:
+def test_tb171_retry_late_due_bar_uses_same_asof_in_service_and_engine(
+    case: Any, offset: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
     first, old = run(case, close_at(case["due"]))
     assert {r["state"] for r in old._mapping["items"]["results"]} == {"unavailable"}
     assert first.status == "pending"
     at = close_at(case["after"][offset - 1])
-    bar(case, case["due"], at - dt.timedelta(minutes=1))
-    # A bar whose fetch is still in the future must remain invisible.
-    bar(case, case["after"][0], at + dt.timedelta(minutes=1))
-    row, snapshot = run(case, at)
+    visible = at + dt.timedelta(minutes=1)
+    known = at + dt.timedelta(minutes=2)
+    bar(case, case["due"], visible)
+    # A visible price after D and a D price fetched after as_of are both excluded.
+    bar(case, case["after"][0], at)
+    case["args"]["factors"][0]["available_at"] = known.isoformat()
+    observe(case, at, fact_at=known)
+    evaluated = []
+    original = service.evaluate
+
+    def record(**kwargs: Any) -> Any:
+        if kwargs["period"] == 1:
+            evaluated.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(service, "evaluate", record)
+    _, hidden = run(case, at)
+    body = hidden._mapping["items"]
+    assert body["raw_stock"]["bars"] == []
+    assert all(r["state"] == "unavailable" for r in body["results"])
+    assert all(k["now"] == at and k["recompute"] and not k["facts"] for k in evaluated)
+    # Visible prices alone cannot bypass independent facts/factor availability.
+    evaluated.clear()
+    _, prices_only = run(case, visible)
+    assert prices_only._mapping["items"]["raw_stock"]["bars"]
+    assert all(
+        r["entry_price"] is None and r["state"] == "unavailable"
+        for r in prices_only._mapping["items"]["results"]
+    )
+    assert all(not k["facts"] for k in evaluated)
+    # Once the same inputs become known, both service SQL and engine qfq use now.
+    evaluated.clear()
+    row, snapshot = run(case, known)
     body = snapshot._mapping["items"]
     assert row.status == "done"
     assert {r["state"] for r in body["results"]} == {"complete"}
-    assert dt.datetime.fromisoformat(body["as_of"]) == at
-    assert snapshot.id != old.id
-    assert body["history"][-1] == {
-        "snapshot_id": str(old.id),
-        "hash": old.hash,
-        "as_of": old._mapping["items"]["as_of"],
-        "results": old._mapping["items"]["results"],
-    }
-    assert all(b["trade_date"] <= case["due"].isoformat() for b in body["raw_stock"]["bars"])
-    assert run(case, at + dt.timedelta(days=1))[1].id == snapshot.id
-    assert service.view(case["conn"], case["owner"], case["id"])["t1"]["n"] == 2
+    assert dt.datetime.fromisoformat(body["as_of"]) == known
+    assert all(k["now"] == known and k["recompute"] for k in evaluated)
+    assert {b["trade_date"] for b in body["raw_stock"]["bars"]} == {case["due"].isoformat()}
+    assert all(
+        dt.datetime.fromisoformat(b["first_seen_at"]) <= visible for b in body["raw_stock"]["bars"]
+    )
+    assert [h["snapshot_id"] for h in body["history"]] == [
+        str(old.id),
+        str(hidden.id),
+        str(prices_only.id),
+    ]
+    assert body["history"][0]["hash"] == old.hash
+    assert run(case, visible + dt.timedelta(days=1))[1].id == snapshot.id
 
 
-def test_fifth_day_inclusive_then_freeze_without_another_evaluation(
-    case: Any,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run(case, close_at(case["due"]))
-    row, snapshot = run(case, close_at(case["after"][4]))
-    assert row.status == "pending"
-    assert len(snapshot._mapping["items"]["history"]) == 1
-    at = dt.datetime.combine(case["after"][4] + dt.timedelta(days=1), dt.time.min, BEIJING)
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "d0",
+        "d1",
+        "d5",
+        "d6",
+        "same_instant_utc",
+        "known_closed",
+        "suspended",
+        "calendar_hole",
+        "calendar_hole_after_nominal_d6",
+    ],
+)
+def test_tb171_beijing_d0_d5_d6_and_calendar_hole(case: Any, scenario: str) -> None:
+    pending, pending_snapshot = run(case, close_at(case["due"]) - dt.timedelta(minutes=1))
+    assert pending.status == "pending"
+    assert {r["state"] for r in pending_snapshot._mapping["items"]["results"]} == {"pending"}
+    # A later pre-due clock must preserve the original pending observation.
+    assert run(case, close_at(case["due"]) - dt.timedelta(seconds=1))[1].id == pending_snapshot.id
+    _, first = run(case, close_at(case["due"]))
+    if scenario == "d0":
+        at = close_at(case["due"]) + dt.timedelta(minutes=1)
+    elif scenario in {"d1", "calendar_hole"}:
+        at = close_at(case["after"][0])
+    elif scenario == "d5":
+        at = close_at(case["after"][4])
+    elif scenario in {"d6", "suspended", "calendar_hole_after_nominal_d6"}:
+        at = close_at(case["after"][5])
+    elif scenario == "same_instant_utc":
+        # UTC is still D+5, while Beijing has passed that calendar date.
+        at = dt.datetime.combine(
+            case["after"][4] + dt.timedelta(days=1), dt.time.min, BEIJING
+        ).astimezone(dt.UTC)
+    else:
+        closed = case["after"][3] + dt.timedelta(days=1)
+        assert case["args"]["calendar"][closed] is False
+        at = close_at(closed)
+    if scenario.startswith("calendar_hole"):
+        case["conn"].execute(
+            delete(trading_calendar).where(trading_calendar.c.date == case["after"][0])
+        )
+    if scenario == "suspended":
+        observe(case, close_at(case["after"][0]), suspended_on=case["after"][0])
+    frozen = scenario in {"d6", "same_instant_utc", "suspended"}
+    row, snapshot = run(case, at)
+    assert row.status == ("done" if frozen else "pending")
+    assert (snapshot.id == first.id) is frozen
+    assert {r["state"] for r in snapshot._mapping["items"]["results"]} == {"unavailable"}
+    if scenario.startswith("calendar_hole"):
+        assert all(
+            "calendar_not_covered" in {g["key"] for g in r["gaps"]}
+            for r in snapshot._mapping["items"]["results"]
+        )
+        # Missing coverage must neither freeze nor prevent a later data repair.
+        later = at + dt.timedelta(minutes=1)
+        bar(case, case["due"], later)
+        assert {r["state"] for r in run(case, later)[1]._mapping["items"]["results"]} == {
+            "complete"
+        }
+    replay_at = at.astimezone(BEIJING) if at.tzinfo == dt.UTC else at.astimezone(dt.UTC)
+    before_replay = run(case, at)[1]
+    assert run(case, replay_at)[1].id == before_replay.id
 
-    def forbidden(**kwargs: Any) -> Any:
-        if kwargs["period"] == 1:
-            pytest.fail("expired unavailable must freeze without evaluation")
-        return original(**kwargs)
 
-    original = service.evaluate
-    monkeypatch.setattr(service, "evaluate", forbidden)
-    # UTC date is still D+5; Beijing has already passed the window boundary.
-    frozen, kept = run(case, at.astimezone(dt.UTC))
-    assert frozen.status == "done"
-    assert kept.id == snapshot.id
-    assert frozen.computed_at == row.computed_at
-    bar(case, case["due"], at)
-    assert run(case, at + dt.timedelta(days=1))[1].id == kept.id
-
-
-def test_first_computation_outside_window_runs_once_then_freezes(case: Any) -> None:
+def test_tb171_first_run_after_window_computes_once(case: Any) -> None:
     at = close_at(case["after"][5])
     row, snapshot = run(case, at)
     assert row.status == "done"
     assert {r["state"] for r in snapshot._mapping["items"]["results"]} == {"unavailable"}
     assert snapshot._mapping["items"]["history"] == []
     bar(case, case["due"], at)
+    assert run(case, at)[1].id == snapshot.id
     assert run(case, at + dt.timedelta(days=1))[1].id == snapshot.id
 
 
-def test_mixed_conclusions_freeze_complete_and_keep_flat_history(
-    case: Any,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("closed_offset", [1, 2], ids=["saturday", "sunday"])
+@pytest.mark.parametrize("repair", [True, False], ids=["late_due_bar", "still_missing"])
+def test_tb171_closed_days_after_fifth_open_friday_remain_in_window(
+    case: Any, monkeypatch: pytest.MonkeyPatch, closed_offset: int, repair: bool
 ) -> None:
+    # A synthetic exchange holiday makes D+5 a Friday, followed by a closed weekend.
+    for day in case["after"][4:8]:
+        case["args"]["calendar"][day] = False
+        case["conn"].execute(
+            update(trading_calendar).where(trading_calendar.c.date == day).values(is_open=False)
+        )
+    opened = [
+        d for d, yes in sorted(case["args"]["calendar"].items()) if yes and d > case["due"]
+    ]
+    fifth, sixth = opened[4:6]
+    assert fifth.weekday() == 4
+    run(case, close_at(case["due"]))
+    row, fifth_snapshot = run(case, close_at(fifth))
+    assert row.status == "pending"
+    closed = fifth + dt.timedelta(days=closed_offset)
+    assert case["args"]["calendar"][closed] is False
+    # The job is passed a UTC instant whose Beijing date is the closed day.
+    at = dt.datetime.combine(closed, dt.time.min, BEIJING).astimezone(dt.UTC)
+    if repair:
+        bar(case, case["due"], at - dt.timedelta(minutes=1))
+    row, snapshot = run(case, at)
+    assert snapshot.id != fifth_snapshot.id
+    assert row.status == ("done" if repair else "pending")
+    assert {r["state"] for r in snapshot._mapping["items"]["results"]} == {
+        "complete" if repair else "unavailable"
+    }
+    assert dt.datetime.fromisoformat(snapshot._mapping["items"]["as_of"]) == at
+
+    def forbidden(**kwargs: Any) -> Any:
+        if kwargs["period"] == 1:
+            pytest.fail("the sixth open day must freeze without evaluation")
+        return original(**kwargs)
+
+    original = service.evaluate
+    monkeypatch.setattr(service, "evaluate", forbidden)
+    sixth_at = dt.datetime.combine(sixth, dt.time.min, BEIJING)
+    frozen, kept = run(case, sixth_at)
+    assert frozen.status == "done"
+    assert kept.id == snapshot.id
+    assert frozen.computed_at == row.computed_at
+    bar(case, case["due"], sixth_at)
+    assert run(case, close_at(sixth))[1].id == kept.id
+
+
+@pytest.mark.parametrize(
+    ("terminal", "case"),
+    [
+        ("complete", ("buy", "sell")),
+        ("untradable", ("buy", "sell")),
+        ("excluded", ("wait", "sell")),
+    ],
+    indirect=["case"],
+)
+def test_tb171_mixed_terminal_results_and_history_hash_preserved(
+    case: Any, monkeypatch: pytest.MonkeyPatch, terminal: str
+) -> None:
+    if terminal == "untradable":
+        case["args"]["facts"][case["due"].isoformat()]["limit_locked_up"] = True
     at = close_at(case["due"]) + dt.timedelta(minutes=1)
     observe(case, at, missing_sell_fact=True)
     bar(case, case["due"], at)
     row, first = run(case, at)
     initial = {r["action"]: r for r in first._mapping["items"]["results"]}
-    assert initial["buy"]["state"] == "complete"
+    kept_action = "wait" if terminal == "excluded" else "buy"
+    assert initial[kept_action]["state"] == terminal
     assert initial["sell"]["state"] == "unavailable"
     assert row.status == "pending"
     evaluated = []
@@ -291,9 +444,17 @@ def test_mixed_conclusions_freeze_complete_and_keep_flat_history(
         return original(**kwargs)
 
     monkeypatch.setattr(service, "evaluate", record)
-    _, second = run(case, close_at(case["after"][0]))
+    retry = close_at(case["after"][0])
+    _, second = run(case, retry)
+    assert evaluated == ["sell"]
+    assert service.view(case["conn"], case["owner"], case["id"])["t1"]["n"] == (
+        1 if terminal == "complete" else 0
+    )
+    assert run(case, retry)[1].id == second.id
     assert evaluated == ["sell"]
     at = close_at(case["after"][1])
+    # Source revisions cannot thaw the other result in this same container.
+    case["args"]["facts"][case["due"].isoformat()]["limit_locked_up"] = False
     observe(case, at)
     bar(case, case["due"], at)
     row, third = run(case, at)
@@ -301,36 +462,107 @@ def test_mixed_conclusions_freeze_complete_and_keep_flat_history(
     assert evaluated == ["sell", "sell"]
     assert row.status == "done"
     final = {r["action"]: r for r in body["results"]}
-    assert final["buy"] == initial["buy"]
+    assert final[kept_action] == initial[kept_action]
     assert final["sell"]["state"] == "complete"
     assert [h["snapshot_id"] for h in body["history"]] == [str(first.id), str(second.id)]
-    assert all("history" not in h for h in body["history"])
-    assert body["history"][0]["results"] == first._mapping["items"]["results"]
-    assert body["history"][1]["results"] == second._mapping["items"]["results"]
-
-
-def test_future_trade_date_never_fills_missing_due_bar(case: Any) -> None:
-    run(case, close_at(case["due"]))
-    at = close_at(case["after"][0])
-    bar(case, case["after"][0], at)
-    row, snapshot = run(case, at)
-    body = snapshot._mapping["items"]
-    assert dt.datetime.fromisoformat(body["as_of"]) == at
-    assert body["raw_stock"]["bars"] == []
-    assert {r["state"] for r in body["results"]} == {"unavailable"}
-    assert row.status == "pending"
-
-
-def test_calendar_gap_conservatively_freezes_without_recompute(case: Any) -> None:
-    _, first = run(case, close_at(case["due"]))
-    case["conn"].execute(
-        delete(trading_calendar).where(trading_calendar.c.date == case["after"][0])
+    for history, old in zip(body["history"], [first, second], strict=True):
+        saved = (
+            case["conn"].execute(select(data_snapshots).where(data_snapshots.c.id == old.id)).one()
+        )
+        assert history == {
+            "snapshot_id": str(old.id),
+            "hash": old.hash,
+            "as_of": old._mapping["items"]["as_of"],
+            "results": old._mapping["items"]["results"],
+        }
+        assert saved.hash == service.digest(saved._mapping["items"]) == old.hash
+        assert saved._mapping["items"] == old._mapping["items"]
+    assert run(case, at)[1].id == third.id
+    assert run(case, at + dt.timedelta(days=1))[1].id == third.id
+    assert service.view(case["conn"], case["owner"], case["id"])["t1"]["n"] == (
+        2 if terminal == "complete" else 1
     )
-    at = close_at(case["after"][1])
+
+
+def test_tb171_current_only_stats_refresh_after_retry(case: Any) -> None:
+    def aggregate(version: str) -> dict[str, Any]:
+        strategy = (
+            case["conn"]
+            .execute(
+                select(strategy_versions.c.strategy_id).where(
+                    strategy_versions.c.id == uuid.UUID(version)
+                )
+            )
+            .scalar_one()
+        )
+        return strategy_tracking_view(
+            strategy,
+            uuid.UUID(version),
+            SimpleNamespace(user_id=case["owner"]),
+            SimpleNamespace(connect=lambda: nullcontext(case["conn"])),
+            Response(),
+        )["by_horizon"][0]
+
+    at = close_at(case["due"]) + dt.timedelta(minutes=1)
+    observe(case, at, missing_sell_fact=True)
     bar(case, case["due"], at)
-    row, snapshot = run(case, at)
+    run(case, at)
+    buy, sell = [c["strategy_version_id"] for c in case["conclusions"]]
+    assert service.view(case["conn"], case["owner"], case["id"])["t1"]["n"] == 1
+    assert aggregate(buy)["avg_return_pct"]["n"] == 1
+    assert aggregate(sell)["avg_return_pct"]["n"] == 0
+    run(case, close_at(case["after"][0]))
+    at = close_at(case["after"][1])
+    observe(case, at)
+    _, snapshot = run(case, at)
+    assert len(snapshot._mapping["items"]["history"]) == 2
+    results, _ = service.results_for(case["conn"], case["owner"], case["id"])
+    assert len([r for r in results if r.horizon_days == 1]) == 2
+    for _ in range(2):
+        assert service.view(case["conn"], case["owner"], case["id"])["t1"]["n"] == 2
+        assert aggregate(buy)["avg_return_pct"]["n"] == 1
+        assert aggregate(sell)["avg_return_pct"]["n"] == 1
+        assert aggregate(buy)["profit_loss_ratio"]["n"] == 1
+        assert aggregate(sell)["profit_loss_ratio"]["n"] == 0
+        assert aggregate(sell)["avg_return_pct"]["value"] is None
+
+
+def test_tb171_complete_with_missing_benchmark_stays_frozen(case: Any) -> None:
+    at = close_at(case["due"])
+    bar(case, case["due"], at)
+    row, first = run(case, at)
     assert row.status == "done"
-    assert snapshot.id == first.id
+    for result in first._mapping["items"]["results"]:
+        assert result["state"] == "complete"
+        assert result["benchmark_return_pct"] is None
+        assert result["excess_pct"] is None
+        assert "benchmark_prices" in {g["key"] for g in result["gaps"]}
+    later = close_at(case["after"][0])
+    bar(case, case["due"], later, code="000300.SH")
+    bar(case, case["due"], later)
+    assert run(case, later)[1].id == first.id
+    assert run(case, close_at(case["after"][5]))[1].id == first.id
+
+
+@pytest.mark.parametrize(
+    ("terminal", "case"),
+    [("untradable", ("buy", "sell")), ("excluded", ("wait", "wait"))],
+    indirect=["case"],
+)
+def test_not_applicable_preserves_existing_meaning(case: Any, terminal: str) -> None:
+    if terminal == "untradable":
+        case["args"]["facts"][case["due"].isoformat()]["is_suspended"] = True
+    at = close_at(case["due"]) + dt.timedelta(minutes=1)
+    observe(case, at)
+    row, first = run(case, at)
+    assert row.status == "not_applicable"
+    assert {r["state"] for r in first._mapping["items"]["results"]} == {terminal}
+    case["args"]["facts"][case["due"].isoformat()]["is_suspended"] = False
+    observe(case, close_at(case["after"][0]))
+    bar(case, case["due"], close_at(case["after"][0]))
+    row, kept = run(case, close_at(case["after"][5]))
+    assert row.status == "not_applicable"
+    assert kept.id == first.id
 
 
 def test_legacy_done_unavailable_is_recomputed_when_still_in_window(case: Any) -> None:
