@@ -245,7 +245,7 @@ def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     # T-O90 分片：目录发现循环移除；全量选择以两片目录并集等价锚定（Chief 14:2x 批）。
     # B 的目录序＝原单 job 的字母序执行顺序（integration/milestone 先于 unit 的钩子安装者）。
-    assert "tests/backend/api_app tests/replay" in workflow
+    assert "src/backend/tests tests/backend/api_app tests/replay" in workflow
     assert "tests/backend/contract tests/backend/golden tests/backend/integration tests/backend/milestone tests/backend/unit" in workflow
     assert "--cov=src/backend/app --cov-report=term-missing:skip-covered" in workflow
     assert "--cov-fail-under=80" not in workflow
@@ -335,6 +335,11 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     merge_index = next(i for i, step in enumerate(steps) if step.get("name") == "合并分片覆盖率与 JUnit")
     ratchet_index = next(i for i, step in enumerate(steps) if step.get("id") == "coverage_ratchet")
     assert merge_index < freeze_index == ratchet_index - 1
+    # T-O90 P1（架构师 6904749207）：gate runner 无 venv——断言/冻结/棘轮三步不得依赖
+    # hashFiles('src/backend/.venv/bin/python')，否则静默 skip 造成假绿。
+    for step in steps:
+        if step.get("name") in ("确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）", "冻结可信 base 覆盖率棘轮基线", "精确覆盖率棘轮（可信 base，不下降）"):
+            assert "hashFiles" not in step.get("if", ""), step["name"]
     frozen = steps[freeze_index]
     assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
                              '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"')
@@ -351,7 +356,7 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     shard = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend-a"]
     command = next(step["run"] for step in shard["steps"] if step.get("name") == "pytest 分片")
     # T-O90 分片（Chief 14:2x 批）：目录由 AIA_SHARD_DIRS 提供；本断言用 backend-a 的目录集。
-    dirs = ["tests/backend/api_app", "tests/replay"]
+    dirs = ["src/backend/tests", "tests/backend/api_app", "tests/replay"]
     for directory in dirs + ["src/backend/.venv/bin", "bin", "runner temp"]:
         (tmp_path / directory).mkdir(parents=True, exist_ok=True)
     if with_ini:
