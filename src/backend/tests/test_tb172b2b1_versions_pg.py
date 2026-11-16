@@ -1,14 +1,16 @@
 """T-A202 §4 / T-A204 阻断3：只读隔离测试库中的合成登记版本。"""
 
 # ruff: noqa: S101
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import Connection, event, select
+from sqlalchemy import Connection, event, insert, select
 
+from app.db.tables.horizon import horizon_completion_evidence as completions
 from app.db.tables.horizon import horizon_input_versions as versions
+from app.db.tables.realtime import pipeline_runs
 from app.features import horizon_evidence_store as store
 from app.features.horizon_evidence_provider import DatabaseHorizonEvidenceProvider
 from app.features.horizon_sources import (
@@ -17,7 +19,9 @@ from app.features.horizon_sources import (
     DailyBarVersion,
     HorizonEvidenceProvider,
 )
-from tests.test_tb172b2a_evidence_store_offline import U
+from app.features.horizon_windows import select_day
+from app.strategy.horizon import inputs
+from tests.test_tb172b2a_evidence_store_offline import BATCH, U
 from tests.test_tb172b2a_evidence_store_pg import (
     NOW,
     completion,
@@ -33,6 +37,42 @@ SCOPE = {"user_id": UUID(U), "licence_id": None, "code": "SYN"}
 
 def bar(connection: Connection, **changes: Any) -> UUID:  # noqa: ANN401
     return store.register_version(connection, **package("daily_bar", source_key="none", **changes))
+
+
+def test_b2b1_complete_registration_still_has_no_basis(conn: Connection) -> None:  # noqa: F811
+    store.register_version(conn, **package("calendar"))
+    p = package("daily_bar")
+    p["payload"].update(is_suspended=False, fetched_at=NOW.isoformat())
+    saved = store.register_version(conn, **p)
+    run = uuid4()
+    conn.execute(
+        insert(pipeline_runs).values(
+            id=run,
+            kind="daily_batch",
+            run_date=DAY,
+            step="daily_bars.fetch",
+            status="ok",
+            started_at=NOW,
+            finished_at=NOW,
+        )
+    )
+    c = completion(conn, saved, pipeline_run_id=run)
+    c["proof"]["batches"] = [{**BATCH, "run_id": str(run)}]
+    proof_id = store.register_completion(conn, **c)
+    row = conn.execute(select(completions).where(completions.c.id == proof_id)).mappings().one()
+    assert (row["is_final"], row["available_at"]) == (True, NOW)
+    batch = row["proof"]["batches"][0]
+    assert (batch["status"], datetime.fromisoformat(batch["finished_at"])) == ("ok", NOW)
+    assert datetime.fromisoformat(batch["available_at"]) == NOW
+    provider = DatabaseHorizonEvidenceProvider(conn)
+    for kind in ("calendar", "daily_bar"):
+        assert provider.read_versions(**SCOPE, kind=kind, dates=[DAY], as_of=LATER).versions
+    basis = provider.read_basis(**SCOPE, as_of=LATER)
+    assert (basis.bars, basis.proofs, basis.batches) == ((), (), ())
+    assert "basis_unavailable" in basis.gaps
+    assert select_day(basis, **SCOPE, as_of=LATER).d is None
+    collected = inputs.collect(conn, UUID(U), "SYN", [], as_of=LATER, evidence_provider=provider)
+    assert collected.d is None
 
 
 @pytest.mark.parametrize("case", ["chain", "late", "fork", "roots", "hidden", "other_key"])
