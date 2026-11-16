@@ -959,7 +959,7 @@ C1/C2 行数与应有交易日估计的比值分别为 1.0015、0.9997，支持�
 
 复核基线为当前本地 `origin/main` 的短 SHA `08331bd`；通过 `git show origin/main:<path>` 与 `git grep origin/main` 核实，未联网。范围为 `src/backend/app`、`src/backend/probes`、`deploy/db/drill`、`deploy/scripts`、`src/backend/selfchecks` 与 `tests/backend` 中的相关写入实现、执行链和隔离测试。
 `/workspace/team/reports/T-B149.md` 涉及的 #151/#163 仅为「分支记录，未核验，不作为 main 状态」。入口存在性、BJ 门闩、收口状态与平台验收分别记录；本次只做源码复核，不宣称运行过功能验收。
-表内 `test_ta172_` 测试名均为待新增的契约要求，不声称已存在或已通过。「唯一入口」表示公共入口本身或调用链已走公共入口，仍须补齐 BJ 门闩与验收；「待迁移」一律阻断对应 BJ 写入支持，包含当前在隔离环境执行的工具链。第四种状态「未落地」及演练两行的修订状态见 §10.12 第 3、4 条。
+表内 `test_ta172_` 测试名均为待新增的契约要求，不声称已存在或已通过。「唯一入口」表示公共入口本身或调用链已走公共入口，仍须补齐 BJ 门闩与验收；「待迁移」一律阻断对应 BJ 写入支持，包含当前在隔离环境执行的工具链。第四种状态「未落地」及演练两行的修订状态见 §10.12 第 3、4 条。`app.cli.tb143_day_load` 一行由 T-A185 追加，基线为 #197 head `6c67891`（合入前按 L-046 先行修订，T-A195）；其余行基线不变。
 
 | 入口 | main 是否存在/写入类型 | BJ 门闩是否实现 | 收口状态（唯一入口/待迁移/隔离测试/未落地） | 验收测试名 | 已验证平台与结果 |
 | --- | --- | --- | --- | --- | --- |
@@ -976,7 +976,8 @@ C1/C2 行数与应有交易日估计的比值分别为 1.0015、0.9997，支持�
 | `tb140_history_load.apply_insert_offline` | 已存在，仅内存模拟；复制并修改 set，不写 PostgreSQL | 未实现（模拟确认） | 隔离测试；不算生产入口或确认凭证 | `test_ta172_apply_insert_offline_bj_gate` | 仅 main 源码复核；模拟反例未运行 |
 | `tb140_history_backfill.run_batch` | 已存在，生成直接写表 SQL，并可调用持久化回调 | 未实现 | 待迁移；产物和回调均须收口，规范化完成不等于写入完成 | `test_ta172_backfill_run_batch_bj_gate` | 仅 main 源码复核；BJ 逐入口未验证 |
 | `tb140_history_supervisor.run_supervised` | 已存在，持久化回调直接调用 `apply_daily_bars` | 未实现 | 待迁移；恢复或子进程不继承确认 | `test_ta172_supervisor_persistence_bj_gate` | 仅 main 源码复核；BJ 持久化未验证 |
-| `src/backend/probes/tb143_load_day.sql` | 已存在，COPY 到临时 day_stage 后直接 INSERT 目标表 | 未实现 | 待迁移；保留 SQL 仅可写临时表，目标表写入改经 upsert | `test_ta172_load_day_sql_session_bj_gate` | 仅 main 源码复核；真实 SQL 会话未验证 |
+| `app.cli.tb143_day_load`（`load_day`） | #197 新增（head `6c67891`，待合入），整年单事务，经 `upsert_daily_bars` 追加，已有行不覆盖 | 已接公共门闩（`daily_bar_write_allowed`）；未确认 BJ 跳过并报 INCOMPLETE，确认不跨进程继承；§10.12 第 1 条可信材料落地前生产路径 BJ 恒跳过（T-A195） | 唯一入口（经 upsert）；§10.12 第 2 条拒绝信息所列替代入口之一；before 之前已有麦蕊行即拒绝，麦蕊行数变化则整年回滚 | `test_load_day_copies_validates_calls_writer_and_commits`、`test_load_day_batch_guards_roll_back`、`test_load_day_rejects_active_transaction`、`test_main_reports_success_or_bj_incomplete` | #197 CI（Linux，假连接）通过；真实 PG 会话与 Windows 未验证 |
+| `src/backend/probes/tb143_load_day.sql` | 已存在；#197 起只 COPY 到临时 day_stage 并校验，不含目标表 DML，不含 COMMIT/ROLLBACK（T-A195） | 不适用（不写目标表；目标表写入由 `load_day` 经 upsert） | 隔离 staging；仅作 `app.cli.tb143_day_load` 的固定语句来源，直接 psql 执行不写目标表 | `test_ta172_load_day_sql_session_bj_gate` | 仅 main 源码复核；真实 SQL 会话未验证 |
 | `src/backend/probes/tb143_day_load_runner.ps1` | 已存在，按年新建 psql 会话执行 load_day SQL | 未实现 | 待迁移；不得传递旧放行或执行目标表旁路 | `test_ta172_day_load_runner_new_session_bj_gate` | 仅 main 源码复核；Windows／真实会话未验证 |
 | `deploy/db/drill/sample-data.sql` | 已存在，按 security_id 聚合直接 INSERT 同名演练表 | 未实现；无合法 BJ code 映射 | 隔离测试（演练例外，保留直接 DML，§10.12 第 3 条）；不提供 BJ 生产支持 | `test_ta172_drill_sample_data_bj_gate` | 仅 main 源码复核；演练／BJ 未运行验收 |
 | `deploy/scripts/db-restore-drill.sh` | 已存在，临时容器／演练库建样例 schema 后执行 sample-data SQL | 未实现；隔离不产生生产准入 | 隔离测试（演练例外，保留直接 DML，§10.12 第 3 条）；不算生产支持入口 | `test_ta172_restore_drill_no_production_bj_support` | 仅 main 源码复核；恢复演练未运行 |
@@ -1018,7 +1019,7 @@ SQL staging 验收须证明仅写临时表、无目标行情表直接 DML；确�
 
 **2. tb143 SQL 只做 staging（编排者裁定）**
 
-- `src/backend/probes/tb143_load_day.sql` 只写会话临时表，不对目标行情表执行任何 DML，以 ROLLBACK 结束。沪深与北交所一样处理；目标表写入只经 `upsert_daily_bars`。
+- `src/backend/probes/tb143_load_day.sql` 只写会话临时表，不对目标行情表执行任何 DML，不含 COMMIT/ROLLBACK；事务归调用方 `app.cli.tb143_day_load.load_day`（`conn.transaction()` 包裹 staging 与公共 writer，任一异常整年回滚，成功才提交）。直接 psql 执行时只建 `ON COMMIT DROP` 临时表，不写目标表（T-A195 修订：原「以 ROLLBACK 结束」作废，T-A183 已认可此实现；验收 `test_tb143_load_day_sql_has_no_target_dml_commit_or_rollback`（待新增，替换现仅禁 COMMIT 的断言）、`test_load_day_batch_guards_roll_back`（已存在））。沪深与北交所一样处理；目标表写入只经 `upsert_daily_bars`。
 - `tb143_day_load_runner.ps1`、`tb143_pg_selfcheck.sh` 的旧直写路径启动即拒绝并非零退出，保留本地产物。拒绝信息须给出可执行的替代命令：通达信导入用 `python -m app.cli daily-bars-import-tdx`（`app.cli.tdx_import`）。
 - `app.cli.tdx_import` 经 `run_import`→`DbDeps.write`→`upsert_daily_bars` 写库，可读根目录下 sh/sz/bj 的 lday/*.day。用户授权 t1110u 的导入走该入口：只导 A 股，只追加、不覆盖麦蕊行，仍受日历、窗口和 BJ 门闩约束；绕开门闩按误放处理。runner 停用不算 Windows 部署必然失败，也不算 Windows 已验收。
 - 原 SQL 承担的整批保护须在 Python 写入路径中补齐：同一事务内先校验整批（日期边界、已有麦蕊区间、跨年），再调用 `upsert_daily_bars`，最后核对麦蕊行计数未变；任一步失败整批回滚。
