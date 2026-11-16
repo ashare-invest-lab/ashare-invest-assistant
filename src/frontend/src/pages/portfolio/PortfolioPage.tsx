@@ -286,7 +286,7 @@ function TradesTab({ accountId }: { accountId: string }) {
           { title: TERM.tradeDate, dataIndex: 'trade_date', render: (v: string, r) => <span className="mono">{v} {r.trade_time ?? ''}</span> },
           { title: '代码', dataIndex: 'security_code', render: (v: string) => <span className="mono">{v}</span> },
           { title: '名称', dataIndex: 'name' },
-          { title: '方向', dataIndex: 'side', render: (s: Trade['side']) => <EnumTag value={ownValue(TRADE_SIDE, s)} /> },
+          { title: '方向', dataIndex: 'side', render: (s: Trade['side']) => <EnumTag value={ownValue(TRADE_SIDE, s) ?? { text: '未知', color: 'default' }} /> },
           { title: '数量', dataIndex: 'qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
           { title: '价格', dataIndex: 'price', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 3)}</span> },
           { title: '金额', dataIndex: 'amount', align: 'right', render: (v: string) => <span className="mono">{fmtAmount(v)}</span> },
