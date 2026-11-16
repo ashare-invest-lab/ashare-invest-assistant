@@ -328,3 +328,41 @@ T+1 hold 方向正确：|超额(T+1 开盘 → T+1 收盘)| ≤ 1.0%   # 【已�
 | 8 | hold 方向正确阈值 | T+5 2%、T+20 5% 已作为初值写入 plan §9 C(7)。T+1 **【已定】** 固定 \|超额\| ≤ 1.0%（T+1 开盘→收盘），只展示、不进健康度；已由架构师在 T-A02 写入 C(7)、§2.8、§2.8.1 |
 | 9 | `oos_result` 类型 | plan 第 881 行要求 `{metric, value, n, window}`，api-contract v0.2 是 `string \| null`。本目录按契约写字符串（未执行写"未验证"）；需架构师统一 |
 | 10 | 问题 26 | **已定**：内部评估第三阶段实施，卡内摘要按方案 A（plan §9 C(6)） |
+
+## 11. T-R99：三卡验证材料包（未执行）
+
+本节只补研究方案，不改正式卡、不生成运行 YAML。状态：**draft；G7 ☐；未验证/待回测**。H-01 当前 v3 明定只走 A 线模拟跟踪，不能借本节把它改成历史收益回测。G2/G6 实际代码和截图版本区别见 [card_promotion_gates.md §9](card_promotion_gates.md#9-t-r99三卡门禁核对补记2026-11-16)。本单未读取任何真实行情、持仓或库内审核结果。
+
+### 11.1 参数出处与验证状态
+
+下表逐项核对正式卡 strategy-spec.params_schema；数值是原稿默认值，不是本单选优结果。范围/步长沿原 schema，不另造参数。S-01、W-01 的阈值属 hypothesis、成本属 estimate；H-01 的趋势/ATR 参数属 hypothesis，仓位限额属 estimate。三卡 validation_summary 已标未执行/未验证，合成夹具不验证参数有效性。
+
+| 卡 | 默认参数清单 | 可追溯出处与边界 |
+|---|---|---|
+| S-01 v1/v2（9项） | rs_min=0.15、touch_pct=0.01、shrink_ratio=0.7、exit_confirm_days=2、hard_stop_pct=0.08、time_stop=5、min_amount=50000000、min_list_days=60、slippage_bp=10 | `cards/history/st_pullback_ma.v1.md` 与 `cards/st_pullback_ma.md` 的 params_schema 一致；E1 绝对涨幅替换原因见 `first_batch_import.md` §3；扩展固定参数审计见 `T-R74/param_audit.md` S-01 表。策略阈值全部未验证；有来源不等于有效 |
+| W-01 v2（17项） | ma_fast=20、ma_slow=60、trend_days=5、pullback_pct=0.02、max_dd_from_high=0.15、exit_confirm_days=2、atr_mult=2、time_stop=40、trail_trigger_r=2、trail_atr_mult=2、rsi_overheat=75、np_yoy_floor=-30、min_amount=50000000、min_list_days=120、slippage_bp=10、fixed_cost_bp=8、min_edge_cost_mult=3 | `cards/sw_ma_trend_pullback.md` params_schema/epistemic；`golden/sw_ma_trend_pullback.card.tmpl` 为生成来源。v2 改 F50 的缘由见卡内变更节。未找到参数样本外验证证据，全部未验证/待回测；fixed_cost_bp 是估计，不冒称已核用户费率 |
+| H-01 v2/v3（6项） | ma_long=60、ma_break_days=3、reclaim_days=2、cost_atr_k=2、single_cap=0.20、sector_cap=0.40 | `cards/history/hold_risk_monitor.v2.md` 与 `cards/hold_risk_monitor.md` params_schema 一致；v3 机制/证伪说明及 `T-R48/H-01_v3_falsification_diff.md`。前四项待模拟跟踪验证；后两项是风险限额估计，不宣称预测收益；不将新版证伪倒写成旧版已验 |
+
+### 11.2 G6 触发体检交付规格（不算收益）
+
+后端需先补统计接线，再由有数据权限的角色执行；仅积累数据而不改 `promotions.prepare` 的固定空历史输入，不会解除 no_history。每次体检冻结卡/策略版本、内容哈希、代码/规则/数据源版本、截止日和最近 120 个交易日列表；预热数据在窗口之前另计。S-01 至少满足卡内 25 根、W-01 65 根、H-01 62 根有效 K，并满足指标各自预热；F50 等依赖仍须独立满足预热，不取卡内最短窗冒充全部就绪。
+
+研究建议的可复算账本如下（需后端/架构师确认接入契约，不是已实现功能）：
+
+1. 逐日冻结实际可评估池。S/W 为当时持仓 ∪ 自选，H 为当时持仓；没有历史池快照就记 unknown，不拿今天的池或全 A 代替。卡 validation.window 的“全A”与实际挂载池有差异，报告须分别写 requested_universe/actual_universe，不能声称全市场体检完成；如要改卡说明，另升版。
+2. 按（卡版本、周期、证券、交易日、求值时点）去重，保存规则 true/false/null、缺失原因和输入可见时点；H 日频与 X1 盘中计划止损分开，不把无计划的“不适用”计作通过。真实账本由后端保管，研究侧只接脱敏汇总。
+3. 同一口径下记录计划评估数 N、完整可评估数 E、命中数 H；coverage=E/N，trigger_rate=H/E。N/E 为 0 时相应 value=null 并给原因；报告各自分母 n、window、small_sample 和剔除数。买入、退出、转弱分别统计，H-01 不适用买入，不能因买入触发为零判异常。
+4. Jaccard 使用同窗口、同池、同周期、同方向且可比的（证券,交易日）集合；给比较卡/版本、交并集计数。历史不足 120 日或未检查保留 no_history；历史充分但无可比非空集合保留 no_comparable_set。无可比者不得填 0。>0.9、触发为零或>30%的处理沿既有 §4.1 建议，待后端接线；本单不宣称已触发。
+5. 配额提供特征到端点映射、刷新频率、池规模、共享缓存/去重、批量大小与增量请求/分钟估计；feature_requests=[] 所得 0 只是当前实现值。三卡夹具覆盖数按目标版本重新核验：S v1=8/v2=10，W v2=15，H v2/v3=11。输出 fixture_runs 与历史汇总分栏，不把合成数值计入真实 n。
+
+交付空槽：`history_days=未知；trigger_rate/coverage.value=null；n=待统计；max_jaccard=null；null_reason=待后端根据历史/集合判定；quota=待核；结论=未执行`。不得把方案空槽导入为正式门禁报告。
+
+### 11.3 分卡研究验证与依赖解除顺序
+
+| 卡 | 先补什么 | 材料齐备后执行什么（本单未执行） |
+|---|---|---|
+| S-01 v2 | 当前内容绑定与门禁结果；按 T 日可见且已生效的权息逐日构建 qfq@T，历史池/状态、F50 指数及原行业基准；计日与 R 语义确认 | 复用 `T-R71/S-01_st_pullback_ma.md`、`T-R74/param_audit.md` §4：冻结默认值、邻域±一步、总组合≤50，按 §2.5 五折及隔离期、最后12个月保留集；缺足够跨度则不做样本外结论。原行业证伪须行业历史，不用大盘替代；逐项披露未验证 |
+| W-01 v2 | F21 单位/分类阈值/定稿及来源批准、F22 plrq 次交易日09:30与修订可见性、行情/因子/池快照和行业基准；不删 A1/C2/F22 否决来绕过依赖 | 冻结17项默认值；先对趋势/回踩、ATR止损/跟踪、时间止损及成本分别做邻域/压力对照，再按 §2.5/§5 做样本外。主周期按卡 swing，另分报1/5/20日跟踪；time_stop=40 的持有窗与隔离期须单列，不拿20日统计替代完整交易结果 |
+| H-01 v3 | 后端在有权限环境提供成本、仓位、计划、行业归属、horizon 和可见时点的闭环；不要求研究员读取私有持仓 | 严格按当前卡正文 F1/F2 的 A 线模拟跟踪：事件窗口不重叠、h=1/5/20分开、缺horizon跳过，n≥30才判证伪；集中度只检查限额执行。缺数据就延长观察，不伪造历史仓位，不回测 v2 来替代 v3 跟踪 |
+
+S/W 成交验证须 T 收盘定稿后最早 T+1，执行用不复权价格；保留停牌、涨跌停、零量、T+1 可卖与交易单位阻断。费用按事件日适用段和已核实际费率，未核佣金/冲击只报估计；成本制度出处见 `T-R74/param_audit.md` §5，本单未联网复核。按 §1.5 报 n 和 small_sample；结果只在研究材料记录，真实回测和用户本人 G7 均不在本单执行范围。

@@ -234,3 +234,39 @@
 | TB-A48 | 多周期挂载/回退/`valid_until`/新卡裁定要求 |
 | T-B80 | G1–G6 执行现状：H-01/W-01 G2 未过、仍 draft、G7 未执行 |
 | `_template.md` / `catalog.md` / `P2N-R10` | 字段写法、研究初判、多周期不默认口径 |
+
+## 9. T-R99：三卡门禁核对补记（2026-11-16）
+
+本节按仓库代码基线 `1490926` 只读核对，不是目标库门禁结果。任务单截图转述为 S-01 v1、H-01 v2 已批准，W-01 v2 待审；仓内 T-B100 记录的是更早的三卡 pending，不能据此推断当前审批状态。**需后端/运维提供门禁明细**：卡 key、卡版本和策略版本、review_id、绑定内容摘要、stale/原因、G1–G7 的 result/detail、fixture_runs、g6_report、代码版本与生成时间；仅提供脱敏门禁证据，不要账户、持仓、凭据或行情明细。
+
+本节及 [validation.md §11](validation.md#11-t-r99三卡验证材料包未执行) 是独立研究材料，不并入已入库卡的正文、机器块或生成 YAML。本单保留 draft，**G7 ☐**；若以后修改已入库卡正文，须冻结旧版、升版、重新生成和导入，再申请新审核（`persistence.py:110–120` 同号内容冲突；`reviews.py:107–114` 新版本/内容变化使绑定失效）。历史文件中的代批说明不适用于本单：G7 只能用户本人操作。
+
+### 9.1 当前判定代码与必需输入
+
+以下代码路径均相对于 `src/backend/app/strategy/`。
+
+| 门 | 实际代码与条件 | 所需字段/材料 |
+|---|---|---|
+| G1 | `promotions.py:115–158` 将 preflight 未归入 G2/G3/G4 的错误判 fail；规则完整性见 `cards/preflight.py` | strategy-card 必填、规则角色/引用、假设与反证、纯离场豁免条件；原文映射由 rules 和 source_hash 生成 |
+| G2 | `promotions.py:94–134` 从库内 feature_catalog 取 registry；preflight 的 feature 错误归 G2，并追加 `cards/source_reviews.py:191–232` 的来源问题 | 必需集合为所有规则 required_features 与 data_needs 中 f.* 的并集，停牌/涨跌停输入也算；每键须注册，status 为 verified_doc 或 verified_live；受管键须有 source.reviewed_document 且其中 status 与库内一致 |
+| G3 | `promotions.py:127–129` 将 dsl/adjust/expression/symbol 类错误归 G3（参数和 feature 分流优先） | 安全表达式、符号白名单、复权/求值时点；见 preflight |
+| G4 | `promotions.py:122–124` params_schema 路径优先归 G4；`cards/preflight.py:158–172` | 参数类型、默认值、范围/步长、说明及 epistemic；参数出处本身不等于样本外验证 |
+| G5 | `promotions.py:135–141,160–206`：至少 6 个 fixture 且全部通过、截断开关开启、合成涨跌停截断探针通过 | validation.fixtures、market_rules、risk_controls；不是完整真实市场可成交证明 |
+| G6 | `promotions.py:208–226` 固定调用 compare(None, set(), [])；`g6.py:38–63` 返回 no_history，fixtures 过则 warn、不过则 fail | 真实 120 交易日历史、触发/覆盖统计、同口径可比命中集尚未接入；fixtures 不能代替历史 |
+| G7 | prepare 固定 skipped（`promotions.py:213–218`）；`reviews.py:295–313,355–360` 审核须绑定当前版本，G1–G6 只接受 pass/warn，warn 必须确认 | 用户本人核对当前报告并操作；fail 不能靠确认警告绕过；本单始终 ☐ |
+
+G2 的具体 issue：未注册/declared 等状态触发 `feature_not_verified_doc_or_live`；受管键无复核或状态冲突触发 `reviewed_source_missing_or_status_conflict`；verified_doc 或复核 ceiling=simulating 不可用于 published/observing（另两个 issue 为 `verified_doc_simulating_only`、`reviewed_source_lifecycle_ceiling`）。本次 prepare 的目标写死为 simulating，后两项不是这三卡当前申请的预期原因。写文档、提高覆盖或把特征放在辅助维度均不自动解除 G2。
+
+G6 另外有两个区别：`g6.py:18–19` 仅按 feature_requests 是否非空给配额 unknown/0，并非真实请求测量；`promotions.py:300–318` 展示旧报告时，配额 unknown 可将原 pass 投影为 warn。`g6.py:35–46` 定义 Jaccard >0.9 为重复，历史不足优先 no_history，足 120 日而无有效集合才 no_comparable_set；当前 prepare 没有接入真实集合，也没有执行卡内 trigger_rate 的 >0、≤0.30 判据。因此不可把当前警告说成“触发率超标”或“策略重复”。
+
+### 9.2 逐卡 YAML、版本与缺口
+
+| 卡/截图版本 | 仓内对应物与输入 | 能确定的原因及尚缺材料 |
+|---|---|---|
+| S-01 `st_pullback_ma` v1 | 冻结原文 `cards/history/st_pullback_ma.v1.md` 的三段 YAML；8 fixtures。当前 `cards/st_pullback_ma.md` 已 v2、10 fixtures；config/strategies 下没有本卡 YAML | T-B100 第9行记 G2 pass、G6 warn/no_history。必需 8 键为 f.close_qfq、f.low_qfq、f.amount、f.list_days、f.market_regime_idx、f.is_suspended、f.limit_up_price、f.limit_locked_up，feature_spec 均 verified_doc；不缺 F21。缺当前绑定、真实 120 日统计/可比集合；v2 导入和重跑证据待提供，不能沿用 v1 批准 |
+| W-01 `sw_ma_trend_pullback` v2 | `cards/sw_ma_trend_pullback.md` 与 `config/strategies/sw_ma_trend_pullback.yaml` 均 v2；spec/validation 相同，15 fixtures；card 块差异仅生成物增加 boards.main_board 别名（`universe_norm.py:30–35`） | T-B100 第8行明确 G2 fail：f.main_net_20d 未 verified_doc/live，对应 source_reviews.py:206–207。A1（辅助入场，core:false）、C2（反证）及 data_needs 都引用它，缺失降级不豁免 G2。其余 12 键为 close/high/low_qfq、amount、list_days、rsi14、np_yoy_latest、market_regime_idx、is_suspended、limit_up_price、limit_down_price、limit_locked_up（均 f. 前缀），文档已 verified_doc；库内状态仍待核。G6 警告对应当前未检查历史路径，不是 F21 警告的别名 |
+| H-01 `hold_risk_monitor` v2 | 冻结原文 `cards/history/hold_risk_monitor.v2.md`；当前卡及 `config/strategies/hold_risk_monitor.yaml` 已 v3，11 fixtures，规则/参数/data_needs 与 v2 相同；v3 spec/validation 与生成物相同，card 块仅 main_board 别名差异 | T-B100 第7行记 G2 pass、G6 warn/no_history。必需 7 键为 f.close_qfq、f.high_qfq、f.low_qfq、f.is_suspended、f.market_regime_idx、f.limit_down_price、f.limit_locked_down，均 verified_doc；不缺 F21。持仓成本/权重等 ctx 数据是执行及跟踪前提，不冒充该 G2 已知失败键。缺 v3 当前审核绑定、真实统计；v2 的批准不等于 v3 可用 |
+
+F21 研究材料已见 `T-R18_source_matrix.yaml:16`、`feature_spec.md` F21、`T-R28/f21_ready_thresholds.json`：四字段 zmbtdcje+zmbddcje−zmstdcje−zmsddcje，近 20 日至少 15 个有效日；仍缺单位、大单/特大单阈值、盘后定稿/可见性及修订口径的认可证据。已有两证券小样本和内置因子口径不等价，不能拿内置 main_20d_net 替换。5 只股票 × 最近 20 交易日各至少 15 日只是“建议重跑”门槛，不是 G2 自动通过条件。`source_reviews.py:87–95` 还把该类键的预期状态固定为 declared；证据获认可后，需后端按架构裁定更新来源接入/校验及对应登记，研究员不能只改 YAML 状态。
+
+三卡 feature_requests 均为空或未提供，按当前代码 quota_delta_per_min=0；这只排除了当前生成路径中的配额未知分支，不证明实际采集成本为零。三卡 validation_summary 均已写 window=未执行、oos_result=未验证、trade_log_ref=null，无需为重复添加这句话改动已入库卡。历史记录仅引用仓内 `docs/handover/team/reports/T-B100.md:6–11`，不等于本单读取了库内结果。
