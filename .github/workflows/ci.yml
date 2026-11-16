@@ -70,7 +70,7 @@ jobs:
       PGPASSWORD: ci-only
       TB116D_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/o67_selfcheck
       MAIRUI_MODE: replay
-      AIA_SHARD_DIRS: tests/backend/api_app tests/replay
+      AIA_SHARD_DIRS: tests/backend/api_app tests/replay tests/backend/milestone/test_enqueue_diagnostics.py
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -221,7 +221,8 @@ jobs:
       PGPASSWORD: ci-only
       TB116D_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/o67_selfcheck
       MAIRUI_MODE: replay
-      AIA_SHARD_DIRS: tests/backend/unit tests/backend/integration tests/backend/milestone tests/backend/contract tests/backend/golden
+      AIA_SHARD_DIRS: tests/backend/unit tests/backend/integration tests/backend/contract tests/backend/golden
+        # milestone 例外：test_enqueue_diagnostics.py 自启子进程 pytest，与 run_p2n10 的进程内审计钩子（模块级 sys.addaudithook，拦 subprocess）不可同进程序倒置——挪入分片 A；其余 milestone 用例仍在本片。
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
