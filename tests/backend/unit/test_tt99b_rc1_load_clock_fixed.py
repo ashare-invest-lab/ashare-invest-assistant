@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import Connection, create_engine, insert, text
@@ -18,6 +19,7 @@ from app.db.tables.market import daily_bars, realtime_quotes, trading_calendar
 from app.risk import rc1
 from app.risk.rc1 import SH, load
 
+STDLIB_DATETIME = dt.datetime
 DAY = dt.date(2030, 6, 11)
 AT = dt.datetime(2030, 6, 11, 14, 59, tzinfo=SH)
 CLOSING = AT.replace(hour=15, minute=0)
@@ -114,26 +116,51 @@ def test_close_uses_fixed_at_daily_bar(
     assert facts.last is None
 
 
+@pytest.fixture
+def rc1_without_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_now(*args: object, **kwargs: object) -> dt.datetime:
+        raise AssertionError("rc1.load must not read the wall clock")
+
+    # 只替换 rc1 自己的绑定，保留标准库 datetime 供延迟导入的模型使用。
+    monkeypatch.setattr(
+        rc1,
+        "dt",
+        SimpleNamespace(
+            datetime=SimpleNamespace(now=unexpected_now, combine=dt.datetime.combine),
+            date=dt.date,
+            time=dt.time,
+            timedelta=dt.timedelta,
+            timezone=dt.timezone,
+            UTC=dt.UTC,
+        ),
+    )
+
+
 def test_fixed_at_is_independent_of_wall_clock(
-    settings: Settings, rc1_conn: Connection, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, rc1_conn: Connection, rc1_without_wall_clock: None
 ) -> None:
-    class FrozenDatetime(dt.datetime):
-        frozen = AT
+    facts = load(
+        rc1_conn, OWNER, None, CODE, settings, at=AT, stops_at=AT, position_known=False
+    )
+    assert facts.mode == "intraday"
+    assert facts.endpoint == "market.realtime_quotes:raw"
+    assert facts.last == PRICE
+    assert facts.observed_at == QUOTE_AT
+    assert facts.fetched_at == FETCHED_AT
 
-        @classmethod
-        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
-            return cls.frozen.astimezone(tz) if tz is not None else cls.frozen.replace(tzinfo=None)
 
-    monkeypatch.setattr(rc1.dt, "datetime", FrozenDatetime)
-    results = []
-    for wall_clock in (AT, CLOSING.replace(hour=16)):
-        monkeypatch.setattr(FrozenDatetime, "frozen", wall_clock)
-        assert rc1.dt.datetime.now(SH) == wall_clock
-        results.append(
-            load(rc1_conn, OWNER, None, CODE, settings, at=AT, stops_at=AT, position_known=False)
-        )
-    assert results[0] == results[1]
-    assert results[0].endpoint == "market.realtime_quotes:raw"
-    assert results[0].last == PRICE
-    assert results[0].observed_at == QUOTE_AT
-    assert results[0].fetched_at == FETCHED_AT
+def test_fixed_at_patch_is_independent_of_stdlib_datetime(
+    rc1_without_wall_clock: None,
+) -> None:
+    from pydantic import BaseModel
+
+    assert rc1.dt is not dt
+    assert dt.datetime is STDLIB_DATETIME
+    with pytest.raises(AssertionError, match="must not read the wall clock"):
+        rc1.dt.datetime.now(SH)
+
+    class TimestampModel(BaseModel):
+        timestamp: dt.datetime
+
+    assert TimestampModel(timestamp=AT).timestamp == AT
+    assert dt.datetime is STDLIB_DATETIME
