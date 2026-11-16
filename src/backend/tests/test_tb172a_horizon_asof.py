@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import inspect
+import operator
 import socket
 from dataclasses import replace
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy.sql import visitors
 
 from app.features.horizon_sources import (
     BasisEvidence,
@@ -344,27 +346,43 @@ def test_a192_daily_cutoff_http_request_time_replay(monkeypatch: pytest.MonkeyPa
 @pytest.mark.parametrize(
     ("rebuilt", "count", "expected"),
     [
-        (None, 0, False),
+        (None, 0, None),
         (at(), 1, True),
         (at(), 0, False),
         (at() + dt.timedelta(microseconds=1), 1, None),
+        pytest.param(at() - dt.timedelta(microseconds=1), 0, False, id="future_business_date"),
     ],
 )
 def test_position_requires_visible_rebuild(
-    rebuilt: dt.datetime | None, count: int, expected: bool | None
+    rebuilt: dt.datetime | None, count: int, expected: bool | None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     conn = MagicMock()
-    conn.execute.return_value.first.return_value = None
-    conn.execute.return_value.one.side_effect = [(0, None), (rebuilt, count)]
+    conn.execute.return_value.first.side_effect = [None, MagicMock(type="stock", board="main")]
+    infer = MagicMock(side_effect=AssertionError("master inference forbidden"))
+    monkeypatch.setattr(inputs, "infer_board", infer, raising=False)
+    conn.execute.return_value.one.side_effect = [(2, at()), (rebuilt, count)]
+    conn.execute.return_value.scalar.side_effect = lambda: all(
+        node.operator(T + dt.timedelta(days=1), node.right.value)
+        for node in visitors.iterate(conn.execute.call_args.args[0])
+        if getattr(node, "operator", None) is operator.le and node.left.name == "trade_date"
+    )
     got = inputs.collect(
         conn,
         USER,
         CODE,
-        ["user.has_position"],
-        as_of=at(),
+        ["user.has_position", "sec.type", "sec.board", "user.has_t_trades"],
+        as_of=at().astimezone(dt.UTC),
         evidence_provider=EmptyEvidenceProvider(),
     )
     assert got.values["user.has_position"] is expected
+    assert got.values["user.has_t_trades"] is False
+    assert got.values["sec.type"] is got.values["sec.board"] is None
+    assert ("user.has_position" in got.sources) is (expected is not None)
+    assert got.gaps == ("evidence_unavailable", "calendar_not_covered", "sec.type", "sec.board")
+    assert all("securities" not in str(c.args[0]) for c in conn.execute.call_args_list)
+    sql = str(conn.execute.call_args.args[0])
+    assert sql.count("trade_date <=") == sql.count("traded_at <=") == 2
+    assert sql.count("traded_at IS NULL") == 2
 
 
 def test_versions_late_conflict_and_calendar_visibility() -> None:
