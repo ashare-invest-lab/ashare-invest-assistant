@@ -12,7 +12,6 @@ from app.db.tables.horizon import horizon_input_versions as versions
 from app.features import horizon_evidence_store as store
 from app.features.horizon_evidence_provider import DatabaseHorizonEvidenceProvider
 from app.features.horizon_sources import (
-    BasisEvidence,
     CalendarVersion,
     DailyBarVersion,
     HorizonEvidenceProvider,
@@ -197,7 +196,10 @@ def test_empty_dates_vendor_naive_cutoff_and_read_only(conn: Connection) -> None
             () if not dates else ("vendor_factor_unavailable", f"version_missing:{DAY}")
         )
     assert not queries
-    assert provider.read_basis(**SCOPE, as_of=NOW) == BasisEvidence(gaps=("basis_unavailable",))
+    basis = provider.read_basis(**SCOPE, as_of=NOW)
+    assert basis.bars
+    assert not basis.proofs
+    queries.clear()
     for method, kwargs in (
         (provider.read_basis, {}),
         (provider.read_versions, {"kind": "daily_bar", "dates": []}),
