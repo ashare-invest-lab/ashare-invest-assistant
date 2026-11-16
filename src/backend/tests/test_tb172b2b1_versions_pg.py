@@ -1,4 +1,4 @@
-"""T-A202 §4 / T-A204 阻断3：只读隔离测试库中的合成登记版本。"""
+"""T-A202 §4 / T-A204：隔离 PG 的登记版本与直接 INSERT 的历史损坏材料。"""
 
 # ruff: noqa: S101
 from datetime import datetime, timedelta, timezone
@@ -36,6 +36,125 @@ SCOPE = {"user_id": UUID(U), "licence_id": None, "code": "SYN"}
 
 def bar(connection: Connection, **changes: Any) -> UUID:  # noqa: ANN401
     return store.register_version(connection, **package("daily_bar", source_key="none", **changes))
+
+
+def historical(connection: Connection, kind: str = "ex_rights", **changes: Any) -> UUID:  # noqa: ANN401
+    saved = uuid4()
+    connection.execute(
+        insert(versions).values(
+            **(package(kind) | {"id": saved, "version_hash": saved.hex * 2} | changes)
+        )
+    )
+    return saved
+
+
+@pytest.mark.parametrize(
+    "case", ["missing", "user", "licence", "late", "null", "date", "deep", "wide", "valid"]
+)
+def test_historical_dependency_closure(conn: Connection, case: str) -> None:  # noqa: F811
+    changes: dict[str, Any] = {}
+    if case == "user":
+        from app.db.tables.users import users
+
+        conn.execute(
+            insert(users).values(
+                id=UUID(int=1724),
+                username="other",
+                password_hash="unusable",  # noqa: S106 - synthetic fixture
+                role="user",
+                status="approved",
+            )
+        )
+        changes["user_id"] = UUID(int=1724)
+    if case == "licence":
+        changes.update(source="tdx_gbbq", scope="per_licence", licence_id=uuid4())
+    if case in {"late", "null"}:
+        changes["available_at"] = LATER if case == "late" else None
+    if case == "date":
+        changes["data_date"] = DAY + timedelta(days=1)
+    leaf = uuid4() if case == "missing" else historical(conn, **changes)
+    deps = [historical(conn, dependency_ids=[leaf])]
+    if case in {"deep", "wide"}:
+        for index in range(1050):
+            node = historical(
+                conn, source_key=str(index), dependency_ids=deps if case == "deep" else []
+            )
+            deps = [node] if case == "deep" else [*deps, node]
+    saved = historical(conn, "daily_bar", dependency_ids=deps)
+    store.register_version(conn, **package(code=None))
+    store.register_completion(conn, **completion(conn, saved))
+    provider = DatabaseHorizonEvidenceProvider(conn)
+    bundle = provider.read_versions(**SCOPE, kind="daily_bar", dates=[DAY], as_of=NOW)
+    basis = provider.read_basis(**SCOPE, as_of=NOW)
+    if case == "valid":
+        assert [v.version_id for v in bundle.versions] == [str(saved)]
+        assert bundle.versions[0].available_at == NOW
+        assert select_day(basis, **SCOPE, as_of=LATER).d == DAY
+    else:
+        assert not bundle.versions
+        assert f"dependency_unavailable:{saved}" in bundle.gaps
+        assert f"dependency_unavailable:{saved}" in basis.gaps
+        assert not basis.bars
+        assert not basis.proofs
+        assert select_day(basis, **SCOPE, as_of=LATER).d is None
+
+
+@pytest.mark.parametrize("kind", ["daily_bar", "calendar"])
+@pytest.mark.parametrize(
+    "case", ["receipt", "unknown", "origin", "scope", "self", "cycle", "roots", "foreign"]
+)
+def test_historical_invalid_revision(conn: Connection, kind: str, case: str) -> None:  # noqa: F811
+    origin = {}
+    if case in {"unknown", "origin", "scope"}:
+        origin = {
+            "source": {"unknown": "unknown", "origin": "derived", "scope": "fake"}[case],
+            "scope": "public",
+        }
+    old = historical(conn, kind, **origin)
+    p = package(kind, **origin, source_version="v2", supersedes_id=old)
+    if case == "receipt":
+        p["payload"].pop("persisted_receipt")
+    elif case in {"self", "cycle"}:
+        node, other = uuid4(), uuid4()
+        rows = [
+            {
+                **p,
+                "id": node,
+                "version_hash": node.hex * 2,
+                "supersedes_id": node if case == "self" else other,
+            }
+        ]
+        if case == "cycle":
+            rows.append({**p, "id": other, "version_hash": other.hex * 2, "supersedes_id": node})
+        conn.execute(insert(versions).values(rows))
+    elif case == "roots":
+        p["supersedes_id"] = None
+    elif case == "foreign":
+        p["supersedes_id"] = historical(conn, kind, source_key="outside")
+    if case not in {"self", "cycle"}:
+        historical(conn, kind, **{k: v for k, v in p.items() if k != "kind"})
+    provider = DatabaseHorizonEvidenceProvider(conn)
+    bundle = provider.read_versions(**SCOPE, kind=kind, dates=[DAY], as_of=NOW)
+    assert str(old) not in {v.version_id for v in bundle.versions}
+    if case != "foreign":
+        assert not bundle.versions
+    prefix = (
+        "revision_graph_invalid"
+        if case in {"self", "cycle", "roots", "foreign"}
+        else "revision_invalid:"
+    )
+    assert any(gap.startswith(prefix) for gap in bundle.gaps)
+    if kind == "daily_bar":
+        store.register_version(conn, **package(code=None))
+    saved = bar(conn)
+    store.register_completion(conn, **completion(conn, saved))
+    basis = provider.read_basis(**SCOPE, as_of=NOW)
+    assert any(gap.startswith(prefix) for gap in basis.gaps)
+    assert f"version_conflict_day:{DAY}" in basis.gaps
+    assert not basis.bars
+    assert not basis.proofs
+    assert not basis.batches
+    assert select_day(basis, **SCOPE, as_of=LATER).d is None
 
 
 def test_b2b2_complete_registration_yields_basis(conn: Connection) -> None:  # noqa: F811
@@ -111,7 +230,7 @@ def test_a192_a1b_provider_revision_isolation(conn: Connection, case: str) -> No
         [] if case in {"fork", "roots"} else [str(expected)]
     )
     assert got.gaps == (
-        (f"version_conflict:daily_bar:{DAY}:none",)
+        ("revision_graph_invalid", f"version_conflict:daily_bar:{DAY}:none")
         + (() if case == "other_key" else (f"version_missing:{DAY}",))
         if case in {"fork", "roots", "other_key"}
         else ()

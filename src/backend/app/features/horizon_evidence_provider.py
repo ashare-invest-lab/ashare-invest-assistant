@@ -13,7 +13,7 @@ from sqlalchemy import Connection, RowMapping, and_, or_, select
 
 from app.db.tables.horizon import horizon_completion_evidence as completions
 from app.db.tables.horizon import horizon_input_versions as versions
-from app.features.horizon_evidence_store import EvidenceRejected, validate_batch
+from app.features.horizon_evidence_store import EvidenceRejected, validate_batch, validate_origin
 from app.features.horizon_sources import (
     BasisEvidence,
     BatchReceipt,
@@ -90,6 +90,41 @@ class DatabaseHorizonEvidenceProvider:
     def __init__(self, conn: Connection) -> None:
         self.conn = conn
 
+    def _qualified(
+        self, row: Row, user_id: UUID, licence_id: UUID | None, as_of: datetime
+    ) -> SourceVersion | None:
+        try:
+            validate_origin(row["kind"], row["source"], row["scope"])
+            version = _version(row)
+            if row["data_date"] <= as_of.astimezone(BEIJING).date() and permitted(
+                version, user_id, licence_id, as_of
+            ):
+                return version
+        except (KeyError, TypeError, ValueError):
+            pass
+        return None
+
+    def _dependencies_available(
+        self, version: SourceVersion, user_id: UUID, licence_id: UUID | None, as_of: datetime
+    ) -> bool:
+        # 历史材料不经过登记校验；迭代闭包最多 128 层、1024 节点。
+        pending = [(UUID(item), 1) for item in version.dependency_ids]
+        seen: set[UUID] = set()
+        while pending:
+            item, depth = pending.pop()
+            if depth > 128 or len(seen) >= 1024 or len(pending) > 1024:
+                return False
+            if item in seen:
+                continue
+            seen.add(item)
+            row = (
+                self.conn.execute(select(versions).where(versions.c.id == item)).mappings().first()
+            )
+            if row is None or self._qualified(row, user_id, licence_id, as_of) is None:
+                return False
+            pending.extend((dep, depth + 1) for dep in row["dependency_ids"])
+        return True
+
     def _read(
         self,
         *,
@@ -128,32 +163,47 @@ class DatabaseHorizonEvidenceProvider:
         rows = self.conn.execute(
             query.order_by(c.data_date, c.source, c.source_key, c.id)
         ).mappings()
-        groups: dict[tuple[object, ...], list[tuple[Row, SourceVersion]]] = defaultdict(list)
+        groups: dict[tuple[object, ...], list[tuple[Row, SourceVersion | None]]] = defaultdict(list)
         result = _VersionRead()
         for row in rows:
-            version = _version(row)
-            # SQL 范围/PIT 与 A0 来源资格分别检查；不借空证书放行 mairui。
-            if permitted(version, user_id, licence_id, as_of):
-                key = tuple(
-                    row[k]
-                    for k in (
-                        "user_id",
-                        "licence_id",
-                        "kind",
-                        "source",
-                        "code",
-                        "data_date",
-                        "source_key",
-                    )
+            version = self._qualified(row, user_id, licence_id, as_of)
+            key = tuple(
+                row[k]
+                for k in (
+                    "user_id",
+                    "licence_id",
+                    "kind",
+                    "source",
+                    "code",
+                    "data_date",
+                    "source_key",
                 )
-                groups[key].append((row, version))
+            )
+            groups[key].append((row, version))
+            if version is not None:
                 result.history.append(version)
         for key, group in groups.items():
+            if any(v is None for _, v in group):
+                result.gaps.append(f"revision_invalid:{kind}:{key[-2]}:{key[-1]}")
+                result.conflicts.add(group[0][0]["data_date"])
+                continue
             superseded = {r["supersedes_id"] for r, _ in group}
             tips = [(r, v) for r, v in group if r["id"] not in superseded]
-            if len(tips) == 1:
-                result.selected.append((tips[0][0]["data_date"], tips[0][1]))
+            parents = {r["id"]: r["supersedes_id"] for r, _ in group}
+            current = tips[0][0]["id"] if len(tips) == 1 else None
+            visited = set()
+            while current in parents and current not in visited:
+                visited.add(current)
+                current = parents[current]
+            if len(visited) == len(group) and current is None and tips[0][1] is not None:
+                day, version = tips[0][0]["data_date"], tips[0][1]
+                if self._dependencies_available(version, user_id, licence_id, as_of):
+                    result.selected.append((day, version))
+                else:
+                    result.gaps.append(f"dependency_unavailable:{version.version_id}")
+                    result.conflicts.add(day)
             else:
+                result.gaps.append("revision_graph_invalid")
                 result.gaps.append(f"version_conflict:{kind}:{key[-2]}:{key[-1]}")
                 result.conflicts.add(group[0][0]["data_date"])
         return result
