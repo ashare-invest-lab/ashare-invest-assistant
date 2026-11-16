@@ -37,7 +37,8 @@ def test_workflows_declare_merge_group_checks_requested():
     for path in WORKFLOWS:
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         # PyYAML's YAML 1.1 loader treats the unquoted GitHub key `on` as True.
-        events = workflow[True]
+        # T-O90：ci.yml 将 on 键加引号（'on':）以满足 actionlint/单文档；此处两种键形兼容读取。
+        events = workflow[True] if True in workflow else workflow["on"]
         assert events["merge_group"] == {"types": ["checks_requested"]}, path.name
 
 

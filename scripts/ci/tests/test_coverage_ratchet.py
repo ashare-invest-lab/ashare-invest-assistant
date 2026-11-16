@@ -246,7 +246,10 @@ def test_download_redirect_removes_token_across_hosts():
 
 def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "for d in src/backend/tests tests/backend tests/replay; do" in workflow
+    # T-O90 分片：目录发现循环移除；全量选择以两片目录并集等价锚定（Chief 14:2x 批）。
+    # B 的目录序＝原单 job 的字母序执行顺序（integration/milestone 先于 unit 的钩子安装者）。
+    assert "src/backend/tests tests/backend/api_app tests/replay" in workflow
+    assert "tests/backend/contract tests/backend/golden tests/backend/integration tests/backend/milestone tests/backend/unit" in workflow
     assert "--cov=src/backend/app --cov-report=term-missing:skip-covered" in workflow
     assert "--cov-fail-under=80" not in workflow
     assert "timeout-minutes: 30" in workflow
@@ -316,26 +319,33 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
-    backend = jobs["backend"]
-    assert "if" not in ready and "if" not in backend  # Required on merge_group too.
-    assert "needs" not in backend
-    # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
-    assert backend["timeout-minutes"] == 75
-    assert backend["name"] == "backend (ruff, mypy, pytest+coverage)"
+    # T-O90（Chief 14:2x 批）：backend 拆 backend-a/backend-b 并行，backend-gate 合并后冻结 base 再棘轮。
+    gate = jobs["backend-gate"]
+    assert "if" not in ready and "if" not in gate  # Required on merge_group too.
+    assert gate["needs"] == ["backend-a", "backend-b"]
+    assert gate["name"] == "backend (merge shards, ratchet, archive)"
     assert ready["name"] == "trusted main coverage readiness"
     assert ready["timeout-minutes"] == 35
     assert ready["permissions"] == {"contents": "read", "actions": "read"}
     commands = [step["run"] for step in ready["steps"] if "run" in step]
     assert len(commands) == 1 and "--wait-for-main-seconds 1800" in commands[0]
     assert "pytest" not in commands[0] and "rerun" not in commands[0]
-    steps = backend["steps"]
+    for shard in ("backend-a", "backend-b"):
+        assert "needs" not in jobs[shard]  # 两片与 coverage-base 同层并行
+        assert "pytest 分片" in [s.get("name") for s in jobs[shard]["steps"]]
+    steps = gate["steps"]
     freezes = [i for i, step in enumerate(steps)
                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
     assert len(freezes) == 1
     freeze_index = freezes[0]
-    pytest_index = next(i for i, step in enumerate(steps) if step.get("name") == "pytest + 覆盖率")
+    merge_index = next(i for i, step in enumerate(steps) if step.get("name") == "合并分片覆盖率与 JUnit")
     ratchet_index = next(i for i, step in enumerate(steps) if step.get("id") == "coverage_ratchet")
-    assert pytest_index < freeze_index == ratchet_index - 1
+    assert merge_index < freeze_index == ratchet_index - 1
+    # T-O90 P1（架构师 6904749207）：gate runner 无 venv——断言/冻结/棘轮三步不得依赖
+    # hashFiles('src/backend/.venv/bin/python')，否则静默 skip 造成假绿。
+    for step in steps:
+        if step.get("name") in ("确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）", "冻结可信 base 覆盖率棘轮基线", "精确覆盖率棘轮（可信 base，不下降）"):
+            assert "hashFiles" not in step.get("if", ""), step["name"]
     frozen = steps[freeze_index]
     assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
                              '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" '
@@ -350,9 +360,10 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     import yaml
 
     path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
-    backend = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend"]
-    command = next(step["run"] for step in backend["steps"] if step.get("name") == "pytest + 覆盖率")
-    dirs = ["src/backend/tests", "tests/backend", "tests/replay"]
+    shard = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend-a"]
+    command = next(step["run"] for step in shard["steps"] if step.get("name") == "pytest 分片")
+    # T-O90 分片（Chief 14:2x 批）：目录由 AIA_SHARD_DIRS 提供；本断言用 backend-a 的目录集。
+    dirs = ["src/backend/tests", "tests/backend/api_app", "tests/replay"]
     for directory in dirs + ["src/backend/.venv/bin", "bin", "runner temp"]:
         (tmp_path / directory).mkdir(parents=True, exist_ok=True)
     if with_ini:
@@ -378,6 +389,8 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
     for name in ("PYTEST_COV_VERSION", "REQUESTS_VERSION", "URLLIB3_VERSION"):
         monkeypatch.setenv(name, "test-only")
+    # T-O90 分片：目录经 AIA_SHARD_DIRS 注入（backend-a 的目录集），测试同源提供。
+    monkeypatch.setenv("AIA_SHARD_DIRS", " ".join(dirs))
     result = subprocess.run(["bash", "-c", command], cwd=tmp_path, capture_output=True, text=True, timeout=10)
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert json.loads((runner_temp / "argv.json").read_text(encoding="utf-8")) == [
@@ -385,6 +398,6 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
         *(["-c", "tests/pytest.ini"] if with_ini else []), *dirs,
         "--durations=30", "--durations-min=0.5",
         "--cov=src/backend/app", "--cov-report=term-missing:skip-covered",
-        f"--cov-report=json:{runner_temp}/coverage.json",
-        f"--junitxml={runner_temp}/backend-pytest.xml",
+        f"--cov-report=json:{runner_temp}/coverage-a.json",
+        f"--junitxml={runner_temp}/backend-pytest-a.xml",
     ]
