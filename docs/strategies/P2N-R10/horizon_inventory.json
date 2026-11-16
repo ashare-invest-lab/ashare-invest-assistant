@@ -9,6 +9,18 @@
   ],
   "scope_snapshot": [
     {
+      "path": "docs/strategies/T-R81/README.md",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R81/gen_reference.py",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R81/reference_values.csv",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
       "path": "docs/strategies/T-R16/L-01_lt_value.md",
       "scope_role": "enumerated_identity_source"
     },
