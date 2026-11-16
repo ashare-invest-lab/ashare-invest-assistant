@@ -70,7 +70,7 @@ export interface AdminUserPatch { status: 'approved' | 'rejected' | 'disabled'; 
 // ---------- §7.2 账户、成交、导入 ----------
 export interface BrokerAccount {
   id: Uuid;
-  broker_name: string;
+  broker_name: string | null;
   alias: string;
   shareholder_code_masked: string | null;
   fund_account_masked: string | null;
