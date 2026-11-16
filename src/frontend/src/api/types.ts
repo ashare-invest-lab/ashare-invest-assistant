@@ -532,7 +532,14 @@ export interface HealthReady {
 
 // ---------- v0.2.3 §7.3 /market/overview（最小结构） ----------
 export interface MarketIndexQuote { security_code: string; name: string; price: Decimal | null; change_pct: Decimal | null; amount: Decimal | null; t: DateTime | null }
+/** T-A209 §3.2 草案；M1 定稿前允许旧响应缺省，不推造批次。 */
+export interface MarketBasis {
+  snapshot_id: Uuid | null; observed_date: DateStr | null; mode: 'intraday' | 'close' | null; scope: string;
+  eligible: number | null; observed: number | null; trading: number | null; suspended: number | null; missing: number | null;
+  source: string | null;
+}
 export interface MarketOverview extends DataStatusBlock {
+  basis?: MarketBasis | null;
   trade_date: DateStr;
   session: MarketSession;
   indices: MarketIndexQuote[];
