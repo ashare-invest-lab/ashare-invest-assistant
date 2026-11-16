@@ -2,8 +2,9 @@
 """Freeze a trusted base measurement, never the PR's own editable baseline.
 
 Only the first approved pre-ratchet main commit uses the reviewed 4c02 counts.
-Later baselines use validated main push artifacts. Only main events may recover
-through a bounded first-parent history; PR and merge-group events remain exact-base.
+Later baselines use validated main push artifacts. Apart from one approved docs-only
+pair, PR and merge-group events remain exact-base; only main events may recover
+through a bounded first-parent history.
 """
 from __future__ import annotations
 
@@ -25,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "scripts/ci/coverage-baseline.json"
 LIMIT = 8 * 1024 * 1024
 MAX_FALLBACK_ANCESTORS = 50
+EXPLICIT_RECOVERY_BASE = "f6c939d6ed4af94144e7dd669f206c96d6aeaf6b"
+EXPLICIT_RECOVERY_PARENT = "90ef8ff16abb7204b7c4ffd54174aeeb8f712455"
 
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -128,6 +131,21 @@ class MeasurementUnavailable(ValueError):
 
 
 def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
+    requested_base = sha
+    if sha == EXPLICIT_RECOVERY_BASE:
+        # One approved docs-only recovery, before querying any requested-base run.
+        parent = subprocess.run(["git", "rev-parse", "--verify", sha + "^1"],
+                                cwd=ROOT, capture_output=True, text=True, check=False)
+        if parent.returncode or parent.stdout.strip() != EXPLICIT_RECOVERY_PARENT:
+            raise ValueError("Explicit recovery requires the approved first parent")
+        diff = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z",
+                               EXPLICIT_RECOVERY_PARENT, sha],
+                              cwd=ROOT, capture_output=True, text=True, check=False)
+        if diff.returncode:
+            raise ValueError("Explicit recovery could not verify the docs-only diff")
+        if any(not path.startswith("docs/") for path in diff.stdout.split("\0") if path):
+            raise ValueError("Explicit recovery requires a docs-only diff")
+        sha = EXPLICIT_RECOVERY_PARENT
     # Keep PR selection, trust checks and failure behavior exact. Main recovery
     # classifies only missing/invalid measurement data, never git or API failures.
     exists = subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=ROOT,
@@ -137,7 +155,7 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
     policy = subprocess.run(["git", "show", sha + ":" + POLICY_PATH], cwd=ROOT,
                             capture_output=True, check=False)
     if policy.returncode:
-        if sha != BOOTSTRAP_BASE:
+        if sha != BOOTSTRAP_BASE or sha != requested_base:
             raise ValueError("Trusted base has no ratchet measurement policy")
         record = bootstrap_record()
         record["source"] = record["source"] | {"base_commit": sha}
@@ -164,11 +182,14 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
         raise unavailable("Missing, expired or ambiguous exact-base measurement")
     data = get("/actions/artifacts/" + str(selected[0]["id"]) + "/zip", binary=True)
     try:
-        return read_artifact(data, sha, run["id"], run["run_attempt"])
+        record = read_artifact(data, sha, run["id"], run["run_attempt"])
     except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
         if unavailable is ValueError:
             raise
         raise unavailable("Invalid exact-base main push measurement") from exc
+    if sha != requested_base:
+        record["source"]["requested_base"] = requested_base
+    return record
 
 
 def freeze(repo: str, sha: str, get, *, allow_fallback: bool = False) -> dict:
