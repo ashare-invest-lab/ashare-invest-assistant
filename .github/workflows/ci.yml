@@ -8,13 +8,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Queue requests must neither share PR groups nor replace pending queue runs.
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'merge_group' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -36,6 +39,7 @@ env:
 jobs:
   # Wait only for an already-running exact-main push, in parallel with backend.
   # Retain this required readiness check; never run another measurement.
+  # PR and merge_group both require their exact main base, without fallback.
   coverage-base:
     name: trusted main coverage readiness
     runs-on: ubuntu-24.04
@@ -51,7 +55,7 @@ jobs:
       - name: 等待原 main push 的精确测量归档
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json"
+        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json" --coverage-output "${RUNNER_TEMP}/coverage-base-ready-coverage.json"
 
   # ------------------------------------------------------------------ 后端：ruff / mypy strict / pytest + 覆盖率
   backend:
@@ -211,7 +215,7 @@ jobs:
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"
+        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" --coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"
       - name: 精确覆盖率棘轮（可信 base，不下降）
         id: coverage_ratchet
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
@@ -219,10 +223,12 @@ jobs:
           test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
           python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json" \
             --base "${RUNNER_TEMP}/coverage-base.json" \
+            --base-coverage "${RUNNER_TEMP}/coverage-base-coverage.json" \
+            --nondet-lines scripts/ci/coverage-nondet-lines.json \
             --policy scripts/ci/coverage-baseline.json \
             --output "${RUNNER_TEMP}/coverage-ratchet-measurement.json"
       - name: 归档可信覆盖率测量与原始 JSON/JUnit
-        if: ${{ !cancelled() && steps.coverage_ratchet.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.coverage_ratchet.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-ratchet-${{ github.run_id }}-${{ github.run_attempt }}

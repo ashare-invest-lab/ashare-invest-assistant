@@ -67,8 +67,8 @@ class TerminalHolding(Model):
 
 class TerminalQuote(Model):
     price: str
-    change_pct: str
-    amount: str
+    change_pct: str | None
+    amount: str | None
     t: dt.datetime
 
 

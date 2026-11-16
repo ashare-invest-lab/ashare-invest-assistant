@@ -269,7 +269,7 @@
     {
       "path": "docs/strategies/T-R28/test_check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides; T-R77 offline subprocess coverage for skipped_no_db, --require-db, override and hash-tamper rejection, including python -O"
     },
     {
       "path": "docs/strategies/T-R31/checklist_reconcile.md",
@@ -385,7 +385,7 @@
     {
       "path": "docs/strategies/check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger)"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger); T-R77 validates locked thresholds before skipped_no_db (ready=null, unverified); --require-db preserves missing-DB failure; F21 remains declared"
     },
     {
       "path": "docs/strategies/check_p2n01_dimension_mapping.py",
@@ -881,6 +881,71 @@
       "path": "docs/strategies/T-R71/acceptance.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71：每日决策候选研究草稿/索引/验收；lifecycle draft，不可导入，不分配新运行身份；周期见单卡 §1"
+    },
+    {
+      "path": "docs/strategies/golden/T-R73_golden.json",
+      "scope_role": "synthetic_golden_or_helper_not_strategy",
+      "note": "T-R73【虚构】PN-06 四卡合成端到端 golden；不是策略身份或生产实现"
+    },
+    {
+      "path": "docs/strategies/golden/check_T-R73.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy",
+      "note": "T-R73【虚构】PN-06 四卡合成端到端 golden；不是策略身份或生产实现"
+    },
+    {
+      "path": "docs/strategies/golden/T-R73_README.md",
+      "scope_role": "synthetic_golden_or_helper_not_strategy",
+      "note": "T-R73【虚构】PN-06 四卡合成端到端 golden；不是策略身份或生产实现"
+    },
+    {
+      "path": "docs/strategies/golden/gen_T-R73.py",
+      "scope_role": "synthetic_golden_or_helper_not_strategy",
+      "note": "T-R73b【虚构】合成 golden 生成脚本；check_T-R73 校验重新生成与提交逐字节一致；不是策略身份或生产实现"
+    },
+    {
+      "path": "docs/strategies/T-R74/param_audit.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/audit_public_lists.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/check_result.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/sources.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/st_current.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/termination_current.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/test_audit_public_lists.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
     }
   ],
   "records": [
@@ -2611,5 +2676,48 @@
     "basis": "T-A159 口径裁定及条件 C1/C2；T-R71d 用户任务",
     "scope_files": 192,
     "change": "保留 T-R69 与 T-R71 全部登记，55 个共同辅助路径去重并保留双方说明；合并后 scope 192（本轮交付记录不入库）；身份记录 45、源文件 23 不变"
+  },
+  "t_r73_refresh": {
+    "basis": "T-R73 用户任务：仅合成 golden 与独立重算校验，登记新增文件",
+    "previous_scope_files": 192,
+    "scope_files": 196,
+    "added_paths": [
+      "docs/strategies/golden/T-R73_golden.json",
+      "docs/strategies/golden/check_T-R73.py",
+      "docs/strategies/golden/T-R73_README.md",
+      "docs/strategies/golden/gen_T-R73.py"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 192→196（T-R73b 补登生成脚本）；身份45、来源身份文件23、records/stats均不变"
+  },
+  "t_r74_refresh": {
+    "basis": "T-R74 用户任务：四卡参数出处审计与最小复测方案",
+    "previous_scope_files": 196,
+    "scope_files": 197,
+    "added_paths": [
+      "docs/strategies/T-R74/param_audit.md"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 196→197（合入 T-R73b 后）；身份45、来源身份文件23、records/stats不变"
+  },
+  "t_r71c_refresh": {
+    "basis": "T-R71c 用户任务：登记 main 上 R-R1 公开名单审计 8 文件，修复 census",
+    "previous_scope_files": 197,
+    "scope_files": 205,
+    "added_paths": [
+      "docs/strategies/R-R1/README.md",
+      "docs/strategies/R-R1/audit_public_lists.py",
+      "docs/strategies/R-R1/check_result.json",
+      "docs/strategies/R-R1/differences.csv",
+      "docs/strategies/R-R1/sources.json",
+      "docs/strategies/R-R1/st_current.csv",
+      "docs/strategies/R-R1/termination_current.csv",
+      "docs/strategies/R-R1/test_audit_public_lists.py"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 197→205：登记 main 上 R-R1 公开名单审计 8 文件，T-R71c；来源提交 bec079a；身份45、来源身份文件23、records/stats不变"
   }
 }
