@@ -4,16 +4,14 @@
  * 本单只核对、不改设计：用 MSW 覆盖出「零数据 / 报错 / 分页截断」三种情形，
  * 锁定页面实际行为，供差异清单取证。
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
-import { AppProviders } from '../../app/AppProviders';
-import { makeQueryClient } from '../../app/queryClient';
 import { routes } from '../../app/routes';
 import { errorBody } from '../../mocks/handlerUtils';
 import { server } from '../../mocks/server';
 import { mockLoginAs } from '../../mocks/session';
 import { preloadRoutes } from '../../test/preloadRoutes';
+import { renderAt } from '../../test/renderAt';
 
 vi.mock('../../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -25,18 +23,6 @@ afterEach(() => server.resetHandlers());
 
 const API = '/api/v1';
 const emptyPage = () => HttpResponse.json({ items: [], next_cursor: null });
-
-function renderAt(path: string) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(
-    <AppProviders client={makeQueryClient(true)}>
-      <RouterProvider router={router} />
-    </AppProviders>,
-  );
-  return router;
-}
 
 describe('① /plans 空态', () => {
   it('零数据 → 表格空态「没有符合条件的计划」，不报错不白屏', async () => {
