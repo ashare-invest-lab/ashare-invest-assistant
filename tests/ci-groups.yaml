@@ -88,6 +88,7 @@ tests:
   - {"file": "tests/backend/unit/test_daily_snapshot_impl_b.py", "group": "serial_pg", "keywords": ["b_db->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
   - {"file": "tests/backend/unit/test_db_metadata.py", "group": "parallel", "keywords": ["SQLAlchemy metadata read-only", "DDL compile only"], "unverified": false}
   - {"file": "tests/backend/unit/test_domain_portfolio_cov_t6.py", "group": "parallel", "keywords": ["autouse deny_network rejects socket.connect/create_connection", "app.domain.portfolio only", "synthetic data; no external resources"], "unverified": false}
+  - {"file": "tests/backend/unit/test_domain_trades_cov_t6.py", "group": "serial_shared", "keywords": ["T-O106 临时登记：main ccd3eb2（#189）新增，待测试正式分组", "autouse deny_network 拒连", "纯 domain trades 合成数据"], "unverified": true, "reason": "T-O106 临时登记，#189 合入后清单缺此项；未逐项核实资源风险，按未验证留在串行组，由测试正式分组"}
   - {"file": "tests/backend/unit/test_expected_json.py", "group": "parallel", "keywords": ["read-only synthetic fixtures/expected JSON"], "unverified": false}
   - {"file": "tests/backend/unit/test_fixtures_fmt_a.py", "group": "parallel", "keywords": ["subprocess generate --check read-only", "generate --out tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_g7_board_in_universe_prod_t_t66.py", "group": "serial_pg", "keywords": ["o61_engine", "PGHOST", "create_engine real PG", "template database"], "unverified": false}
