@@ -77,7 +77,8 @@ class Actions:
             event = mode if mode in {"pull_request", "workflow_dispatch"} else "push"
             return {"workflow_runs": [{
                 "id": identifier, "run_attempt": 1, "head_sha": sha,
-                "head_branch": "main", "event": event, "status": status,
+                "head_branch": "topic" if mode == "topic" else "main",
+                "event": event, "status": status,
                 "repository": {"full_name": "foreign/repo" if mode == "foreign" else REPO},
             }]}
         identifier = int(parsed.path.split("/")[-2])
@@ -116,7 +117,9 @@ def assert_fallback(record, selected, requested, skipped):
     assert record["source"]["fallback"] == {
         "requested_base_commit": requested, "skipped_heads": skipped,
         "ancestor_limit": loader.MAX_FALLBACK_ANCESTORS,
+        "reason": record["source"]["fallback"]["reason"],
     }
+    assert record["source"]["fallback"]["reason"]
 
 
 def test_missing_exact_base_recovers_nearest_measured_first_parent(history):
@@ -132,7 +135,7 @@ def test_missing_exact_base_recovers_nearest_measured_first_parent(history):
 
 @pytest.mark.parametrize("mode", [
     "no_artifact", "expired", "ambiguous", "failed_ratchet", "wrong_identity", "invalid_zip",
-    "pull_request", "workflow_dispatch", "foreign",
+    "pull_request", "workflow_dispatch", "foreign", "topic",
 ])
 def test_unusable_or_untrusted_head_never_becomes_recovered_baseline(history, mode):
     _, (_, second, third) = history
@@ -165,7 +168,7 @@ def test_ancestor_bound_includes_boundary_but_never_queries_beyond_it(
         assert_fallback(loader.freeze(REPO, requested, actions, allow_fallback=True),
                         first, requested, 2)
     else:
-        with pytest.raises(ValueError, match="No usable trusted main push measurement"):
+        with pytest.raises(loader.MeasurementUnavailable, match="No usable trusted main push measurement"):
             loader.freeze(REPO, requested, actions, allow_fallback=True)
         assert not any(first in call for call in actions.calls)
 
@@ -223,39 +226,172 @@ def test_authentication_or_transport_failure_is_not_hidden_by_ancestry(history, 
     assert len(calls) == 1
 
 
+@pytest.fixture
+def cli_recovery_case(history, tmp_path, monkeypatch):
+    root, (_, second, third) = history
+
+    def make(event_name="pull_request", mode="failed_ratchet", *, wait=0):
+        if event_name == "workflow_dispatch":
+            commit(root, "current dispatch main")  # HEAD^ is the requested third commit.
+        actions = Actions()
+        actions.put(second)
+        if mode != "missing":
+            actions.put(third, mode)
+        event = {"before": third, "merge_group": {
+            "base_ref": "refs/heads/main", "base_sha": third, "head_sha": "a" * 40,
+        }, "pull_request": {
+            "base": {"sha": third, "ref": "main", "repo": {"full_name": REPO}},
+            "head": {"sha": "a" * 40},
+        }}
+        path = tmp_path / "synthetic-event.json"
+        path.write_text(json.dumps(event), encoding="utf-8")
+        output = tmp_path / "frozen.json"
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
+        monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
+        monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
+        refs = {"pull_request": "refs/pull/7/merge",
+                "merge_group": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
+        monkeypatch.setenv("GITHUB_REF", refs.get(event_name, "refs/heads/main"))
+        monkeypatch.setattr(loader, "api_reader", lambda repo: actions)
+        monkeypatch.setattr(sys, "argv", ["loader", "--output", str(output),
+                                         "--wait-for-main-seconds", str(wait)])
+        return {"actions": actions, "output": output, "requested": third, "selected": second}
+
+    return make
+
+
+def assert_cli_recovers(main, case):
+    assert main() == 0, "PR/main/merge_group must recover an unavailable exact main base"
+    frozen = json.loads(case["output"].read_text(encoding="utf-8"))
+    assert_fallback(frozen, case["selected"], case["requested"], 1)
+    return frozen
+
+
 @pytest.mark.parametrize("event_name", ["push", "workflow_dispatch", "pull_request", "merge_group"])
-def test_cli_allows_main_events_to_recover_but_pr_remains_exact(
-    history, tmp_path, monkeypatch, capsys, event_name,
+@pytest.mark.parametrize("mode", [
+    "missing", "no_artifact", "expired", "ambiguous", "invalid_zip", "failed_ratchet",
+    "wrong_identity", "pull_request", "workflow_dispatch", "foreign", "topic",
+])
+def test_cli_allows_main_pr_and_merge_group_to_recover_and_logs_reason(
+    cli_recovery_case, capsys, event_name, mode,
 ):
-    _, (first, _, third) = history
+    case = cli_recovery_case(event_name, mode)
+    frozen = assert_cli_recovers(loader.main, case)
+    stdout = capsys.readouterr().out
+    assert "Frozen coverage baseline: " + case["selected"] in stdout
+    assert "first-parent fallback commit=" + case["selected"] in stdout
+    reason = frozen["source"]["fallback"]["reason"]
+    assert "reason=" + reason in stdout
+    if mode == "failed_ratchet":
+        assert "ratchet_passed is not true" in reason
+    elif mode in {"invalid_zip", "wrong_identity"}:
+        assert "Invalid exact-base main push measurement" in reason
+    elif mode in {"no_artifact", "expired", "ambiguous"}:
+        assert "Missing, expired or ambiguous exact-base measurement" in reason
+    else:
+        assert "No completed exact-base main measurement run" in reason
+
+
+@pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])
+@pytest.mark.parametrize("completed_mode", ["valid", "failed_ratchet", "no_artifact"])
+def test_cli_waits_for_exact_main_push_before_deciding_to_recover(
+    cli_recovery_case, monkeypatch, capsys, event_name, completed_mode,
+):
+    case = cli_recovery_case(event_name, "pending", wait=30)
+    actions = case["actions"]
+    identifier, _ = actions.states[case["requested"]]
+    sleeps = []
+
+    def complete(seconds):
+        assert not any(case["selected"] in call for call in actions.calls)
+        sleeps.append(seconds)
+        actions.states[case["requested"]] = (identifier, completed_mode)
+
+    monkeypatch.setattr(loader.time, "sleep", complete)
+    monkeypatch.setattr(loader.time, "monotonic", lambda: 0)
+    if completed_mode == "valid":
+        assert loader.main() == 0
+        frozen = json.loads(case["output"].read_text(encoding="utf-8"))
+        assert frozen["commit"] == case["requested"]
+        assert "fallback" not in frozen["source"]
+        assert not any(case["selected"] in call for call in actions.calls)
+    else:
+        assert_cli_recovers(loader.main, case)
+    assert sleeps == [15]
+    assert f"Waiting for existing trusted main run {identifier}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])
+def test_cli_pending_timeout_does_not_use_available_ancestor(
+    cli_recovery_case, monkeypatch, event_name,
+):
+    case = cli_recovery_case(event_name, "pending", wait=30)
+    ticks = iter([0, 30])
+    monkeypatch.setattr(loader.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(loader.time, "sleep", lambda _: pytest.fail("Must time out"))
+    assert loader.main() == 1
+    assert not case["output"].exists()
+    assert not any(case["selected"] in call for call in case["actions"].calls)
+
+
+@pytest.mark.parametrize("mode", ["pull_request", "workflow_dispatch", "foreign", "topic"])
+def test_untrusted_artifacts_throughout_history_cannot_supply_a_baseline(history, mode):
+    _, heads = history
+    actions = Actions()
+    for head in heads:
+        actions.put(head, mode)
+    with pytest.raises(loader.MeasurementUnavailable):
+        loader.freeze(REPO, heads[-1], actions, allow_fallback=True)
+    assert not any("/artifacts" in call for call in actions.calls)
+
+
+@pytest.mark.parametrize("distance", [50, 51])
+def test_consecutive_failed_measurements_respect_actual_fifty_ancestor_limit(history, distance):
+    root, (first, second, third) = history
+    heads = [first, second, third]
+    while len(heads) <= distance:
+        heads.append(commit(root, f"failed main {len(heads)}"))
     actions = Actions()
     actions.put(first)
-    event = {"before": third, "merge_group": {
-        "base_ref": "refs/heads/main", "base_sha": third, "head_sha": "a" * 40,
-    }, "pull_request": {
-        "base": {"sha": third, "ref": "main", "repo": {"full_name": REPO}},
-        "head": {"sha": "a" * 40},
-    }}
-    path = tmp_path / "synthetic-event.json"
-    path.write_text(json.dumps(event), encoding="utf-8")
-    output = tmp_path / "frozen.json"
-    monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
-    monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
-    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
-    refs = {"pull_request": "refs/pull/7/merge",
-            "merge_group": "refs/heads/gh-readonly-queue/main/pr-7-synthetic"}
-    monkeypatch.setenv("GITHUB_REF", refs.get(event_name, "refs/heads/main"))
-    monkeypatch.setattr(loader, "api_reader", lambda repo: actions)
-    monkeypatch.setattr(sys, "argv", ["loader", "--output", str(output)])
-    result = loader.main()
-    if event_name in {"pull_request", "merge_group"}:
-        assert result == 1 and not output.exists()
-        assert all(third in call for call in actions.calls)
+    for head in heads[1:]:
+        actions.put(head, "failed_ratchet")
+    if distance == 50:
+        assert_fallback(loader.freeze(REPO, heads[-1], actions, allow_fallback=True),
+                        first, heads[-1], 50)
     else:
-        assert result == 0
-        frozen = json.loads(output.read_text(encoding="utf-8"))
-        assert frozen["commit"] == first
-        assert "Frozen coverage baseline: " + first in capsys.readouterr().out
+        with pytest.raises(loader.MeasurementUnavailable, match="50 first-parent ancestors"):
+            loader.freeze(REPO, heads[-1], actions, allow_fallback=True)
+        assert not any(first in call for call in actions.calls)
+
+
+@pytest.mark.parametrize("mutation", ["main_only", "disabled", "failed_ratchet", "non_main"])
+def test_cli_recovery_and_trust_mutations_are_caught(
+    cli_recovery_case, tmp_path, monkeypatch, mutation,
+):
+    case = cli_recovery_case(mode="pull_request" if mutation == "non_main" else "failed_ratchet")
+    assert_cli_recovers(loader.main, case)
+    case["output"].unlink()
+    source = Path(loader.__file__).read_text(encoding="utf-8")
+    if mutation in {"main_only", "disabled"}:
+        needle = "                               allow_fallback=True)"
+        replacement = ("                               allow_fallback="
+                       '(os.environ["GITHUB_EVENT_NAME"] in {"push", "workflow_dispatch"}))'
+                       if mutation == "main_only" else
+                       "                               allow_fallback=False)")
+    elif mutation == "failed_ratchet":
+        needle = 'if record.get("ratchet_passed") is not True:'
+        replacement = 'if False:  # mutated: accept failed ratchets'
+    else:
+        needle = 'and r["event"] == "push" and r["status"] == "completed"'
+        replacement = 'and r["status"] == "completed"  # mutated: accept PR artifacts'
+    assert source.count(needle) == 1
+    mutant_path = tmp_path / "mutant_cli_recovery.py"
+    mutant_path.write_text(source.replace(needle, replacement, 1), encoding="utf-8")
+    namespace = {"__file__": loader.__file__, "__name__": "mutant_cli_recovery"}
+    exec(compile(mutant_path.read_text(encoding="utf-8"), str(mutant_path), "exec"), namespace)
+    namespace.update(ROOT=loader.ROOT, api_reader=loader.api_reader)
+    with pytest.raises(AssertionError):
+        assert_cli_recovers(namespace["main"], case)
 
 
 def test_tag_dispatch_context_is_still_rejected_before_any_measurement():
