@@ -8,10 +8,12 @@
 # 运维：parallel 可 xdist/分片；三个 serial_* 合并后用单 worker 顺序运行，并隔离 parallel 的 PG/端口/共享资源。
 # 从仓库根按 group 过滤 file 列表，作为 env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini 的位置参数。
 # 例如 Python yaml.safe_load(...)["tests"] 中筛选 r["group"] == "parallel" 后取 r["file"]；此组可追加 -n 4。
+# 守护递归扫描 tests/backend、tests/replay 及 src/backend/tests（不含 selfchecks）。
 # 全范围收集必须显式给 tests/backend tests/replay（根目录下裸跑会回退扫描范围外 scripts）；守护测试独立跑不启动嵌套收集。
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "src/backend/tests/test_terminal_quotes.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "socket.connect/create_connection denied", "synthetic data; no real PG/Redis/docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_contract_current.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_users_patch_t_b150.py", "group": "serial_pg", "keywords": ["app_client->authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_architect_rulings_t_t25.py", "group": "serial_pg", "keywords": ["session/sql->_t23.authdb->pg_url", "redis_url", "docker"], "unverified": false}
@@ -128,6 +130,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb117_session_filter_t_t61.py", "group": "parallel", "keywords": ["pure session calculations", "existing probe results read-only", "no probe execution"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_offline.py", "group": "parallel", "keywords": ["offline DDL compile", "tmp_path ZIP/CSV", "no_socket monkeypatch", "import-only RNG"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_pg.py", "group": "serial_pg", "keywords": ["offline_schema->pg_conn->pg_url", "psycopg", "docker"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb163r2_bj_gate.py", "group": "parallel", "keywords": ["Mock/monkeypatch", "confirm_bj_offline_volume_units and upsert gate", "no database connection"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
   - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
