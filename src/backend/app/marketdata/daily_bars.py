@@ -751,6 +751,8 @@ def daily_bars_fetch_task(
     from app.workers.jobs import _engine
 
     day, uid = _validate_task_args(trade_date, user_id, window_trading_days)
+    if batch_kind == "backfill" and window_trading_days is None:
+        raise ValueError("window_trading_days is required for backfill")
     engine = _engine(settings)
     try:
         with engine.begin() as conn:
