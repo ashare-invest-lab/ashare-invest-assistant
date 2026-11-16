@@ -23,21 +23,23 @@ T-R76计数更正（相对T-R75）：总参数仍309；已验证48→52，未验
 
 T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标「用户配置项（券商个体费率，不找出处；复测须冻结所用费率）」，四卡各1项，共4项；总参数309、已验证52不变，未验证257→253，用户配置项0→4。最低佣金及§5的25项制度段/背景状态不变（已验证23、未验证2、用户配置项0）；制度上限3‰、历史最低5元及2002-05-01等已有官方证据保持原状，不改研究主跑或敏感性费率。
 
+T-R97第1批（2026-11-16）：按23份主线策略卡中参数原名引用频次，对253个未验证表项固定排序，仅核前40项。新增7项文献取值依据、复核原有RSI阈值1项，8项状态写为「取值有文献，A股有效性未验证（待复测）」；其余32项保留未验证。完整摘标0项，总数309、已验证52、未验证253、用户配置项4不变；未验证中的文献取值子集4→11。所有取值／规则／阈值不变，lifecycle: draft；G7：☐；排序、逐项检索及自测见T-R97报告。
+
 ## 2. 逐卡参数明细
 
 ### S-01（docs/strategies/T-R71/S-01_st_pullback_ma.md）
 
 | 卡 | 参数 | 值 | 出处（仓库路径＋节） | 敏感性区间/复测包 | 状态 | golden 对照 |
 |---|---|---|---|---|---|---|
-| S-01 | rs_min | 0.15 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:96 | 0.10–0.30；步0.05；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.rs_min=0.15；一致 |
-| S-01 | touch_pct | 0.01 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:97 | 0.0–0.03；步0.005；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.touch_pct=0.01；一致 |
-| S-01 | shrink_ratio | 0.7 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:98 | 0.5–0.9；步0.05；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.shrink_ratio=0.7；一致 |
-| S-01 | exit_confirm_days | 2 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:99 | 1–3；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.exit_confirm_days=2；一致（checker 固定2根求值，未读取此键） |
-| S-01 | hard_stop_pct | 0.08 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:100 | 0.05–0.12；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.hard_stop_pct=0.08；一致 |
-| S-01 | time_stop | 5 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:101 | 3–10；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.time_stop=5；一致 |
-| S-01 | min_amount | 50000000.0 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:102 | 10000000.0–500000000.0；步10000000.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_amount=50000000.0；一致 |
-| S-01 | min_list_days | 60 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:103 | 30–250；步10；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_list_days=60；一致 |
-| S-01 | slippage_bp | 10.0 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:104 | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=10.0；一致 |
+| S-01 | rs_min | 0.15 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:96；T-R97第1批序22：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.10–0.30；步0.05；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.rs_min=0.15；一致 |
+| S-01 | touch_pct | 0.01 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:97；T-R97第1批序23：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.0–0.03；步0.005；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.touch_pct=0.01；一致 |
+| S-01 | shrink_ratio | 0.7 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:98；T-R97第1批序20：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.5–0.9；步0.05；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.shrink_ratio=0.7；一致 |
+| S-01 | exit_confirm_days | 2 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:99；T-R97第1批序18：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 1–3；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.exit_confirm_days=2；一致（checker 固定2根求值，未读取此键） |
+| S-01 | hard_stop_pct | 0.08 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:100；T-R97：Jia-Hao Syu、Yi-Ren Yeh、Mu-En Wu、Jan-Ming Ho，《Self-Management Portfolio System with Adaptive Association Mining: A Practical Application on Taiwan Stock Market》，https://www.mdpi.com/2227-7390/9/10/1093，访问日期 2026-11-16，§3.2.1止损公式、§3.2.2式(2)后TSL集合；原文 TSL∈{−3%,−5%,−8%,−10%}；8%仅为论文止损候选网格，且其收益口径扣费、阈值动态选择，不等同本卡固定8%价格止损。 | 0.05–0.12；步0.01；A | 取值有文献，A股有效性未验证（待复测） | P.hard_stop_pct=0.08；一致 |
+| S-01 | time_stop | 5 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:101；T-R97第1批序17：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 3–10；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.time_stop=5；一致 |
+| S-01 | min_amount | 50000000.0 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:102；T-R97第1批序5：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 10000000.0–500000000.0；步10000000.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_amount=50000000.0；一致 |
+| S-01 | min_list_days | 60 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:103；T-R97第1批序11：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 30–250；步10；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_list_days=60；一致 |
+| S-01 | slippage_bp | 10.0 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:104；T-R97第1批序1：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=10.0；一致 |
 | S-01 | MA短窗 | 5根有效K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:110 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.ma_windows=[5, 10, 20]；一致（对应5） |
 | S-01 | MA触及/退出窗 | 10根有效K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:113；仓内定义：docs/strategies/cards/st_pullback_ma.md:130 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.ma_windows=[5, 10, 20]；一致（对应10） |
 | S-01 | MA长窗 | 20根有效K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:110 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.ma_windows=[5, 10, 20]；一致（对应20） |
@@ -47,13 +49,13 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-01 | 反证跌幅 | >5% | 仓内定义：docs/strategies/cards/st_pullback_ma.md:124 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.counter_drop_pct=0.05；一致 |
 | S-01 | 反证放量倍数 | >1.5 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:126 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.counter_amount_mult=1.5；一致 |
 | S-01 | 时间止损有利幅度门槛 | <1R；R口径待裁定 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:135；仓内定义：docs/strategies/T-R71/S-01_st_pullback_ma.md:94 | 原值；A | 未验证（仅仓内定义）；R口径未裁定、效果未验证（待复测） | F.time_r_gate=1.0；一致（仅登记，R未求值） |
-| S-01 | 卡预热 | 25根有效K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:18 | 25与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=25；一致 |
+| S-01 | 卡预热 | 25根有效K | 仓内定义：docs/strategies/cards/st_pullback_ma.md:18；T-R97第1批序24：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 25与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=25；一致 |
 | S-01 | 证伪观察期 | 5交易日 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:38 | 原值5；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-01 | 证伪最低跟踪数 | n≥30 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:39 | 30仅最低披露门槛；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-01 | 证伪胜率门槛 | <45% | 仓内定义：docs/strategies/cards/st_pullback_ma.md:39 | 原值45%；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-01 | 证伪rs_min邻域 | ±0.05 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:40 | ±0.05；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-01 | 证伪shrink_ratio邻域 | ±0.1 | 仓内定义：docs/strategies/cards/st_pullback_ma.md:40 | ±0.1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
-| S-01 | 候选有效期 | 1交易日 | 仓内定义：docs/strategies/T-R71/S-01_st_pullback_ma.md:90 | 原值；A | 未验证（仅仓内定义）；执行与效果未验证（待复测） | F.valid_for_trading_days=1；一致 |
+| S-01 | 候选有效期 | 1交易日 | 仓内定义：docs/strategies/T-R71/S-01_st_pullback_ma.md:90；T-R97第1批序38：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原值；A | 未验证（仅仓内定义）；执行与效果未验证（待复测） | F.valid_for_trading_days=1；一致 |
 | S-01 | 信号定稿下限 | 北京时间17:10且实际定稿/依赖就绪后 | 仓内定义：docs/strategies/T-R71/S-01_st_pullback_ma.md:31 | 17:10及实际就绪延迟；D | 未验证（仅仓内定义）；实际就绪未验证（待复测） | golden未用（合成输入17:10、求值17:15，不验证此下限） |
 | S-01 | 下一交易日执行偏移 | T+1开盘；最早09:30 | 仓内定义：docs/strategies/T-R71/S-01_st_pullback_ma.md:90 | 固定偏移；D | 未验证（仅仓内定义）；执行与效果未验证（待复测） | 一致：expect.trade为次日开盘/阻断顺延；P/F无键 |
 | S-01 | 复权锚点/因子缺口 | qfq@T=raw(d)×A(d)/A(T)；缺因子不补1 | 仓内定义：docs/strategies/T-R71/S-01_st_pullback_ma.md:42 | 固定公式；D | 未验证（仅仓内定义）；历史因子与复测未验证（待复测） | 一致：unverified.split仅1拆2；复杂权息golden未用 |
@@ -86,7 +88,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-01 | 冲击回退最低覆盖 | 有效K<5或ADV=0取60bp | 仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:262 | 5/0边界；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | golden未用：impact_cost=null |
 | S-01 | 同模板证券冷却 | 3交易日且检查持有重叠 | 仓内定义：docs/strategies/validation.md:131；仓内定义：docs/strategies/T-R71/README.md:112 | 原值3；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：每case只跟踪首笔 |
 | S-01 | 研究最低样本数 | min_n=30 | 仓内定义：docs/strategies/validation.md:44；仓内定义：docs/strategies/validation.md:134 | 30仅披露下限；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：4个合成case非历史n |
-| S-01 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142 | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
+| S-01 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142；T-R97第1批序25：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
 | S-01 | 组合预算 | ≤50 | 仓内定义：docs/strategies/validation.md:141 | 固定上限50；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：未选参 |
 | S-01 | 样本外折数 | K=5 | 仓内定义：docs/strategies/validation.md:68 | 固定5；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：无训练/评估切分 |
 | S-01 | 切分隔离期 | embargo=持有期h；动态h未裁定 | 仓内定义：docs/strategies/validation.md:68；仓内定义：docs/strategies/T-R71/README.md:115 | 冻结h后划分；E | 未验证（仅仓内定义）；动态h未裁定、效果未验证（待复测） | golden未用：无样本外切分 |
@@ -103,7 +105,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-01 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-01 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-01 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| S-01 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
+| S-01 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收；T-R97复核同一官方原文第1、6、8条：仅历史制度背景，实际最低额仍未核 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | S-01 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-01 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-01 | 科创板申报递增 | 200股以上递增1股（仅部分核实） | 仓内定义：docs/strategies/market_rules_T-R10.md:65；仓内定义：docs/strategies/market_rules_T-R10.md:68；上海证券交易所，《第十三期：科创板股票交易规则必知（一）》第6问，https://edu.sse.com.cn/tib/qa/，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2023年修订）》第6.1.7/6.2.6/12.8条，https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/10824490/files/dcbe58edb194451d93f19b1f7dd8fb4c.docx，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2026年修订）》第6.7/11.9条，https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/10816482/files/e3a3b98e36894edca77841837936e006.docx，访问日期 2026-11-16（两版数量条款均未明写1股递增，生效衔接与未摘标理由见§6） ；T-R96补核：上海证券交易所，《科创板投资修炼手册》印刷页27（申报数量说明），https://edu.sse.com.cn/tib/manual/c/10608392/files/cd2f63893add490490f61a508b7c0ed2.pdf，访问日期 2026-11-16；PDF明写买卖超过200股部分以1股递增，但未列该递增制度生效日，完整适用段仍待核（见§7） | 1股；待正式规则/接口规范佐证；D | 未验证（递增生效日期及完整适用段未核）；官方PDF释义与原值一致，两版正式数量条款未明写1股递增 | golden未用：无数量账本 |
@@ -112,15 +114,15 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 
 | 卡 | 参数 | 值 | 出处（仓库路径＋节） | 敏感性区间/复测包 | 状态 | golden 对照 |
 |---|---|---|---|---|---|---|
-| S-02 | rsi_os | 30.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:66；Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.7（期刊第182页，PDF第5页；仅文献采用30阈值；其简单均值并非本卡Wilder递推；不能证明对A股有效） | 20.0–35.0；步1.0；A | 文献采用该取值；A股有效性未验证（待复测） | P.rsi_os=30.0；一致 |
-| S-02 | drop_5d | 0.08 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:67 | 0.05–0.15；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.drop_5d=0.08；一致 |
-| S-02 | stop_pct | 0.03 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:68 | 0.02–0.05；步0.005；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.stop_pct=0.03；一致 |
-| S-02 | tp_pct | 0.06 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:69 | 0.04–0.1；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.tp_pct=0.06；一致 |
+| S-02 | rsi_os | 30.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:66；T-R97：Dirk F. Gerritsen，《Are chartists artists? The determinants and profitability of recommendations based on technical analysis》，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.7（期刊页182／PDF第5页），RSI买入阈值说明；原文买入条件RSI<30；仅核30阈值，简单均值算法不同于本卡Wilder递推，不验证预热或A股有效性。 | 20.0–35.0；步1.0；A | 取值有文献，A股有效性未验证（待复测） | P.rsi_os=30.0；一致 |
+| S-02 | drop_5d | 0.08 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:67；T-R97第1批序40：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.05–0.15；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.drop_5d=0.08；一致 |
+| S-02 | stop_pct | 0.03 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:68；T-R97：Andrew Clare、James Seaton、Stephen Thomas、Peter N. Smith，《Breaking into the Blackbox: Trend Following, Stop Losses, and the Frequency of Trading: the case of the S&P500》，https://openaccess.city.ac.uk/id/eprint/17842/8/BLACKBOX%20%20%20SSRN-id2126476.pdf，访问日期 2026-11-16，§4（印刷页9／PDF第10页）及表4B（印刷页17／PDF第18页）；原表 Stop-Loss Percentage (%) 列为3、5、7、10、12、15；仅证明文献测试3%／5%入场后跌幅止损，不证明本卡收盘触发、次日执行或A股有效性。 | 0.02–0.05；步0.005；A | 取值有文献，A股有效性未验证（待复测） | P.stop_pct=0.03；一致 |
+| S-02 | tp_pct | 0.06 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:69；T-R97第1批序34：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.04–0.1；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.tp_pct=0.06；一致 |
 | S-02 | rsi_exit | 55.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:70 | 50.0–65.0；步1.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.rsi_exit=55.0；一致 |
-| S-02 | max_hold | 5 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:71 | 3–10；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.max_hold=5；一致 |
-| S-02 | min_amount | 50000000.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:72 | 10000000.0–500000000.0；步10000000.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_amount=50000000.0；一致 |
-| S-02 | min_list_days | 60 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:73 | 30–120；步10；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_list_days=60；一致 |
-| S-02 | slippage_bp | 10.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:74 | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=10.0；一致 |
+| S-02 | max_hold | 5 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:71；T-R97：Zhixi Li、Vincent Tam，《A Machine Learning View on Momentum and Reversal Trading》，https://www.mdpi.com/1999-4893/11/11/170，访问日期 2026-11-16，§2.1 Problem Description，式(1)–(4)前后；原文明确 J,K∈[5,10,15,20]，K为持有期，并说明持有到期末；仅证明5日／20日持有期取值被采用，不验证本卡最大持有与提前退出组合、停牌计日或执行。 | 3–10；步1；A | 取值有文献，A股有效性未验证（待复测） | P.max_hold=5；一致 |
+| S-02 | min_amount | 50000000.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:72；T-R97第1批序6：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 10000000.0–500000000.0；步10000000.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_amount=50000000.0；一致 |
+| S-02 | min_list_days | 60 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:73；T-R97第1批序12：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 30–120；步10；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_list_days=60；一致 |
+| S-02 | slippage_bp | 10.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:74；T-R97第1批序2：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=10.0；一致 |
 | S-02 | RSI周期 | 14 | 仓内定义：docs/strategies/feature_spec.md:281；Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.7（期刊第182页，PDF第5页；仅文献采用14日；不证明28根预热；不能证明对A股有效） | 原值；A | 文献采用该取值；A股有效性未验证（待复测） | F.rsi_period=14；一致 |
 | S-02 | RSI预热 | 28根有效K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:24 | 原值；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.rsi_warmup=28；一致 |
 | S-02 | 超卖回看 | 3根有效K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:29 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.rsi_lookback=3；一致 |
@@ -129,7 +131,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-02 | 结构止损低点窗口 | 5根，候选日及之前4根 | 仓内定义：docs/strategies/T-R71/S-02_st_oversold_rebound.md:88；仓内定义：docs/strategies/T-R71/S-02_st_oversold_rebound.md:96 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.structure_low_window=5；一致 |
 | S-02 | 回收高点/衰竭偏移 | 前1根有效K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:31；仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:39 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-02 | 反证放量倍数 | >1.5 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:34 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.counter_amount_mult=1.5；一致 |
-| S-02 | 卡预热 | 30根有效K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:24 | 原值与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=30；一致 |
+| S-02 | 卡预热 | 30根有效K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:24；T-R97第1批序26：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原值与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=30；一致 |
 | S-02 | 证伪观察期 | 3交易日 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:11 | 原值；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-02 | 流动性均额窗口 | 20交易日内有效K均额，非最近20根 | 仓内定义：docs/strategies/feature_spec.md:118；仓内定义：docs/strategies/T-R71/S-02_st_oversold_rebound.md:46 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.amount_window=20；一致 |
 | S-02 | 候选有效期 | 1交易日 | 仓内定义：docs/strategies/T-R71/S-02_st_oversold_rebound.md:92 | 原值；A | 未验证（仅仓内定义）；执行与效果未验证（待复测） | F.valid_for_trading_days=1；一致 |
@@ -168,7 +170,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-02 | 冲击回退最低覆盖 | 有效K<5或ADV=0取60bp | 仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:262 | 5/0边界；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | golden未用：impact_cost=null |
 | S-02 | 同模板证券冷却 | 3交易日且检查持有重叠 | 仓内定义：docs/strategies/validation.md:131；仓内定义：docs/strategies/T-R71/README.md:112 | 原值3；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：每case只跟踪首笔 |
 | S-02 | 研究最低样本数 | min_n=30 | 仓内定义：docs/strategies/validation.md:44；仓内定义：docs/strategies/validation.md:134 | 30仅披露下限；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：4个合成case非历史n |
-| S-02 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142 | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
+| S-02 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142；T-R97第1批序27：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
 | S-02 | 组合预算 | ≤50 | 仓内定义：docs/strategies/validation.md:141 | 固定上限50；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：未选参 |
 | S-02 | 样本外折数 | K=5 | 仓内定义：docs/strategies/validation.md:68 | 固定5；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：无训练/评估切分 |
 | S-02 | 切分隔离期 | embargo=持有期h；动态h未裁定 | 仓内定义：docs/strategies/validation.md:68；仓内定义：docs/strategies/T-R71/README.md:115 | 冻结h后划分；E | 未验证（仅仓内定义）；动态h未裁定、效果未验证（待复测） | golden未用：无样本外切分 |
@@ -185,7 +187,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-02 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-02 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-02 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| S-02 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
+| S-02 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收；T-R97复核同一官方原文第1、6、8条：仅历史制度背景，实际最低额仍未核 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | S-02 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-02 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-02 | 科创板申报递增 | 200股以上递增1股（仅部分核实） | 仓内定义：docs/strategies/market_rules_T-R10.md:65；仓内定义：docs/strategies/market_rules_T-R10.md:68；上海证券交易所，《第十三期：科创板股票交易规则必知（一）》第6问，https://edu.sse.com.cn/tib/qa/，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2023年修订）》第6.1.7/6.2.6/12.8条，https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/10824490/files/dcbe58edb194451d93f19b1f7dd8fb4c.docx，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2026年修订）》第6.7/11.9条，https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/10816482/files/e3a3b98e36894edca77841837936e006.docx，访问日期 2026-11-16（两版数量条款均未明写1股递增，生效衔接与未摘标理由见§6） ；T-R96补核：上海证券交易所，《科创板投资修炼手册》印刷页27（申报数量说明），https://edu.sse.com.cn/tib/manual/c/10608392/files/cd2f63893add490490f61a508b7c0ed2.pdf，访问日期 2026-11-16；PDF明写买卖超过200股部分以1股递增，但未列该递增制度生效日，完整适用段仍待核（见§7） | 1股；待正式规则/接口规范佐证；D | 未验证（递增生效日期及完整适用段未核）；官方PDF释义与原值一致，两版正式数量条款未明写1股递增 | golden未用：无数量账本 |
@@ -194,11 +196,11 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 
 | 卡 | 参数 | 值 | 出处（仓库路径＋节） | 敏感性区间/复测包 | 状态 | golden 对照 |
 |---|---|---|---|---|---|---|
-| S-04 | min_boards | 2 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:65 | 1–5；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_boards=2；一致 |
+| S-04 | min_boards | 2 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:65；T-R97第1批序32：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 1–5；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_boards=2；一致 |
 | S-04 | vol_ratio | 1.5 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:66 | 1.2–3.0；步0.1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.vol_ratio=1.5；一致 |
-| S-04 | stop_pct | 0.05 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:67 | 0.03–0.1；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.stop_pct=0.05；一致 |
-| S-04 | max_hold | 5 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:68 | 3–10；步1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.max_hold=5；一致 |
-| S-04 | slippage_bp | 10.0 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:69 | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=10.0；一致 |
+| S-04 | stop_pct | 0.05 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:67；T-R97：Andrew Clare、James Seaton、Stephen Thomas、Peter N. Smith，《Breaking into the Blackbox: Trend Following, Stop Losses, and the Frequency of Trading: the case of the S&P500》，https://openaccess.city.ac.uk/id/eprint/17842/8/BLACKBOX%20%20%20SSRN-id2126476.pdf，访问日期 2026-11-16，§4（印刷页9／PDF第10页）及表4B（印刷页17／PDF第18页）；原表 Stop-Loss Percentage (%) 列为3、5、7、10、12、15；仅证明文献测试3%／5%入场后跌幅止损，不证明本卡收盘触发、次日执行或A股有效性。 | 0.03–0.1；步0.01；A | 取值有文献，A股有效性未验证（待复测） | P.stop_pct=0.05；一致 |
+| S-04 | max_hold | 5 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:68；T-R97：Zhixi Li、Vincent Tam，《A Machine Learning View on Momentum and Reversal Trading》，https://www.mdpi.com/1999-4893/11/11/170，访问日期 2026-11-16，§2.1 Problem Description，式(1)–(4)前后；原文明确 J,K∈[5,10,15,20]，K为持有期，并说明持有到期末；仅证明5日／20日持有期取值被采用，不验证本卡最大持有与提前退出组合、停牌计日或执行。 | 3–10；步1；A | 取值有文献，A股有效性未验证（待复测） | P.max_hold=5；一致 |
+| S-04 | slippage_bp | 10.0 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:69；T-R97第1批序3：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=10.0；一致 |
 | S-04 | 上市天数门槛 | ≥60交易日 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:15；仓内定义：docs/strategies/T-R71/S-04_st_broken_board.md:27 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.min_list_days=60；一致 |
 | S-04 | 封板计数窗口 | 20交易日 | 仓内定义：docs/strategies/feature_spec.md:212 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.limit_count_window=20；一致 |
 | S-04 | 封板时序偏移 | T−2 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:28 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
@@ -206,7 +208,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-04 | 失效高点偏移 | 前第2根有效K，ref(high,2) | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:33 | 原值2；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | 一致：checker固定偏移2；P/F无键 |
 | S-04 | 失效连续确认 | 2根 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:33 | 原值2；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | 一致：checker固定连续2根；P/F无键 |
 | S-04 | 退出均线窗口 | MA5 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:36 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.ma_windows=[5, 10, 20]；一致（5参与；10/20仅诊断） |
-| S-04 | 卡预热 | 20根有效K | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:23 | 原值与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=20；一致 |
+| S-04 | 卡预热 | 20根有效K | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:23；T-R97第1批序28：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原值与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=20；一致 |
 | S-04 | 证伪观察期 | 3交易日 | 仓内定义：docs/strategies/T-R16/S-04_st_broken_board.md:11 | 原值；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | S-04 | 流动性均额窗口 | 20交易日内有效K均额，非最近20根 | 仓内定义：docs/strategies/feature_spec.md:118；仓内定义：docs/strategies/T-R71/S-04_st_broken_board.md:46 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.amount_window=20；一致 |
 | S-04 | 候选有效期 | 1交易日 | 仓内定义：docs/strategies/T-R71/S-04_st_broken_board.md:91 | 原值；A | 未验证（仅仓内定义）；执行与效果未验证（待复测） | F.valid_for_trading_days=1；一致 |
@@ -244,7 +246,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-04 | 冲击回退最低覆盖 | 有效K<5或ADV=0取60bp | 仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:262 | 5/0边界；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | golden未用：impact_cost=null |
 | S-04 | 同模板证券冷却 | 3交易日且检查持有重叠 | 仓内定义：docs/strategies/validation.md:131；仓内定义：docs/strategies/T-R71/README.md:112 | 原值3；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：每case只跟踪首笔 |
 | S-04 | 研究最低样本数 | min_n=30 | 仓内定义：docs/strategies/validation.md:44；仓内定义：docs/strategies/validation.md:134 | 30仅披露下限；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：4个合成case非历史n |
-| S-04 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142 | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
+| S-04 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142；T-R97第1批序29：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
 | S-04 | 组合预算 | ≤50 | 仓内定义：docs/strategies/validation.md:141 | 固定上限50；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：未选参 |
 | S-04 | 样本外折数 | K=5 | 仓内定义：docs/strategies/validation.md:68 | 固定5；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：无训练/评估切分 |
 | S-04 | 切分隔离期 | embargo=持有期h；动态h未裁定 | 仓内定义：docs/strategies/validation.md:68；仓内定义：docs/strategies/T-R71/README.md:115 | 冻结h后划分；E | 未验证（仅仓内定义）；动态h未裁定、效果未验证（待复测） | golden未用：无样本外切分 |
@@ -261,7 +263,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | S-04 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-04 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | S-04 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| S-04 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
+| S-04 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收；T-R97复核同一官方原文第1、6、8条：仅历史制度背景，实际最低额仍未核 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | S-04 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-04 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | S-04 | 科创板申报递增 | 200股以上递增1股（仅部分核实） | 仓内定义：docs/strategies/market_rules_T-R10.md:65；仓内定义：docs/strategies/market_rules_T-R10.md:68；上海证券交易所，《第十三期：科创板股票交易规则必知（一）》第6问，https://edu.sse.com.cn/tib/qa/，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2023年修订）》第6.1.7/6.2.6/12.8条，https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/10824490/files/dcbe58edb194451d93f19b1f7dd8fb4c.docx，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2026年修订）》第6.7/11.9条，https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/10816482/files/e3a3b98e36894edca77841837936e006.docx，访问日期 2026-11-16（两版数量条款均未明写1股递增，生效衔接与未摘标理由见§6） ；T-R96补核：上海证券交易所，《科创板投资修炼手册》印刷页27（申报数量说明），https://edu.sse.com.cn/tib/manual/c/10608392/files/cd2f63893add490490f61a508b7c0ed2.pdf，访问日期 2026-11-16；PDF明写买卖超过200股部分以1股递增，但未列该递增制度生效日，完整适用段仍待核（见§7） | 1股；待正式规则/接口规范佐证；D | 未验证（递增生效日期及完整适用段未核）；官方PDF释义与原值一致，两版正式数量条款未明写1股递增 | golden未用：无数量账本 |
@@ -272,12 +274,12 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 |---|---|---|---|---|---|---|
 | W-02 | bw_pct120_th | 0.2 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:64 | 0.05–0.4；步0.05；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.bw_pct120_th=0.2；一致 |
 | W-02 | vol_mult | 1.5 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:65 | 1.2–3.0；步0.1；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.vol_mult=1.5；一致 |
-| W-02 | fail_pct | 0.03 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:66 | 0.01–0.05；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.fail_pct=0.03；一致 |
-| W-02 | stop_pct | 0.05 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:67 | 0.03–0.10；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.stop_pct=0.05；一致 |
-| W-02 | max_hold | 20 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:68 | 10–40；步5；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.max_hold=20；一致 |
-| W-02 | min_amount | 50000000.0 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:69 | 10000000.0–500000000.0；步10000000.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_amount=50000000.0；一致 |
-| W-02 | min_list_days | 120 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:70 | 60–250；步10；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_list_days=120；一致 |
-| W-02 | slippage_bp | 15.0 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:71 | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=15.0；一致 |
+| W-02 | fail_pct | 0.03 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:66；T-R97第1批序19：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.01–0.05；步0.01；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.fail_pct=0.03；一致 |
+| W-02 | stop_pct | 0.05 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:67；T-R97：Andrew Clare、James Seaton、Stephen Thomas、Peter N. Smith，《Breaking into the Blackbox: Trend Following, Stop Losses, and the Frequency of Trading: the case of the S&P500》，https://openaccess.city.ac.uk/id/eprint/17842/8/BLACKBOX%20%20%20SSRN-id2126476.pdf，访问日期 2026-11-16，§4（印刷页9／PDF第10页）及表4B（印刷页17／PDF第18页）；原表 Stop-Loss Percentage (%) 列为3、5、7、10、12、15；仅证明文献测试3%／5%入场后跌幅止损，不证明本卡收盘触发、次日执行或A股有效性。 | 0.03–0.10；步0.01；A | 取值有文献，A股有效性未验证（待复测） | P.stop_pct=0.05；一致 |
+| W-02 | max_hold | 20 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:68；T-R97：Zhixi Li、Vincent Tam，《A Machine Learning View on Momentum and Reversal Trading》，https://www.mdpi.com/1999-4893/11/11/170，访问日期 2026-11-16，§2.1 Problem Description，式(1)–(4)前后；原文明确 J,K∈[5,10,15,20]，K为持有期，并说明持有到期末；仅证明5日／20日持有期取值被采用，不验证本卡最大持有与提前退出组合、停牌计日或执行。 | 10–40；步5；A | 取值有文献，A股有效性未验证（待复测） | P.max_hold=20；一致 |
+| W-02 | min_amount | 50000000.0 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:69；T-R97第1批序7：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 10000000.0–500000000.0；步10000000.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_amount=50000000.0；一致 |
+| W-02 | min_list_days | 120 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:70；T-R97第1批序13：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 60–250；步10；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | P.min_list_days=120；一致 |
+| W-02 | slippage_bp | 15.0 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:71；T-R97第1批序4：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 0.0–50.0；步1.0；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | P.slippage_bp=15.0；一致 |
 | W-02 | 布林窗口 | 20根有效K | 仓内定义：docs/strategies/feature_spec.md:381；Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.8（期刊第182–183页，PDF第5–6页；仅文献采用20日；不证明有效K及120日分位；不能证明对A股有效） | 原值；A | 文献采用该取值；A股有效性未验证（待复测） | F.boll_window=20；一致 |
 | W-02 | 布林倍数 | 2（带宽系数4） | 仓内定义：docs/strategies/feature_spec.md:381；Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.8（期刊第182–183页，PDF第5–6页；仅文献采用2倍标准差；带宽系数4及ddof=0另据仓库；不能证明对A股有效） | 原值；A | 文献采用该取值；A股有效性未验证（待复测） | F.boll_k=2；一致 |
 | W-02 | 布林ddof | 0 | 仓内定义：docs/strategies/feature_spec.md:381 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.boll_ddof=0；一致 |
@@ -292,7 +294,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | W-02 | 原证伪结构回撤 | 3% | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:12 | 原值3%；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | W-02 | 证伪分位敏感区间 | 0.1–0.3 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:12 | 0.1–0.3；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | W-02 | 证伪放量敏感区间 | 1.3–2.0 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:12 | 1.3–2.0；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
-| W-02 | 卡预热 | 140根有效K | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:17 | 原值与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=140；一致 |
+| W-02 | 卡预热 | 140根有效K | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:17；T-R97第1批序30：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原值与更长历史重算；D | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.warmup=140；一致 |
 | W-02 | 证伪观察期 | 10交易日 | 仓内定义：docs/strategies/T-R16/W-02_sw_breakout.md:12 | 原值；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用 |
 | W-02 | 流动性均额窗口 | 20交易日内有效K均额，非最近20根 | 仓内定义：docs/strategies/feature_spec.md:118；仓内定义：docs/strategies/T-R71/W-02_sw_breakout.md:46 | 原值；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | F.amount_window=20；一致 |
 | W-02 | 候选有效期 | 1交易日 | 仓内定义：docs/strategies/T-R71/W-02_sw_breakout.md:91 | 原值；A | 未验证（仅仓内定义）；执行与效果未验证（待复测） | F.valid_for_trading_days=1；一致 |
@@ -332,7 +334,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | W-02 | 冲击回退最低覆盖 | 有效K<5或ADV=0取60bp | 仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:262 | 5/0边界；C | 未验证（仅仓内定义）；成本校准未验证（待复测） | golden未用：impact_cost=null |
 | W-02 | 同模板证券冷却 | 3交易日且检查持有重叠 | 仓内定义：docs/strategies/validation.md:131；仓内定义：docs/strategies/T-R71/README.md:112 | 原值3；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：每case只跟踪首笔 |
 | W-02 | 研究最低样本数 | min_n=30 | 仓内定义：docs/strategies/validation.md:44；仓内定义：docs/strategies/validation.md:134 | 30仅披露下限；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：4个合成case非历史n |
-| W-02 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142 | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
+| W-02 | 参数邻域 | 原网格±1步 | 仓内定义：docs/strategies/validation.md:142；T-R97第1批序31：未获匹配的公开外部出处（检索位置／关键词见T-R97报告逐项表，报告不是出处） | 原网格±1步；A | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：仅默认值 |
 | W-02 | 组合预算 | ≤50 | 仓内定义：docs/strategies/validation.md:141 | 固定上限50；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：未选参 |
 | W-02 | 样本外折数 | K=5 | 仓内定义：docs/strategies/validation.md:68 | 固定5；E | 未验证（仅仓内定义）；A股有效性未验证（待复测） | golden未用：无训练/评估切分 |
 | W-02 | 切分隔离期 | embargo=持有期h；动态h未裁定 | 仓内定义：docs/strategies/validation.md:68；仓内定义：docs/strategies/T-R71/README.md:115 | 冻结h后划分；E | 未验证（仅仓内定义）；动态h未裁定、效果未验证（待复测） | golden未用：无样本外切分 |
@@ -349,7 +351,7 @@ T-R96b计数更正（相对T-R96）：实际佣金费率按编排者裁定改标
 | W-02 | 历史卖出印花税 | 0.1%，2023-04-10至2023-08-27 | 本文件§5 F04：《中华人民共和国印花税法》第3/5/20条及税目税率表，税务总局官方全文/附件（取代仅引T-R58 §5 R6） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | W-02 | 现段卖出印花税 | 0.05%，2023-08-28起 | 本文件§5 F05：财政部、税务总局《关于减半征收证券交易印花税的公告》，2023年第39号（补官方原文） | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
 | W-02 | 过户费 | 买、卖各按成交金额0.001%，2022-04-29起 | 本文件§5 F10：中国结算《中国结算关于降低股票交易过户费收费标准的通知》，2022-04-28官方正文HTTP 200，补齐原文后恢复制度验证 | 制度固定，按有效日分段 | 已验证 | golden未用：fees=null |
-| W-02 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
+| W-02 | 最低佣金 | 以用户券商为准；5元仅历史规定/压力参考，实际最低额未核 | 本文件§5 F25：证监发〔2002〕21号原文及效力状态仅作背景；实际券商协议未读取 ；T-R96：中国证监会、国家发展计划委员会、国家税务总局，《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第1/8条，https://www.chinatax.gov.cn/chinatax/n810341/n810765/n812203/200202/c1209808/content.html，访问日期 2026-11-16；仅核制度上下限/历史起点，不验证用户实收；T-R97复核同一官方原文第1、6、8条：仅历史制度背景，实际最低额仍未核 | 用户实际最低额；5元只作待验证压力档；C | 以用户券商为准、未验证 | golden未用：fees=null |
 | W-02 | 普通/创业板整手 | 买入100股整数倍；不足100股余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | W-02 | 科创板最小申报/零股界 | 200股；不足200余量一次卖出 | docs/strategies/market_rules_T-R10.md §1.1/2.1 | 制度固定，按有效日分段 | 已验证 | golden未用：无数量账本 |
 | W-02 | 科创板申报递增 | 200股以上递增1股（仅部分核实） | 仓内定义：docs/strategies/market_rules_T-R10.md:65；仓内定义：docs/strategies/market_rules_T-R10.md:68；上海证券交易所，《第十三期：科创板股票交易规则必知（一）》第6问，https://edu.sse.com.cn/tib/qa/，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2023年修订）》第6.1.7/6.2.6/12.8条，https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/10824490/files/dcbe58edb194451d93f19b1f7dd8fb4c.docx，访问日期 2026-11-16；上海证券交易所，《上海证券交易所交易规则（2026年修订）》第6.7/11.9条，https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/10816482/files/e3a3b98e36894edca77841837936e006.docx，访问日期 2026-11-16（两版数量条款均未明写1股递增，生效衔接与未摘标理由见§6） ；T-R96补核：上海证券交易所，《科创板投资修炼手册》印刷页27（申报数量说明），https://edu.sse.com.cn/tib/manual/c/10608392/files/cd2f63893add490490f61a508b7c0ed2.pdf，访问日期 2026-11-16；PDF明写买卖超过200股部分以1股递增，但未列该递增制度生效日，完整适用段仍待核（见§7） | 1股；待正式规则/接口规范佐证；D | 未验证（递增生效日期及完整适用段未核）；官方PDF释义与原值一致，两版正式数量条款未明写1股递增 | golden未用：无数量账本 |
