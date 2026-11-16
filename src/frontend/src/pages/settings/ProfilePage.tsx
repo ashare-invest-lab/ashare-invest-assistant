@@ -7,6 +7,7 @@ import { ErrorBox, Loading } from '../../components/common';
 import { EFFORT, EXPERIENCE } from '../../i18n/accountLabels';
 import { HORIZON } from '../../i18n/labels';
 import { applyFieldErrors } from '../../lib/formErrors';
+import { ChangePasswordForm } from './ChangePasswordForm';
 
 const UNSET = '__unset__';
 interface FormValues { horizon_pref: Horizon[]; effort: ProfileInput['effort'] | typeof UNSET; risk_tolerance: number | null; experience: ProfileInput['experience'] | typeof UNSET; max_single_position_pct: number }
@@ -77,6 +78,7 @@ export function ProfilePage() {
         </Form.Item>
         <Button type="primary" htmlType="submit" loading={save.isPending}>保存为新版本</Button>
       </Form>
+      <ChangePasswordForm />
     </div>
   );
 }
