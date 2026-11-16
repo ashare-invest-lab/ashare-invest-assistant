@@ -70,6 +70,7 @@ tests:
   - {"file": "tests/backend/unit/b05_routes/test_b05_financials.py", "group": "parallel", "keywords": ["b05_harness.environment", "SQLite memory", "ASGI TestClient", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/b05_routes/test_b05_fund_flows.py", "group": "parallel", "keywords": ["b05_harness.environment", "SQLite memory", "ASGI TestClient", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/b05_routes/test_s2_owned_daily_bars.py", "group": "serial_pg", "keywords": ["selfchecks.test_s2_owned_daily_bars.world", "psycopg.connect", "PGHOST", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_cash_gap_r4.py", "group": "parallel", "keywords": ["pure Decimal reconcile inputs", "synthetic cash balances; no external resources"], "unverified": false}
   - {"file": "tests/backend/unit/test_ci_template_worker_wait.py", "group": "parallel", "keywords": ["fake PG metadata", "monkeypatch connects/docker/socket", "tmp_path", "virtual clock"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_backfill_latest_start_c2.py", "group": "serial_pg", "keywords": ["late->world imported from consumer->pg_url", "docker", "Redis fake"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_batch_fetch_c2.py", "group": "parallel", "keywords": ["world->tmp_path", "fake engine/grant/transport", "socket.connect monkeypatched"], "unverified": false}
