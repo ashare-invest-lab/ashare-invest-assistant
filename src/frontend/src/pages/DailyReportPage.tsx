@@ -74,7 +74,7 @@ function DateSwitcher({ date }: { date: string }) {
     ...(pages.hasNextPage ? [{ value: LOAD_MORE, label: pages.isFetchingNextPage ? '加载中…' : '加载更早…' }] : []),
   ];
   return (
-    <span className="report-dates">
+    <div className="report-dates">
       <Button size="small" disabled={!older && !pages.hasNextPage} aria-label="上一期"
         onClick={() => (older ? go(older) : void loadOlder())}>‹ 上一期</Button>
       <Select
@@ -82,7 +82,15 @@ function DateSwitcher({ date }: { date: string }) {
         onChange={(d) => (d === LOAD_MORE ? void pages.fetchNextPage() : go(d))}
       />
       <Button size="small" disabled={!newer} aria-label="下一期" onClick={() => newer && go(newer)}>下一期 ›</Button>
-    </span>
+      {pages.isError ? (
+        <Alert
+          type="error" role="alert" aria-label="日报日期列表错误" className="small" style={{ padding: '4px 8px' }}
+          title={pages.isFetchNextPageError ? '更早日期加载失败，已加载日期保留' : '日期列表加载失败'}
+          action={<Button size="small" aria-label="重试" loading={pages.isFetching}
+            onClick={() => void (pages.isFetchNextPageError ? pages.fetchNextPage() : pages.refetch())}>重试</Button>}
+        />
+      ) : null}
+    </div>
   );
 }
 
