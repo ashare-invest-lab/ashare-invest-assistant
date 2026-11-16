@@ -2,6 +2,7 @@
 
 # ruff: noqa: S101
 from collections.abc import Iterator
+from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -23,21 +24,20 @@ NOW = datetime(2026, 11, 15, 9, tzinfo=UTC)
 @pytest.fixture
 def conn(world: SimpleNamespace) -> Iterator[Connection]:  # noqa: F811
     with world.engine.begin() as connection:
-        for n in (1723, 1724):
-            connection.execute(
-                insert(users).values(
-                    id=UUID(int=n),
-                    username=f"synthetic_{n}",
-                    password_hash="unusable",  # noqa: S106
-                    role="user",
-                    status="approved",
-                )
+        connection.execute(
+            insert(users).values(
+                id=UUID(U),
+                username="synthetic_evidence",
+                password_hash="unusable",  # noqa: S106
+                role="user",
+                status="approved",
             )
+        )
         yield connection
 
 
 def package(kind: str = "calendar", **changes: object) -> dict[str, Any]:
-    return {
+    p = {
         "user_id": UUID(U),
         "licence_id": None,
         "kind": kind,
@@ -50,10 +50,15 @@ def package(kind: str = "calendar", **changes: object) -> dict[str, Any]:
         "payload": {**PAYLOADS[kind], "persisted_receipt": "synthetic"},
         "first_seen_at": NOW,
         "available_at": NOW,
-        "computed_at": None,
+        "computed_at": NOW if kind in {"feature", "adjust_factor"} else None,
         "dependency_ids": [],
         "transform_version": "v1",
     } | changes
+    if kind == "daily_bar" and "payload" not in changes:
+        p["payload"].update(
+            source=p["source"], source_licence_id=str(p["licence_id"]) if p["licence_id"] else None
+        )
+    return p
 
 
 def completion(conn: Connection, bar: UUID, **changes: object) -> dict[str, Any]:
@@ -68,7 +73,6 @@ def completion(conn: Connection, bar: UUID, **changes: object) -> dict[str, Any]
     }
     return {
         "bar_version_id": bar,
-        "pipeline_run_id": None,
         "is_final": True,
         "available_at": NOW,
         "proof_kind": "synthetic",
@@ -98,26 +102,15 @@ def test_revision_chain(conn: Connection, case: str) -> None:
         p["source_key"] = "other"
     elif case == "missing":
         p["supersedes_id"] = uuid4()
-    if case == "same":
+    with nullcontext() if case == "same" else pytest.raises(store.EvidenceRejected):
         assert store.register_version(conn, **p) != old
-    else:
-        with pytest.raises(store.EvidenceRejected):
-            store.register_version(conn, **p)
 
 
 @pytest.mark.parametrize("case", ["user", "licence", "missing", "duplicate", "self"])
 def test_source_isolation(conn: Connection, case: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    licence = uuid4()
-    dep = store.register_version(
-        conn, **package(source="merged_calendar", scope="per_licence", licence_id=licence)
-    )
-    p = package(
-        "adjust_factor",
-        computed_at=NOW,
-        dependency_ids=[dep],
-        scope="per_licence",
-        licence_id=licence,
-    )
+    p = package(source="merged_calendar", scope="per_licence", licence_id=uuid4())
+    dep = store.register_version(conn, **p)
+    p["dependency_ids"] = [dep]
     if case == "user":
         p["user_id"] = UUID(int=1724)
     elif case == "licence":
@@ -132,67 +125,108 @@ def test_source_isolation(conn: Connection, case: str, monkeypatch: pytest.Monke
         store.register_version(conn, **p)
 
 
-@pytest.mark.parametrize("unknown", [False, True])
-@pytest.mark.parametrize("hours", [-1, 1])
-def test_derived_available_at(conn: Connection, unknown: bool, hours: int) -> None:
-    dep = store.register_version(conn, **package(available_at=None if unknown else NOW))
-    computed = NOW + timedelta(hours=hours)
-    p = package("adjust_factor", computed_at=computed, dependency_ids=[dep], available_at=None)
-    result = store.register_version(conn, **p)
-    assert conn.scalar(select(versions.c.available_at).where(versions.c.id == result)) == (
-        None if unknown else max(NOW, computed)
-    )
-    with pytest.raises(store.EvidenceRejected):
-        store.register_version(conn, **(p | {"available_at": NOW + timedelta(hours=2)}))
-
-
-@pytest.mark.parametrize("field", list(PROOF))
-def test_completion_binding(conn: Connection, field: str) -> None:
-    bar = store.register_version(conn, **package("daily_bar"))
-    p = completion(conn, bar)
-    p["proof"][field] = str(uuid4()) if field.endswith("id") else "b" * 64
-    if field == "sha256":  # 材料摘要不等于版本摘要，允许独立取值。
-        store.register_completion(conn, **p)
-    else:
-        with pytest.raises(store.EvidenceRejected):
+@pytest.mark.parametrize(
+    ("target", "key"),
+    [("payload", k) for k in ("code", "trade_date", "source", "source_licence_id", "adj_type")]
+    + [("proof", k) for k in PROOF],
+)
+def test_daily_bar_outer_binding(conn: Connection, target: str, key: str) -> None:
+    p = package("daily_bar")
+    if target == "proof":
+        p = completion(conn, store.register_version(conn, **p))
+    bad = "2026-11-14" if key == "trade_date" else "b" * 64
+    p[target][key] = str(uuid4()) if key.endswith("id") else bad
+    with nullcontext() if key == "sha256" else pytest.raises(store.EvidenceRejected, match=key):
+        if target == "payload":
+            store.register_version(conn, **p)
+        else:
             store.register_completion(conn, **p)
 
 
-COMPLETION_CASES = "kind scope batches pipeline members date valid synthetic missing_run"
+@pytest.mark.parametrize("kinds", [[], ["daily_bar"], ["ex_rights"], ["calendar"]])
+def test_adjust_factor_dependencies(conn: Connection, kinds: list[str]) -> None:
+    deps = [store.register_version(conn, **package(kind)) for kind in kinds]
+    with pytest.raises(store.EvidenceRejected, match="dependency"):
+        store.register_version(conn, **package("adjust_factor", dependency_ids=deps))
+
+
+@pytest.mark.parametrize(
+    ("kind", "unknown"),
+    [
+        ("adjust_factor", "known"),
+        ("adjust_factor", "dependency"),
+        ("feature", "known"),
+        ("feature", "dependency"),
+        ("feature", "evidence"),
+    ],
+)
+@pytest.mark.parametrize("hours", [-1, 4])
+def test_derived_available_at(conn: Connection, kind: str, unknown: str, hours: int) -> None:
+    event = store.register_version(
+        conn, **package("ex_rights", available_at=None if unknown == "dependency" else NOW)
+    )
+    bar = store.register_version(conn, **package("daily_bar"))
+    computed = NOW + timedelta(hours=hours)
+    visible = NOW + timedelta(hours=3 if kind == "feature" else 0)
+    p = package(kind, computed_at=computed, dependency_ids=[event, bar], available_at=None)
+    if kind == "feature":
+        evidence = store.register_completion(
+            conn,
+            **completion(
+                conn,
+                bar,
+                available_at=None if unknown == "evidence" else visible,
+                is_final=None if unknown == "evidence" else True,
+            ),
+        )
+        p["payload"].update(dependency_ids=[str(event), str(bar)], evidence_ids=[str(evidence)])
+    expected = None if unknown != "known" else max(computed, visible)
+    result = store.register_version(conn, **p)
+    assert conn.scalar(select(versions.c.available_at).where(versions.c.id == result)) == expected
+    with pytest.raises(store.EvidenceRejected, match="derived_available_at"):
+        store.register_version(conn, **(p | {"available_at": NOW + timedelta(hours=2)}))
+    if kind == "feature":
+        p["dependency_ids"] = [event]
+        p["payload"]["dependency_ids"] = [str(event)]
+        with pytest.raises(store.EvidenceRejected, match=r"evidence.*dependency"):
+            store.register_version(conn, **p)
+
+
+COMPLETION_CASES = (
+    "kind scope historical pipeline members run_date valid synthetic missing_run "
+    "no_batches empty_batches owner_id licence_id step"
+)
 
 
 @pytest.mark.parametrize("case", COMPLETION_CASES.split())
 def test_completion_gates_and_idempotency(conn: Connection, case: str) -> None:
-    p = (
-        package()
-        if case == "kind"
-        else package("daily_bar", source="mairui", scope="per_licence", licence_id=uuid4())
-    )
-    if case == "synthetic":
-        p = package("daily_bar")
+    p = package() if case == "kind" else package("daily_bar")
+    if case != "synthetic" and case != "kind":
+        p = package("daily_bar", source="mairui", scope="per_licence", licence_id=uuid4())
     bar = store.register_version(conn, **p)
     c = completion(conn, bar)
-    if case not in {"kind", "synthetic"}:
-        if case != "scope":
-            c["proof_kind"] = "source_final_receipt"
-        if case != "batches":
-            run = uuid4()
-            conn.execute(
-                insert(pipeline_runs).values(
-                    id=run, kind="daily_batch", run_date=p["data_date"], status="ok"
-                )
+    if case != "scope":
+        c["proof_kind"] = "synthetic" if case == "synthetic" else "source_final_receipt"
+    if case not in {"kind", "synthetic", "historical"}:
+        run = uuid4()
+        conn.execute(
+            insert(pipeline_runs).values(
+                id=run, kind="daily_batch", run_date=p["data_date"], status="ok"
             )
-            c["pipeline_run_id"] = run
-            c["proof"]["batches"] = [{**BATCH, "run_id": U if case == "pipeline" else str(run)}]
-    if case == "missing_run":
-        c["pipeline_run_id"] = None
-    if case in {"members", "date"}:
-        c["proof"]["batches"][0]["members" if case == "members" else "run_date"] = (
-            [] if case == "members" else "2026-11-14"
         )
-    if case in {"valid", "synthetic"}:
+        c["pipeline_run_id"] = None if case == "missing_run" else run
+        c["proof"]["batches"] = [{**BATCH, "run_id": U if case == "pipeline" else str(run)}]
+        if case in BATCH:
+            bad = [] if case == "members" else "2026-11-14" if case == "run_date" else str(uuid4())
+            c["proof"]["batches"][0][case] = bad
+        if case == "no_batches":
+            del c["proof"]["batches"]
+        if case == "empty_batches":
+            c["proof"]["batches"] = []
+    with (
+        nullcontext()
+        if case in {"valid", "synthetic", "historical", "missing_run"}
+        else pytest.raises(store.EvidenceRejected)
+    ):
         first = store.register_completion(conn, **c)
         assert store.register_completion(conn, **c) == first
-    else:
-        with pytest.raises(store.EvidenceRejected):
-            store.register_completion(conn, **c)

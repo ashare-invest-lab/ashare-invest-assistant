@@ -252,9 +252,8 @@ def _save(conn: Connection, table: Table, values: dict[str, Any], keys: Sequence
         return UUID(str(new))
     matches = [table.c[k].is_not_distinct_from(values[k]) for k in keys]
     old = conn.execute(select(table).where(*matches)).mappings().one()
-    if _canon({k: old[k] for k in values if k != "id"}) != _canon(
-        {k: v for k, v in values.items() if k != "id"}
-    ):
+    content = {k: v for k, v in values.items() if k != "id"}
+    if _canon({k: old[k] for k in content}) != _canon(content):
         raise EvidenceConflict("idempotency_content_conflict")
     return UUID(str(old["id"]))
 
@@ -295,14 +294,6 @@ def register_version(
     dependencies = [_row(conn, versions, dep) for dep in deps]
     if any(not _in_scope(row, user_id, licence_id) for row in dependencies):
         raise EvidenceRejected("dependency_scope")
-    if kind in {"adjust_factor", "feature"}:
-        if computed_at is None:
-            raise EvidenceRejected("computed_at_required")
-        visible = [row["available_at"] for row in dependencies]
-        derived_at = None if None in visible else max([computed_at, *visible])
-        if available_at is not None and available_at != derived_at:
-            raise EvidenceRejected("derived_available_at_mismatch")
-        available_at = derived_at
     validate_payload(
         kind,
         payload,
@@ -310,16 +301,43 @@ def register_version(
         transform_version=transform_version,
         available_at=available_at,
     )
+    if kind == "daily_bar":
+        binding = {
+            "code": code,
+            "trade_date": str(data_date),
+            "source": source,
+            "source_licence_id": str(licence_id) if licence_id else None,
+            "adj_type": "none",
+        }
+        for key, expected in binding.items():
+            if payload[key] != expected:
+                raise EvidenceRejected(f"payload_outer_mismatch:{key}")
+    if kind == "adjust_factor":
+        # 参考价=daily_bar 版本：未验证。
+        for required in ("ex_rights", "daily_bar"):
+            if not any(row["kind"] == required for row in dependencies):
+                raise EvidenceRejected(f"dependency_required:{required}")
+    evidence_rows = [_row(conn, completions, UUID(e)) for e in payload.get("evidence_ids", [])]
+    for evidence in evidence_rows:
+        if not _in_scope(_row(conn, versions, evidence["bar_version_id"]), user_id, licence_id):
+            raise EvidenceRejected("evidence_scope")
+        if kind == "feature" and evidence["bar_version_id"] not in deps:
+            raise EvidenceRejected("evidence_bar_dependency")
+    if kind in {"adjust_factor", "feature"}:
+        if computed_at is None:
+            raise EvidenceRejected("computed_at_required")
+        visible = [row["available_at"] for row in [*dependencies, *evidence_rows]]
+        derived_at = None if None in visible else max([computed_at, *visible])
+        if available_at is not None and available_at != derived_at:
+            raise EvidenceRejected("derived_available_at_mismatch")
+        available_at = derived_at
+        _receipt(payload, available_at)
     logical_key = ("user_id", "licence_id", "kind", "source", "code", "data_date", "source_key")
     identity = {key: values[key] for key in logical_key}
     if supersedes_id is not None:
         previous = _row(conn, versions, supersedes_id)
         if any(previous[k] != v for k, v in identity.items()):
             raise EvidenceRejected("supersedes_logical_key")
-    for evidence_id in payload.get("evidence_ids", []):
-        evidence = _row(conn, completions, UUID(evidence_id))
-        if not _in_scope(_row(conn, versions, evidence["bar_version_id"]), user_id, licence_id):
-            raise EvidenceRejected("evidence_scope")
     values.update(available_at=available_at, dependency_ids=deps)
     version_hash = canon_sha256(values)
     return _save(
@@ -334,7 +352,7 @@ def register_completion(
     conn: Connection,
     *,
     bar_version_id: UUID,
-    pipeline_run_id: UUID | None,
+    pipeline_run_id: UUID | None = None,
     is_final: bool | None,
     available_at: datetime | None,
     proof_kind: str,
@@ -347,11 +365,10 @@ def register_completion(
         expected = bar["data_date" if key == "trade_date" else key]
         if proof[key] != (str(expected) if isinstance(expected, (UUID, date)) else expected):
             raise EvidenceRejected(f"proof_bar_mismatch:{key}")
-    # 登记无 as_of，无法判定“当日”：按契约要求，mairui 一律要求例行批。
-    if bar["source"] == "mairui":
-        batches = proof.get("batches")
-        if not isinstance(batches, list) or not batches:
-            raise EvidenceRejected("mairui_batches_required")
+    batches = proof.get("batches", [])
+    if "batches" in proof:
+        if not isinstance(batches, list):
+            raise EvidenceRejected("batches_required")
         for batch in batches:
             validate_batch(batch)
             owner = batch["owner_id"]
@@ -363,8 +380,8 @@ def register_completion(
                 or batch["licence_id"] not in {None, str(bar["licence_id"])}
             ):
                 raise EvidenceRejected("batch:bar_scope_or_date")
-        if pipeline_run_id is None or str(pipeline_run_id) not in [b["run_id"] for b in batches]:
-            raise EvidenceRejected("pipeline_run_binding")
+    if pipeline_run_id is not None and str(pipeline_run_id) not in [b["run_id"] for b in batches]:
+        raise EvidenceRejected("pipeline_run_binding")
     hashed = {
         "proof": proof,
         "is_final": is_final,
