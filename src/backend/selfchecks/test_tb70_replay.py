@@ -42,9 +42,15 @@ from app.replay.baseline import (
     require_isolated,
 )
 from app.schemas.enums import RegistrationMode
+from selfchecks.unix_test_resources import from_env
 
-DB = "postgresql+psycopg://postgres@/tb70_replay?host=/tmp/tb70-pg-socket"
-REDIS = "unix:///tmp/tb70-redis-socket/redis.sock?db=0"
+RESOURCES = from_env(
+    "AIA_TEST_TB70",
+    pg_socket="/tmp/tb70-pg-socket",
+    redis_url="unix:///tmp/tb70-redis-socket/redis.sock?db=0",
+)
+DB = RESOURCES.database_url("tb70_replay")
+REDIS = RESOURCES.redis_url
 
 
 @pytest.fixture(autouse=True)
@@ -156,7 +162,7 @@ def test_migration_head_rejects_non_unique_graph(
 def integration(
     tmp_path: Path,
 ) -> Iterator[tuple[Any, TestClient, TestClient, uuid.UUID, uuid.UUID]]:
-    if not Path("/tmp/tb70-pg-socket/.s.PGSQL.5432").exists():
+    if not (Path(RESOURCES.pg_socket) / ".s.PGSQL.5432").exists():
         pytest.skip("dedicated networkless T-B70 PostgreSQL not provisioned")
     engine = create_engine(DB)
     with engine.begin() as conn:
@@ -400,9 +406,9 @@ def test_cli_job(
             "--user",
             str(owner),
             "--database",
-            "tb70_replay",
+            engine.url.database,
             "--socket",
-            "/tmp/tb70-pg-socket",
+            engine.url.query["host"],
         ],
     )
     main()
@@ -420,7 +426,7 @@ def test_cli_job(
             "--database",
             "production",
             "--socket",
-            "/tmp/tb70-pg-socket",
+            engine.url.query["host"],
         ],
     )
     with pytest.raises(SystemExit) as error:

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -134,6 +134,7 @@ for (const mode of ['null', 'fallback', 'item'] as const) {
     const dispose = renderAt(`/stocks/${code}`);
     try {
       // PriceChartPanel has consumed the exact minute response before rendering the canvas stub.
+      fireEvent.click(within(await screen.findByTestId('price-chart')).getByText('分时'));
       expect(await screen.findByTestId('s1-f18-minute-consumed')).toHaveTextContent('无分时数据');
       const head = await screen.findByTestId('stock-head');
       // Quote presence and non-null minute.pre_close are necessary to reach StockPage's slice branch.

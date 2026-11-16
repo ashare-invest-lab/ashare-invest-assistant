@@ -36,7 +36,7 @@
     "kind": "cash_gap",
     "ours": "104",
     "broker": "204",
-    "diff": "100",
+    "diff": "-100",
     "resolution": null
   },
   {
