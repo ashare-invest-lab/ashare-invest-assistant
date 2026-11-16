@@ -16,6 +16,10 @@ import pytest
 
 CALENDAR = "src/backend/app/aggregates/calendar.py"
 LINES = [78, 79, 80, 81, 82, 84, 85]
+RC1 = "src/backend/app/risk/rc1.py"
+RC1_LINES = [232, 233, 234, 235, 244, 249, 250, 252, 253, 263, 264, 265]
+RC1_CLOSE = [232, 233, 234, 235, 244, 249, 250]
+RC1_INTRADAY = [252, 253, 263]
 REPO = Path(__file__).resolve().parents[3]
 
 
@@ -47,6 +51,8 @@ def coverage(session, *, lost_line=False, name=CALENDAR):
 @pytest.fixture
 def case(tmp_path):
     policy = json.loads(ratchet.NONDET_PATH.read_text(encoding="utf-8"))
+    # Keep the original calendar-only regressions isolated from the new incident.
+    policy["files"] = [entry for entry in policy["files"] if entry["path"] == CALENDAR]
     # Tests retain a fixed validity window independent of when this suite is run.
     policy["files"][0]["review_by"] = "2099-12-15"
     whitelist = write_json(tmp_path / "nondet.json", policy)
@@ -65,12 +71,132 @@ def case(tmp_path):
 
 def test_reviewed_repository_whitelist_has_exact_anchors_and_deadline():
     entries = ratchet.load_nondet_lines(ratchet.NONDET_PATH, today=date(2026, 11, 15))
-    assert len(entries) == 1
-    entry = entries[0]
-    assert entry["path"] == CALENDAR and entry["lines"] == LINES
-    assert entry["review_by"] == "2026-12-15" and entry["reason"]
-    source = (REPO / CALENDAR).read_text(encoding="utf-8").splitlines()
-    assert entry["anchors"] == {str(line): source[line - 1].strip() for line in LINES}
+    assert [entry["path"] for entry in entries] == [CALENDAR, RC1]
+    for entry, lines in zip(entries, (LINES, RC1_LINES)):
+        assert entry["lines"] == lines
+        assert entry["review_by"] == "2026-12-15" and entry["reason"]
+        source = (REPO / entry["path"]).read_text(encoding="utf-8").splitlines()
+        assert entry["anchors"] == {str(line): source[line - 1].strip() for line in lines}
+
+
+def closing_coverage(*, before, lost_line=False):
+    data = coverage([78] if before else [79, 81, 84, 85])
+    # Fixed-clock unit tests execute the close branch on both sides; the live
+    # clock only executes the intraday statements before 15:00 Beijing time.
+    executed = {100, *RC1_CLOSE, *(RC1_INTRADAY if before else [])}
+    if lost_line:
+        executed.remove(100)
+    statements = {100, *RC1_LINES}
+    data["files"][RC1] = {
+        "executed_lines": sorted(executed), "missing_lines": sorted(statements - executed),
+        "summary": {"covered_lines": len(executed), "num_statements": len(statements)},
+    }
+    data["totals"] = {
+        "covered_lines": sum(info["summary"]["covered_lines"] for info in data["files"].values()),
+        "num_statements": sum(info["summary"]["num_statements"] for info in data["files"].values()),
+    }
+    return data
+
+
+@pytest.fixture
+def closing_case(case):
+    policy = json.loads(ratchet.NONDET_PATH.read_text(encoding="utf-8"))
+    for entry in policy["files"]:
+        entry["review_by"] = "2099-12-15"
+    case["policy"] = policy
+    write_json(case["whitelist"], policy)
+    write_json(case["before"], closing_coverage(before=True))
+    write_json(case["current"], closing_coverage(before=False))
+    case["trusted"]["counts"] = ratchet.measured(case["before"])
+    write_json(case["frozen"], case["trusted"])
+    return case
+
+
+def assert_closing_comparison_passes(main, case):
+    assert main(case["argv"]) == 0, "15:00 clock exclusions must pass"
+    result = json.loads(case["output"].read_text())
+    assert result["ratchet_passed"] is True
+    assert result["comparison"]["counts"] == result["comparison"]["base_counts"]
+    return result
+
+
+def test_closing_clock_requires_rc1_exclusions_and_keeps_official_counts(closing_case):
+    case = closing_case
+    original_files = {key: case[key].read_bytes() for key in ("before", "current", "frozen")}
+    raw = {key: ratchet.measured(case[key]) for key in ("before", "current")}
+    write_json(case["whitelist"], {**case["policy"], "files": case["policy"]["files"][:1]})
+    assert check.main(case["argv"]) == 1
+    calendar_only = json.loads(case["output"].read_text())
+    comparison = calendar_only["comparison"]
+    assert calendar_only["ratchet_passed"] is False
+    assert comparison["base_counts"]["total"][0] - comparison["counts"]["total"][0] == 3
+
+    write_json(case["whitelist"], case["policy"])
+    result = assert_closing_comparison_passes(check.main, case)
+    assert result["counts"] == raw["current"]
+    assert result["comparison"]["base_raw_counts"] == raw["before"]
+    assert raw["before"]["total"] == raw["current"]["total"] == [19272, 25211]
+    assert result["comparison"]["counts"]["total"] == [19261, 25192]
+    for label, calendar_lines, rc1_lines in (
+            ("base", [78], sorted(RC1_CLOSE + RC1_INTRADAY)),
+            ("current", [79, 81, 84, 85], RC1_CLOSE)):
+        audit = result["comparison"]["exclusions"][label]
+        assert audit == [
+            {**entry, "covered_lines": executed, "excluded_counts": [len(executed), len(entry["lines"])]}
+            for entry, executed in zip(case["policy"]["files"], (calendar_lines, rc1_lines))]
+    assert result["minimums"] == ratchet.MINIMUMS
+    assert original_files == {key: case[key].read_bytes() for key in original_files}
+
+
+def test_closing_clock_still_rejects_one_unregistered_line_loss(closing_case):
+    case = closing_case
+    write_json(case["current"], closing_coverage(before=False, lost_line=True))
+    assert check.main(case["argv"]) == 1
+    result = json.loads(case["output"].read_text())
+    assert result["ratchet_passed"] is False
+    assert result["counts"]["total"] == [19271, 25211]
+    assert result["comparison"]["counts"]["total"] == [19260, 25192]
+    assert result["rows"][0]["status"] == "fail"
+
+
+@pytest.mark.parametrize("change", ["anchor", "expiry"])
+def test_rc1_policy_guards_fail_with_location(closing_case, capsys, change):
+    case = closing_case
+    entry = case["policy"]["files"][1]
+    if change == "anchor":
+        entry["anchors"]["232"] += " changed"
+        message = "anchor mismatch"
+    else:
+        entry["review_by"] = "2000-01-01"
+        message = "expired"
+    write_json(case["whitelist"], case["policy"])
+    assert check.main(case["argv"]) == 1
+    assert f"{RC1}:232: {message}" in capsys.readouterr().err
+    assert not case["output"].exists()
+
+
+@pytest.mark.parametrize("mutation", ["registration", "deduction"])
+def test_mutation_removing_rc1_exclusions_is_caught(closing_case, monkeypatch, mutation):
+    case = closing_case
+    assert_closing_comparison_passes(check.main, case)
+    if mutation == "registration":
+        policy = deepcopy(case["policy"])
+        policy["files"] = [entry for entry in policy["files"] if entry["path"] != RC1]
+        write_json(case["whitelist"], policy)
+    else:
+        original = check.adjusted_measurement
+
+        def without_rc1(path, exclusions, *, label):
+            return original(path, [entry for entry in exclusions if entry["path"] != RC1], label=label)
+
+        monkeypatch.setattr(check, "adjusted_measurement", without_rc1)
+    # The identical passing assertion must turn red under either mutation.
+    with pytest.raises(AssertionError, match="15:00 clock exclusions must pass"):
+        assert_closing_comparison_passes(check.main, case)
+    result = json.loads(case["output"].read_text())
+    assert result["ratchet_passed"] is False
+    comparison = result["comparison"]
+    assert comparison["base_counts"]["total"][0] - comparison["counts"]["total"][0] == 3
 
 
 def test_preopen_vs_open_fails_raw_but_passes_with_exact_exclusions(case):
