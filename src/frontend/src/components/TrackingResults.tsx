@@ -1,5 +1,6 @@
 import type { SuggestionTracking, TrackingResult } from '../api/phase2Types';
 import { EvidenceChips } from './EvidenceChips';
+import { EmptyState } from './common';
 import { GAP_REASON, ACTION_FULL } from '../i18n/labels';
 import { trackingDecimal } from '../lib/trackingDecimal';
 import { fmtTime } from '../lib/format';
@@ -11,7 +12,7 @@ export function TrackingResults({ data }: { data: SuggestionTracking }) {
   return <div data-testid="tracking-results">
     <p><strong>模拟非实际收益</strong> · <b>模拟，不代表实际收益</b></p>
     <p className="small" data-testid="tracking-counts">本卡逐条观测（不是策略聚合有效样本 n）：待到期 {count('pending')} · 不可成交 {count('untradable')} · 排除 {count('excluded')} · 缺数据 {count('unavailable')}</p>
-    {!results.length ? <p className="muted">暂无逐条模拟结果；不补算、不用旧聚合数字代替。</p> : results.map((r) => <article className="stc-sec" key={`${r.strategy_version_id}-${r.horizon_days}`} data-testid={`tracking-${r.state}`}>
+    {!results.length ? <EmptyState title="暂无逐条模拟结果；不补算、不用旧聚合数字代替。" description="只有已有逐条观测才展示结果；空列表不代表模拟收益为零。" /> : results.map((r) => <article className="stc-sec" key={`${r.strategy_version_id}-${r.horizon_days}`} data-testid={`tracking-${r.state}`}>
       <h4>{r.horizon_days} 日 · {STATE[r.state]} · {ACTION_FULL[r.action]}</h4>
       <p className="small">策略版本 {r.strategy_version_id} · 实例 {r.instance_id ?? '—'} · 复权口径 {r.price_basis} · 成本{r.cost_applied ? '已计入' : '未计入'}</p>
       <div>模拟入场：{value(r.entry_price)} / {r.entry_at === null ? '—' : fmtTime(r.entry_at)}；模拟离场：{value(r.exit_price)} / {r.exit_at === null ? '—' : fmtTime(r.exit_at)}</div>

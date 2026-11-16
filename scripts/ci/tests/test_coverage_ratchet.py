@@ -317,13 +317,17 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     backend = jobs["backend"]
-    assert backend["needs"] == ["backend-lint", "backend-mypy", "backend-tests"]
-    assert backend["if"] == "${{ always() }}"
-    assert backend["timeout-minutes"] == 45
-    assert "if" not in ready  # Required on merge_group too.
-    assert "if" not in jobs["backend-lint"]
-    assert "if" not in jobs["backend-mypy"]
-    assert "if" not in jobs["backend-tests"]
+    # Classification runs first on PRs; all other events retain full CI, including merge_group.
+    expected_if = "${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}"
+    assert ready["needs"] == "changes"
+    assert ready["if"] == expected_if
+    for upstream in ("backend-lint", "backend-mypy", "backend-tests"):
+        assert jobs[upstream]["needs"] == "changes"
+        assert jobs[upstream]["if"] == expected_if
+    assert backend["needs"] == ["changes", "backend-lint", "backend-mypy", "backend-tests"]
+    assert backend["if"] == "${{ always() && (github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true') }}"
+    # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
+    assert backend["timeout-minutes"] == 75
     assert backend["name"] == "backend (ruff, mypy, pytest+coverage)"
     shards = jobs["backend-tests"]
     assert shards["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4, 5, 6]}}
