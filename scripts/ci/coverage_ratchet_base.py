@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -26,6 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "scripts/ci/coverage-baseline.json"
 LIMIT = 8 * 1024 * 1024
 MAX_FALLBACK_ANCESTORS = 50
+SETTLE_SECONDS = 120
+# 1800 s pending budget + at most 120 s settling; below readiness's 35 min.
+MAX_WAIT_SECONDS = 1920
 EXPLICIT_RECOVERY_BASE = "f6c939d6ed4af94144e7dd669f206c96d6aeaf6b"
 EXPLICIT_RECOVERY_PARENT = "90ef8ff16abb7204b7c4ffd54174aeeb8f712455"
 
@@ -120,17 +124,29 @@ def path_parts(name: str):
 class MeasurementPending(ValueError):
     """Only an existing exact-main push may justify waiting; never a fallback."""
 
-    def __init__(self, sha: str, run_id: int):
+    def __init__(self, sha: str, run_id: int, *, timeout: int | None = None):
         self.sha = sha
         self.run_id = run_id
-        super().__init__(f"Exact main measurement pending: base={sha}, run={run_id}")
+        self.timeout = timeout
+        message = (f"timed out after {timeout} s waiting for run {run_id}" if timeout is not None
+                   else f"Exact main measurement pending: base={sha}, run={run_id}")
+        super().__init__(message)
 
 
 class MeasurementUnavailable(ValueError):
     """A known main head lacks a usable, validated main push measurement."""
 
 
-def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
+class _MeasurementNotVisible(ValueError):
+    """Completed, previously pending run whose artifact data may still settle."""
+
+    def __init__(self, message: str, completed_at: float):
+        self.completed_at = completed_at
+        super().__init__(message)
+
+
+def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError,
+                  known_run_id: int | None = None) -> dict:
     requested_base = sha
     if sha == EXPLICIT_RECOVERY_BASE:
         # One approved docs-only recovery, before querying any requested-base run.
@@ -160,11 +176,26 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
         record = bootstrap_record()
         record["source"] = record["source"] | {"base_commit": sha}
         return record
-    runs = get("/actions/workflows/ci.yml/runs?event=push&branch=main&status=completed&head_sha="
+    if known_run_id is not None:
+        # The filtered runs index can lag the run's own completed status. Once
+        # pending was observed, pin all retries to that run, before any fallback.
+        run = get("/actions/runs/" + str(known_run_id))
+        if (run.get("id") != known_run_id or run.get("head_sha") != sha
+                or run.get("head_branch") != "main" or run.get("event") != "push"
+                or run.get("repository", {}).get("full_name") != repo
+                or run.get("path") != ".github/workflows/ci.yml"):
+            raise unavailable("Known main measurement run identity mismatch")
+        if run.get("status") != "completed":
+            raise MeasurementPending(sha, known_run_id)
+        completed_at = time.monotonic()
+        runs = [run]
+    else:
+        runs = get("/actions/workflows/ci.yml/runs?event=push&branch=main&status=completed&head_sha="
                + sha + "&per_page=100")["workflow_runs"]
-    runs = [r for r in runs if r["head_sha"] == sha and r["head_branch"] == "main"
-            and r["event"] == "push" and r["status"] == "completed"
-            and r["repository"]["full_name"] == repo]
+    if known_run_id is None:
+        runs = [r for r in runs if r["head_sha"] == sha and r["head_branch"] == "main"
+                and r["event"] == "push" and r["status"] == "completed"
+                and r["repository"]["full_name"] == repo]
     if not runs:
         active = get("/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha="
                      + sha + "&per_page=100")["workflow_runs"]
@@ -175,12 +206,30 @@ def _freeze_exact(repo: str, sha: str, get, *, unavailable=ValueError) -> dict:
             raise MeasurementPending(sha, max(int(r["id"]) for r in active))
         raise unavailable("No completed exact-base main measurement run")
     run = max(runs, key=lambda r: (r["id"], r["run_attempt"]))
-    artifacts = get("/actions/runs/" + str(run["id"]) + "/artifacts?per_page=100")["artifacts"]
+
+    def missing(message):
+        return (_MeasurementNotVisible(message, completed_at) if known_run_id is not None
+                else unavailable(message))
+
+    try:
+        artifacts = get("/actions/runs/" + str(run["id"]) + "/artifacts?per_page=100")["artifacts"]
+    except urllib.error.HTTPError as exc:
+        if known_run_id is None or exc.code != 404:
+            raise
+        raise missing("Exact-base measurement artifacts not yet visible") from exc
     name = "coverage-ratchet-" + str(run["id"]) + "-" + str(run["run_attempt"])
     selected = [a for a in artifacts if a["name"] == name and not a["expired"]]
     if len(selected) != 1:
+        # Expired or ambiguous artifacts are invalid, not publication latency.
+        if not any(a["name"] == name for a in artifacts):
+            raise missing("Missing, expired or ambiguous exact-base measurement")
         raise unavailable("Missing, expired or ambiguous exact-base measurement")
-    data = get("/actions/artifacts/" + str(selected[0]["id"]) + "/zip", binary=True)
+    try:
+        data = get("/actions/artifacts/" + str(selected[0]["id"]) + "/zip", binary=True)
+    except urllib.error.HTTPError as exc:
+        if known_run_id is None or exc.code != 404:
+            raise
+        raise missing("Exact-base measurement download not yet visible") from exc
     try:
         record = read_artifact(data, sha, run["id"], run["run_attempt"])
     except (ValueError, KeyError, TypeError, zipfile.BadZipFile) as exc:
@@ -229,18 +278,78 @@ def freeze(repo: str, sha: str, get, *, allow_fallback: bool = False) -> dict:
 
 
 def wait_for_base(repo: str, sha: str, get, timeout: int, *, allow_fallback: bool = False) -> dict:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    hard_deadline = started + MAX_WAIT_SECONDS
+    known_run_id = None
+    settle_deadline = None
+    unavailable = MeasurementUnavailable if allow_fallback else ValueError
     while True:
         try:
+            if known_run_id is not None:
+                return _freeze_exact(repo, sha, get, unavailable=unavailable,
+                                     known_run_id=known_run_id)
             if allow_fallback:
                 return freeze(repo, sha, get, allow_fallback=True)
             return freeze(repo, sha, get)
         except MeasurementPending as pending:
-            remaining = deadline - time.monotonic()
+            known_run_id = pending.run_id
+            remaining = min(deadline, hard_deadline,
+                            settle_deadline if settle_deadline is not None else hard_deadline) - time.monotonic()
             if remaining <= 0:
-                raise
+                raise MeasurementPending(sha, known_run_id, timeout=timeout) from pending
             print(f"Waiting for existing trusted main run {pending.run_id}; base={sha}", flush=True)
             time.sleep(min(15, remaining))
+        except _MeasurementNotVisible as exc:
+            now = time.monotonic()
+            if settle_deadline is None:
+                settle_deadline = min(exc.completed_at + SETTLE_SECONDS, hard_deadline)
+            remaining = settle_deadline - now
+            if remaining > 0:
+                print(f"Waiting for trusted main run {known_run_id} artifact to settle", flush=True)
+                time.sleep(min(15, remaining))
+                continue
+            if allow_fallback:
+                return freeze(repo, sha, get, allow_fallback=True)
+            raise unavailable(str(exc)) from exc
+        except MeasurementUnavailable:
+            if known_run_id is None or not allow_fallback:
+                raise
+            # Invalid data takes the existing recovery path immediately. Pending
+            # and data still settling never enter freeze's ancestor loop.
+            return freeze(repo, sha, get, allow_fallback=True)
+
+
+def _failure_reason(exc: Exception) -> str:
+    # Never echo library/API exception text: URLs, headers or attacker-controlled
+    # archive content can occur there. Only these script-owned literals are safe.
+    safe_messages = {
+        "Invalid repository", "Only this repository's trusted main base is accepted",
+        "Only the trusted main merge group base is accepted", "Missing trusted base commit",
+        "Unsupported coverage baseline context", "Missing Actions read token", "Unexpected API path",
+        "Baseline artifact exceeds bound", "Unexpected measurement archive", "Measurement exceeds bound",
+        "Unexpected coverage archive entry", "Archived coverage.json counts disagree with measurement",
+        "Artifact does not belong to exact trusted base run",
+        "Explicit recovery requires the approved first parent",
+        "Explicit recovery could not verify the docs-only diff", "Explicit recovery requires a docs-only diff",
+        "Trusted base commit is not present in fetched history", "Trusted base has no ratchet measurement policy",
+        "No completed exact-base main measurement run", "Known main measurement run identity mismatch",
+        "Missing, expired or ambiguous exact-base measurement", "Invalid exact-base main push measurement",
+        "Exact-base measurement artifacts not yet visible", "Exact-base measurement download not yet visible",
+        "Invalid first-parent commit identity", "Refuse to replace a frozen baseline",
+        "Trusted base artifact has no coverage.json", "Frozen measurement and coverage outputs must differ",
+        f"No usable trusted main push measurement within {MAX_FALLBACK_ANCESTORS} first-parent ancestors",
+    }
+    if isinstance(exc, urllib.error.HTTPError):
+        reason = f"HTTP status {exc.code}"
+    elif isinstance(exc, MeasurementPending):
+        reason = (f"timed out after {exc.timeout} s waiting for run {exc.run_id}"
+                  if exc.timeout is not None else "Exact main measurement pending")
+    elif isinstance(exc, ValueError) and str(exc) in safe_messages:
+        reason = str(exc)
+    else:
+        reason = "Could not read or validate trusted base measurement data"
+    return type(exc).__name__ + ": " + reason
 
 
 def main() -> int:
@@ -278,11 +387,9 @@ def main() -> int:
             print("Recovered requested base: " + sha
                   + "; skipped_heads=" + str(source["fallback"]["skipped_heads"]))
         return 0
-    except MeasurementPending as pending:
-        print("::error title=coverage-ratchet::" + str(pending))
-        return 1
-    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
-        print("::error title=coverage-ratchet::Trusted base measurement unavailable or invalid")
+    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError) as exc:
+        print("::error title=coverage-ratchet::Trusted base measurement unavailable or invalid; "
+              + _failure_reason(exc))
         return 1
 
 
