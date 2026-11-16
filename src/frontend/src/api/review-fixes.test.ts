@@ -156,7 +156,8 @@ describe('契约 v0.2.3 同步', () => {
     const supplement = CONTRACT.slice(CONTRACT.indexOf('#### `/today` 补充'));
     const added = ['alerts', 'plan_triggers', 'data_gaps', 'evidence'];
     for (const k of added) expect(supplement).toMatch(new RegExp(`^${k}: `, 'm'));
-    expect(Object.keys(t).sort()).toEqual([...endpointKeys('/today'), ...added].sort());
+    // T-A12 在 §7.2 裁定正文补充账户回显，未重复展开在 §7.3 的端点行里。
+    expect(Object.keys(t).sort()).toEqual([...endpointKeys('/today'), ...added, 'account_id'].sort());
     for (const k of ['focus', 'pending_plan_drafts', 'released_reasons', 'risk_flags', 'invalidations_today'] as const) {
       expect(t[k].items.length).toBeLessThanOrEqual(50);
       expect(typeof t[k].more).toBe('boolean');

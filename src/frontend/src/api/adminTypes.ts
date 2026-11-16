@@ -39,8 +39,8 @@ export interface AdminIngestStatus {
   /** v0.2.9 #38：ingest 心跳状态（ingest_health，契约不为 null；判定同 /health/ready.ingest；不返回心跳时间）。
    *  前端对缺失或不认识的取值按 unknown 显示，不据此自行生成告警 */
   heartbeat: IngestHealth;
-  /** 没有未过期的租约时为 null（不返回各字段为 null 的对象） */
-  leader: { instance_id: string; egress_ip_masked: string | null; lease_expires_at: string } | null;
+  /** 契约无租约为 null；兼容当前后端无租约时返回各字段为 null 的对象。 */
+  leader: { instance_id: string | null; egress_ip_masked: string | null; lease_expires_at: string | null } | null;
   budget: { per_minute_limit: number; used_last_minute: number };
   queues: { priority: 'p0_intraday' | 'p1_daily' | 'p2_backfill'; depth: number; oldest_age_s: number }[];
   errors_24h: { upstream_code: string; count: number }[];
