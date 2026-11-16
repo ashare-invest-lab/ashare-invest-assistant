@@ -191,7 +191,7 @@ def reconcile(
                 )
             )
     if ours_cash is not None and broker_cash is not None:
-        gap = broker_cash - ours_cash
+        gap = ours_cash - broker_cash
         if abs(gap) > CASH_TOL:
             items.append(
                 _item(
