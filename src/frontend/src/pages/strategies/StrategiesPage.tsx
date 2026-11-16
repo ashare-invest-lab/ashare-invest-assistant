@@ -83,7 +83,7 @@ export function StrategiesPage() {
               title: '模板', key: 'name',
               render: (_, t) => (
                 <span>
-                  {t.name} <span className="mono muted">{t.key}</span>
+                  <Link to={`/strategies/${t.id}`}>{t.name}</Link> <span className="mono muted">{t.key}</span>
                   {isHighRisk(t.risk_level) ? <Tag color="red" style={{ marginLeft: 6 }}>高风险</Tag> : null}
                 </span>
               ),
