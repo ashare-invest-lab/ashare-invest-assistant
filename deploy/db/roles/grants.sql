@@ -315,6 +315,8 @@ DECLARE
     'app.daily_bars_outbox|DELETE|',
     'app.horizon_input_versions|SELECT|id,user_id',
     'app.horizon_input_versions|DELETE|',
+    'app.horizon_completion_evidence|SELECT|bar_version_id',
+    'app.horizon_completion_evidence|DELETE|',
     'app.daily_report_items|SELECT|report_id',
     'app.daily_report_items|DELETE|',
     'app.daily_reports|SELECT|id,llm_call_id,user_id',
