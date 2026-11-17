@@ -138,6 +138,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                     "released_reasons",
                     "risk_flags",
                     "invalidations_today",
+                    "alerts",
                 )
             },
             "gaps": [],
