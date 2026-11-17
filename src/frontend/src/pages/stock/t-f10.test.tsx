@@ -13,7 +13,7 @@ import { routes } from '../../app/routes';
 import { server } from '../../mocks/server';
 import { mockLoginAs } from '../../mocks/session';
 import { preloadRoutes } from '../../test/preloadRoutes';
-import { renderAt } from '../../test/renderAt';
+import { renderTestRoute as renderAt } from '../../test/renderTestRoute';
 
 vi.mock('../../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -56,7 +56,7 @@ describe('② ETF：not_applicable 空态，两字段为 null', () => {
 
 describe('③ 页面层：null 时显示「未知」，不拿常量兜底', () => {
   it('指数因子页签显示「未知」而不是编造的截面日/因子集', async () => {
-    renderAt('/stocks/000300.SH?tab=factors');
+    await renderAt('/stocks/000300.SH?tab=factors');
     await screen.findByTestId('tab-factors');
     await waitFor(() => expect(screen.getByTestId('tab-factors').textContent).toMatch(/截面日/));
     const text = screen.getByTestId('tab-factors').textContent ?? '';
@@ -78,7 +78,7 @@ describe('③ 页面层：null 时显示「未知」，不拿常量兜底', () =
         }),
       ),
     );
-    renderAt('/stocks/600000.SH?tab=factors');
+    await renderAt('/stocks/600000.SH?tab=factors');
     await screen.findByTestId('tab-factors');
     await waitFor(() => expect(screen.getByTestId('tab-factors').textContent).toContain('real-factors-v1'));
     expect(screen.getByTestId('tab-factors').textContent).not.toMatch(/截面日 未知/);

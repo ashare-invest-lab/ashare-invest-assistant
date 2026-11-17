@@ -336,7 +336,7 @@ def test_migration_single_head_upgrade_downgrade_and_nonempty_refusal(
     config = Config()
     config.set_main_option("script_location", str(backend / "migrations"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0037"]
+    assert script.get_heads() == ["0038"]
     revision = script.get_revision("0035")
     assert revision is not None and revision.down_revision == "0034"
     migration = revision.module
