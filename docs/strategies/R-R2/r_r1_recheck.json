@@ -1,0 +1,48 @@
+{
+  "scope": "Recheck the already merged R-R1 frozen public archive; no new live full-market refresh",
+  "source_pr": 169,
+  "source_head": "939c014c28b69e2d8bbc4e2a4e53f5d176e50b63",
+  "source_merged_at": "2026-11-15T12:50:03Z",
+  "recheck_started_at": "2026-11-16T03:53:30.0764201Z",
+  "recheck_finished_at": "2026-11-16T03:53:34.2064553Z",
+  "recheck_timezone": "UTC (03:53 UTC = 20:53 MST on 2026-11-15)",
+  "test_result": {
+    "ran": 9,
+    "passed": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 0
+  },
+  "merged_r_r1_files_changed_by_recheck": false,
+  "counts": {
+    "current_st": 193,
+    "current_st_shenzhen": 113,
+    "current_st_shanghai": 80,
+    "terminated_a_shares": 338,
+    "terminated_shenzhen": 190,
+    "terminated_shanghai": 148,
+    "differences": 6,
+    "registered_termination_records": 90,
+    "registered_termination_records_consistent": 89
+  },
+  "differences": [
+    "300901: 中胤时尚 -> 中胤科技",
+    "301015: 百洋医药 -> 百洋制药",
+    "002731: add terminated record 萃华退",
+    "002731: current status 退 -> 已终止",
+    "Shanghai current ST aggregate: 81 -> 80",
+    "600190: retain announcement date 2025-07-25 and DELIST_DATE 2025-07-28 as distinct values"
+  ],
+  "other_checks": {
+    "600543_current_name": "*ST",
+    "excluded_star_market_cdr": 1,
+    "shanghai_old_st_comparison": "aggregate only",
+    "old_termination_public_keys_checked": 36
+  },
+  "limitations": [
+    "This is a deterministic replay of the R-R1 frozen archive, not a 2026-11-15 evening live refresh.",
+    "Public archive availability and security scanning do not replace row-level factual verification."
+  ],
+  "deepseek": "DeepSeek V4-Pro executed the deterministic recheck; no private samples, trading, holdings, or credentials used."
+}
