@@ -72,9 +72,15 @@ def fixed_aggregate_clock(monkeypatch: pytest.MonkeyPatch) -> dt.datetime:
     class FixedDateTime(dt.datetime):
         @classmethod
         def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
-            return instant.astimezone(tz) if tz is not None else instant.replace(tzinfo=None)
+            return (
+                instant.astimezone(tz)
+                if tz is not None
+                else instant.replace(tzinfo=None)
+            )
 
-    monkeypatch.setattr(aggregates, "dt", SimpleNamespace(datetime=FixedDateTime, UTC=dt.UTC))
+    monkeypatch.setattr(
+        aggregates, "dt", SimpleNamespace(datetime=FixedDateTime, UTC=dt.UTC)
+    )
     return instant
 
 

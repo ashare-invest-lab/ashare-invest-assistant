@@ -8,14 +8,15 @@ from pathlib import Path
 
 import pytest
 import yaml
+from sqlalchemy import Connection, create_engine, insert, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
+
 from app.aggregates.calendar import BEIJING, market_clock
 from app.common.errors import AppError, ErrorCode
 from app.config_files import MarketRulesConfig
 from app.db.tables.market import trading_calendar
 from app.schemas.enums import MarketSession
-from sqlalchemy import Connection, create_engine, insert, text
-from sqlalchemy.engine import make_url
-from sqlalchemy.exc import OperationalError
 
 pytestmark = pytest.mark.unit
 DAY = dt.date(2030, 6, 11)
@@ -26,7 +27,9 @@ FOLLOWING = DAY + dt.timedelta(days=1)
 @pytest.fixture
 def rules() -> MarketRulesConfig:
     path = Path(__file__).resolve().parents[3] / "config/market_rules.yaml"
-    return MarketRulesConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    return MarketRulesConfig.model_validate(
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+    )
 
 
 @pytest.fixture
@@ -87,7 +90,9 @@ def test_open_day_sessions(
     assert clock.session == session
 
 
-def test_non_trading_day_uses_last_open_day(conn: Connection, rules: MarketRulesConfig) -> None:
+def test_non_trading_day_uses_last_open_day(
+    conn: Connection, rules: MarketRulesConfig
+) -> None:
     conn.execute(
         insert(trading_calendar),
         [
@@ -96,7 +101,9 @@ def test_non_trading_day_uses_last_open_day(conn: Connection, rules: MarketRules
             {"date": FOLLOWING, "is_open": False},
         ],
     )
-    clock = market_clock(conn, dt.datetime.combine(FOLLOWING, dt.time(10), BEIJING), rules)
+    clock = market_clock(
+        conn, dt.datetime.combine(FOLLOWING, dt.time(10), BEIJING), rules
+    )
     assert clock.trade_date == PREVIOUS
     assert clock.session == MarketSession.NON_TRADING_DAY
 
@@ -113,11 +120,15 @@ def test_non_trading_day_uses_last_open_day(conn: Connection, rules: MarketRules
     ids=["empty", "before-coverage", "after-coverage", "hole", "no-previous-open"],
 )
 def test_calendar_not_covered(
-    conn: Connection, rules: MarketRulesConfig, rows: list[tuple[dt.date, bool]], day: dt.date
+    conn: Connection,
+    rules: MarketRulesConfig,
+    rows: list[tuple[dt.date, bool]],
+    day: dt.date,
 ) -> None:
     if rows:
         conn.execute(
-            insert(trading_calendar), [{"date": date, "is_open": is_open} for date, is_open in rows]
+            insert(trading_calendar),
+            [{"date": date, "is_open": is_open} for date, is_open in rows],
         )
     with pytest.raises(AppError) as exc:
         market_clock(conn, dt.datetime.combine(day, dt.time(10), BEIJING), rules)
