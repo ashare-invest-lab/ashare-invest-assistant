@@ -286,17 +286,22 @@ def terminal(
         .where(notifications.c.user_id == user_id, notifications.c.read_at.is_(None))
     ).scalar_one()
     focused_rows, focus_more = products.focus_rows(result_rows)
+    returned_rows = focused_rows[:50] if _focus_only else result_rows[:300]
     value = m.Terminal(
         server_time=now,
         trade_date=clock.trade_date,
         session=clock.session,
         account_id=account_id,
         account=account_out,
-        rows=focused_rows[:50] if _focus_only else result_rows[:300],
+        rows=returned_rows,
         truncated=len(result_rows) > 300,
         unread_notifications=int(unread),
         data_status=DataStatus.PARTIAL,
-        data_as_of=None,
+        data_as_of=min(
+            (row.data_as_of for row in returned_rows if row.data_as_of is not None),
+            key=lambda at: at.astimezone(dt.UTC),
+            default=None,
+        ),
         gaps=gaps,
     )
     value._focus_more = focus_more
@@ -369,7 +374,9 @@ def today(
                 now=now,
                 trading_day=clock.session is not MarketSession.NON_TRADING_DAY
                 and clock.trade_date == now.astimezone(t_view.BEIJING).date(),
-                # M3 盘中采集未接线，没有排程信息，按 §3.7⑥ 没数据即 unavailable。
+                # 未接调度事实源（T-B185 裁定②）：仓库里没有分时拉取排程（任务注册和 ingest
+                # 入口都没有），无法得出真值，先保留 False，按 §3.7⑥ 没数据即 unavailable。
+                # 事实源随 T-A209 M0（真实盘中采集器）立项后再接。
                 scheduled=False,
                 interval_s=interval_s,
                 thresholds=t_view.THRESHOLDS,
@@ -419,6 +426,10 @@ def today(
         data_gaps=m.GapBlock(items=action_gaps, more=False),
         evidence=actual["evidence"],
         data_status=DataStatus.PARTIAL,
-        data_as_of=None,
+        data_as_of=min(
+            (row.data_as_of for row in focus[:50] if row.data_as_of is not None),
+            key=lambda at: at.astimezone(dt.UTC),
+            default=None,
+        ),
         gaps=base.gaps,
     )

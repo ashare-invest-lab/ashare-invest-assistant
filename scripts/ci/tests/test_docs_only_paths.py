@@ -40,6 +40,7 @@ CHECKS = {
     *[([path], False) for path in (
         "docs/api-contract.md", "docs/plan.md", "docs/contracts/x.md",
         "docs/strategies/cards/x.md", "docs/data.json",
+        "docs/handover/team/tasks/T-R88.md",
         "tests/fixtures/broker_statements/fmt_a/README.md", "src/frontend/x.md", ".github/x.md",
     )],
     (["docs/handover/x.md", "docs/reviews/x.md"], True),
