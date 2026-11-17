@@ -286,17 +286,22 @@ def terminal(
         .where(notifications.c.user_id == user_id, notifications.c.read_at.is_(None))
     ).scalar_one()
     focused_rows, focus_more = products.focus_rows(result_rows)
+    returned_rows = focused_rows[:50] if _focus_only else result_rows[:300]
     value = m.Terminal(
         server_time=now,
         trade_date=clock.trade_date,
         session=clock.session,
         account_id=account_id,
         account=account_out,
-        rows=focused_rows[:50] if _focus_only else result_rows[:300],
+        rows=returned_rows,
         truncated=len(result_rows) > 300,
         unread_notifications=int(unread),
         data_status=DataStatus.PARTIAL,
-        data_as_of=None,
+        data_as_of=min(
+            (row.data_as_of for row in returned_rows if row.data_as_of is not None),
+            key=lambda at: at.astimezone(dt.UTC),
+            default=None,
+        ),
         gaps=gaps,
     )
     value._focus_more = focus_more
@@ -419,6 +424,10 @@ def today(
         data_gaps=m.GapBlock(items=action_gaps, more=False),
         evidence=actual["evidence"],
         data_status=DataStatus.PARTIAL,
-        data_as_of=None,
+        data_as_of=min(
+            (row.data_as_of for row in focus[:50] if row.data_as_of is not None),
+            key=lambda at: at.astimezone(dt.UTC),
+            default=None,
+        ),
         gaps=base.gaps,
     )
