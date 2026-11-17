@@ -10,17 +10,28 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from sqlalchemy.sql import operators
-from sqlalchemy.sql.elements import BindParameter, BooleanClauseList, ColumnClause, Tuple
+from sqlalchemy.sql.elements import (
+    BindParameter,
+    BooleanClauseList,
+    ColumnClause,
+    Tuple,
+)
 
 from tests.backend.unit.test_ta157_bj_routing import (  # noqa: F401
-    TOKEN, Wire, api, assert_invalid_fields, bar, counter, offline_only,
+    TOKEN,
+    Wire,
+    api,
+    assert_invalid_fields,
+    bar,
+    counter,
+    offline_only,
 )
 
 pytestmark = pytest.mark.unit
@@ -87,8 +98,11 @@ class StatementDB:
             index = 0
             while True:
                 suffix = f"_m{index}"
-                values = {key[:-len(suffix)]: value for key, value in params.items()
-                          if key.endswith(suffix)}
+                values = {
+                    key[: -len(suffix)]: value
+                    for key, value in params.items()
+                    if key.endswith(suffix)
+                }
                 if not values:
                     break
                 key = self.key(values)
@@ -99,8 +113,11 @@ class StatementDB:
             return SimpleNamespace(all=lambda: inserted)
         if statement.is_select:
             self.events.append("select")
-            rows = [deepcopy(row) for row in self.rows.values()
-                    if all(evaluate(expr, row) for expr in statement._where_criteria)]
+            rows = [
+                deepcopy(row)
+                for row in self.rows.values()
+                if all(evaluate(expr, row) for expr in statement._where_criteria)
+            ]
             return SimpleNamespace(mappings=lambda: rows)
         assert statement.is_update, "只允许 INSERT、SELECT 和条件 UPDATE"
         self.events.append("update")
@@ -110,44 +127,75 @@ class StatementDB:
         changed = []
         for row in self.rows.values():
             if all(evaluate(expr, row) for expr in statement._where_criteria):
-                row.update({getattr(column, "key", column): value.value
-                            for column, value in statement._values.items()})
+                row.update(
+                    {
+                        getattr(column, "key", column): value.value
+                        for column, value in statement._values.items()
+                    }
+                )
                 changed.append({"code": row["code"]})
         return SimpleNamespace(mappings=lambda: changed)
 
 
 def make_bar(writer, code="600997.SH"):
     return writer.DailyBar(
-        code, date(2001, 1, 4), "none", *([Decimal("10")] * 5),
-        Decimal(200), Decimal(2000), False,
+        code,
+        date(2001, 1, 4),
+        "none",
+        *([Decimal(10)] * 5),
+        Decimal(200),
+        Decimal(2000),
+        False,
     )
 
 
 def write(writer, db, bars, sink=None):
     return writer.upsert_daily_bars(
-        db, writer.FetchResult(bars), source="mairui", licence_id=None,
-        fetched_at=datetime(2026, 11, 13, tzinfo=timezone.utc), reconcile_sink=sink,
+        db,
+        writer.FetchResult(bars),
+        source="mairui",
+        licence_id=None,
+        fetched_at=datetime(2026, 11, 13, tzinfo=UTC),
+        reconcile_sink=sink,
     )
 
 
-@pytest.mark.parametrize("label,source,same,fail_audit,race", [
-    ("replace", "tdx_local", False, False, False),
-    ("same", "tdx_local", True, False, False),
-    ("audit-failed", "tdx_local", False, True, False),
-    ("race", "tdx_local", False, False, True),
-    ("mairui", "mairui", False, False, False),
-    ("fake", "fake", False, False, False),
-])
-def test_ta157_tdx_priority(writer, api, tmp_path, label, source, same, fail_audit, race):
+@pytest.mark.parametrize(
+    "label,source,same,fail_audit,race",
+    [
+        ("replace", "tdx_local", False, False, False),
+        ("same", "tdx_local", True, False, False),
+        ("audit-failed", "tdx_local", False, True, False),
+        ("race", "tdx_local", False, False, True),
+        ("mairui", "mairui", False, False, False),
+        ("fake", "fake", False, False, False),
+    ],
+)
+def test_ta157_tdx_priority(
+    writer,
+    api,  # noqa: F811
+    tmp_path,
+    label,
+    source,
+    same,
+    fail_audit,
+    race,
+):
     incoming = make_bar(writer)
     existing = dict(vars(incoming), source=source, source_licence_id=None)
     if not same:
-        existing.update(open=Decimal("9.99"), high=Decimal("9.99"),
-                        low=Decimal("9.99"), close=Decimal("9.99"))
+        existing.update(
+            open=Decimal("9.99"),
+            high=Decimal("9.99"),
+            low=Decimal("9.99"),
+            close=Decimal("9.99"),
+        )
     # 不同代码/日期/复权的旁观行证明 UPDATE 不得越过同键条件。
-    sentinels = [dict(existing, code="000997.SZ"),
-                 dict(existing, trade_date=date(2001, 1, 5)),
-                 dict(existing, adj_type="qfq")]
+    sentinels = [
+        dict(existing, code="000997.SZ"),
+        dict(existing, trade_date=date(2001, 1, 5)),
+        dict(existing, adj_type="qfq"),
+    ]
     db = StatementDB([existing, *sentinels], race=race)
     audit = tmp_path / f"{label}.jsonl"
     persist = api.load.jsonl_reconcile_sink(audit)
@@ -160,9 +208,8 @@ def test_ta157_tdx_priority(writer, api, tmp_path, label, source, same, fail_aud
 
     if fail_audit:
         before = deepcopy(db.rows)
-        with pytest.raises(OSError, match="synthetic audit failure"):
-            with db.transaction():
-                write(writer, db, [incoming], sink)
+        with pytest.raises(OSError, match="synthetic audit failure"), db.transaction():
+            write(writer, db, [incoming], sink)
         assert db.rows == before
         assert db.events[-1] == "rollback" and "audit" in db.events
         assert "update" not in db.events and not audit.exists()
@@ -171,8 +218,10 @@ def test_ta157_tdx_priority(writer, api, tmp_path, label, source, same, fail_aud
     with db.transaction():
         stats = write(writer, db, [incoming], sink)
         if audit.exists():
-            assert not any(json.loads(line).get("value") == "committed"
-                           for line in audit.read_text().splitlines())
+            assert not any(
+                json.loads(line).get("value") == "committed"
+                for line in audit.read_text().splitlines()
+            )
     stats.reconcile_after_transaction(committed=True)
     should_replace = source == "tdx_local" and not race
     assert stats.inserted == 0 and stats.replaced == int(should_replace)
@@ -180,25 +229,36 @@ def test_ta157_tdx_priority(writer, api, tmp_path, label, source, same, fail_aud
     for row in sentinels:
         assert db.rows[db.key(row)] == row
     stored = db.rows[db.key(existing)]
-    records = [json.loads(line) for line in audit.read_text().splitlines()] if audit.exists() else []
+    records = (
+        [json.loads(line) for line in audit.read_text().splitlines()]
+        if audit.exists()
+        else []
+    )
     if source != "tdx_local":
         assert stored == existing and records == [] and "update" not in db.events
         return
-    assert db.events.index("audit") < db.events.index("update") < db.events.index("commit")
+    assert (
+        db.events.index("audit") < db.events.index("update") < db.events.index("commit")
+    )
     kind = "replaced_tdx_local_same" if same else "replaced_tdx_local"
     diffs = [record for record in records if record.get("kind") == kind]
-    assert diffs and all(record["existing_source"] == "tdx_local"
-                         and record["incoming_source"] == "mairui" for record in diffs)
+    assert diffs and all(
+        record["existing_source"] == "tdx_local"
+        and record["incoming_source"] == "mairui"
+        for record in diffs
+    )
     if same:
         assert [record["field"] for record in diffs] == ["*"]
     else:
         close = next(record for record in diffs if record["field"] == "close")
         assert Decimal(close["existing_value"]) == Decimal("9.99")
-        assert Decimal(close["incoming_value"]) == Decimal("10")
+        assert Decimal(close["incoming_value"]) == Decimal(10)
     result = records[-1]
     assert result["kind"] == "replace_result"
     assert result["value"] == ("skipped" if race else "committed")
-    assert {record["replacement_id"] for record in records} == {result["replacement_id"]}
+    assert {record["replacement_id"] for record in records} == {
+        result["replacement_id"]
+    }
     if race:
         assert stored == dict(existing, source="mairui")
     else:
@@ -206,7 +266,7 @@ def test_ta157_tdx_priority(writer, api, tmp_path, label, source, same, fail_aud
         assert stored["source"] == "mairui" and stored["source_licence_id"] is None
 
 
-def test_ta157_wrong_suffix_read_only(writer, api):
+def test_ta157_wrong_suffix_read_only(writer, api):  # noqa: F811
     # 生产统计入口只读查询、结果透传；不在替身中重写分组/比较算法。
     groups = [("920997.SH", "tdx_local", "none", 3, "2001-01-04", "2001-01-08")]
     comparison = [
@@ -224,7 +284,10 @@ def test_ta157_wrong_suffix_read_only(writer, api):
     result = api.load.wrong_suffix_stats(conn)
     assert result == {"groups": groups, "comparison": comparison}
     queries = [call.args[0] for call in cursor.execute.call_args_list]
-    assert queries == [api.load.WRONG_SUFFIX_GROUP_SQL, api.load.WRONG_SUFFIX_COMPARE_SQL]
+    assert queries == [
+        api.load.WRONG_SUFFIX_GROUP_SQL,
+        api.load.WRONG_SUFFIX_COMPARE_SQL,
+    ]
     assert all(query.lstrip().upper().startswith("SELECT") for query in queries)
     conn.commit.assert_not_called()
     conn.rollback.assert_not_called()
@@ -238,10 +301,12 @@ def test_ta157_wrong_suffix_read_only(writer, api):
     assert db.rows == before and db.events == []
 
 
-def test_ta157_bj_volume_lots_to_shares(api, writer, tmp_path):
+def test_ta157_bj_volume_lots_to_shares(api, writer, tmp_path):  # noqa: F811
     raw = bar(code="920801.BJ", v="2", a="2000")
     accepted = api.load.validate_bar(raw, "920801.BJ")
-    assert accepted is not None and api.load.VOL_MULT == 100 and accepted["volume"] == 200
+    assert (
+        accepted is not None and api.load.VOL_MULT == 100 and accepted["volume"] == 200
+    )
     assert accepted["close"] == "10" and accepted["amount"] == "2000"
     rows, rejects = api.load.normalize_history("920801", [raw])
     assert rows == [accepted] and rejects == []
@@ -250,8 +315,9 @@ def test_ta157_bj_volume_lots_to_shares(api, writer, tmp_path):
     api.load.write_normalized(path, "920801", rows, rejects)
     assert api.load.load_normalized(path) == rows
     db = StatementDB()
-    bj = writer.DailyBar(**{**vars(make_bar(writer, "920801.BJ")),
-                           "trade_date": date(2026, 11, 13)})
+    bj = writer.DailyBar(
+        **{**vars(make_bar(writer, "920801.BJ")), "trade_date": date(2026, 11, 13)}
+    )
     stats = write(writer, db, [bj])
     assert stats.inserted == 0 and stats.blocked_bj_unconfirmed == 1
     assert db.rows == {} and db.events == []
@@ -260,14 +326,16 @@ def test_ta157_bj_volume_lots_to_shares(api, writer, tmp_path):
 def test_ta158_bj_write_requires_offline_volume_check(writer):
     """引用 #197：只观察公共 writer 默认阻断；完整证据/撤销矩阵由该单维护。"""
     db = StatementDB()
-    bj, sh, sz = [make_bar(writer, code) for code in ("920997.BJ", "600997.SH", "000997.SZ")]
+    bj, sh, sz = [
+        make_bar(writer, code) for code in ("920997.BJ", "600997.SH", "000997.SZ")
+    ]
     stats = write(writer, db, [bj, sh, sz])
     assert stats.blocked_bj_unconfirmed == 1 and stats.inserted == 2
     assert stats.issues == ("blocked_bj_unconfirmed",)
     assert set(db.rows) == {db.key(vars(sh)), db.key(vars(sz))}
 
 
-def test_ta157_old_window_not_complete(api, tmp_path, capsys):
+def test_ta157_old_window_not_complete(api, tmp_path, capsys):  # noqa: F811
     # 通过真实 run_batch 观察旧账本：不重置计数、不自动重拉、显示待补范围。
     state = counter()
     state["done_history"] = ["600997"]
