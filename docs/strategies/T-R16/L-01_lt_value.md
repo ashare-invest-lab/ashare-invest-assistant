@@ -43,7 +43,7 @@ key `lt_value`；category `value`；horizons `[long]`（月度再平衡，持有
 - 财报季切换：只用公告日（`f.*_visible_at` / basis）≤ as_of 的报告期，不得用报告期末日对齐。
 
 ## 8–10 执行与仓位
-每月第一个交易日盘后出 screen，次日开盘模拟成交；等权，单票上限按 RC2 执行。
+每月第一个交易日盘后出 screen，次日开盘模拟成交（出处：docs/plan.md:1283）；等权，单票上限按 RC2 执行。
 
 ## 11 验证
 门禁关闭前只做 `fixture` 和 `post_close_stats`；关闭后做 walk-forward（训练 36 个月 / 测试 12 个月，月度滚动），`min_n` 为 24 个月度截面，基准用中证全指；年度换手和容量须一并报告。

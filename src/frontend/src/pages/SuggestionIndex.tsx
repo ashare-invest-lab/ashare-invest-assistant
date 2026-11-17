@@ -3,7 +3,7 @@ import { Alert, Input, Select, Table, Tag } from 'antd';
 import { useSuggestionPages } from '../api/suggestionQueries';
 import { ENUMS } from '../api/enums';
 import type { SuggestionListItem } from '../api/types';
-import { ActionBadge, ConsensusBadge, ErrorBox, Loading } from '../components/common';
+import { ActionBadge, ConsensusBadge, EmptyState, ErrorBox, Loading } from '../components/common';
 import { CursorPager } from '../components/CursorPager';
 import { EXECUTABILITY, SUGGESTION_STATUS } from '../i18n/labels';
 import { fmtTime } from '../lib/format';
@@ -33,7 +33,7 @@ export function SuggestionIndex() {
         { title: '共识', key: 'consensus', render: (_, s) => <ConsensusBadge status={s.consensus} /> },
         { title: '满足度', key: 'score', render: (_, s) => s.top_score ?? '—' },
         { title: '可执行性', key: 'executability', render: (_, s) => EXECUTABILITY[s.executability_status].text },
-      ]} locale={{ emptyText: '当前筛选没有候选信号卡' }} />
+      ]} locale={{ emptyText: <EmptyState title="当前筛选没有候选信号卡" description="可调整卡片状态或证券代码筛选；空列表不代表没有风险或已有模拟结果。" /> }} />
       <CursorPager query={q} loaded={rows.length} />
     </>}
   </div></div>;
