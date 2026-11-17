@@ -154,6 +154,7 @@ tests:
   - {"file": "tests/replay/test_licence_t_t22.py", "group": "parallel", "keywords": ["RefIngest/RefScheduler fake clock", "pure synthetic licence state"], "unverified": false}
   - {"file": "tests/replay/test_replay_example.py", "group": "parallel", "keywords": ["ReplayClient/Tape fake clock", "read-only recordings", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta157_bj_routing.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta157_bj_writers.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
   - {"file": "tests/backend/unit/test_aggregates_calendar_clock.py", "group": "parallel", "keywords": ["fixed aware datetime", "MagicMock connection", "read-only market_rules.yaml; no DB/network"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata only", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}

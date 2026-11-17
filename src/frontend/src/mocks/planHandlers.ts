@@ -99,10 +99,6 @@ export function resetPlanDrafts() {
   seq = 0;
 }
 export const draftsNow = (): PlanDraft[] => drafts;
-/** 测试辅助：改某份草案的状态（例如把待确认改成 stale） */
-export function mockSetDraftStatus(id: string, status: PlanDraftStatus) {
-  drafts = drafts.map((d) => (d.id === id ? { ...d, status } : d));
-}
 
 const EXPLAINABLE_ROLES = new Set(['entry', 'exit', 'weakening']);
 
