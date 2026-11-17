@@ -13,6 +13,9 @@
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "src/backend/tests/test_tb178_today_alerts_offline.py", "group": "parallel", "keywords": ["synthetic SQL result pages", "real alert/evidence validation", "socket connections denied; no PG"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb178_today_alerts.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL only", "isolated PostgreSQL database", "synthetic alerts; in-process Today API"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172a_horizon_asof.py", "group": "parallel", "keywords": ["synthetic evidence/calendar", "fake connection/provider", "deny_network monkeypatch"], "unverified": false}
   - {"file": "src/backend/tests/test_terminal_quotes.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "socket.connect/create_connection denied", "synthetic data; no real PG/Redis/docker"], "unverified": false}
   - {"file": "src/backend/tests/test_tb171_unavailable_recompute.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL/TT41_DATABASE_URL real PG", "skip when no DSN"], "unverified": false}
   - {"file": "tests/backend/api_app/test_admin_contract_current.py", "group": "serial_pg", "keywords": ["authdb->pg_url", "redis_url", "docker"], "unverified": false}
@@ -100,6 +103,7 @@ tests:
   - {"file": "tests/backend/unit/test_import_cases_skeleton.py", "group": "parallel", "keywords": ["read-only mapping/fixtures", "pure parser"], "unverified": false}
   - {"file": "tests/backend/unit/test_import_codes_generated.py", "group": "parallel", "keywords": ["read-only expected JSON", "pure importing parser"], "unverified": false}
   - {"file": "tests/backend/unit/test_import_resolutions_t_b02x.py", "group": "parallel", "keywords": ["read-only resolution table", "pure findings calculations"], "unverified": false}
+  - {"file": "tests/backend/unit/test_import_storage_offline_cov_t6.py", "group": "parallel", "keywords": ["socket.connect/create_connection denied", "generated synthetic keys and tmp_path only", "no real DB or import files"], "unverified": false}
   - {"file": "tests/backend/unit/test_importing_preview_coverage_repair.py", "group": "parallel", "keywords": ["pure synthetic preview context"], "unverified": false}
   - {"file": "tests/backend/unit/test_ingest_expiry_offline.py", "group": "parallel", "keywords": ["synthetic dates", "deny_network monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ingest_intents_offline.py", "group": "parallel", "keywords": ["synthetic intents", "deny_network monkeypatch", "SHARING read-only"], "unverified": false}
@@ -114,7 +118,9 @@ tests:
   - {"file": "tests/backend/unit/test_quotes_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "subprocess import check", "socket monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_s3_report_chain_coverage.py", "group": "parallel", "keywords": ["fake RedisQueue", "isolated_jobs autouse monkeypatch", "TASKS restored via setitem"], "unverified": false}
   - {"file": "tests/backend/unit/test_sector_flows_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "socket monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_security_search_terms_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake engine/rebuild transaction", "socket connections denied", "read-only config plus tmp_path and restored environment"], "unverified": false}
   - {"file": "tests/backend/unit/test_set_licence_retain_id_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
+  - {"file": "tests/backend/unit/test_signal_rt_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake Consumer/Redis/engine/runner", "socket connections denied", "runpy and automatically restored monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "ipl global replacement restored in finally"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta81_l6781_t_t45.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "thread contention"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta87_m1_a1_a24_t_t50.py", "group": "serial_pg", "keywords": ["_temp_db", "PGHOST", "create_engine real PG", "socket.bind blackhole", "subprocess", "fallback /tmp"], "unverified": false}
@@ -146,3 +152,10 @@ tests:
   - {"file": "tests/backend/unit/test_worker_healthcheck_offline.py", "group": "parallel", "keywords": ["fake Redis/runner", "deny_network monkeypatch", "runpy with restored sys.argv"], "unverified": false}
   - {"file": "tests/replay/test_licence_t_t22.py", "group": "parallel", "keywords": ["RefIngest/RefScheduler fake clock", "pure synthetic licence state"], "unverified": false}
   - {"file": "tests/replay/test_replay_example.py", "group": "parallel", "keywords": ["ReplayClient/Tape fake clock", "read-only recordings", "tmp_path"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta157_bj_routing.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta157_bj_writers.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
+  - {"file": "tests/backend/unit/test_aggregates_calendar_clock.py", "group": "parallel", "keywords": ["fixed aware datetime", "MagicMock connection", "read-only market_rules.yaml; no DB/network"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata only", "no IO"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata and purge wiring", "no IO"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "synthetic evidence"], "unverified": false}

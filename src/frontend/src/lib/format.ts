@@ -1,6 +1,6 @@
 import type { DimensionCell, Evidence } from '../api/types';
 import { PROVIDER } from '../i18n/labels';
-/** 契约时间均为 +08:00；界面统一按北京时间显示。Z 或其他偏移换算到 Asia/Shanghai；+08:00 输出与旧实现逐字节不变。 */
+/** 契约时间均为 +08:00；界面统一按北京时间显示。Z 或其他偏移换算到 Asia/Shanghai；截去小数秒（不四舍五入）；+08:00 其余输出与旧实现不变。 */
 /**
  * F-13：`t` 为 null/undefined 时返回空串，**不抛错**。
  * 空数据场景（契约 T-A53）`data_as_of` 为 null 是合法的；此前直接调 `.endsWith` 会让整页
@@ -10,7 +10,7 @@ import { PROVIDER } from '../i18n/labels';
 export const fmtTime = (t: string | null | undefined) => {
   if (t === null || t === undefined || t === '') return '';
   if (t.endsWith('+08:00') || !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(t)) {
-    return t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
+    return t.replace('T', ' ').replace(/\+08:00$/, '').replace(/(:\d{2})\.\d+$/, '$1').replace(/:00$/, '');
   }
   const date = new Date(t);
   if (Number.isNaN(date.getTime())) return t;
@@ -25,6 +25,11 @@ export const fmtTime = (t: string | null | undefined) => {
   const base = `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}`;
   return g('second') === '00' ? base : `${base}:${g('second')}`;
 };
+/** 行情价格：至少 2 位、最多 3 位小数（ETF 最小变动 0.001），去掉 187.5800 这类多余的 0。 */
+export const fmtPrice = (v: string | number | null | undefined) =>
+  v === null || v === undefined || v === '' || Number.isNaN(Number(v))
+    ? '—'
+    : Number(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 export const fmtNum = (v: string | number | null | undefined, digits = 2) =>
   v === null || v === undefined || v === '' || Number.isNaN(Number(v))
     ? '—'

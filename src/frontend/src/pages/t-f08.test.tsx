@@ -1,13 +1,13 @@
 /** T-F08（契约 v0.2.7 §7.3 及“/today 补充”）：今日关注 /today */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
-import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
 import { preloadRoutes } from '../test/preloadRoutes';
+import { renderTestRoute } from '../test/renderTestRoute';
+import { settled } from '../test/timing';
 import type { TodayAlert, TodayDataGap, TodayPlanTrigger, TodayResponse } from '../api/types';
 import { todayPollMs } from '../api/queries';
 import { MORE_ROUTE, safeInternalRoute } from './today/todayRoutes';
@@ -70,18 +70,6 @@ const BANNED: string[] = [
 const SEV = { important: 0, attention: 1, info: 2 } as const;
 const GAP_ORDER = ['data_licence_unavailable', 'user_input_missing', 'upstream_error', 'quota_deferred'];
 
-function renderAt(path: string) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(
-    <AppProviders client={makeQueryClient(true)}>
-      <RouterProvider router={router} />
-    </AppProviders>,
-  );
-  return router;
-}
-
 /** 契约里某个列表元素的字段名，如 pending_plan_drafts: {items: [{id, ...}] */
 function itemKeys(list: string) {
   const m = TODAY_LINE.match(new RegExp(`${list}: \\{items: \\[\\{([^}]*)\\}\\]`));
@@ -92,6 +80,7 @@ function itemKeys(list: string) {
 const row = TERMINAL_ROWS.find((r) => r.suggestion && r.holding)!;
 /** 各区都有数据、都被截断的示例（测试专用） */
 const FULL: TodayResponse = {
+  account_id: null,
   server_time: '2026-11-02T15:20:00+08:00', trade_date: '2026-11-02', session: 'closed',
   market: { regime: 'range', regime_position_range: { min_pct: '40', max_pct: '60' }, data_status: 'fresh' },
   focus: { items: [row], more: true },
@@ -227,7 +216,7 @@ describe('T-F08 今日关注', () => {
 
   it('默认 mock：不再是占位页；展示时段、大盘环境、重点关注、草案、风险、日报与对账、免责提示', async () => {
     const t = (await (await fetch('/api/v1/today')).json()) as TodayResponse;
-    renderAt('/today');
+    await renderTestRoute('/today');
     const page = await screen.findByTestId('today-page');
     expect(screen.queryByTestId('placeholder')).toBeNull();
     expect(screen.getByTestId('today-session')).toHaveTextContent('上午连续竞价');
@@ -291,7 +280,7 @@ describe('T-F08 今日关注', () => {
 
   it('完整示例：more=true 给出列表页入口；账户级风险无证券链接；日报 ready、未导入对账', async () => {
     server.use(http.get('/api/v1/today', () => HttpResponse.json(FULL)));
-    renderAt('/today');
+    await renderTestRoute('/today');
     await screen.findByTestId('today-page');
     // 契约 v0.2.7“查看全部”去向表（7 个有去向；data_gaps 的 more 恒 false 且没有入口）
     const more: Record<string, string> = {
@@ -330,7 +319,7 @@ describe('T-F08 今日关注', () => {
       ...FULL, daily_report: { date: '2026-11-02', status: 'generating' },
       reconciliation: { status: 'diff', as_of: '2026-11-02T15:10:00+08:00', diff_count: 3, important_count: 1 },
     } satisfies TodayResponse)));
-    renderAt('/today');
+    await renderTestRoute('/today');
     const rec = await screen.findByTestId('today-reconciliation');
     expect(rec).toHaveTextContent('差异 3 项，其中重要 1 项');
     expect(within(rec).getByRole('link')).toHaveAttribute('href', '/portfolio?tab=reconciliation');
@@ -339,7 +328,7 @@ describe('T-F08 今日关注', () => {
 
   it('评审 m3：非交易日 not_yet 显示“非交易日，无日报”', async () => {
     server.use(http.get('/api/v1/today', () => HttpResponse.json({ ...FULL, session: 'non_trading_day', daily_report: { date: '2026-11-01', status: 'not_yet' } } satisfies TodayResponse)));
-    renderAt('/today');
+    await renderTestRoute('/today');
     expect(await screen.findByTestId('today-report-not-yet')).toHaveTextContent('非交易日，无日报');
   });
 
@@ -350,19 +339,22 @@ describe('T-F08 今日关注', () => {
     server.use(http.get('/api/v1/today', () => HttpResponse.json({
       ...FULL, data_gaps: { items: [gap('a', '//evil.example'), gap('b', 'javascript:alert(1)'), gap('c', 'http://x.example'), gap('d', '/portfolio/import')], more: false },
     } satisfies TodayResponse)));
-    renderAt('/today');
+    await renderTestRoute('/today');
     const gaps = await screen.findByTestId('today-data-gaps');
     expect(within(gaps).getAllByTestId('data-gap-route').map((a) => a.getAttribute('href'))).toEqual(['/portfolio/import']);
   });
 
   it('评审 M1：已有数据时轮询失败，保留内容，只在顶部显示错误条', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Only polling intervals need a fake clock; keep MSW/query notification timeouts real.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     try {
-      renderAt('/today');
+      const client = makeQueryClient(true);
+      await renderTestRoute('/today', { client });
       await screen.findByTestId('today-alerts');
+      await settled(client);
       expect(screen.queryByTestId('today-refresh-error')).toBeNull();
       server.use(http.get('/api/v1/today', () => HttpResponse.json({ error: { code: 'INTERNAL', message: 'x', details: {}, request_id: 'r' } }, { status: 500 })));
-      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      await act(async () => { vi.advanceTimersByTime(15_000); });
       const bar = await screen.findByTestId('today-refresh-error');
       expect(bar).toHaveTextContent('刷新失败，显示的是 2026-');
       expect(screen.getByTestId('today-page')).toBeInTheDocument();
@@ -375,14 +367,15 @@ describe('T-F08 今日关注', () => {
 
   it('接口失败显示错误，不显示空白页', async () => {
     server.use(http.get('/api/v1/today', () => HttpResponse.json({ error: { code: 'INTERNAL', message: 'x', details: {}, request_id: 'r' } }, { status: 500 })));
-    renderAt('/today');
+    await renderTestRoute('/today');
     await waitFor(() => expect(screen.getByText(/加载失败/)).toBeInTheDocument());
   });
 
   it('从顶部导航进入今日关注', async () => {
-    const router = renderAt('/terminal');
-    await screen.findByTestId('terminal');
-    fireEvent.click(screen.getAllByRole('link', { name: '今日关注' })[0]);
+    // The global navigation works from any page; avoid mounting the unrelated terminal/grid.
+    const router = await renderTestRoute('/reviews');
+    const nav = screen.getByRole('navigation', { name: '主导航' });
+    await act(async () => { fireEvent.click(within(nav).getByRole('link', { name: '今日关注' })); });
     await screen.findByTestId('today-page', undefined, { timeout: 5000 });
     expect(router.state.location.pathname).toBe('/today');
   });

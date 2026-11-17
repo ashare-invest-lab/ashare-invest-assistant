@@ -12,7 +12,7 @@ describe('api client', () => {
 
   it('GET /terminal 返回契约结构（MSW 示例数据）', async () => {
     const t = await apiGet<TerminalResponse>('/terminal', { scope: 'all' });
-    expect(Object.keys(t).sort()).toEqual(['account', 'rows', 'server_time', 'session', 'trade_date', 'truncated', 'unread_notifications']);
+    expect(Object.keys(t).sort()).toEqual(['account', 'account_id', 'rows', 'server_time', 'session', 'trade_date', 'truncated', 'unread_notifications']);
     expect(t.rows.length).toBeGreaterThan(0);
   });
 
