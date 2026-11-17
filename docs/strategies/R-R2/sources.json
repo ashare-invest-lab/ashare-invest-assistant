@@ -1,0 +1,64 @@
+{
+  "sources": [
+    {
+      "id": "bse_code_map_html",
+      "file": "code_mapping.html",
+      "url": "https://www.bse.cn/service/code_mapping.html",
+      "publisher": "北京证券交易所：新旧代码对照表",
+      "fetched_at": "2026-11-16T03:46:27.881631+00:00",
+      "http_status": 200,
+      "bytes": 460275,
+      "sha256": "67fdc4d40c6d8b5102a98d769ff55260df2c066a9a9fa4d3110a237a7f7ec6e1"
+    },
+    {
+      "id": "bse_code_map_docx",
+      "file": "code_mapping_20241213.docx",
+      "url": "https://www.bse.cn/uploads/6/file/public/202412/20241213164135_pio0sowwqn.docx",
+      "publisher": "北证公告〔2024〕231号附件：存量上市公司股票新旧代码对照表",
+      "fetched_at": "2026-11-16T03:46:28.177118+00:00",
+      "http_status": 200,
+      "bytes": 32544,
+      "sha256": "bf9a56f29e77e552a3c9aacc54e9fe26b7d4cd83107ca8826c73c38d54d2bd2e"
+    },
+    {
+      "id": "bse_2024_code_guideline",
+      "file": "notice_20240419.html",
+      "url": "https://www.bse.cn/important_news/200021617.html",
+      "publisher": "北证公告〔2024〕20号",
+      "fetched_at": "2026-11-16T03:46:28.569068+00:00",
+      "http_status": 200,
+      "bytes": 18076,
+      "sha256": "6ad70fa95e3677e30ecdd72345bf790fd1558e2842035f6e4ffe7e8bddd8dbf9"
+    },
+    {
+      "id": "bse_2024_switch_preparation",
+      "file": "notice_20241213.html",
+      "url": "https://www.bse.cn/important_news/200024109.html",
+      "publisher": "北证公告〔2024〕231号",
+      "fetched_at": "2026-11-16T03:46:28.911057+00:00",
+      "http_status": 200,
+      "bytes": 51022,
+      "sha256": "b51cbefb8d3c5734f88f462b0dc46acd715f358bb7957f7d24fb476c893ef64a"
+    },
+    {
+      "id": "bse_2024_switch_explainer",
+      "file": "explainer_20241213.html",
+      "url": "https://www.bse.cn/important_news/200024115.html",
+      "publisher": "北京证券交易所：北交所启动存量上市公司代码切换工作",
+      "fetched_at": "2026-11-16T03:46:29.286627+00:00",
+      "http_status": 200,
+      "bytes": 20318,
+      "sha256": "7ff7c1c11558766a4edc10dbd7af9bc9fc3819f8a347d51d890b258b1394120f"
+    },
+    {
+      "id": "bse_2025_switch_launch",
+      "file": "notice_20250912.html",
+      "url": "https://www.bse.cn/important_news/200026735.html",
+      "publisher": "北证公告〔2025〕46号",
+      "fetched_at": "2026-11-16T03:46:29.633081+00:00",
+      "http_status": 200,
+      "bytes": 16815,
+      "sha256": "e70c54923ddd5d6006b9222d5280fb08182ddf33ebc6b0d62fc26221a80ec4ed"
+    }
+  ]
+}

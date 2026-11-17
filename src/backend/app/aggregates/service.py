@@ -419,7 +419,7 @@ def today(
         daily_report=m.Report(date=clock.trade_date, status=status),
         reconciliation=reconciliation,
         unread_notifications=base.unread_notifications,
-        alerts=empty,
+        alerts=actual["alerts"],
         plan_triggers=empty,
         data_gaps=m.GapBlock(items=action_gaps, more=False),
         evidence=actual["evidence"],
