@@ -72,6 +72,30 @@ def test_one_unapproved_path_in_same_finding_still_fails(tmp_path):
     assert run(tmp_path, report(item)) == 1
 
 
+def test_unparseable_other_high_cannot_disappear(tmp_path):
+    another = advisory(advisory_id="GHSA-other-0000-0002", name="other-package")
+    del another["findings"]
+    assert run(tmp_path, report(advisory(), another)) != 0
+
+
+def test_inconsistent_high_count_cannot_disappear(tmp_path):
+    data = report(advisory())
+    data["metadata"]["vulnerabilities"]["high"] = 2
+    assert run(tmp_path, data) != 0
+
+
+def test_lower_severity_metadata_count_can_be_filtered_by_pnpm(tmp_path):
+    data = report(advisory())
+    data["metadata"]["vulnerabilities"]["moderate"] = 1
+    assert run(tmp_path, data) == 0
+
+
+def test_muted_advisory_cannot_hide_another_high(tmp_path):
+    data = report(advisory())
+    data["muted"] = [{"github_advisory_id": "GHSA-other-0000-0003"}]
+    assert run(tmp_path, data) != 0
+
+
 def test_expiry_is_fail_closed_for_gate_and_daily_watch(tmp_path):
     data = report(advisory())
     assert run(tmp_path, data, today=date(2026, 12, 1)) == 2

@@ -27,6 +27,15 @@ def load_report(path: str) -> dict:
         raise ValueError(f"审计报告不可读或不是 JSON：{exc}") from exc
     if not isinstance(report, dict) or not isinstance(report.get("advisories"), dict):
         raise ValueError("审计报告缺少 advisories 对象，拒绝放行")
+    metadata = report.get("metadata")
+    counts = metadata.get("vulnerabilities") if isinstance(metadata, dict) else None
+    if not isinstance(counts, dict) or any(
+        type(counts.get(key)) is not int or counts[key] < 0
+        for key in ("info", "low", "moderate", "high", "critical")
+    ):
+        raise ValueError("审计报告缺少有效漏洞计数，拒绝放行")
+    if report.get("muted"):
+        raise ValueError("审计报告包含静音公告，拒绝放行")
     return report
 
 
@@ -34,6 +43,7 @@ def is_exception(advisory: dict, finding: dict, path: str) -> bool:
     return (
         advisory.get("github_advisory_id") == ADVISORY_ID
         and advisory.get("module_name") == PACKAGE
+        and advisory.get("severity") == "high"
         and finding.get("version") == VERSION
         and path == DEPENDENCY_PATH
     )
@@ -45,13 +55,20 @@ def filter_exception(report: dict) -> tuple[dict, int]:
     matched = 0
     kept_advisories = {}
     for advisory_id, advisory in filtered["advisories"].items():
-        if not isinstance(advisory, dict):
-            raise ValueError(f"advisory {advisory_id} 不是对象，拒绝放行")
+        if not isinstance(advisory, dict) or advisory.get("severity") not in (
+            "info", "low", "moderate", "high", "critical"
+        ):
+            raise ValueError(f"advisory {advisory_id} 结构或严重性无效，拒绝放行")
+        findings = advisory.get("findings")
+        if not isinstance(findings, list) or not findings:
+            raise ValueError(f"advisory {advisory_id} 缺少有效 findings，拒绝放行")
         kept_findings = []
-        for finding in advisory.get("findings", []):
-            paths = finding.get("paths", [])
-            if not isinstance(paths, list):
-                raise ValueError(f"advisory {advisory_id} findings.paths 不是数组")
+        for finding in findings:
+            if not isinstance(finding, dict):
+                raise ValueError(f"advisory {advisory_id} finding 不是对象")
+            paths = finding.get("paths")
+            if not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths):
+                raise ValueError(f"advisory {advisory_id} findings.paths 无效")
             remaining = []
             for path in paths:
                 if is_exception(advisory, finding, path):
@@ -64,11 +81,16 @@ def filter_exception(report: dict) -> tuple[dict, int]:
             kept_advisories[advisory_id] = {**advisory, "findings": kept_findings}
     filtered["advisories"] = kept_advisories
     counts = {key: 0 for key in ("info", "low", "moderate", "high", "critical")}
+    for advisory in report["advisories"].values():
+        counts[advisory["severity"]] += 1
+    # pnpm --audit-level high 保留 moderate 元计数，但 advisories 只列 high/critical。
+    for severity in ("high", "critical"):
+        if counts[severity] != report["metadata"]["vulnerabilities"][severity]:
+            raise ValueError(f"审计报告 {severity} 计数与公告明细不符，拒绝放行")
+    remaining_counts = {key: 0 for key in counts}
     for advisory in kept_advisories.values():
-        severity = advisory.get("severity")
-        if severity in counts:
-            counts[severity] += 1
-    filtered.setdefault("metadata", {})["vulnerabilities"] = counts
+        remaining_counts[advisory["severity"]] += 1
+    filtered["metadata"]["vulnerabilities"] = remaining_counts
     return filtered, matched
 
 
