@@ -1,7 +1,7 @@
 """Public field boilerplate reviewed locally from DeepSeek T-B77 draft.
 
 Enums/nullability/required fields verified against api-contract §5.1/7.3.
-Real owned products are typed; unbuilt alert/plan event producers remain empty with gaps.
+Real owned products are typed; unbuilt plan event producers remain empty with gaps.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import datetime as dt
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from app.schemas import enums as e
 from app.schemas.enums import (
@@ -204,6 +204,33 @@ class TodayRiskFlag(RiskFlag):
     risk_event_id: uuid.UUID | None
 
 
+class TodayAffectedPlan(Model):
+    plan_id: uuid.UUID
+    plan_version_no: int
+    condition_id: uuid.UUID | None
+
+
+class TodayAlert(Model):
+    id: uuid.UUID
+    rule_id: uuid.UUID
+    origin: Literal["holding_event", "user_custom"]
+    severity: e.Severity
+    status: Literal["new", "read"]
+    security_code: str | None
+    name: str | None
+    title: str
+    triggered_at: dt.datetime
+    data_as_of: dt.datetime | None
+    affected_plans: list[TodayAffectedPlan]
+    evidence_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def account_name(self) -> TodayAlert:
+        if self.security_code is None and self.name is not None:
+            raise ValueError("account_alert_name_must_be_null")
+        return self
+
+
 class Invalidation(Model):
     suggestion_id: uuid.UUID
     security_code: str
@@ -277,10 +304,18 @@ class Today(DataBlock):
     daily_report: Report
     reconciliation: Reconciliation
     unread_notifications: int = Field(ge=0)
-    alerts: EmptyBlock
+    alerts: ProductBlock[TodayAlert]
     plan_triggers: EmptyBlock
     data_gaps: GapBlock
     evidence: list[Evidence]
+
+    @model_validator(mode="after")
+    def resolves(self) -> Today:
+        if not {i for alert in self.alerts.items for i in alert.evidence_ids} <= {
+            item.id for item in self.evidence
+        }:
+            raise ValueError("unresolved_evidence")
+        return self
 
 
 class ReconciliationItem(Model):

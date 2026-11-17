@@ -34,7 +34,7 @@ export interface CandidateVersion extends DataStatusBlock {
   fit_assessment: FitAssessment;
   decision: CandidateDecision | null;
   decision_reason: string | null;
-  snapshot_id: string;
+  snapshot_id: string | null;
   evidence: Evidence[];
   created_at: string;
 }
