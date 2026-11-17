@@ -13,15 +13,25 @@ from junit_validation import validate_junit
 
 
 def case_file(case: ET.Element, files: set[str]) -> str | None:
-    """Map a JUnit testcase to its tests/ file (classname may carry a class suffix)."""
-    if case.get("file") and "tests/" + case.get("file", "") in files:
-        return "tests/" + case.get("file", "")
-    parts = (case.get("classname") or case.get("name") or "").split(".")
+    """Map JUnit cases to every registered root; classname may carry a class suffix."""
+    if case.get("file"):
+        path = case.get("file", "").replace("\\", "/").lstrip("./")
+        for candidate in (path, "tests/" + path):
+            if candidate in files:
+                return candidate
+    qualified = (case.get("classname") or case.get("name") or "").lstrip(".")
+    parts = qualified.split(".")
+    stem = parts[0] if parts else ""
     while parts:
-        path = "tests/" + "/".join(parts) + ".py"
-        if path in files:
-            return path
+        path = "/".join(parts) + ".py"
+        for candidate in (path, "tests/" + path):
+            if candidate in files:
+                return candidate
         parts.pop()
+    # Pytest may emit only the module stem when src/backend/tests is its rootdir.
+    matches = [path for path in files if Path(path).stem == stem]
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 

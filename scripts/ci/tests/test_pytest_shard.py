@@ -263,6 +263,31 @@ def test_serial_skips_guard(tmp_path, capsys):
     assert "::error" in capsys.readouterr().out
 
 
+def test_serial_skips_guard_counts_src_backend_tests(tmp_path, capsys):
+    import check_serial_skips
+
+    groups = tmp_path / "g.yaml"
+    groups.write_text('version: 1\ntests:\n'
+                      '  - {"file": "tests/backend/api_app/test_pg.py", "group": "serial_pg"}\n'
+                      '  - {"file": "src/backend/tests/test_real_pg.py", "group": "serial_pg"}\n')
+    config = tmp_path / "c.json"
+    config.write_text(json.dumps({"max_skipped": {"serial_pg": 1}, "min_passed": {"serial_pg": 2}}))
+    junit = tmp_path / "j.xml"
+    junit.write_text('<testsuites><testsuite>'
+                     '<testcase classname="backend.api_app.test_pg" name="a"/>'
+                     '<testcase file="src/backend/tests/test_real_pg.py" name="b"/>'
+                     '<testcase file="src/backend/tests/test_real_pg.py" name="s1"><skipped/></testcase>'
+                     '<testcase classname="src.backend.tests.test_real_pg" name="s2"><skipped/></testcase>'
+                     '<testcase classname="test_real_pg" name="s3"><skipped/></testcase>'
+                     '</testsuite></testsuites>')
+    args = [str(junit), "--groups", str(groups), "--config", str(config)]
+
+    assert check_serial_skips.main(args) == 1
+    assert "passed=2 skipped=3" in capsys.readouterr().out
+    config.write_text(json.dumps({"max_skipped": {"serial_pg": 3}, "min_passed": {"serial_pg": 2}}))
+    assert check_serial_skips.main(args) == 0
+
+
 def test_serial_skips_guard_counts_module_skip(tmp_path, capsys):
     import check_serial_skips
 

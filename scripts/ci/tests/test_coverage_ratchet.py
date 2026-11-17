@@ -333,6 +333,9 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     assert shards["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4, 5, 6]}}
     assert shards["timeout-minutes"] == 30
     assert shards["name"] == "backend tests (shard ${{ matrix.shard }}/6)"
+    # Job-level env reaches every matrix shard, including src/backend/tests real-PG cases.
+    assert shards["env"]["AIA_TEST_DATABASE_URL"] == "postgresql://aia:ci-only@127.0.0.1:5432/aia"
+    assert shards["services"]["db"]["ports"] == ["5432:5432"]
     assert jobs["backend-lint"]["name"] == "backend lint (ruff)"
     assert jobs["backend-mypy"]["name"] == "backend typecheck (mypy --strict)"
     assert ready["name"] == "trusted main coverage readiness"
