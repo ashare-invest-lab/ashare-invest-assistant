@@ -5,8 +5,13 @@ This module performs no session cancellation or termination.
 """
 from __future__ import annotations
 
-from owned_unix_resources import now, save
+import time
+
+from owned_unix_resources import check_runner, now, save
 from psycopg import sql
+
+AUTOVACUUM_DRAIN_SECONDS = 15
+CONFIRM_INTERVAL_SECONDS = 0.25
 
 STATES = frozenset({"active", "idle", "idle in transaction", "idle in transaction (aborted)", "disabled"})
 APPLICATIONS = {"psql": "psql", "pg_dump": "pg_dump", "pg_restore": "pg_restore",
@@ -58,16 +63,56 @@ def snapshot(conn, row: dict) -> dict:
 
 
 def seal(conn, receipt: dict, path) -> None:
+    # STOP already fences this database. Recheck the exact run/container identity
+    # and real OID/owner before touching it; never adopt another service or DB.
+    from prepare_tt50_template import identity
+
+    if receipt.get("owner") != identity(check_runner()):
+        raise RuntimeError("Template service or run identity changed")
     row = template_row(receipt)
     before = snapshot(conn, row)
-    # Standard PostgreSQL template lifecycle: prohibit new direct sessions and
-    # validate through a separate clone. Existing sessions are never blind-killed.
+    if before["allow_connections"] or before["database_oid"] != row["oid"]:
+        raise RuntimeError("Template identity or connection fence changed before seal")
+    if (before["session_count"] != len(before["sessions"])
+            or any(session["source"] != "autovacuum" for session in before["sessions"])):
+        raise RuntimeError("Existing non-autovacuum template session before seal")
+    # Keep the existing explicit fence; no global autovacuum or other DB is changed.
     conn.execute(sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(sql.Identifier(row["name"])))
+    deadline = time.monotonic() + AUTOVACUUM_DRAIN_SECONDS
     after = snapshot(conn, row)
-    receipt["template_connection_lifecycle"] = {"before": before, "after": after,
-                                                "sessions_terminated": 0}
+    lifecycle = {"before": before, "after": after, "sessions_terminated": 0}
+    receipt["template_connection_lifecycle"] = lifecycle
     save(path, receipt)
-    if after["allow_connections"]:
-        raise RuntimeError("Template still allows direct connections")
-    if after["session_count"]:
-        raise RuntimeError("Existing template sessions require diagnosis; no termination attempted")
+    seen_zero = False
+    while True:
+        # snapshot() checks the real OID/owner on every observation and limits
+        # pg_stat_activity to that OID. Only a proven autovacuum may drain.
+        if (after["database_oid"] != row["oid"] or after["allow_connections"]
+                or after["session_count"] != len(after["sessions"])):
+            raise RuntimeError("Template identity, fence or session count changed")
+        if any(session["source"] != "autovacuum" for session in after["sessions"]):
+            raise RuntimeError("Existing non-autovacuum template session; no termination attempted")
+        if not after["session_count"]:
+            if seen_zero:
+                if receipt["owner"] != identity(check_runner()):
+                    raise RuntimeError("Template service or run identity changed during seal")
+                # Inspect once more after the service check: an autovacuum may
+                # enter between the second zero and Docker's identity read.
+                after = snapshot(conn, row)
+                lifecycle["after"] = after
+                save(path, receipt)
+                if (not after["session_count"] and not after["allow_connections"]
+                        and time.monotonic() <= deadline):
+                    return
+                seen_zero = False
+                continue
+            seen_zero = True
+        else:
+            seen_zero = False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Template autovacuum drain timeout; no termination attempted")
+        time.sleep(min(CONFIRM_INTERVAL_SECONDS, remaining))
+        after = snapshot(conn, row)
+        lifecycle["after"] = after
+        save(path, receipt)
