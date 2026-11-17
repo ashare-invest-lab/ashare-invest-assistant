@@ -63,14 +63,22 @@ def snapshot(conn, row: dict) -> dict:
 
 
 def seal(conn, receipt: dict, path) -> None:
+    deadline = time.monotonic() + AUTOVACUUM_DRAIN_SECONDS
+
+    def check_deadline() -> None:
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Template seal total timeout (deadline exceeded); no termination attempted")
+
     # STOP already fences this database. Recheck the exact run/container identity
     # and real OID/owner before touching it; never adopt another service or DB.
     from prepare_tt50_template import identity
 
     if receipt.get("owner") != identity(check_runner()):
         raise RuntimeError("Template service or run identity changed")
+    check_deadline()
     row = template_row(receipt)
     before = snapshot(conn, row)
+    check_deadline()
     if before["allow_connections"] or before["database_oid"] != row["oid"]:
         raise RuntimeError("Template identity or connection fence changed before seal")
     if (before["session_count"] != len(before["sessions"])
@@ -78,13 +86,15 @@ def seal(conn, receipt: dict, path) -> None:
         raise RuntimeError("Existing non-autovacuum template session before seal")
     # Keep the existing explicit fence; no global autovacuum or other DB is changed.
     conn.execute(sql.SQL("ALTER DATABASE {} ALLOW_CONNECTIONS false").format(sql.Identifier(row["name"])))
-    deadline = time.monotonic() + AUTOVACUUM_DRAIN_SECONDS
+    check_deadline()
     after = snapshot(conn, row)
+    check_deadline()
     lifecycle = {"before": before, "after": after, "sessions_terminated": 0}
     receipt["template_connection_lifecycle"] = lifecycle
     save(path, receipt)
     seen_zero = False
     while True:
+        check_deadline()
         # snapshot() checks the real OID/owner on every observation and limits
         # pg_stat_activity to that OID. Only a proven autovacuum may drain.
         if (after["database_oid"] != row["oid"] or after["allow_connections"]
@@ -96,13 +106,14 @@ def seal(conn, receipt: dict, path) -> None:
             if seen_zero:
                 if receipt["owner"] != identity(check_runner()):
                     raise RuntimeError("Template service or run identity changed during seal")
+                check_deadline()
                 # Inspect once more after the service check: an autovacuum may
                 # enter between the second zero and Docker's identity read.
                 after = snapshot(conn, row)
                 lifecycle["after"] = after
                 save(path, receipt)
-                if (not after["session_count"] and not after["allow_connections"]
-                        and time.monotonic() <= deadline):
+                check_deadline()
+                if not after["session_count"] and not after["allow_connections"]:
                     return
                 seen_zero = False
                 continue

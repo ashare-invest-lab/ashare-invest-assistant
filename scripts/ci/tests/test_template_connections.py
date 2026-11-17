@@ -66,7 +66,8 @@ def world(monkeypatch, tmp_path):
             return self.value
 
     state = SimpleNamespace(samples=[], index=0, current=None, queries=[], receipt=receipt,
-                            path=path, clock=clock, module=module)
+                            path=path, clock=clock, module=module, fence_delay=0.0,
+                            first_snapshot_delay=0.0)
 
     class Conn:
         def execute(self, statement, params=None):
@@ -79,9 +80,12 @@ def world(monkeypatch, tmp_path):
                 return Result((current["oid"], current["owner"], current["allowed"]))
             if "FROM pg_stat_activity" in text:
                 assert params == (22398,)
+                if state.index == 0:
+                    state.clock.value += state.first_snapshot_delay
                 state.index += 1
                 return Result(state.current["sessions"])
             assert text == 'ALTER DATABASE "o61_tmp_0030" ALLOW_CONNECTIONS false'
+            state.clock.value += state.fence_delay
             return Result(None)
 
     state.conn = Conn()
@@ -160,6 +164,37 @@ def test_before_unknown_client_is_rejected_before_fence(world):
     with pytest.raises(RuntimeError, match="non-autovacuum"):
         world.run()
     assert not any(sql.startswith("ALTER DATABASE") for sql, _ in world.queries)
+
+
+def test_total_budget_counts_initial_identity_before_any_database_access(world, monkeypatch):
+    world.samples = [sample()]
+
+    def slow_identity(_env):
+        world.clock.value += 16
+        return dict(OWNER)
+
+    monkeypatch.setattr(sys.modules["prepare_tt50_template"], "identity", slow_identity)
+    with pytest.raises(RuntimeError, match="deadline|timeout"):
+        world.run()
+    assert world.queries == []
+    assert world.clock.sleeps == []
+
+
+def test_total_budget_counts_first_database_snapshot_before_fence(world):
+    world.samples = [sample()]
+    world.first_snapshot_delay = 16
+    with pytest.raises(RuntimeError, match="deadline|timeout"):
+        world.run()
+    assert not any(sql.startswith("ALTER DATABASE") for sql, _ in world.queries)
+    assert world.clock.sleeps == []
+
+
+def test_total_budget_counts_fence_before_wait(world):
+    world.samples = [sample()]
+    world.fence_delay = 16
+    with pytest.raises(RuntimeError, match="deadline|timeout"):
+        world.run()
+    assert world.clock.sleeps == []
 
 
 def test_connections_must_already_be_disabled_before_seal(world):
