@@ -1,0 +1,529 @@
+{
+  "mode": "offline_archived_public_bytes",
+  "scope": "Current BSE HTML table compared row-by-row with the 2024-12-13 official DOCX",
+  "source_checks": [
+    {
+      "id": "bse_code_map_html",
+      "bytes": 460275,
+      "sha256": "67fdc4d40c6d8b5102a98d769ff55260df2c066a9a9fa4d3110a237a7f7ec6e1",
+      "matches_archived": true
+    },
+    {
+      "id": "bse_code_map_docx",
+      "bytes": 32544,
+      "sha256": "bf9a56f29e77e552a3c9aacc54e9fe26b7d4cd83107ca8826c73c38d54d2bd2e",
+      "matches_archived": true
+    },
+    {
+      "id": "bse_2024_code_guideline",
+      "bytes": 18076,
+      "sha256": "6ad70fa95e3677e30ecdd72345bf790fd1558e2842035f6e4ffe7e8bddd8dbf9",
+      "matches_archived": true
+    },
+    {
+      "id": "bse_2024_switch_preparation",
+      "bytes": 51022,
+      "sha256": "b51cbefb8d3c5734f88f462b0dc46acd715f358bb7957f7d24fb476c893ef64a",
+      "matches_archived": true
+    },
+    {
+      "id": "bse_2024_switch_explainer",
+      "bytes": 20318,
+      "sha256": "7ff7c1c11558766a4edc10dbd7af9bc9fc3819f8a347d51d890b258b1394120f",
+      "matches_archived": true
+    },
+    {
+      "id": "bse_2025_switch_launch",
+      "bytes": 16815,
+      "sha256": "e70c54923ddd5d6006b9222d5280fb08182ddf33ebc6b0d62fc26221a80ec4ed",
+      "matches_archived": true
+    }
+  ],
+  "notice_checks": [
+    {
+      "id": "bse_2024_code_guideline",
+      "markers": {
+        "自2024年4月22日起施行": true,
+        "920号段": true
+      }
+    },
+    {
+      "id": "bse_2024_switch_preparation",
+      "markers": {
+        "2024年4月22日以前上市": true,
+        "后三位保持不变": true,
+        "第四位代码做递进处理": true
+      }
+    },
+    {
+      "id": "bse_2024_switch_explainer",
+      "markers": {
+        "248家": true,
+        "后三位不变": true,
+        "逐家对第四位代码做递进": true
+      }
+    },
+    {
+      "id": "bse_2025_switch_launch",
+      "markers": {
+        "自2025年10月9日起": true,
+        "新旧代码对应关系": true
+      }
+    }
+  ],
+  "counts": {
+    "mappings": 248,
+    "old_prefix": {
+      "43": 16,
+      "83": 178,
+      "87": 54
+    },
+    "suffix_preserved": 222,
+    "fourth_digit_adjusted": 26,
+    "html_docx_mismatches": 5,
+    "html_docx_name_differences": 5,
+    "html_docx_code_or_date_mismatches": 0,
+    "differences": 31
+  },
+  "comparison": {
+    "mismatches": [
+      {
+        "old_code": "830879",
+        "changed_fields": [
+          "name"
+        ],
+        "html": {
+          "source_seq": 101,
+          "name": "基康技术",
+          "list_date": "2022-12-20",
+          "old_code": "830879",
+          "new_code": "920879",
+          "simple_suffix_code": "920879",
+          "allocation": "suffix_preserved"
+        },
+        "docx": {
+          "source_seq": 101,
+          "name": "基康仪器",
+          "list_date": "2022-12-20",
+          "old_code": "830879",
+          "new_code": "920879",
+          "simple_suffix_code": "920879",
+          "allocation": "suffix_preserved"
+        }
+      },
+      {
+        "old_code": "831834",
+        "changed_fields": [
+          "name"
+        ],
+        "html": {
+          "source_seq": 143,
+          "name": "三维装备",
+          "list_date": "2022-08-22",
+          "old_code": "831834",
+          "new_code": "920834",
+          "simple_suffix_code": "920834",
+          "allocation": "suffix_preserved"
+        },
+        "docx": {
+          "source_seq": 143,
+          "name": "三维股份",
+          "list_date": "2022-08-22",
+          "old_code": "831834",
+          "new_code": "920834",
+          "simple_suffix_code": "920834",
+          "allocation": "suffix_preserved"
+        }
+      },
+      {
+        "old_code": "835305",
+        "changed_fields": [
+          "name"
+        ],
+        "html": {
+          "source_seq": 187,
+          "name": "*ST云创",
+          "list_date": "2021-08-26",
+          "old_code": "835305",
+          "new_code": "920305",
+          "simple_suffix_code": "920305",
+          "allocation": "suffix_preserved"
+        },
+        "docx": {
+          "source_seq": 187,
+          "name": "云创数据",
+          "list_date": "2021-08-26",
+          "old_code": "835305",
+          "new_code": "920305",
+          "simple_suffix_code": "920305",
+          "allocation": "suffix_preserved"
+        }
+      },
+      {
+        "old_code": "838810",
+        "changed_fields": [
+          "name"
+        ],
+        "html": {
+          "source_seq": 103,
+          "name": "春光智能",
+          "list_date": "2022-12-16",
+          "old_code": "838810",
+          "new_code": "920810",
+          "simple_suffix_code": "920810",
+          "allocation": "suffix_preserved"
+        },
+        "docx": {
+          "source_seq": 103,
+          "name": "春光药装",
+          "list_date": "2022-12-16",
+          "old_code": "838810",
+          "new_code": "920810",
+          "simple_suffix_code": "920810",
+          "allocation": "suffix_preserved"
+        }
+      },
+      {
+        "old_code": "839680",
+        "changed_fields": [
+          "name"
+        ],
+        "html": {
+          "source_seq": 174,
+          "name": "*ST广道",
+          "list_date": "2021-11-15",
+          "old_code": "839680",
+          "new_code": "920680",
+          "simple_suffix_code": "920680",
+          "allocation": "suffix_preserved"
+        },
+        "docx": {
+          "source_seq": 174,
+          "name": "广道数字",
+          "list_date": "2021-11-15",
+          "old_code": "839680",
+          "new_code": "920680",
+          "simple_suffix_code": "920680",
+          "allocation": "suffix_preserved"
+        }
+      }
+    ]
+  },
+  "differences": [
+    {
+      "category": "name_changed_vs_20241213",
+      "source_seq": 101,
+      "name": "基康技术",
+      "list_date": "2022-12-20",
+      "old_code": "830879",
+      "new_code": "920879",
+      "simple_suffix_code": "920879",
+      "note": "2024-12-13 DOCX简称=基康仪器；当前HTML简称=基康技术；代码与上市日期一致"
+    },
+    {
+      "category": "name_changed_vs_20241213",
+      "source_seq": 143,
+      "name": "三维装备",
+      "list_date": "2022-08-22",
+      "old_code": "831834",
+      "new_code": "920834",
+      "simple_suffix_code": "920834",
+      "note": "2024-12-13 DOCX简称=三维股份；当前HTML简称=三维装备；代码与上市日期一致"
+    },
+    {
+      "category": "name_changed_vs_20241213",
+      "source_seq": 187,
+      "name": "*ST云创",
+      "list_date": "2021-08-26",
+      "old_code": "835305",
+      "new_code": "920305",
+      "simple_suffix_code": "920305",
+      "note": "2024-12-13 DOCX简称=云创数据；当前HTML简称=*ST云创；代码与上市日期一致"
+    },
+    {
+      "category": "name_changed_vs_20241213",
+      "source_seq": 103,
+      "name": "春光智能",
+      "list_date": "2022-12-16",
+      "old_code": "838810",
+      "new_code": "920810",
+      "simple_suffix_code": "920810",
+      "note": "2024-12-13 DOCX简称=春光药装；当前HTML简称=春光智能；代码与上市日期一致"
+    },
+    {
+      "category": "name_changed_vs_20241213",
+      "source_seq": 174,
+      "name": "*ST广道",
+      "list_date": "2021-11-15",
+      "old_code": "839680",
+      "new_code": "920680",
+      "simple_suffix_code": "920680",
+      "note": "2024-12-13 DOCX简称=广道数字；当前HTML简称=*ST广道；代码与上市日期一致"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 2,
+      "name": "芭薇股份",
+      "list_date": "2024-03-29",
+      "old_code": "837023",
+      "new_code": "920123",
+      "simple_suffix_code": "920023",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 6,
+      "name": "许昌智能",
+      "list_date": "2024-01-26",
+      "old_code": "831396",
+      "new_code": "920496",
+      "simple_suffix_code": "920396",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 10,
+      "name": "莱赛激光",
+      "list_date": "2023-12-28",
+      "old_code": "871263",
+      "new_code": "920363",
+      "simple_suffix_code": "920263",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 11,
+      "name": "西磁科技",
+      "list_date": "2023-12-21",
+      "old_code": "836961",
+      "new_code": "920061",
+      "simple_suffix_code": "920961",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 13,
+      "name": "派诺科技",
+      "list_date": "2023-12-14",
+      "old_code": "831175",
+      "new_code": "920375",
+      "simple_suffix_code": "920175",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 22,
+      "name": "立方控股",
+      "list_date": "2023-11-02",
+      "old_code": "833030",
+      "new_code": "920130",
+      "simple_suffix_code": "920030",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 25,
+      "name": "卓兆点胶",
+      "list_date": "2023-10-19",
+      "old_code": "873726",
+      "new_code": "920026",
+      "simple_suffix_code": "920726",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 30,
+      "name": "万德股份",
+      "list_date": "2023-09-15",
+      "old_code": "836419",
+      "new_code": "920519",
+      "simple_suffix_code": "920419",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 34,
+      "name": "宏裕包材",
+      "list_date": "2023-08-18",
+      "old_code": "837174",
+      "new_code": "920274",
+      "simple_suffix_code": "920174",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 38,
+      "name": "鸿智科技",
+      "list_date": "2023-08-08",
+      "old_code": "870726",
+      "new_code": "920926",
+      "simple_suffix_code": "920726",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 56,
+      "name": "巨能股份",
+      "list_date": "2023-05-12",
+      "old_code": "871478",
+      "new_code": "920578",
+      "simple_suffix_code": "920478",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 70,
+      "name": "百甲科技",
+      "list_date": "2023-03-14",
+      "old_code": "835857",
+      "new_code": "920057",
+      "simple_suffix_code": "920857",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 78,
+      "name": "利尔达",
+      "list_date": "2023-02-17",
+      "old_code": "832149",
+      "new_code": "920249",
+      "simple_suffix_code": "920149",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 80,
+      "name": "新赣江",
+      "list_date": "2023-02-09",
+      "old_code": "873167",
+      "new_code": "920367",
+      "simple_suffix_code": "920167",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 84,
+      "name": "天宏锂电",
+      "list_date": "2023-01-19",
+      "old_code": "873152",
+      "new_code": "920252",
+      "simple_suffix_code": "920152",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 99,
+      "name": "九菱科技",
+      "list_date": "2022-12-21",
+      "old_code": "873305",
+      "new_code": "920505",
+      "simple_suffix_code": "920305",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 104,
+      "name": "丰安股份",
+      "list_date": "2022-12-16",
+      "old_code": "870508",
+      "new_code": "920608",
+      "simple_suffix_code": "920508",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 106,
+      "name": "国航远洋",
+      "list_date": "2022-12-15",
+      "old_code": "833171",
+      "new_code": "920571",
+      "simple_suffix_code": "920171",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 131,
+      "name": "中科美菱",
+      "list_date": "2022-10-18",
+      "old_code": "835892",
+      "new_code": "920992",
+      "simple_suffix_code": "920892",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 150,
+      "name": "恒进感应",
+      "list_date": "2022-07-05",
+      "old_code": "838670",
+      "new_code": "920870",
+      "simple_suffix_code": "920670",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 152,
+      "name": "泰德股份",
+      "list_date": "2022-06-20",
+      "old_code": "831278",
+      "new_code": "920378",
+      "simple_suffix_code": "920278",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 157,
+      "name": "邦德股份",
+      "list_date": "2022-06-02",
+      "old_code": "838171",
+      "new_code": "920271",
+      "simple_suffix_code": "920171",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 158,
+      "name": "鑫汇科",
+      "list_date": "2022-05-27",
+      "old_code": "831167",
+      "new_code": "920267",
+      "simple_suffix_code": "920167",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 173,
+      "name": "科达自控",
+      "list_date": "2021-11-15",
+      "old_code": "831832",
+      "new_code": "920932",
+      "simple_suffix_code": "920832",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 182,
+      "name": "海希通讯",
+      "list_date": "2021-11-05",
+      "old_code": "831305",
+      "new_code": "920405",
+      "simple_suffix_code": "920305",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    },
+    {
+      "category": "allocation_exception",
+      "source_seq": 194,
+      "name": "华阳变速",
+      "list_date": "2021-07-20",
+      "old_code": "839946",
+      "new_code": "920146",
+      "simple_suffix_code": "920946",
+      "note": "新码不是920+旧码后三位；按官网逐行值交付，不用公式改写"
+    }
+  ],
+  "limits": [
+    "上市日期来自对照表，不是代码切换日期；本清单不提供逐股切换日。",
+    "248行是2024-04-22以前上市的存量公司历史对照，不代表当前仍在市。",
+    "新码只取官网逐行值，不用920+旧码后三位推导；未做当前在市名单或麦蕊核验。"
+  ]
+}
