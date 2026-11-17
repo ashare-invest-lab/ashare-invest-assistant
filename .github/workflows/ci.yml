@@ -359,7 +359,14 @@ jobs:
       - name: pnpm audit
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: src/frontend
-        run: pnpm audit --audit-level high
+        shell: bash
+        # Grok 6957881424：仅精确 picomatch 例外，2026-12-01 到期；完整 dev/high 门禁不变。
+        run: |
+          set +e
+          pnpm audit --audit-level high --json > "$RUNNER_TEMP/frontend-audit.json"
+          audit_status=$?
+          set -e
+          python3 ../../scripts/ci/frontend_audit.py gate --report "$RUNNER_TEMP/frontend-audit.json" --audit-exit "$audit_status"
       - name: AG Grid Enterprise（已安装依赖）
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python3 scripts/ci/check_licenses.py --node-modules src/frontend/node_modules
