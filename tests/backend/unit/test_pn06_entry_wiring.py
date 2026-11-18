@@ -732,24 +732,43 @@ def test_pn06_entry_history_supervisor(tmp_path, monkeypatch):
         module.run_supervised(**args)
     assert module.main(argv) == 1
 
-def test_pn06_entry_day_runner_ps1(tmp_path):
-    # 旧 runner 已停用，入口必须明确拒绝且不能触碰 Docker 或清理产物。
+@pytest.mark.parametrize("before", [None, str(D2)], ids=["default", "explicit"])
+def test_pn06_entry_day_runner_ps1(tmp_path, before):
     shell = shutil.which("pwsh") or shutil.which("powershell")
-    if shell is None:
-        pytest.skip("需要 PowerShell 以验证停用入口")
-    done = subprocess.run(
-        [shell, "-NoProfile", "-File", str(BACKEND / "probes/tb143_day_load_runner.ps1"),
-         "-Dir", str(tmp_path), "-AllSha", "a" * 64, "-BundleSizes", "1",
-         "-Lock", str(tmp_path / "lock"), "-Log", str(tmp_path / "run.log"),
-         "-PauseSeconds", "0"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert done.returncode == 1
-    assert "legacy tb143 load path is disabled" in done.stdout + done.stderr
-    assert not (tmp_path / "lock").exists() and not (tmp_path / "run.log").exists()
+    assert shell is not None, "需要 PowerShell 验证旧入口拒绝行为"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    archive = artifacts / "all.bin"
+    original = b"synthetic archive\n"
+    archive.write_bytes(original)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    calls = tmp_path / "external-calls"
+    # 优先命中本地替身，确保旧入口回归时也不会运行真实 Docker 或 psql。
+    for name in ("docker", "psql"):
+        if os.name == "nt":
+            (bindir / f"{name}.cmd").write_text(
+                f'@echo {name}>>"%PN06_CALLS%"\n@exit /b 1\n', encoding="utf-8"
+            )
+        else:
+            command = bindir / name
+            command.write_text(f'#!/bin/sh\necho {name} >> "$PN06_CALLS"\nexit 1\n')
+            command.chmod(0o755)
+    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ["PATH"], PN06_CALLS=str(calls))
+    lock, log = tmp_path / "lock", tmp_path / "run.log"
+    argv = [shell, "-NoProfile", "-File", str(BACKEND / "probes/tb143_day_load_runner.ps1"),
+            "-Dir", str(artifacts), "-AllSha", "a" * 64, "-BundleSizes", "1",
+            "-Lock", str(lock), "-Log", str(log), "-PauseSeconds", "0"]
+    if before is not None:
+        argv += ["-Before", before]
+    done = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=30, env=env)
+    output = done.stdout + done.stderr
+    assert done.returncode == 1, output
+    assert "legacy tb143 load path is disabled" in output
+    assert "app.cli.tb143_day_load" in output
+    assert not calls.exists() and not lock.exists() and not log.exists()
+    assert list(artifacts.iterdir()) == [archive]
+    assert archive.read_bytes() == original
 
 def _probe_schema(conn):
     schema = "pn06_" + uuid.uuid4().hex
@@ -772,9 +791,9 @@ def _run_sql(conn, schema, name, before="2025-01-01"):
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     module._load(conn, schema, meta=name == "tb143_load_meta.sql", before=before)
     if name == "tb143_load_day.sql":
-        result = conn.execute("SELECT count(*) FROM day_stage").fetchone()
+        result = conn.execute("SELECT * FROM pg_temp.day_stage").fetchall()
     else:
-        result = conn.execute("SELECT count(*) FROM ex_rights_events").fetchone()
+        result = conn.execute("SELECT * FROM load_counts").fetchall()
     conn.execute("DROP VIEW IF EXISTS catalog_effective, mairui_count")
     conn.execute('DROP TABLE IF EXISTS gbbq_stage, catalog_stage, day_stage, load_params, load_counts, mairui_before, mairui_after')
     return result
@@ -782,10 +801,12 @@ def _run_sql(conn, schema, name, before="2025-01-01"):
 def test_pn06_entry_load_day_sql(pg_conn):
     schema = _probe_schema(pg_conn)
     calendars = pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone()
-    # 当前 SQL 入口只负责校验并填充临时 staging，写库统计由公共 writer 返回。
-    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == (1,)
-    source = pg_conn.execute(f'SELECT source FROM "{schema}".daily_bars').fetchone()
-    assert source == ("tdx_local",)
+    # SQL 仅填充临时表，目标日线写入由 Python 公共 writer 负责。
+    price = Decimal("12.34")
+    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == [
+        ("600999.SH", dt.date(2024, 1, 2), "none", price, price, price, price, 700, 8638)
+    ]
+    assert pg_conn.execute(f'SELECT count(*) FROM "{schema}".daily_bars').fetchone() == (0,)
     with (
         pytest.raises(
             psycopg.errors.RaiseException, match="日线日期必须全部小于 before"
@@ -793,7 +814,8 @@ def test_pn06_entry_load_day_sql(pg_conn):
         pg_conn.transaction(),
     ):
         _run_sql(pg_conn, schema, "tb143_load_day.sql", "2024-01-02")
-    after = pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone(); assert after == calendars
+    assert pg_conn.execute(f'SELECT count(*) FROM "{schema}".daily_bars').fetchone() == (0,)
+    assert pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone() == calendars
 
 def test_pn06_entry_load_meta_sql(pg_conn):
     schema = _probe_schema(pg_conn)
