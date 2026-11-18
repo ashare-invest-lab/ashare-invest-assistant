@@ -25,14 +25,17 @@ ANNUAL_LINES = [
     "（六）国庆节、中秋节：10月1日（星期四）至10月8日（星期四）休市，10月9日（星期五）起照常开市。另外，9月27日（星期日）、10月10日（星期六）为周末休市。",
 ]
 EXTENSION = (
-    "根据批准，延长2020年春节休市至2月2日（星期日），"
-    "2月3日（星期一）起照常开市。"
+    "根据批准，延长2020年春节休市至2月2日（星期日），2月3日（星期一）起照常开市。"
 )
 
 
 def notice(exchange: str, lines: list[str]) -> bytes:
-    container = '<div class="allZoom">' if exchange == "sse" else '<div id="desContent">'
-    return (container + "".join(f"<p><span>{line}</span></p>" for line in lines) + "</div>").encode()
+    container = (
+        '<div class="allZoom">' if exchange == "sse" else '<div id="desContent">'
+    )
+    return (
+        container + "".join(f"<p><span>{line}</span></p>" for line in lines) + "</div>"
+    ).encode()
 
 
 def adjusted_pair() -> tuple[dict, dict]:
@@ -40,9 +43,7 @@ def adjusted_pair() -> tuple[dict, dict]:
     for exchange in ("sse", "szse"):
         annual = MODULE.parse_annual(notice(exchange, ANNUAL_LINES), exchange, 2020)
         result.append(
-            MODULE.apply_2020_extension(
-                annual, notice(exchange, [EXTENSION]), exchange
-            )
+            MODULE.apply_2020_extension(annual, notice(exchange, [EXTENSION]), exchange)
         )
     return result[0], result[1]
 
@@ -64,7 +65,9 @@ def test_2020_extension_overrides_original_spring_reopen() -> None:
         adjusted = MODULE.apply_2020_extension(
             annual, notice(exchange, [EXTENSION]), exchange
         )
-        assert {date(2020, 1, 31), date(2020, 2, 1), date(2020, 2, 2)} <= adjusted["closed"]
+        assert {date(2020, 1, 31), date(2020, 2, 1), date(2020, 2, 2)} <= adjusted[
+            "closed"
+        ]
         assert date(2020, 2, 3) in adjusted["reopens"]
         assert date(2020, 1, 31) not in adjusted["reopens"]
         assert date(2020, 1, 31) not in annual["closed"], "不得改写原公告解析结果"
@@ -79,7 +82,13 @@ def test_daily_comparison_separates_date_mismatch_and_coverage() -> None:
     }
     repository_open = official_open - {date(2020, 2, 3)} | {date(2020, 1, 31)}
     differences, daily, stats = MODULE.compare_year(
-        2020, sse, szse, date(2020, 1, 1), date(2020, 12, 31), repository_open, ["synthetic"]
+        2020,
+        sse,
+        szse,
+        date(2020, 1, 1),
+        date(2020, 12, 31),
+        repository_open,
+        ["synthetic"],
     )
     assert len(daily) == 366
     assert {(row["category"], row["date_or_range"]) for row in differences} == {
@@ -104,13 +113,24 @@ def test_exchange_conflict_is_not_voted_into_repository_difference() -> None:
         if day.weekday() < 5 and day not in sse["closed"]
     }
     differences, daily, stats = MODULE.compare_year(
-        2026, sse, szse, date(2026, 1, 1), date(2026, 12, 31), repository_open, ["synthetic"]
+        2026,
+        sse,
+        szse,
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+        repository_open,
+        ["synthetic"],
     )
-    conflict = [row for row in differences if row["category"] == "exchange_source_conflict"]
+    conflict = [
+        row for row in differences if row["category"] == "exchange_source_conflict"
+    ]
     assert [row["date_or_range"] for row in conflict] == ["2026-01-05"]
     assert stats["exchange_source_conflict_days"] == 1
     assert stats["repository_mismatch_days"] == 0
-    assert next(row for row in daily if row["date"] == "2026-01-05")["repository_open"] is False
+    assert (
+        next(row for row in daily if row["date"] == "2026-01-05")["repository_open"]
+        is False
+    )
 
 
 def test_manifest_rejects_tampered_public_bytes(tmp_path: Path) -> None:
@@ -124,7 +144,9 @@ def test_manifest_rejects_tampered_public_bytes(tmp_path: Path) -> None:
                 "url": "https://www.sse.com.cn/synthetic",
                 "raw_file": f"{source_id}.html",
                 "bytes": len(raw),
-                "sha256": "0" * 64 if source_id == "sse_annual_2020" else MODULE.sha256(raw),
+                "sha256": "0" * 64
+                if source_id == "sse_annual_2020"
+                else MODULE.sha256(raw),
             }
         )
     (tmp_path / "sources.json").write_text(json.dumps(entries), encoding="utf-8")

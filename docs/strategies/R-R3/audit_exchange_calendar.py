@@ -123,7 +123,9 @@ def text_date(year: int, match: re.Match[str], offset: int = 0) -> date:
 def parse_annual(raw: bytes, exchange: str, year: int) -> dict:
     lines = article_lines(raw, exchange)
     holiday_lines = [
-        line for line in lines if "休市" in line and any(name in line for name in HOLIDAYS)
+        line
+        for line in lines
+        if "休市" in line and any(name in line for name in HOLIDAYS)
     ]
     require(
         len(holiday_lines) == EXPECTED_PARAGRAPHS[year],
@@ -217,7 +219,10 @@ def load_manifest(raw_dir: Path) -> dict[str, dict]:
         require(len(raw) == entry["bytes"], f"byte count: {source_id}")
         require(sha256(raw) == entry["sha256"], f"sha256: {source_id}")
         result[source_id] = entry
-    require(set(result) == SOURCE_IDS, f"source coverage: {sorted(SOURCE_IDS - set(result))}")
+    require(
+        set(result) == SOURCE_IDS,
+        f"source coverage: {sorted(SOURCE_IDS - set(result))}",
+    )
     return result
 
 
@@ -261,7 +266,9 @@ def compare_year(
             category = "exchange_source_conflict"
             conflict += 1
         elif covered and repo_open != sse_open:
-            category = "repository_extra_open" if repo_open else "repository_missing_open"
+            category = (
+                "repository_extra_open" if repo_open else "repository_missing_open"
+            )
             mismatch += 1
         if category:
             differences.append(
@@ -273,7 +280,9 @@ def compare_year(
                     "szse_open": szse_open,
                     "repository_open": repo_open,
                     "source_ids": ";".join(source_ids),
-                    "note": "两所冲突，未代为裁定" if conflict and not category.startswith("repository") else "逐日开市状态不同",
+                    "note": "两所冲突，未代为裁定"
+                    if conflict and not category.startswith("repository")
+                    else "逐日开市状态不同",
                 }
             )
         daily.append(
@@ -282,7 +291,8 @@ def compare_year(
                 "sse_open": sse_open,
                 "szse_open": szse_open,
                 "repository_open": repo_open,
-                "comparison": category or ("covered_match" if covered else "coverage_missing"),
+                "comparison": category
+                or ("covered_match" if covered else "coverage_missing"),
             }
         )
     for interval in compress_ranges(uncovered):
@@ -331,7 +341,10 @@ def audit(raw_dir: Path, calendar_path: Path) -> dict[str, bytes | dict]:
     coverage_start = date.fromisoformat(calendar["coverage_start"])
     coverage_end = date.fromisoformat(calendar["coverage_end"])
     open_values = calendar["open_days"]
-    require(open_values == sorted(set(open_values)), "repository open_days not sorted/unique")
+    require(
+        open_values == sorted(set(open_values)),
+        "repository open_days not sorted/unique",
+    )
     repository_open = {date.fromisoformat(value) for value in open_values}
     require(
         all(coverage_start <= day <= coverage_end for day in repository_open),
@@ -352,7 +365,9 @@ def audit(raw_dir: Path, calendar_path: Path) -> dict[str, bytes | dict]:
             if year == 2020:
                 extension_id = f"{exchange}_2020_extension"
                 parsed[exchange] = apply_2020_extension(
-                    parsed[exchange], (raw_dir / f"{extension_id}.html").read_bytes(), exchange
+                    parsed[exchange],
+                    (raw_dir / f"{extension_id}.html").read_bytes(),
+                    exchange,
                 )
                 source_ids.append(extension_id)
         differences, daily, stats = compare_year(
@@ -371,7 +386,11 @@ def audit(raw_dir: Path, calendar_path: Path) -> dict[str, bytes | dict]:
     daily_raw = csv_bytes(all_daily, daily_fields)
     summary = {
         "task": "R-R3",
-        "range": {"start": "2020-01-01", "end": "2026-12-31", "calendar_days": len(all_daily)},
+        "range": {
+            "start": "2020-01-01",
+            "end": "2026-12-31",
+            "calendar_days": len(all_daily),
+        },
         "repository": {
             "coverage_start": coverage_start.isoformat(),
             "coverage_end": coverage_end.isoformat(),
@@ -379,10 +398,12 @@ def audit(raw_dir: Path, calendar_path: Path) -> dict[str, bytes | dict]:
         },
         "totals": {
             "repository_coverage_gap_rows": sum(
-                row["category"] == "repository_coverage_missing" for row in all_differences
+                row["category"] == "repository_coverage_missing"
+                for row in all_differences
             ),
             "repository_mismatch_days": sum(
-                row["category"].startswith("repository_") and row["category"] != "repository_coverage_missing"
+                row["category"].startswith("repository_")
+                and row["category"] != "repository_coverage_missing"
                 for row in all_differences
             ),
             "exchange_source_conflict_days": sum(
@@ -401,7 +422,9 @@ def audit(raw_dir: Path, calendar_path: Path) -> dict[str, bytes | dict]:
     }
     return {
         "differences.csv": csv_bytes(all_differences, DIFF_FIELDS),
-        "summary.json": (json.dumps(summary, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        "summary.json": (
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n"
+        ).encode("utf-8"),
         "daily_comparison.csv": daily_raw,
         "summary": summary,
     }
@@ -410,7 +433,9 @@ def audit(raw_dir: Path, calendar_path: Path) -> dict[str, bytes | dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--raw-dir", type=Path, required=True)
-    parser.add_argument("--calendar", type=Path, default=ROOT / "config/trading_calendar.json")
+    parser.add_argument(
+        "--calendar", type=Path, default=ROOT / "config/trading_calendar.json"
+    )
     parser.add_argument("--output-dir", type=Path, default=HERE)
     parser.add_argument("--daily-output", type=Path)
     parser.add_argument("--check", action="store_true")
@@ -418,7 +443,10 @@ def main() -> None:
     result = audit(args.raw_dir, args.calendar)
     if args.check:
         for name in ("differences.csv", "summary.json"):
-            require((HERE / name).read_bytes() == result[name], f"stale generated file: {name}")
+            require(
+                (HERE / name).read_bytes() == result[name],
+                f"stale generated file: {name}",
+            )
     else:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         for name in ("differences.csv", "summary.json"):
