@@ -1,8 +1,12 @@
-# G-STAGE6b 主线 E2E 用例规格草稿
+# G-STAGE8 主线 E2E 用例规格草稿
 
 状态：DRAFT，供前端与测试按编号实现；本文件不是可运行的 Playwright 测试，未执行任何下列用例。
-依据：G-STAGE6b 架构师第②项；取证基线 `95967e1cb50b97a5e27afd1f2b98afbf9fe14118`。只描述现行契约，不修改契约、建议引擎、风控、日历或数据接线。
+依据：当前 main `2051c8f23fed2428e32ae4bdd61636066b0c340f`，含 #301 merge `2051c8f` 的 PN06 日历行隔离修复。只描述现行契约与现有测试入口，不修改契约、建议引擎、风控、日历或数据接线。
 目标：用户从真实登录进入本人账户，上传纯合成文件、预览并确认，重读持仓与导入记录，再查看本人日报和今日关注；每一环均有服务端结果与页面对应证据。
+
+## 0. 当前主线前置核验
+
+#301 只改 `tests/backend/unit/test_pn06_entry_wiring.py`，未改生产运行路径。完整主线 E2E 启动前，先在独占测试库执行既有 `test_pn06_calendar_isolation_preserves_preexisting_and_cleans_exception`，确认本轮新增日历行在正常退出和异常退出后均被清理，预存日历行保持原值；该项是资源隔离前置，不计浏览器 E2E 通过。缺少独占 PG、网络隔离或清理回证时标记 `blocked`。
 
 ## 1. 执行模式与资源前提
 
@@ -40,6 +44,7 @@ T 与 P 在不同测试账户/独立 case 中跑，不能把同一持仓既从�
 
 | ID | 入口与前提 | 用户动作 / API 检查 | 必须满足的断言与证据 |
 |---|---|---|---|
+| ML-00 | 独占测试库，当前 main 含 #301 | 先执行既有 PN06 日历隔离测试，再检查清理回证 | 预存日历行值不变；正常与异常退出新增行均清除；缺 PG、隔离或回证为 `blocked`，不计浏览器 E2E 通过 |
 | ML-01 | 无会话，受保护 `/portfolio` | 直接打开，再检查 `/api/v1/portfolio` | API `401 AUTH_REQUIRED`，页面进入登录；无持仓内容闪现；仅记录路径/状态，不记录 cookie |
 | ML-02 | 用户 A，真实 `/login` | 填用户名/内存密码并提交；观测 `POST /api/v1/auth/login` | `200`；后续本人身份/账户读取正确；`next=/portfolio` 合法内站回跳，直接 `/` 落 `/today`；不以注入 cookie 代替此步骤 |
 | ML-03 | 单独错误密码与 pending 用户 | 各执行一次登录 | 错密码 `401 INVALID_CREDENTIALS` 及 `login-error`；pending `403 ACCOUNT_NOT_APPROVED`、进入账户状态页且无业务会话；不触发真实账户锁定 |
