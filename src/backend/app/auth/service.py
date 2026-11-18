@@ -71,13 +71,16 @@ def audit(
     )
 
 
-def latest_profile(conn: Connection, user_id: uuid.UUID) -> Row[Any] | None:
-    return conn.execute(
-        select(user_profiles)
-        .where(user_profiles.c.user_id == user_id)
-        .order_by(user_profiles.c.version_no.desc())
-        .limit(1)
-    ).first()
+def latest_profile(
+    conn: Connection, user_id: uuid.UUID, *, as_of: dt.datetime | None = None
+) -> Row[Any] | None:
+    stmt = select(user_profiles).where(user_profiles.c.user_id == user_id)
+    if as_of is not None:
+        stmt = stmt.where(
+            user_profiles.c.created_at <= as_of,
+            user_profiles.c.confirmed_at.is_(None) | (user_profiles.c.confirmed_at <= as_of),
+        )
+    return conn.execute(stmt.order_by(user_profiles.c.version_no.desc()).limit(1)).first()
 
 
 _PROFILE_FIELDS = (

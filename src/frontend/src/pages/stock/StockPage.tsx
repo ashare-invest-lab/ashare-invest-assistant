@@ -11,7 +11,7 @@ import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, QUOTE_CLOSE_PRICE, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
-import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { fmtAmount, fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { StockErrorBoundary } from './StockErrorBoundary';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
@@ -143,15 +143,18 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   const suspended = profile.suspended === true;
   const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
-  // v0.2.8：ETF 价格保留 3 位小数（价格字段是字符串，原样显示即保留；涨跌额也按 3 位）
+  // v0.2.8：ETF 涨跌额按 3 位
   const pd = profile.type === 'etf' ? 3 : 2;
-  const stats: [string, React.ReactNode][] = [
-    ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{tb.open}</span> : '—'],
-    ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{tb.high}</span> : '—'],
-    ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{tb.low}</span> : '—'],
-    ['昨收', preClose ?? '—'],
-    ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—'],
-    ['成交额', q ? fmtAmount(q.amount) : '—'],
+  // 与现有收盘价标签使用相同的 stale + 有价/时点判断；两项都缺失时提示回退。
+  const turnoverHint = q?.data_status === 'stale' && q.price != null && q.t && q.volume == null && q.amount == null
+    ? '收盘价回退，无成交量/额' : '暂无数据';
+  const stats: [string, React.ReactNode, string?][] = [
+    ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{fmtPrice(tb.open)}</span> : '—'],
+    ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{fmtPrice(tb.high)}</span> : '—'],
+    ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{fmtPrice(tb.low)}</span> : '—'],
+    ['昨收', fmtPrice(preClose)],
+    ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—', q && q.volume == null ? turnoverHint : undefined],
+    ['成交额', q ? fmtAmount(q.amount) : '—', q && q.amount == null ? turnoverHint : undefined],
     ['换手率', q?.volume != null && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
     ['总市值', q?.price != null && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
     ['流通市值', q?.price != null && float ? fmtAmount(capOf(q.price, float)) : '—'],
@@ -171,7 +174,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price ?? '—'}</span>
+          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price)}</span>
           {q.data_status === 'stale' && q.t ? <Tag data-testid="quote-stale-tag">{QUOTE_CLOSE_PRICE}·{fmtTime(q.t).slice(5, 10)}</Tag> : null}
           <span className={`mono ${pctClass(q.change_pct)}`}>
             {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
@@ -182,10 +185,10 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       ) : <span className="muted">无行情缓存</span>}
       {q ? <GapNote status={q.data_status} gaps={q.gaps} asOf={q.data_as_of} testId="quote-gap-note" /> : null}
       <div className="sh-stats">
-        {stats.map(([k, v]) => (
+        {stats.map(([k, v, hint]) => (
           <div key={k}>
             <label>{k}</label>
-            <b className="mono">{v}</b>
+            {hint ? <KeyTip lines={[hint]}><b className="mono">{v}</b></KeyTip> : <b className="mono">{v}</b>}
           </div>
         ))}
       </div>

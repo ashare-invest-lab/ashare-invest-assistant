@@ -7,7 +7,7 @@ import { useEffect, useId, useRef } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useDailyReport, useDailyReportPages, useDailyReports } from '../api/queries';
 import type { DailyReport, DailyReportStock, TextWithEvidence } from '../api/types';
-import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../components/common';
+import { ActionBadge, ConsensusBadge, DataStatusTag, EmptyState, ErrorBox, Loading } from '../components/common';
 import { EvidenceChips } from '../components/EvidenceChips';
 import { CardDisclaimer } from '../components/RiskDisclosure';
 import { DIMENSION, EXECUTABILITY, GAP_REASON, RECONCILIATION, REGIME, RISK_LEVEL } from '../i18n/labels';
@@ -38,7 +38,7 @@ export function DailyReportIndex() {
   if (list.isLoading) return <Loading />;
   if (list.isError) return <ErrorBox error={list.error} />;
   const latest = list.data?.items[0];
-  return latest ? <Navigate to={`/daily-reports/${latest.date}`} replace /> : <div className="loading-box">暂无日报</div>;
+  return latest ? <Navigate to={`/daily-reports/${latest.date}`} replace /> : <EmptyState title="暂无日报" description="尚未找到已生成的日报；本页仅读取已有快照，不触发生成。" />;
 }
 
 const LOAD_MORE = '__more__';
@@ -286,7 +286,7 @@ export function DailyReportPage() {
       </div>
       {shown.length ? (
         <div className="stock-grid">{shown.map((s) => <StockCard key={s.security_code} s={s} r={r} />)}</div>
-      ) : <div className="loading-box" data-testid="report-empty">{r.stocks.length ? '没有符合筛选条件的证券' : '本期没有持仓或自选证券'}</div>}
+      ) : <div data-testid="report-empty"><EmptyState title={r.stocks.length ? '没有符合筛选条件的证券' : '本期没有持仓或自选证券'} description="可调整日期或筛选条件查看已有内容；空列表不代表数据齐全。" /></div>}
       </section>
     </div>
   );

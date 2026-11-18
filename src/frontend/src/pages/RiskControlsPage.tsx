@@ -6,7 +6,7 @@ import { Link, useSearchParams } from 'react-router';
 import type { RiskControlSetting } from '../api/phase2Types';
 import { ENUMS } from '../api/enums';
 import { useRiskSettings, useSaveRiskSettings, useRiskEvaluation, useRiskEvents } from '../api/phase2Queries';
-import { ErrorBox, Loading, DataStatusTag } from '../components/common';
+import { EmptyState, ErrorBox, Loading, DataStatusTag } from '../components/common';
 import { RiskFlagView } from '../components/RiskFlagView';
 import { EvidenceChips } from '../components/EvidenceChips';
 import { CardDisclaimer } from '../components/RiskDisclosure';
@@ -110,7 +110,7 @@ function EventsPanel() {
     <Input aria-label="风控事件证券代码" value={code} onChange={(e) => setCode(e.target.value.trim().toUpperCase())} placeholder="全部证券" style={{ maxWidth: 180 }} />
     <Input aria-label="风控事件起始时间" value={since} onChange={(e) => setSince(e.target.value)} placeholder="ISO 日期时间（可选）" style={{ maxWidth: 240 }} />
     {events.isPending ? <Loading /> : null}{events.isError ? <ErrorBox error={events.error} /> : null}
-    {events.isSuccess && !items.length ? <p>暂无符合条件的风控事件；不是“风险为零”。</p> : null}
+    {events.isSuccess && !items.length ? <EmptyState title="暂无符合条件的风控事件；不是“风险为零”。" description="可调整事件状态、风控类型或证券筛选，查看已有记录。" /> : null}
     {target && events.isSuccess && !items.some((e) => e.id === target) ? <p>定位事件不在已加载列表，请调整筛选或加载更多。</p> : null}
     {items.map((e) => <article key={e.id} id={`risk-event-${e.id}`} className="stc-sec" data-testid={`risk-event-${e.id}`}>
       <h4>{e.name ?? '账户 / 策略项'} · {e.status === 'active' ? '未解除' : '已解除'}{target === e.id ? <Tag>当前定位事件</Tag> : null}</h4>

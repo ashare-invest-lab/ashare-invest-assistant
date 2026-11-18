@@ -30,7 +30,7 @@ export function VersionView({ v, testId = 'cand-version' }: { v: CandidateVersio
   return (
     <div className="cand-version" data-testid={testId}>
       <div className="muted small" style={{ marginBottom: 6 }}>
-        第 {v.version_no} 版 · {fmtTime(v.created_at)}（北京时间）· 快照 <span className="mono">{v.snapshot_id}</span> · 生成时简称 {v.name}{' '}
+        第 {v.version_no} 版 · {fmtTime(v.created_at)}（北京时间）· 快照 <span className="mono">{v.snapshot_id ?? '—'}</span> · 生成时简称 {v.name}{' '}
         <DataStatusTag status={v.data_status} asOf={v.data_as_of} gaps={v.gaps} />
       </div>
       <GapNote status={v.data_status} gaps={v.gaps} asOf={v.data_as_of} testId={`${testId}-gap`} />
