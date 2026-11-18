@@ -965,7 +965,7 @@
     {
       "path": "docs/strategies/T-R79/u11_calib.py",
       "scope_role": "research_support_not_strategy",
-      "note": "T-R80 offline U11 descriptive calibration; no strategy identity or runtime change"
+      "note": "T-R80 offline U11 descriptive calibration; no system suggestions or runtime change"
     },
     {
       "path": "docs/strategies/R-R2/README.md",
