@@ -109,10 +109,15 @@ export function useCreateAccount() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (b: BrokerAccountCreate) => apiPost<BrokerAccount>('/accounts', b), onSuccess: () => qc.invalidateQueries({ queryKey: ak.accounts }) });
 }
-export const useTrades = (accountId: string | undefined) =>
-  useQuery({
-    queryKey: ak.trades(accountId ?? ''),
-    queryFn: ({ signal }) => apiGet<Paged<Trade>>('/trades', { account_id: accountId, limit: 200 }, signal),
+export interface TradeFilter { security_code?: string; from?: string; to?: string; include_voided?: boolean }
+const tradeId = (t: Trade) => t.id;
+export const useTrades = (accountId: string | undefined, f: TradeFilter = {}) =>
+  useCursorPages<Trade>({
+    queryKey: [...ak.trades(accountId ?? ''), f],
+    path: '/trades',
+    params: { account_id: accountId, ...f },
+    limit: 200,
+    idOf: tradeId,
     enabled: !!accountId,
   });
 /** 手工录入：Idempotency-Key 由调用方持有，重复点击或重试复用同一个，成功后再换新（评审 s1） */
