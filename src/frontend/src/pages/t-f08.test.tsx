@@ -222,7 +222,7 @@ describe('T-F08 今日关注', () => {
     const t = (await (await fetch('/api/v1/today')).json()) as TodayResponse;
     // 独立于实现中的权重表，锁定 mock 三档齐全且按契约顺序返回。
     expect(t.alerts.items.map((a) => a.severity)).toEqual(['important', 'attention', 'info']);
-    renderAt('/today');
+    await renderTestRoute('/today');
     const alerts = await screen.findByTestId('today-alerts');
     const items = within(alerts).getAllByRole('listitem');
     expect(items.map((li) => li.getAttribute('data-testid'))).toEqual(t.alerts.items.map((a) => `alert-${a.id}`));
@@ -240,7 +240,7 @@ describe('T-F08 今日关注', () => {
       server.use(http.get('/api/v1/today', () => HttpResponse.json({
         ...FULL, alerts: { items: [alert], more: false },
       })));
-      const router = renderAt('/today');
+      const router = await renderTestRoute('/today');
       const alerts = await screen.findByTestId('today-alerts');
       expect(alerts).toBeInTheDocument();
       const li = within(alerts).getByTestId(`alert-${alert.id}`);
@@ -268,7 +268,7 @@ describe('T-F08 今日关注', () => {
     server.use(http.get('/api/v1/today', () => HttpResponse.json({
       ...FULL, alerts: { items, more: false },
     } satisfies TodayResponse)));
-    renderAt('/today');
+    await renderTestRoute('/today');
     const alerts = await screen.findByTestId('today-alerts');
     expect(within(alerts).getAllByRole('listitem').map((li) => li.getAttribute('data-testid'))).toEqual(
       [920, 918, 919, 917, 916].map((id) => `alert-${uid(id)}`),
@@ -279,7 +279,7 @@ describe('T-F08 今日关注', () => {
     server.use(http.get('/api/v1/today', () => HttpResponse.json({
       ...FULL, alerts: { items: [], more: false },
     } satisfies TodayResponse)));
-    renderAt('/today');
+    await renderTestRoute('/today');
     const alerts = await screen.findByTestId('today-alerts');
     expect(alerts.querySelector('.today-empty')).toHaveTextContent(/^无$/);
     expect(within(alerts).getByTestId('today-alerts-count')).toHaveTextContent(/^0 条$/);
