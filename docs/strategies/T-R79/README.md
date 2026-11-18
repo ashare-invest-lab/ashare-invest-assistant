@@ -103,7 +103,7 @@ T-R80验收：两次全量JSON逐字节一致；合成边界/窗口算术核对�
 
 ## T-R79d｜R12修订（2026-11-15）
 
-按T-A190 D03/B01仅修R12及相关引用：可信端点齐备时正式输出收益/超额，整窗完整性与逐日缺口另报；D1开1000、D5收1040、D3缺行仍输出4%，完整性为不完整+`benchmark_daily_missing:D3`；缺D5端点则null+`benchmark_prices`。U06仍未验证，后端整窗/缺日用例与实库覆盖待补；G02–G04等后端缺口不在本卡处理。lifecycle保持draft，仅研究候选信号，不构成荐股或收益承诺。
+按T-A190 D03/B01仅修R12及相关引用：可信端点齐备时正式输出收益/超额，整窗完整性与逐日缺口另报；D1开1000、D5收1040、D3缺行仍输出4%，完整性为不完整+`benchmark_daily_missing:D3`；缺D5端点则null+`benchmark_prices`。U06仍未验证，后端整窗/缺日用例与实库覆盖待补；后端承接分三项：G1→T-B171（U10 补算窗口与终态冻结），G2→T-B173（U10 输入版本、定稿与时点），G3→T-B174（U12 生成时置信度分组与有效样本数）。验收入口见 [#230 契约 §1–§4](../../contracts/tracking-benchmark-pit-and-groups.md)。T-R79d 原文另提 G04，未给定义；治理复核记录 T-B173、T-B174 均排除 G04，其出处和归属待编排者确认。[治理复核记录](https://github.com/ashare-invest-lab/ashare-invest-assistant/pull/210#issuecomment-6910646080)。lifecycle保持draft，仅研究候选信号，不构成荐股或收益承诺。
 
 T-R79d验收：按`git ls-files 'docs/strategies/**/check_*.py' 'docs/strategies/check_*.py'`枚举16个checker，使用任务指定临时虚拟环境Python并设`PYTHONDONTWRITEBYTECODE=1`，普通及`-O`共32次，28次rc=0；另4次仅为`check_horizons`的R-R1既有8项漏登与`check_f21_ready`无库两类例外。最小环境不传数据库地址，未连库或执行SQL。`git diff --check`无输出，净增不超过150行，R12/D03/缺日/整窗引用已逐处核对，未生成`.last.md`。
 
