@@ -1,0 +1,7 @@
+category,year,date_or_range,sse_open,szse_open,repository_open,source_ids,note
+repository_coverage_missing,2020,2020-01-01..2020-12-31,,,,sse_annual_2020;sse_2020_extension;szse_annual_2020;szse_2020_extension,仓库无覆盖；不判定逐日一致或不一致
+repository_coverage_missing,2021,2021-01-01..2021-12-31,,,,sse_annual_2021;szse_annual_2021,仓库无覆盖；不判定逐日一致或不一致
+repository_coverage_missing,2022,2022-01-01..2022-12-31,,,,sse_annual_2022;szse_annual_2022,仓库无覆盖；不判定逐日一致或不一致
+repository_coverage_missing,2023,2023-01-01..2023-12-31,,,,sse_annual_2023;szse_annual_2023,仓库无覆盖；不判定逐日一致或不一致
+repository_coverage_missing,2024,2024-01-01..2024-12-31,,,,sse_annual_2024;szse_annual_2024,仓库无覆盖；不判定逐日一致或不一致
+repository_coverage_missing,2025,2025-01-01..2025-12-31,,,,sse_annual_2025;szse_annual_2025,仓库无覆盖；不判定逐日一致或不一致
