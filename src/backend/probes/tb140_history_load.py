@@ -539,7 +539,11 @@ def apply_daily_bars(
     tx = getattr(conn, "transaction", None)
     if not callable(tx):
         raise RowReject("connection_transaction_required")
-    writer_conn = _WriterConnection(conn) if isinstance(conn, PsycopgConnection) else conn
+    writer_conn = (
+        _WriterConnection(conn)
+        if isinstance(conn, PsycopgConnection) or not callable(getattr(conn, "execute", None))
+        else conn
+    )
 
     def count() -> int:
         with conn.cursor() as cur:
