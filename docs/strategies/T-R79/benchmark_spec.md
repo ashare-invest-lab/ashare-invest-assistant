@@ -344,6 +344,6 @@ T-R79b公开查证/访问日期统一为2026-11-15。公开出处仅采纳编制
 
 ## 10. 变更记录
 
-- T-R79d（2026-11-15）：按T-A190 D03/B01修R12，端点可算性与整窗完整性分开报告，同步U06/C06、D03及相关引用；本次修订限于B01，lifecycle保持draft。后继分工为 G1→T-B171（补算与冻结）、G2→T-B173（基准输入版本与可见性）、G3→T-B174（生成时置信度分组），见 [#230 契约 §0、§4](../../contracts/tracking-benchmark-pit-and-groups.md)。[T-R79d 原始提交](https://github.com/ashare-invest-lab/ashare-invest-assistant/commit/1274b79339e31d6cb018c8bfd9640ad114a44d55)只写“G02–G04等缺口”。G04 的原始定义、是否误号及承接单尚待确认。[治理复核记录](https://github.com/ashare-invest-lab/ashare-invest-assistant/pull/210#issuecomment-6910646080)。
+- T-R79d（2026-11-15）：按T-A190 D03/B01修R12，端点可算性与整窗完整性分开报告，同步U06/C06、D03及相关引用；本次修订限于B01，lifecycle保持draft。后继分工为 G1→T-B171（补算与冻结）、G2→T-B173（基准输入版本与可见性）、G3→T-B174（生成时置信度分组），见 [#230 契约 §0、§4](../../contracts/tracking-benchmark-pit-and-groups.md)。
 
 - T-R84（2026-11-15）：按#210评审及T-A190 D04改为实际运行/补算as_of、逐结果冻结与旧版重放，同步R08/R13虚构例/U10/C10/D04和只读Q06；补D05采集适配层职责、D07必选组合与逐槽有效n，同步D01–D08裁定状态；U11临时目录改平台默认，lifecycle保持draft。
