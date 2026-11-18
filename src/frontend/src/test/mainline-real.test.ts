@@ -15,6 +15,7 @@ const empty = { items: [], more: false };
 
 function today(overrides: Partial<TodayResponse> = {}): TodayResponse {
   return {
+    account_id: '00000000-0000-4000-8000-000000000001',
     server_time: '2026-11-13T10:40:00Z', trade_date: '2026-11-13', session: 'closed',
     market: { regime: null, regime_position_range: null, data_status: 'unavailable' },
     focus: { items: [held], more: false },
