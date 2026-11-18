@@ -40,7 +40,7 @@ key `st_pullback_ma`；category `momentum`；horizons `[short]`（持有 1–5 �
 - 原稿 E5（`close ≤ MA5` 近似回踩）用 E3 的“触及 MA10”代替；原稿 X4（未创新高即时间止损）几乎每天都会成立，已改为 X3。原稿的 X5（大盘转弱减仓）属于 H-01 和风控 RC3 的职责，已删除。
 
 ## 8–10 入场 / 退出 / 仓位
-T 日盘后确认，最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价；信号有效 1 个交易日，过期作废。止损价截断到涨跌停价之内。仓位按 RC2/RC3 建议，不在本卡内硬编码。
+T 日盘后确认，最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价（出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154）；信号有效 1 个交易日，过期作废。止损价截断到涨跌停价之内。仓位按 RC2/RC3 建议，不在本卡内硬编码。
 
 ## 11 验证
 `fixture`、`trigger_stats`、`tracking_sim`；horizon_days `[1,5]`；`min_n=30`；基准：所属行业指数或中证全指。正式卡需 ≥ 6 个虚构 golden（导入前补）。

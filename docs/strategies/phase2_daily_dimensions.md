@@ -7,7 +7,7 @@
 - 每个新生成的非 removed `DailyReport.stocks[]` 恰好六组，顺序 technical、capital、fundamental、sentiment、sector_market、news；旧日报/removed 行 `dimensions=null`，不回写历史正文。新输入产生新 revision，`analysis_snapshot_id` 指向生成时本人不可变快照。
 - 每组沿契约 `DailyDimensionAnalysis`：`dimension/facts/feature_refs/data_status/data_as_of/gaps`。facts 为 TextWithEvidence，证据引用本日报顶层 evidence，同股代码前缀遵循 §5.3；不得悬空。feature_refs 的 feature_key/status/evidence_ids 不另造字段；未登记键 status=null，不虚构 f.*。
 - Evidence 沿契约 id/key/value/unit/provider/endpoint/data_as_of/fetched_at/epistemic_type。字段等级与取数完整性分开；verified_doc 最多 simulating，不能用数值存在或两股样本改成 verified_live。表中“declared”含计划明确保留项；“null（等级未明）”指已有键但规格未明确其等级，不当 verified_doc。
-- 未知指标 Evidence.value=null、unit 无证据则 null，并带 gap；完全无来源 facts=[]、data_status=unavailable、data_as_of=null。部分缺失 partial；stale/pending 沿 §1.1，不能静默前值、插值、0、range 或 neutral 补齐。真实零值仅在输入完整、口径可复算时允许。
+- 未知指标 Evidence.value=null、unit 无证据则 null，并带 gap；完全无来源 facts=[]、data_status=unavailable、data_as_of=null。部分缺失 partial；stale/pending 沿 §1.1，不能静默前值、插值、0（出处：T-A190 §一、逐条裁定／共同约束）、range 或 neutral 补齐。真实零值仅在输入完整、口径可复算时允许。
 - gaps.reason 只用契约 no_source/not_yet_published/upstream_error/quota_deferred/user_input_missing/data_licence_unavailable/not_applicable。单位/PIT/版本冲突等细节写 message，内部 null_reason/verify_pending 不新增成 API reason。上游失败用 upstream_error；来源/单位无证用 no_source；尚未可见用 not_yet_published；不适用用 not_applicable。
 - 六维是事实覆盖，不是六个策略结论。规则观点仍来自实际启用策略的 dimension_matrix；同股不同卡观点并列，不合并动作、不生成综合分数/中性结论、不改变置信度公式。一个维度失败不阻断整份日报，顶层汇总 gaps。
 

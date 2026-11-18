@@ -12,6 +12,8 @@ from fastapi import APIRouter, Query
 
 from app.api.v1.trades import SECURITY_CODE_PATTERN, normalize_code
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
+from app.auth.service import now_utc
+from app.features.horizon_sources import EmptyEvidenceProvider
 from app.strategy.horizon import classifier
 from app.strategy.horizon import inputs as hz_inputs
 
@@ -25,10 +27,18 @@ def get_horizon_assessment(
     engine: EngineDep,
     security_code: Annotated[str, Query(pattern=SECURITY_CODE_PATTERN)],
 ) -> dict[str, Any]:
+    as_of = now_utc()
     cfg = settings.business.horizon_classifier
     with engine.connect() as conn:
         code = normalize_code(conn, security_code)
-        got = hz_inputs.collect(conn, auth.user_id, code, list(cfg.features))
+        got = hz_inputs.collect(
+            conn,
+            auth.user_id,
+            code,
+            list(cfg.features),
+            as_of=as_of,
+            evidence_provider=EmptyEvidenceProvider(),
+        )
     res = classifier.classify(cfg, got.values)
     used = {r.input for r in res.reasons if r.input is not None}
     evidence, ids = hz_inputs.evidence(got, used)

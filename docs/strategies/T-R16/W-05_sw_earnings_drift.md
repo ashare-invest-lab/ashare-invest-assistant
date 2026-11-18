@@ -36,7 +36,7 @@ key `sw_earnings_drift`；category `event`；horizons `[swing]`；risk_level `no
 | X3 | exit（时间） | `ctx.holding_days >= p.max_hold` |  |
 
 ## 8–10 执行与仓位
-公告次日盘后确认，下一交易日开盘模拟入场（不在公告当日追入）；仓位按 RC2。
+公告次日盘后确认，下一交易日开盘模拟入场（出处：docs/plan.md:1283）（不在公告当日追入）；仓位按 RC2。
 
 ## 11 验证（本轮不写 golden）
 门禁关闭前只做 `fixture` 和 `post_close_stats`；关闭后做事件研究（以公告可见时点为 0 日），`min_n=30`。
