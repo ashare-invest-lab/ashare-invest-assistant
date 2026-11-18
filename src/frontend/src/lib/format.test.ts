@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { fmtTime } from './format';
+import { fmtPrice, fmtTime } from './format';
 
 const ORIGINAL_TZ = process.env.TZ;
 const inputs = [
@@ -53,5 +53,17 @@ describe('fmtTime 北京时间显示', () => {
       process.env.TZ = tz;
       expect(inputs.map(fmtTime)).toEqual(expected);
     }
+  });
+});
+
+describe('T-F47 秒级时间与价格位数', () => {
+  it('fmtTime 截去微秒', () => {
+    expect(fmtTime('2026-11-13T15:06:59.586199+08:00')).toBe('2026-11-13 15:06:59');
+    expect(fmtTime('2026-11-13 15:06:59.586199')).toBe('2026-11-13 15:06:59');
+  });
+  it('fmtPrice 2 到 3 位小数', () => {
+    expect(fmtPrice('187.5800')).toBe('187.58');
+    expect(fmtPrice('3.1230')).toBe('3.123');
+    expect(fmtPrice(null)).toBe('—');
   });
 });
