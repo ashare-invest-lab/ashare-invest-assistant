@@ -34,10 +34,17 @@ FIELDS = ("price", "change_pct", "volume", "amount", "t", "data_as_of")
 
 
 def licence(**overrides: Any) -> SimpleNamespace:
-    return SimpleNamespace(**{
-        "id": LICENCE, "user_id": OWNER, "deleted_at": None, "status": "active",
-        "expires_on": None, "paused_until": None, **overrides,
-    })
+    return SimpleNamespace(
+        **{
+            "id": LICENCE,
+            "user_id": OWNER,
+            "deleted_at": None,
+            "status": "active",
+            "expires_on": None,
+            "paused_until": None,
+            **overrides,
+        }
+    )
 
 
 @pytest.fixture
@@ -70,14 +77,18 @@ def owned_world(world: Any, no_enqueue: None) -> Any:  # noqa: F811
         state.reads.append(sql)
         # Use scenario facts as the fake source; SQL only routes the query.
         today = state.now.astimezone(BEIJING).date()
-        eligible = [row.id for row in state.licences if (
-            row.user_id == OWNER
-            and row.deleted_at is None
-            and row.status == "active"
-            and not any(hold.user_id == row.user_id for hold in state.holds)
-            and (row.paused_until is None or row.paused_until <= state.now)
-            and (row.expires_on is None or row.expires_on >= today)
-        )]
+        eligible = [
+            row.id
+            for row in state.licences
+            if (
+                row.user_id == OWNER
+                and row.deleted_at is None
+                and row.status == "active"
+                and not any(hold.user_id == row.user_id for hold in state.holds)
+                and (row.paused_until is None or row.paused_until <= state.now)
+                and (row.expires_on is None or row.expires_on >= today)
+            )
+        ]
         assert len(eligible) <= 1
         return Result(eligible)
 
@@ -86,7 +97,10 @@ def owned_world(world: Any, no_enqueue: None) -> Any:  # noqa: F811
 
 
 def assert_unavailable(
-    response: Any, *, code: str = CODE, name: str = NAME,
+    response: Any,
+    *,
+    code: str = CODE,
+    name: str = NAME,
 ) -> dict[str, Any]:
     assert response.status_code == 200
     assert response.status_code != 409
@@ -112,15 +126,20 @@ def assert_cache_untouched(harness: Any, retained: list[Any]) -> None:
     assert all("daily_bars" not in sql for sql in harness.state.reads)
 
 
-@pytest.mark.parametrize("unusable", ["missing", "expired", "invalid", "held", "cooling", "deleted"])
+@pytest.mark.parametrize(
+    "unusable", ["missing", "expired", "invalid", "held", "cooling", "deleted"]
+)
 def test_ta173_quotes_unusable_licence_with_owned_daily_cache_returns_unavailable(
-    owned_world: Any, unusable: str,
+    owned_world: Any,
+    unusable: str,
 ) -> None:
     state = owned_world.state
     if unusable == "missing":
         state.licences = []
     elif unusable == "expired":
-        state.licences[0].expires_on = NOW.astimezone(BEIJING).date() - dt.timedelta(days=1)
+        state.licences[0].expires_on = NOW.astimezone(BEIJING).date() - dt.timedelta(
+            days=1
+        )
     elif unusable == "invalid":
         state.licences[0].status = "invalid"
     elif unusable == "held":
@@ -136,7 +155,9 @@ def test_ta173_quotes_unusable_licence_with_owned_daily_cache_returns_unavailabl
     assert_cache_untouched(owned_world, retained)
 
 
-def test_ta173_quotes_unusable_licence_owned_cache_combined_response(owned_world: Any) -> None:
+def test_ta173_quotes_unusable_licence_owned_cache_combined_response(
+    owned_world: Any,
+) -> None:
     owned_world.state.licences = []
     retained = list(owned_world.state.bars)
     # T-G06 §5: the same HTTP response must satisfy the entire combination.
@@ -146,7 +167,8 @@ def test_ta173_quotes_unusable_licence_owned_cache_combined_response(owned_world
 
 @pytest.mark.parametrize("at_boundary", [False, True])
 def test_ta173_quotes_active_licence_keeps_stale_close(
-    owned_world: Any, at_boundary: bool,
+    owned_world: Any,
+    at_boundary: bool,
 ) -> None:
     if at_boundary:
         owned_world.state.licences[0].expires_on = NOW.astimezone(BEIJING).date()
@@ -167,11 +189,18 @@ def test_ta173_quotes_active_licence_keeps_stale_close(
 
 def test_ta173_quotes_cannot_borrow_other_users_cached_close(owned_world: Any) -> None:
     other_licence = uuid.uuid4()
-    owned_world.state.licences = [licence(status="invalid"), licence(id=other_licence, user_id=OTHER)]
-    owned_world.state.bars.append(bar(
-        source_licence_id=other_licence, close=Decimal("9876.54"),
-        trade_date=dt.date(2041, 5, 6), fetched_at=dt.datetime(2041, 5, 6, 9, 5, tzinfo=dt.UTC),
-    ))
+    owned_world.state.licences = [
+        licence(status="invalid"),
+        licence(id=other_licence, user_id=OTHER),
+    ]
+    owned_world.state.bars.append(
+        bar(
+            source_licence_id=other_licence,
+            close=Decimal("9876.54"),
+            trade_date=dt.date(2041, 5, 6),
+            fetched_at=dt.datetime(2041, 5, 6, 9, 5, tzinfo=dt.UTC),
+        )
+    )
     retained = list(owned_world.state.bars)
     response = owned_world.client.get("/api/v1/quotes", params={"codes": CODE})
     assert_unavailable(response)
@@ -184,9 +213,13 @@ def ta173_db() -> Any:
     """Only an explicitly supplied isolated TT41 PG; never start a container."""
     url = os.environ.get("TT41_DATABASE_URL")
     if not url:
-        pytest.skip("TT41_DATABASE_URL 未设置：T-A173 真实旧日线验收需要显式提供的隔离 PostgreSQL")
+        pytest.skip(
+            "TT41_DATABASE_URL 未设置：T-A173 真实旧日线验收需要显式提供的隔离 PostgreSQL"
+        )
     engine = create_engine(url)
-    assert engine.dialect.name == "postgresql", "TT41_DATABASE_URL 必须指向隔离 PostgreSQL"
+    assert engine.dialect.name == "postgresql", (
+        "TT41_DATABASE_URL 必须指向隔离 PostgreSQL"
+    )
     try:
         with engine.connect() as conn:
             transaction = conn.begin()
@@ -208,7 +241,8 @@ def real_db_world(ta173_db: Any, world: Any, no_enqueue: None) -> Any:  # noqa: 
 
 
 def test_ta173_quotes_unusable_licence_with_owned_daily_cache_on_real_db(
-    ta173_db: Any, real_db_world: Any,
+    ta173_db: Any,
+    real_db_world: Any,
 ) -> None:
     from app.db.tables.licences import user_data_licences
     from app.db.tables.market import daily_bars, securities
@@ -219,20 +253,35 @@ def test_ta173_quotes_unusable_licence_with_owned_daily_cache_on_real_db(
     # Dedicated code: do not reuse shared 999991.SH fixtures or overwrite existing rows.
     code, name = "999173.SH", "synthetic 999173.SH"
     # Both licence and user are fabricated; no existing user or credential is read.
-    conn.execute(users.insert().values(
-        id=owner, username="ta173_" + owner.hex[:24], password_hash="synthetic-unusable-hash",
-        role="user", status="approved",
-    ))
-    conn.execute(user_data_licences.insert().values(
-        id=lid, user_id=owner, ciphertext=b"synthetic-not-a-certificate", seal_key_version=1,
-        licence_hmac=uuid.uuid4().bytes, tier="annual", status="invalid",
-    ))
+    conn.execute(
+        users.insert().values(
+            id=owner,
+            username="ta173_" + owner.hex[:24],
+            password_hash="synthetic-unusable-hash",
+            role="user",
+            status="approved",
+        )
+    )
+    conn.execute(
+        user_data_licences.insert().values(
+            id=lid,
+            user_id=owner,
+            ciphertext=b"synthetic-not-a-certificate",
+            seal_key_version=1,
+            licence_hmac=uuid.uuid4().bytes,
+            tier="annual",
+            status="invalid",
+        )
+    )
     # No upsert: a collision must fail rather than overwrite any pre-existing row.
-    conn.execute(securities.insert().values(code=code, name=name, type="stock", exchange="SH"))
+    conn.execute(
+        securities.insert().values(code=code, name=name, type="stock", exchange="SH")
+    )
     old_bar = vars(bar(code=code, source_licence_id=lid))
     conn.execute(daily_bars.insert().values(**old_bar))
     retained_query = select(daily_bars).where(
-        daily_bars.c.code == code, daily_bars.c.source_licence_id == lid,
+        daily_bars.c.code == code,
+        daily_bars.c.source_licence_id == lid,
     )
     before = conn.execute(retained_query).one()._asdict()
     assert before["close"] == old_bar["close"]
