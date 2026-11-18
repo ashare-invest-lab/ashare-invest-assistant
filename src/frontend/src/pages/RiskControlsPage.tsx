@@ -1,3 +1,4 @@
+import { labelOf } from '../lib/explanations';
 import { numericRiskRule, restoredRiskDefault, validateRiskParams } from '../lib/riskControlParams';
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Input, InputNumber, Select, Tabs, Tag } from 'antd';
@@ -28,7 +29,7 @@ function SettingFields({ value, change }: { value: RiskControlSetting; change: (
   switch (value.control) {
     case 'stop_take': return <>{decimal('long_horizon_default_stop_pct', '中长线默认止损比例（%）', value.params.long_horizon_default_stop_pct, (v) => change({ ...value, params: { ...value.params, long_horizon_default_stop_pct: v } }))}{bool('止损止盈限制在涨跌停价格内', value.params.clamp_to_price_limit, (v) => change({ ...value, params: { ...value.params, clamp_to_price_limit: v } }))}</>;
     case 'position_cap': return decimal('single_position_max_pct', '单只仓位上限（%）', value.params.single_position_max_pct, (v) => change({ ...value, params: { single_position_max_pct: v } }));
-    case 'total_exposure': return <>{(['uptrend', 'range', 'downtrend'] as const).map((regime) => <div key={regime}>{([0, 1] as const).map((i) => decimal(`regime_ranges.${regime}`, `${REGIME[regime]}参考仓位${i === 0 ? '下限' : '上限'}（%）`, value.params.regime_ranges[regime][i], (v) => {
+    case 'total_exposure': return <>{(['uptrend', 'range', 'downtrend'] as const).map((regime) => <div key={regime}>{([0, 1] as const).map((i) => decimal(`regime_ranges.${regime}`, `${(labelOf(REGIME, regime) ?? '未知')}参考仓位${i === 0 ? '下限' : '上限'}（%）`, value.params.regime_ranges[regime][i], (v) => {
       const pair: [string, string] = [...value.params.regime_ranges[regime]]; pair[i] = v;
       change({ ...value, params: { ...value.params, regime_ranges: { ...value.params.regime_ranges, [regime]: pair } } });
     }))}</div>)}{integer('regime_confirm_days', '大盘环境确认天数', value.params.regime_confirm_days, (v) => change({ ...value, params: { ...value.params, regime_confirm_days: v } }))}</>;
@@ -49,13 +50,13 @@ function SettingCard({ item }: { item: RiskControlSetting }) {
   const systemDefault = restoredRiskDefault(item);
   const edit = (next: RiskControlSetting) => { save.reset(); setDraft(next); };
   return <section className="panel risk-setting-card" id={`risk-setting-${item.control}`} style={{ padding: 16 }} data-testid={`risk-setting-${item.control}`}>
-    <h3>{RISK_CONTROL[item.control]} <Tag>{item.source === 'system' ? '系统有效值' : '本人覆盖值'}</Tag></h3>
+    <h3>{(labelOf(RISK_CONTROL, item.control) ?? '未知')} <Tag>{item.source === 'system' ? '系统有效值' : '本人覆盖值'}</Tag></h3>
     <fieldset disabled={save.isPending} style={{ border: 0, padding: 0 }}>
-      <Checkbox checked={draft.enabled} onChange={(e) => edit({ ...draft, enabled: e.target.checked })}>启用 {RISK_CONTROL[item.control]}</Checkbox>
+      <Checkbox checked={draft.enabled} onChange={(e) => edit({ ...draft, enabled: e.target.checked })}>启用 {(labelOf(RISK_CONTROL, item.control) ?? '未知')}</Checkbox>
       {item.control === 'stop_take' && !draft.enabled ? <Alert type="warning" title="已关闭止损止盈风控；不再施加该项门控，请自行核实计划条件。" /> : null}
       <SettingFields value={draft} change={edit} />
-      <Button loading={save.isPending} disabled={issues.length > 0} onClick={() => { if (!issues.length) save.mutate(draft); }}>保存 {RISK_CONTROL[item.control]}</Button>
-      <Button disabled={systemDefault === null} onClick={() => { if (systemDefault) edit(structuredClone(systemDefault)); }}>恢复默认 {RISK_CONTROL[item.control]}</Button>
+      <Button loading={save.isPending} disabled={issues.length > 0} onClick={() => { if (!issues.length) save.mutate(draft); }}>保存 {(labelOf(RISK_CONTROL, item.control) ?? '未知')}</Button>
+      <Button disabled={systemDefault === null} onClick={() => { if (systemDefault) edit(structuredClone(systemDefault)); }}>恢复默认 {(labelOf(RISK_CONTROL, item.control) ?? '未知')}</Button>
       {systemDefault === null ? <p className="muted small">响应未提供可信的同形 default，无法恢复；不以有效值或契约参考值冒充系统默认值。</p> : null}
       {issues.length ? <div role="alert" data-testid={`risk-param-errors-${item.control}`}>{issues.map((issue) => <p key={issue.field + issue.kind}><code>{issue.field}</code>：{issue.message}</p>)}</div> : null}
     </fieldset>
@@ -70,7 +71,7 @@ function SettingsPanel() {
   return <section aria-labelledby="risk-settings-title" data-testid="risk-settings-overview">
     <h3 id="risk-settings-title">有效风控设置</h3>
     <p className="small muted">以下为服务端当前有效设置。编辑后需点击对应保存按钮；当前评价与历史事件分别查看。</p>
-    <nav className="report-nav small" aria-label="风控设置定位">{settings.data.map((s) => <a key={s.control} href={`#risk-setting-${s.control}`}>{RISK_CONTROL[s.control]} · {s.enabled ? '已启用' : '已关闭'}</a>)}</nav>
+    <nav className="report-nav small" aria-label="风控设置定位">{settings.data.map((s) => <a key={s.control} href={`#risk-setting-${s.control}`}>{(labelOf(RISK_CONTROL, s.control) ?? '未知')} · {s.enabled ? '已启用' : '已关闭'}</a>)}</nav>
     <div className="stock-grid">{settings.data.map((s) => <SettingCard key={s.control} item={s} />)}</div>
   </section>;
 }
@@ -85,12 +86,12 @@ function EvaluationPanel({ initialCode }: { initialCode: string }) {
     <Button onClick={() => { const next = draft.trim().toUpperCase(); if (next === code) void q.refetch(); else setCode(next); }} disabled={!draft.trim()}>读取当前评价</Button>
     {q.isFetching ? <Loading /> : null}{q.isError ? <ErrorBox error={q.error} /> : null}
     {q.data && !q.isError ? <><p>{q.data.name} · {q.data.security_code} · 评价时间 {fmtTime(q.data.evaluated_at)} · 快照 {q.data.snapshot_id ?? '—（完全无数据）'}</p><DataStatusTag status={q.data.data_status} />
-      {q.data.gaps.length > 0 ? <div role="alert" data-testid="risk-evaluation-gaps"><p>当前评价存在缺口，不能视为通过或正常；请核实候选信号与计划条件。</p>{q.data.gaps.map((g, i) => <p key={`${g.key}-${i}`}>缺口 · {GAP_REASON[g.reason]}：{g.message}</p>)}</div> : null}
-      {q.data.controls.map((c) => <div className="stc-sec" key={c.control} data-testid={`risk-state-${c.control}`}><b>{RISK_CONTROL[c.control]}</b> · {c.state === 'ok' && c.gaps.length > 0 ? '输入存在缺口，不能判为通过' : STATE[c.state]}
+      {q.data.gaps.length > 0 ? <div role="alert" data-testid="risk-evaluation-gaps"><p>当前评价存在缺口，不能视为通过或正常；请核实候选信号与计划条件。</p>{q.data.gaps.map((g, i) => <p key={`${g.key}-${i}`}>缺口 · {(labelOf(GAP_REASON, g.reason) ?? '未知')}：{g.message}</p>)}</div> : null}
+      {q.data.controls.map((c) => <div className="stc-sec" key={c.control} data-testid={`risk-state-${c.control}`}><b>{(labelOf(RISK_CONTROL, c.control) ?? '未知')}</b> · {c.state === 'ok' && c.gaps.length > 0 ? '输入存在缺口，不能判为通过' : (labelOf(STATE, c.state) ?? '未知')}
         {c.control === 'total_exposure' && c.state === 'unknown' ? <p>大盘环境未知；不以卡片指数环境替代，不施加 RC3 门控。</p> : null}
         {c.flags.map((flag, i) => <RiskFlagView key={i} flag={flag} evidence={q.data?.evidence ?? []} />)}
         {(['position_cap', 'sector_concentration'] as const).some((key) => key === c.control) && (c.state === 'unknown' || c.flags.some((f) => f.quantity_cap === null)) ? <p>可新增数量：—（额度未知，不代表0或无限额度）</p> : null}
-        {c.gaps.map((g, i) => <p className="small" key={`${g.key}-${i}`}>缺口 · {GAP_REASON[g.reason]}：{g.message}</p>)}
+        {c.gaps.map((g, i) => <p className="small" key={`${g.key}-${i}`}>缺口 · {(labelOf(GAP_REASON, g.reason) ?? '未知')}：{g.message}</p>)}
       </div>)}
     </> : null}
   </section>;
@@ -105,7 +106,7 @@ function EventsPanel() {
   return <section className="panel" style={{ padding: 16 }} data-testid="risk-events">
     <h3>风控事件（只读）</h3>
     <Select aria-label="风控事件状态" value={status} onChange={setStatus} options={[{ value: 'active', label: '未解除' }, { value: 'cleared', label: '已解除' }, { value: '', label: '全部' }]} style={{ width: 140 }} />
-    <Select aria-label="风控事件类型" value={control} onChange={setControl} options={[{ value: '', label: '全部风控' }, ...ENUMS.risk_control.map((value) => ({ value, label: RISK_CONTROL[value] }))]} style={{ width: 200 }} />
+    <Select aria-label="风控事件类型" value={control} onChange={setControl} options={[{ value: '', label: '全部风控' }, ...ENUMS.risk_control.map((value) => ({ value, label: (labelOf(RISK_CONTROL, value) ?? '未知') }))]} style={{ width: 200 }} />
     <Input aria-label="风控事件证券代码" value={code} onChange={(e) => setCode(e.target.value.trim().toUpperCase())} placeholder="全部证券" style={{ maxWidth: 180 }} />
     <Input aria-label="风控事件起始时间" value={since} onChange={(e) => setSince(e.target.value)} placeholder="ISO 日期时间（可选）" style={{ maxWidth: 240 }} />
     {events.isPending ? <Loading /> : null}{events.isError ? <ErrorBox error={events.error} /> : null}

@@ -12,7 +12,10 @@ plan §3A.1/§8.0：单元与集成测试都用 PostgreSQL（testcontainers）�
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+import secrets
+from collections.abc import Callable, Iterator
+from ipaddress import IPv4Network
+from itertools import chain
 
 import pytest
 
@@ -82,6 +85,22 @@ def redis_url() -> Iterator[str]:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(6379)
         yield f"redis://{host}:{port}/0"
+
+
+@pytest.fixture(scope="session")
+def next_auth_client_ip() -> Callable[[], str]:
+    """从同一池分配测试来源，防止动态导入的认证夹具复用 Redis 限流桶。"""
+    network = IPv4Network("198.18.0.0/15")
+    start = secrets.randbelow(network.num_addresses)
+    offsets = chain(range(start, network.num_addresses), range(start))
+
+    def allocate() -> str:
+        offset = next(offsets, None)
+        if offset is None:
+            raise RuntimeError("认证测试来源 IP 池耗尽")
+        return str(network.network_address + offset)
+
+    return allocate
 
 
 @pytest.fixture()

@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { Link, useSearchParams } from 'react-router';
 import { Alert, Segmented, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { useAdminSecurityReconciliation, type ReconFilter } from '../../api/adminQueries';
@@ -121,7 +122,7 @@ export function AdminSecurityReconciliationPage() {
           style={{ minWidth: 260 }}
           value={filter.kinds}
           onChange={(v: SecurityReconciliationKind[]) => update({ kinds: v })}
-          options={KINDS.map((k) => ({ value: k, label: RECON_KIND[k].text }))}
+          options={KINDS.map((k) => ({ value: k, label: labelOf(RECON_KIND, k)?.text ?? '未知' }))}
           data-testid="recon-kind"
         />
         <Select
@@ -130,7 +131,7 @@ export function AdminSecurityReconciliationPage() {
           style={{ minWidth: 160 }}
           value={filter.source ?? undefined}
           onChange={(v: SecurityReconciliationSource | undefined) => update({ source: v ?? null })}
-          options={SOURCES.map((s) => ({ value: s, label: RECON_SOURCE[s] }))}
+          options={SOURCES.map((s) => ({ value: s, label: (labelOf(RECON_SOURCE, s) ?? '未知') }))}
           data-testid="recon-source"
         />
       </Space>
