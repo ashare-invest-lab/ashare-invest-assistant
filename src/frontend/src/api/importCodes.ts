@@ -83,7 +83,7 @@ export const IMPORT_TONE: Record<ImportTone, { tag: string; label: string; rowCl
 
 /** 用 params 渲染模板中的 {param} 占位；缺参数时保留占位符原样，便于发现问题 */
 export function renderTemplate(template: string, params: Record<string, unknown> | null | undefined): string {
-  return template.replace(/\{([a-z_]+)\}/g, (m, k: string) => (params && params[k] !== undefined && params[k] !== null ? String(params[k]) : m));
+  return template.replace(/\{([a-z_]+)\}/g, (m, k: string) => (params && Object.hasOwn(params, k) && params[k] !== undefined && params[k] !== null ? String(params[k]) : m));
 }
 
 /** 契约外的未知码兜底：按 severity 着色，标题显示原码 */

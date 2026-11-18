@@ -185,18 +185,16 @@ def sql(authdb: SimpleNamespace) -> Callable[..., Any]:
     return _sql
 
 
-def random_client_ip() -> str:
-    """测试用来源 IP（198.18.0.0/15 基准测试网段，不在可信代理内）：每个客户端各用一个，
-    使 T-B03a 的按 IP 限速（Redis 键跨用例、跨运行存活）只在用例有意为之时触发。"""
-    n = secrets.randbelow(1 << 17)
-    return f"198.{18 + (n >> 16)}.{(n >> 8) & 0xFF}.{n & 0xFF}"
-
-
 @pytest.fixture
-def app_client(authdb: SimpleNamespace, backend: SimpleNamespace, make_settings: Callable[..., Any]) -> Iterator[Callable[..., Any]]:
+def app_client(
+    authdb: SimpleNamespace,
+    backend: SimpleNamespace,
+    make_settings: Callable[..., Any],
+    next_auth_client_ip: Callable[[], str],
+) -> Iterator[Callable[..., Any]]:
     """``app_client(mode="open", secure=False, ip=None, **settings)`` → TestClient（真实 PG/Redis，进程内）。
 
-    ``ip`` 为直连来源地址；不给则每个客户端随机一个（见 :func:`random_client_ip`）。
+    ``ip`` 为直连来源地址；默认由测试会话分配，每个客户端各用一个地址。
     """
     from fastapi.testclient import TestClient
 
@@ -209,7 +207,7 @@ def app_client(authdb: SimpleNamespace, backend: SimpleNamespace, make_settings:
             overrides["session_cookie_secure"] = secure
         overrides.update(kw)
         app = backend.main.create_app(make_settings(**overrides))
-        c = TestClient(app, base_url=base_url, raise_server_exceptions=False, client=(ip or random_client_ip(), 50000))
+        c = TestClient(app, base_url=base_url, raise_server_exceptions=False, client=(ip or next_auth_client_ip(), 50000))
         clients.append(c)
         return c
 
@@ -980,11 +978,12 @@ def test_register_rate_limited_per_ip(app_client: Callable[..., Any]) -> None:
 
 
 def test_client_supplied_x_real_ip_not_trusted(
-    session: Callable[..., SimpleNamespace], app_client: Callable[..., Any], sql: Callable[..., Any]
+    session: Callable[..., SimpleNamespace], app_client: Callable[..., Any], sql: Callable[..., Any],
+    next_auth_client_ip: Callable[[], str],
 ) -> None:
     """直连客户端自带的 X-Real-IP 不应改变审计/限速用的来源 IP（否则可伪造来源绕过按 IP 限速）。"""
     s = session()
-    ip = random_client_ip()  # 两次请求同一直连来源；只有 X-Real-IP 不同
+    ip = next_auth_client_ip()  # 两次请求同一直连来源；只有 X-Real-IP 不同
     for hdr in ({}, {"X-Real-IP": "203.0.113." + str(secrets.randbelow(250) + 1)}):
         app_client(ip=ip).post(f"{API}/auth/login", json={"username": s.user.username, "password": new_pw()}, headers=hdr)
     hashes = [h for (h,) in sql(
