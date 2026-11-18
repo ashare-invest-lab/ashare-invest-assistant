@@ -269,7 +269,7 @@
     {
       "path": "docs/strategies/T-R28/test_check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 7eed78d docs(strategies): T-R31 lock F21 ready thresholds and reject overrides; T-R77 offline subprocess coverage for skipped_no_db, --require-db, override and hash-tamper rejection, including python -O"
     },
     {
       "path": "docs/strategies/T-R31/checklist_reconcile.md",
@@ -385,7 +385,7 @@
     {
       "path": "docs/strategies/check_f21_ready.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
-      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger)"
+      "note": "T-A78 ①b feature/tool/doc not strategy identity; source 73168e7 docs(strategies): T-R28 W-01 F21 data-readiness detector (read-only, no gate trigger); T-R77 validates locked thresholds before skipped_no_db (ready=null, unverified); --require-db preserves missing-DB failure; F21 remains declared"
     },
     {
       "path": "docs/strategies/check_p2n01_dimension_mapping.py",
@@ -906,6 +906,91 @@
       "path": "docs/strategies/T-R74/param_audit.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/audit_public_lists.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/check_result.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/sources.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/st_current.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/termination_current.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R1/test_audit_public_lists.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/audit_bse_code_map.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/bse_code_mapping.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/check_result.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/r_r1_recheck.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/sources.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/test_audit_bse_code_map.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R88b：st_pullback_ma v2 升版前原文冻结；历史身份，不晋级"
     }
   ],
   "records": [
@@ -1013,7 +1098,7 @@
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 2,
+          "line": 3,
           "quote": "v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`"
         }
       ],
@@ -1277,11 +1362,11 @@
       "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
     },
     {
-      "record_id": "st_pullback_ma@2:current_formal_L1_with_L2_spec",
+      "record_id": "st_pullback_ma@3:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/st_pullback_ma.md",
       "key": "st_pullback_ma",
-      "version_no": 2,
-      "document_version": "v2",
+      "version_no": 3,
+      "document_version": "v3",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "short"
@@ -1294,17 +1379,17 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 3,
+          "line": 4,
           "quote": "> 正式卡"
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 29,
-          "quote": "version_no: 2"
+          "line": 45,
+          "quote": "version_no: 3"
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 32,
+          "line": 48,
           "quote": "horizons: [short]"
         }
       ],
@@ -2424,6 +2509,46 @@
       ],
       "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
       "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "st_pullback_ma@2:historical_frozen",
+      "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+      "key": "st_pullback_ma",
+      "version_no": 2,
+      "document_version": "v2",
+      "scope": "historical_frozen",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级；正式≠G7批准≠运行态",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+          "line": 3,
+          "quote": "> 正式卡"
+        },
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+          "line": 29,
+          "quote": "version_no: 2"
+        },
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+          "line": 32,
+          "quote": "horizons: [short]"
+        },
+        {
+          "path": "docs/strategies/cards/st_pullback_ma.md",
+          "line": 2,
+          "quote": "v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
     }
   ],
   "excluded_render_mirrors": [
@@ -2484,10 +2609,10 @@
     }
   ],
   "stats": {
-    "identity_records": 45,
-    "source_identity_files": 23,
+    "identity_records": 46,
+    "source_identity_files": 24,
     "scope_counts": {
-      "historical_frozen": 4,
+      "historical_frozen": 5,
       "current_formal_L1_with_L2_spec": 3,
       "research_blocked_not_importable": 15,
       "catalog_research_not_formal_card": 23
@@ -2495,7 +2620,7 @@
     "explicit_single_distribution": {
       "swing": 11,
       "long": 8,
-      "short": 10,
+      "short": 11,
       "intraday_t": 7
     },
     "multi_records": 9,
@@ -2661,5 +2786,23 @@
     "identity_records_unchanged": true,
     "runtime_changed": false,
     "change": "scope 196→197（合入 T-R73b 后）；身份45、来源身份文件23、records/stats不变"
+  },
+  "t_r71c_refresh": {
+    "basis": "T-R71c 用户任务：登记 main 上 R-R1 公开名单审计 8 文件，修复 census",
+    "previous_scope_files": 197,
+    "scope_files": 205,
+    "added_paths": [
+      "docs/strategies/R-R1/README.md",
+      "docs/strategies/R-R1/audit_public_lists.py",
+      "docs/strategies/R-R1/check_result.json",
+      "docs/strategies/R-R1/differences.csv",
+      "docs/strategies/R-R1/sources.json",
+      "docs/strategies/R-R1/st_current.csv",
+      "docs/strategies/R-R1/termination_current.csv",
+      "docs/strategies/R-R1/test_audit_public_lists.py"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 197→205：登记 main 上 R-R1 公开名单审计 8 文件，T-R71c；来源提交 bec079a；身份45、来源身份文件23、records/stats不变"
   }
 }

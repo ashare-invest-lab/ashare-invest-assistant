@@ -6,7 +6,7 @@ import { ApiError } from '../../api/client';
 import { stateErrorText } from '../../lib/stateTransition';
 import { useConfirmPlanDraft, useCreatePlanDraft, useDiscardPlanDraft, usePlanDraft } from '../../api/planQueries';
 import type { ChecklistAnswerValue, PlanDraft } from '../../api/planTypes';
-import { ActionBadge, ErrorBox, Loading } from '../../components/common';
+import { ActionBadge, ErrorBox, KeyTip, Loading } from '../../components/common';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { EPISTEMIC, PLAN_DRAFT_STATUS, RISK_CONTROL, RISK_LEVEL } from '../../i18n/labels';
 import { fmtNum, fmtTime } from '../../lib/format';
@@ -111,7 +111,7 @@ function Figures({ d }: { d: PlanDraft }) {
         <div><label>止损</label><b className="mono down">{d.stops.stop_loss ?? '—'}</b></div>
         <div><label>止盈</label><b className="mono up">{d.stops.take_profit ?? '—'}</b></div>
         <div><label>时间止损</label><b className="mono">{d.stops.time_stop_days != null ? `${d.stops.time_stop_days} 日` : '—'}</b></div>
-        <div><label>最大亏损 <Tag>估算</Tag></label><b className="mono">{fmtNum(d.max_loss_amount)}</b><span className="muted small">占总资产 {d.max_loss_pct}%</span></div>
+        <div><label>最大亏损 <Tag>估算</Tag></label><b className="mono">{fmtNum(d.max_loss_amount)}</b><span className="muted small">占总资产 {d.max_loss_pct == null ? '—' : `${d.max_loss_pct}%`}</span></div>
         <div><label>费用 <Tag color={EPISTEMIC[d.fee_estimate.epistemic_type].color}>{EPISTEMIC[d.fee_estimate.epistemic_type].text}</Tag></label><b className="mono">{fmtNum(d.fee_estimate.amount)}</b></div>
       </div>
       <h4 style={{ marginTop: 8 }}>生成时的持仓与资金</h4>
@@ -119,8 +119,15 @@ function Figures({ d }: { d: PlanDraft }) {
         <div><label>持仓</label><b className="mono">{u.holding_qty}</b></div>
         <div><label>可卖</label><b className="mono">{u.sellable_qty}</b></div>
         <div><label>可用资金</label><b className="mono">{fmtNum(u.cash)}</b></div>
-        <div><label>所属行业占比</label><b className="mono">{u.sector_pct}%</b></div>
+        <div><label>所属行业占比</label><b className="mono">{u.sector_pct == null ? '—' : `${u.sector_pct}%`}</b></div>
       </div>
+      {d.max_loss_amount == null || d.max_loss_pct == null ? (
+        <KeyTip lines={[
+          ...(d.max_loss_amount == null ? [d.stops.stop_loss == null ? '未提供止损价，无法估算最大亏损金额。' : '未提供最大亏损金额。'] : []),
+          ...(u.gaps?.some((g) => g.reason === 'rc1_disabled') ? ['止损风控已关闭，不主动监测。'] : []),
+          ...(d.max_loss_pct == null ? [u.gaps?.some((g) => g.key === 'max_loss_pct' && g.reason === 'no_source') ? '总资产未知，无法计算最大亏损占比。' : '未提供最大亏损占比。'] : []),
+        ]} className="muted small">最大亏损数据未齐</KeyTip>
+      ) : null}
       <div className="muted small">以上为生成草案那一刻的快照；下单前请在券商端核对实时价格、可用资金与可卖数量。</div>
     </section>
   );
