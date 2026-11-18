@@ -1,5 +1,5 @@
 import { useMe } from '../api/queries';
-import { hasAdminLlmUsagePage, adminLlmUsageHref, explanationFallbackText } from '../lib/explanations';
+import { tagOf, hasAdminLlmUsagePage, adminLlmUsageHref, explanationFallbackText } from '../lib/explanations';
 import { useId, useRef } from 'react';
 import type { Evidence, Explanation } from '../api/types';
 import { EPISTEMIC } from '../i18n/labels';
@@ -40,7 +40,7 @@ export function ExplanationView({ explanation, evidence, testId, title = '中文
     {records.length ? <details ref={details}>
       <summary>解释引用证据（{records.length} 项；仅本对象）</summary>
       {records.map((e, index) => <div id={anchor(index)} key={e.id} tabIndex={-1} className="stc-sec" data-testid={`${testId}-evidence-${e.id}`}>
-        <b>{e.id} · {e.key}</b> = {e.value === null ? '—（缺数据）' : String(e.value)}{e.unit ?? ''}（{EPISTEMIC[e.epistemic_type].text}）
+        <b>{e.id} · {e.key}</b> = {e.value === null ? '—（缺数据）' : String(e.value)}{e.unit ?? ''}（{tagOf(EPISTEMIC, e.epistemic_type).text}）
         <div>来源：{providerText(e)} · 数据时间：{fmtTime(e.data_as_of)} · 抓取时间：{fmtTime(e.fetched_at)}</div>
       </div>)}
     </details> : null}

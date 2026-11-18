@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Connection, Row, select
 
 from app.common.errors import AppError, ErrorCode
-from app.db.tables.market import daily_bars, securities
+from app.db.tables.market import daily_bars, securities, trading_calendar
 from app.marketdata.subresource_read import DecimalText, Gap, Shape
 from app.schemas.enums import DataStatus, GapReason, SecurityType
 
@@ -43,7 +43,7 @@ def _daily_closes(
     if local_now.time() < dt.time(15):
         latest_close_date -= dt.timedelta(days=1)
     rows = conn.execute(
-        select(v.code, v.close, v.pre_close, v.trade_date, v.fetched_at)
+        select(v.code, v.close, v.pre_close, v.trade_date, v.fetched_at, v.volume, v.amount)
         .where(
             v.code.in_(codes),
             v.source == "mairui",
@@ -65,6 +65,24 @@ def _daily_closes(
     return {row.code: row for row in rows}
 
 
+def _fresh_close_day(conn: Connection, now: dt.datetime) -> dt.date | None:
+    local = now.astimezone(BEIJING)
+    calendar = trading_calendar.c
+    is_open = conn.execute(
+        select(calendar.is_open).where(calendar.date == local.date())
+    ).scalar_one_or_none()
+    # A daily fallback cannot satisfy the realtime.yaml intraday quote threshold.
+    # Missing calendar facts and an open day's pre-close data remain stale.
+    if is_open is None or (is_open and local.time() < dt.time(15)):
+        return None
+    return conn.execute(
+        select(calendar.date)
+        .where(calendar.is_open.is_(True), calendar.date <= local.date())
+        .order_by(calendar.date.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def read_quotes(conn: Connection, owner: uuid.UUID, codes: tuple[str, ...]) -> QuotesResponse:
     # daily_snapshot -> daily_bars -> aggregates.service also imports this reader.
     from app.marketdata.daily_snapshot import active_licence_id
@@ -80,6 +98,7 @@ def read_quotes(conn: Connection, owner: uuid.UUID, codes: tuple[str, ...]) -> Q
     now = dt.datetime.now(dt.UTC)
     licence = active_licence_id(conn, owner, now)
     closes = _daily_closes(conn, codes, licence, now) if licence is not None else {}
+    fresh_day = _fresh_close_day(conn, now) if closes else None
     reason = GapReason.NO_SOURCE if licence is not None else GapReason.DATA_LICENCE_UNAVAILABLE
     message = "本人行情缓存尚无可用读取源" if licence is not None else "本人数据证书不可用"
     items: list[QuoteItem] = []
@@ -99,7 +118,15 @@ def read_quotes(conn: Connection, owner: uuid.UUID, codes: tuple[str, ...]) -> Q
                 item.change_pct = format((row.close - row.pre_close) / row.pre_close * 100, "f")
             item.t = dt.datetime.combine(row.trade_date, dt.time(15), BEIJING).isoformat()
             item.data_as_of = row.fetched_at.astimezone(BEIJING).isoformat()
-            item.data_status = DataStatus.STALE
+            item.volume = None if row.volume is None else format(row.volume, "f")
+            item.amount = None if row.amount is None else format(row.amount, "f")
+            # Cross-day backfills do not prove a close fetched on its own session.
+            item.data_status = (
+                DataStatus.FRESH
+                if row.trade_date == fresh_day
+                and row.fetched_at.astimezone(BEIJING).date() == row.trade_date
+                else DataStatus.STALE
+            )
             item.gaps = []
         items.append(item)
     return QuotesResponse(items=items)

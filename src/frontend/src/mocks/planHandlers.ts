@@ -60,17 +60,17 @@ function buildDraft(cs: CandidateSignal, id: string, status: PlanDraftStatus, cr
   else max = Math.max(sl, Math.floor(sellable / 2 / sl) * sl);
   if (min > max) min = max;
   const stop = cs.stops.stop_loss ? Number(cs.stops.stop_loss) : null;
-  const loss = sellSide ? max * (high - low) : max * (stop !== null && stop < high ? high - stop : high * 0.08);
+  const loss = stop === null ? null : sellSide ? max * (high - low) : max * (stop < high ? high - stop : high * 0.08);
   const notional = max * high;
   const fee = Math.max(5, notional * 0.00025) + notional * 0.00001 + (sellSide ? notional * 0.0005 : 0);
   const sector = sectorOf(cs.security_code);
-  const sectorPct = PORTFOLIO.exposure.sector.find((x) => x.name === sector)?.pct ?? '0.00';
+  const sectorPct = PORTFOLIO.exposure.sector.find((x) => x.name === sector)?.pct ?? null;
   return {
     id, status, signal_ids: [cs.id], security_code: cs.security_code, name: cs.name, action: cs.proposed_action,
     qty_range: { min: String(min), max: String(max), lot: String(lot) },
     price_range: { low: f2(low), high: f2(high) },
     stops: cs.stops,
-    max_loss_amount: f2(loss), max_loss_pct: f2((loss / total) * 100),
+    max_loss_amount: loss == null ? null : f2(loss), max_loss_pct: loss == null || total <= 0 ? null : f2((loss / total) * 100),
     fee_estimate: { amount: f2(fee), epistemic_type: 'estimate' },
     user_context_snapshot: { holding_qty: String(holding), sellable_qty: String(sellable), cash: f2(cash), sector_pct: sectorPct },
     risk_flags: cs.risk_flags,
@@ -99,10 +99,6 @@ export function resetPlanDrafts() {
   seq = 0;
 }
 export const draftsNow = (): PlanDraft[] => drafts;
-/** 测试辅助：改某份草案的状态（例如把待确认改成 stale） */
-export function mockSetDraftStatus(id: string, status: PlanDraftStatus) {
-  drafts = drafts.map((d) => (d.id === id ? { ...d, status } : d));
-}
 
 const EXPLAINABLE_ROLES = new Set(['entry', 'exit', 'weakening']);
 

@@ -1,3 +1,4 @@
+import { tagOf } from '../../lib/explanations';
 import { Input, Select, Space, Table, Tag } from 'antd';
 import { Link, useSearchParams } from 'react-router';
 import { ENUMS, type PlanDraftStatus } from '../../api/enums';
@@ -42,7 +43,7 @@ export function PlanDraftsPage() {
           placeholder="全部状态"
           value={f.status}
           onChange={(v) => setParam('status', v.join(','))}
-          options={STATUSES.map((s) => ({ value: s, label: PLAN_DRAFT_STATUS[s].text }))}
+          options={STATUSES.map((s) => ({ value: s, label: tagOf(PLAN_DRAFT_STATUS, s).text }))}
           data-testid="filter-status"
         />
         <Input.Search
@@ -73,13 +74,13 @@ export function PlanDraftsPage() {
           { title: '规则信号', dataIndex: 'action', width: 90, render: (_v, r) => <ActionBadge action={r.action} /> },
           {
             title: '状态', dataIndex: 'status', width: 100,
-            render: (s: PlanDraftStatus) => <Tag color={PLAN_DRAFT_STATUS[s].color} data-testid="draft-status">{PLAN_DRAFT_STATUS[s].text}</Tag>,
+            render: (s: PlanDraftStatus) => <Tag color={tagOf(PLAN_DRAFT_STATUS, s).color} data-testid="draft-status">{tagOf(PLAN_DRAFT_STATUS, s).text}</Tag>,
           },
           { title: '数量区间（股）', key: 'qty', width: 140, align: 'right', render: (_v, r) => <span className="mono">{r.qty_range.min}–{r.qty_range.max}</span> },
           { title: '价格区间', key: 'px', width: 130, align: 'right', render: (_v, r) => <span className="mono">{r.price_range.low}–{r.price_range.high}</span> },
           {
             title: '最大亏损（估算）', key: 'loss', width: 150, align: 'right',
-            render: (_v, r) => <span className="mono">{fmtNum(r.max_loss_amount)} <span className="muted">({r.max_loss_pct}%)</span></span>,
+            render: (_v, r) => <span className="mono">{fmtNum(r.max_loss_amount)} <span className="muted">({r.max_loss_pct == null ? '—' : `${r.max_loss_pct}%`})</span></span>,
           },
           { title: '有效至', dataIndex: 'valid_until', width: 130, render: (v: string | null) => <span className="mono small">{v ? fmtTime(v).slice(5) : '—'}</span> },
           { title: '生成时间', dataIndex: 'created_at', width: 130, render: (v: string) => <span className="mono small">{fmtTime(v).slice(5)}</span> },

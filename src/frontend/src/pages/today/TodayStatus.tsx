@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 /** T-F34：today 页顶部状态条、账户总览（A1/A2）、日报缺口行与无候选信号空态（契约 today-view.md §2） */
 import { Link } from 'react-router';
 import type { DailyReport, TodayResponse } from '../../api/types';
@@ -12,7 +13,7 @@ export function TodayStatusBar({ state, today }: { state: GlobalState | null; to
   if (!state || state === 'S9') return null;
   return (
     <div className="today-card today-status-bar" role="status" data-testid="today-status-bar" data-state={state}>
-      <span data-testid="today-status-text">{STATE_TEXT[state]}</span>
+      <span data-testid="today-status-text">{(labelOf(STATE_TEXT, state) ?? '未知')}</span>
       {state === 'S1' ? <> <Link to="/portfolio/import" data-testid="today-status-import">导入交割单</Link></> : null}
       {state === 'S3' ? <span className="muted small"> 交易日 <span className="mono">{today.trade_date}</span></span> : null}
       {state === 'S4' && hasSuggestion(today) ? <span data-testid="today-status-signals-updated">{S4_SIGNALS_UPDATED}</span> : null}
