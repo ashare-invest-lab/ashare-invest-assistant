@@ -1,3 +1,4 @@
+import { labelOf } from '../lib/explanations';
 import type { Horizon } from '../api/enums';
 import type { HorizonAssessment, HorizonCap } from '../api/types';
 
@@ -23,7 +24,8 @@ export const HORIZON_CAP_RULE_TEXT: Record<string, string> = {
 export const CAP_KIND_TEXT: Record<HorizonCap['kind'], string> = { gate: '证券闸门', data_missing: '数据不足' };
 
 export function capExplanation(c: HorizonCap): string {
-  if (c.rule_id && HORIZON_CAP_RULE_TEXT[c.rule_id]) return HORIZON_CAP_RULE_TEXT[c.rule_id];
+  const text = labelOf(HORIZON_CAP_RULE_TEXT, c.rule_id);
+  if (text) return text;
   if (c.kind === 'data_missing') return `缺少输入 ${c.inputs_missing.join('、') || '—'}`;
   return `闸门 ${c.rule_id ?? '—'} 命中`;
 }

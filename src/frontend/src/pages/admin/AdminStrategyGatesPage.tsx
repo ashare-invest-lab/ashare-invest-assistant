@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { promotionRows } from './promotionDisplay';
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Select, Table, Tag } from 'antd';
@@ -60,9 +61,9 @@ function GatesContent() {
       {list.isError ? <ErrorBox error={list.error} /> : null}
       <Table<PromotionSummary> size="small" rowKey="review_id" pagination={false} loading={list.isFetching} dataSource={list.data?.items ?? []} columns={[
         { title: '卡片 / 版本', render: (_, r) => <>{r.card_key} · v{r.version_no}{r.lifecycle === 'simulating' ? <Tag>模拟中</Tag> : null}</> },
-        { title: '决定', render: (_, r) => <>{DECISION[r.decision]}{r.stale || r.stale_reason === 'legacy_unbound' ? <Tag color="orange">{staleText(r.stale_reason)}</Tag> : null}</> },
-        { title: 'G1–G6', render: (_, r) => r.gates.map((g) => <Tag key={g.gate} color={COLORS[g.result]}>{g.gate} {RESULT[g.result]}</Tag>) },
-        { title: 'G7', render: (_, r) => DECISION[r.g7] },
+        { title: '决定', render: (_, r) => <>{(labelOf(DECISION, r.decision) ?? '未知')}{r.stale || r.stale_reason === 'legacy_unbound' ? <Tag color="orange">{staleText(r.stale_reason)}</Tag> : null}</> },
+        { title: 'G1–G6', render: (_, r) => r.gates.map((g) => <Tag key={g.gate} color={labelOf(COLORS, g.result)}>{g.gate} {(labelOf(RESULT, g.result) ?? '未知')}</Tag>) },
+        { title: 'G7', render: (_, r) => (labelOf(DECISION, r.g7) ?? '未知') },
         { title: '操作', render: (_, r) => <Button onClick={() => open(r.review_id)}>查看报告</Button> },
       ]} />
       <Button disabled={!history.length || list.isFetching} onClick={() => { setCursor(history[history.length - 1]); setHistory(history.slice(0, -1)); }}>上一页</Button>
@@ -106,10 +107,10 @@ function ReportContent({ id }: { id: string }) {
     {report.data ? <>
       {report.data.stale || report.data.stale_reason === 'legacy_unbound' ? <Alert type="warning" title={staleText(report.data.stale_reason)} /> : null}
       <p className="muted">绑定版本：{report.data.version_id ?? '—（历史审核未绑定版本）'} · v{report.data.version_no} · 内容哈希：{report.data.content_sha256 ?? '—（历史审核未绑定内容哈希，不补算）'}</p>
-      <div className="panel-head"><span className="panel-title">逐项结果</span><Tag>{DECISION[report.data.decision]}</Tag></div>
+      <div className="panel-head"><span className="panel-title">逐项结果</span><Tag>{(labelOf(DECISION, report.data.decision) ?? '未知')}</Tag></div>
       <Table<GateResultEntry> size="small" rowKey="gate" pagination={false} dataSource={rows} columns={[
         { title: '门禁', dataIndex: 'gate', width: 80 },
-        { title: '结果', width: 100, render: (_, g) => <Tag color={COLORS[g.result]}>{RESULT[g.result]}</Tag> },
+        { title: '结果', width: 100, render: (_, g) => <Tag color={labelOf(COLORS, g.result)}>{(labelOf(RESULT, g.result) ?? '未知')}</Tag> },
         { title: '说明 / 缺口', dataIndex: 'detail' },
       ]} />
       <section className="panel" style={{ padding: 12 }}>
@@ -117,7 +118,7 @@ function ReportContent({ id }: { id: string }) {
         <div className="stat-grid">
           <div><label>触发率</label><StatValue s={report.data.g6_report.trigger_rate} kind="raw" /></div>
           <div><label>覆盖率</label><StatValue s={report.data.g6_report.coverage} kind="raw" /></div>
-          <div><label>最大 Jaccard</label><span data-testid="max-jaccard">{report.data.g6_report.max_jaccard ?? `—（${report.data.g6_report.max_jaccard_null_reason ? NULL_REASON[report.data.g6_report.max_jaccard_null_reason] : '原因缺失'}）`}</span></div>
+          <div><label>最大 Jaccard</label><span data-testid="max-jaccard">{report.data.g6_report.max_jaccard ?? `—（${report.data.g6_report.max_jaccard_null_reason ? (labelOf(NULL_REASON, report.data.g6_report.max_jaccard_null_reason) ?? '未知') : '原因缺失'}）`}</span></div>
           <div><label>每分钟配额增量</label><span data-testid="quota-delta-per-min">{report.data.g6_report.quota_delta_per_min ?? '—'}</span></div>
         </div>
         <h4>夹具回放</h4>
