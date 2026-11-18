@@ -5,18 +5,15 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
-from contextlib import contextmanager
-import hashlib
 import importlib.util
-import io
 import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 import uuid
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -736,53 +733,23 @@ def test_pn06_entry_history_supervisor(tmp_path, monkeypatch):
     assert module.main(argv) == 1
 
 def test_pn06_entry_day_runner_ps1(tmp_path):
-    # 原脚本、临时包与docker替身；只核默认/显式Before，不接触真实库。
-    members = {'day_2030.csv': f'code,trade_date\n{CODE_A},{D0}\n', 'day_2031.csv': f'code,trade_date\n{CODE_A},{D2}\n', 'tb143_load_day.sql': (BACKEND / 'probes/tb143_load_day.sql').read_text(encoding='utf-8')}
-    members['SUMS'] = ''.join((hashlib.sha256(v.encode()).hexdigest() + '  ' + k + '\n' for k, v in members.items()))
-    bundles = []
-    for index in range(5):
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
-            if index == 0:
-                for name, text in members.items():
-                    raw = text.encode(); info = tarfile.TarInfo(name); info.size = len(raw); bundle.addfile(info, io.BytesIO(raw))
-        data = buffer.getvalue(); bundles.append(data); (tmp_path / f'b{index + 1}.tgz').write_bytes(data)
-    combined = b''.join(bundles); (tmp_path / 'all.bin').write_bytes(combined); empty = hashlib.sha256(b'').hexdigest(); (tmp_path / 'PARTS').write_text(''.join(f'{empty}  p{n:02}\n' for n in range(57)))
-    for n in range(57):
-        (tmp_path / f"p{n:02}").write_bytes(b"")
-    (tmp_path / 'BUNDLES').write_text(''.join((f'{hashlib.sha256(x).hexdigest()}  b{n}.tgz\n' for n, x in enumerate(bundles, 1))))
-    fake = tmp_path / "docker.py"
-    fake.write_text(
-        "import json,os,sys\nopen(os.environ['PN06_LOG'],'a').write(json.dumps(sys.argv[1:])+'\\n')\n"
-        "if 'find' in sys.argv: print('./day_2030.csv\\n./day_2031.csv')\n"
-        "if 'psql' in sys.argv:\n"
-        "    print('1 | 1 | 0')\n"
-        "    print('blocked_bj_unconfirmed | 0')\n",
-        encoding="utf-8",
-    )
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    if os.name == 'nt':
-        (bindir / 'docker.cmd').write_text(f'@"{sys.executable}" "{fake}" %*\n', encoding='utf-8')
-    else:
-        command = bindir / 'docker'
-        command.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" "$@"\n')
-        command.chmod(0o755)
-    log = tmp_path / "calls.jsonl"
-    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ['PATH'], PN06_LOG=str(log))
+    # 旧 runner 已停用，入口必须明确拒绝且不能触碰 Docker 或清理产物。
     shell = shutil.which("pwsh") or shutil.which("powershell")
-    for before in (None, str(D2)):
-        case = tmp_path / ('default' if before is None else 'explicit'); case.mkdir(); names = ['all.bin', 'PARTS', 'BUNDLES']; names += [f'b{n}.tgz' for n in range(1, 6)] + [f'p{n:02}' for n in range(57)]
-        for name in names:
-            shutil.copy2(tmp_path / name, case / name)
-        argv = [shell, '-NoProfile', '-File', str(BACKEND / 'probes/tb143_day_load_runner.ps1')]
-        argv += ["-Dir", str(case), "-AllSha", hashlib.sha256(combined).hexdigest()]
-        argv += ['-BundleSizes', ','.join(str(len(x)) for x in bundles), '-Lock', str(case / 'lock')]
-        argv += ["-Log", str(case / "run.log"), "-PauseSeconds", "0"]
-        if before:
-            argv += ["-Before", before]
-        done = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=30, env=env); assert done.returncode == 0, done.stdout + done.stderr
-    calls = [json.loads(x) for x in log.read_text().splitlines()]; psql = [x for x in calls if 'psql' in x]; assert any('before=2023-11-13' in a for x in psql for a in x); assert any('before=' + str(D2) in a for x in psql for a in x)
+    if shell is None:
+        pytest.skip("需要 PowerShell 以验证停用入口")
+    done = subprocess.run(
+        [shell, "-NoProfile", "-File", str(BACKEND / "probes/tb143_day_load_runner.ps1"),
+         "-Dir", str(tmp_path), "-AllSha", "a" * 64, "-BundleSizes", "1",
+         "-Lock", str(tmp_path / "lock"), "-Log", str(tmp_path / "run.log"),
+         "-PauseSeconds", "0"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert done.returncode == 1
+    assert "legacy tb143 load path is disabled" in done.stdout + done.stderr
+    assert not (tmp_path / "lock").exists() and not (tmp_path / "run.log").exists()
 
 def _probe_schema(conn):
     schema = "pn06_" + uuid.uuid4().hex
@@ -804,16 +771,19 @@ def _run_sql(conn, schema, name, before="2025-01-01"):
     path = ROOT / "tests/backend/unit/test_tb143_multi_source_pg.py"; spec = importlib.util.spec_from_file_location("pn06_tb143_sql", path)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     module._load(conn, schema, meta=name == "tb143_load_meta.sql", before=before)
-    counts = conn.execute("SELECT * FROM load_counts").fetchall()
+    if name == "tb143_load_day.sql":
+        result = conn.execute("SELECT count(*) FROM day_stage").fetchone()
+    else:
+        result = conn.execute("SELECT count(*) FROM ex_rights_events").fetchone()
     conn.execute("DROP VIEW IF EXISTS catalog_effective, mairui_count")
     conn.execute('DROP TABLE IF EXISTS gbbq_stage, catalog_stage, day_stage, load_params, load_counts, mairui_before, mairui_after')
-    return counts
+    return result
 
 def test_pn06_entry_load_day_sql(pg_conn):
     schema = _probe_schema(pg_conn)
     calendars = pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone()
-    # T-B163 在 candidates/inserted/skipped 后新增 blocked_bj 计数。
-    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == [(1, 1, 0, 0)]
+    # 当前 SQL 入口只负责校验并填充临时 staging，写库统计由公共 writer 返回。
+    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == (1,)
     source = pg_conn.execute(f'SELECT source FROM "{schema}".daily_bars').fetchone()
     assert source == ("tdx_local",)
     with (
