@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+from contextlib import contextmanager
 import hashlib
 import importlib.util
 import io
@@ -93,7 +94,7 @@ from app.workers.daily import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, insert, select
+from sqlalchemy import create_engine, delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -150,14 +151,85 @@ def _put_pg(conn, table, fields, *values):
 def pn06_engine(pg_url: str):
     cfg = Config(str(BACKEND / 'alembic.ini')); cfg.cmd_opts = SimpleNamespace(x=['url=' + pg_url]); command.upgrade(cfg, 'head'); engine = create_engine(pg_url); yield engine; engine.dispose()
 
+
+def _calendar_dates(connection):
+    return {row.date for row in connection.execute(select(trading_calendar.c.date))}
+
+
+def _remove_owned_calendar_rows(connection, baseline):
+    owned = _calendar_dates(connection) - baseline
+    if owned:
+        connection.execute(delete(trading_calendar).where(trading_calendar.c.date.in_(owned)))
+
+
+@contextmanager
+def _pn06_calendar_isolation(engine):
+    with engine.begin() as connection:
+        baseline = _calendar_dates(connection)
+    try:
+        yield
+    finally:
+        with engine.begin() as connection:
+            _remove_owned_calendar_rows(connection, baseline)
+
+
 @pytest.fixture(autouse=True)
 def pn06_clean(pn06_engine):
-    # 只清理可变行情；合成用户/快照保留且所有断言按owner隔离，不绕过只追加守卫。
+    # 只清本组新增的日历行和可变行情；预存行与其他测试资产保持不变。
+    with _pn06_calendar_isolation(pn06_engine):
+        with pn06_engine.begin() as connection:
+            connection.execute(daily_bars.delete())
+        yield
+        with pn06_engine.begin() as connection:
+            connection.execute(daily_bars.delete())
+
+
+def test_pn06_calendar_isolation_preserves_preexisting_and_cleans_exception(pn06_engine):
+    preserved = dt.date(2030, 6, 11)
+    normal = dt.date(2099, 1, 1)
+    exceptional = dt.date(2099, 1, 2)
     with pn06_engine.begin() as connection:
-        connection.execute(daily_bars.delete())
-    yield
+        connection.execute(
+            pg_insert(trading_calendar)
+            .values(date=preserved, is_open=False)
+            .on_conflict_do_nothing()
+        )
+        original = connection.execute(
+            select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+                trading_calendar.c.date == preserved
+            )
+        ).one()
+
+    with _pn06_calendar_isolation(pn06_engine):
+        with pn06_engine.begin() as connection:
+            connection.execute(insert(trading_calendar).values(date=normal, is_open=True))
     with pn06_engine.begin() as connection:
-        connection.execute(daily_bars.delete())
+        assert connection.execute(
+            select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+                trading_calendar.c.date == preserved
+            )
+        ).one() == original
+        assert connection.execute(
+            select(trading_calendar.c.date).where(trading_calendar.c.date == normal)
+        ).first() is None
+
+    with pytest.raises(RuntimeError, match="synthetic cleanup probe"):
+        with _pn06_calendar_isolation(pn06_engine):
+            with pn06_engine.begin() as connection:
+                connection.execute(
+                    insert(trading_calendar).values(date=exceptional, is_open=True)
+                )
+            raise RuntimeError("synthetic cleanup probe")
+    with pn06_engine.begin() as connection:
+        assert connection.execute(
+            select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+                trading_calendar.c.date == preserved
+            )
+        ).one() == original
+        assert connection.execute(
+            select(trading_calendar.c.date).where(trading_calendar.c.date == exceptional)
+        ).first() is None
+
 
 @pytest.fixture(autouse=True)
 def pn06_no_external(monkeypatch):
