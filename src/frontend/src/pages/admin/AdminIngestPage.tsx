@@ -81,7 +81,7 @@ export function AdminIngestPage() {
             <Descriptions.Item label="队列">{d.queues.map((x) => `${labelOf(PRIORITY, x.priority) ?? x.priority} ${x.depth}（最久 ${x.oldest_age_s} 秒）`).join('；')}</Descriptions.Item>
             <Descriptions.Item label="24 小时上游错误">{d.errors_24h.length ? d.errors_24h.map((x) => `${x.upstream_code} × ${x.count}`).join('；') : '无'}</Descriptions.Item>
             <Descriptions.Item label="数据新鲜度">
-              {d.freshness.map((f) => <Tag key={f.dataset} color={tagOf(DATA_STATUS, f.data_status).color} data-testid={`ingest-fresh-${f.dataset}`}>{labelOf(INGEST_DATASET_NAME, f.dataset) ?? f.dataset} {dash(f.data_as_of)} {tagOf(DATA_STATUS, f.data_status).text}</Tag>)}
+              {d.freshness.map((f) => <Tag key={f.dataset} color={tagOf(DATA_STATUS, f.data_status).color} data-testid={`ingest-fresh-${f.dataset}`}>{labelOf(INGEST_DATASET_NAME, f.dataset) ?? f.dataset} {fmtTime(f.data_as_of) || '—'} {tagOf(DATA_STATUS, f.data_status).text}</Tag>)}
             </Descriptions.Item>
           </Descriptions>
         </Card>
