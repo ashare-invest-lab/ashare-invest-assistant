@@ -129,6 +129,13 @@ export function ConfidenceTag({ c }: { c: Confidence }) {
   );
 }
 
+/** 成功响应为空时的统一说明；不复用错误或加载态，也不把无记录解释为零风险。 */
+export function EmptyState({ title, description }: { title: string; description: string }) {
+  return <div className="page-empty-state" role="status" aria-label={title} data-state="empty">
+    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<><strong>{title}</strong><p>{description}</p></>} />
+  </div>;
+}
+
 export function Loading({ text = '加载中…' }: { text?: string }) {
   return <div className="loading-box">{text}</div>;
 }
@@ -139,7 +146,7 @@ export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; p
   if (isSuperseded(error)) {
     const next = (error as ApiError).details?.superseded_by as string;
     return (
-      <div className="error-box" role="alert" data-code="SUPERSEDED">
+      <div className="error-box" role="alert" data-state="error" data-code="SUPERSEDED">
         该证券代码已停用，请改用新代码 <span className="mono">{next}</span>
       </div>
     );
@@ -151,7 +158,7 @@ export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; p
   const bootstrap = isBootstrapRequired(error);
   const fresh = e?.code === 'FRESH_DATA_REQUIRED';
   return (
-    <div className={`error-box${fresh ? ' refreshing' : ''}`} role="alert" data-code={bootstrap ? BOOTSTRAP_REQUIRED_ISSUE : e?.code}>
+    <div className={`error-box${fresh ? ' refreshing' : ''}`} role="alert" data-state="error" data-code={bootstrap ? BOOTSTRAP_REQUIRED_ISSUE : e?.code}>
       {bootstrap
         ? '证券主数据尚未完成首次导入，暂时查不到证券资料；请联系管理员完成主数据导入后再试'
         : <>{fresh ? '' : `${prefix}：`}{errorText(error)}</>}
