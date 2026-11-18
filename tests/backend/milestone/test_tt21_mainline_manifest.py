@@ -16,9 +16,9 @@ def test_explicit_mainline_snapshot_has_reviewed_0036_head():
     manifest = json.loads(Path(__file__).with_name('tt21_mainline.json').read_text())
     assert manifest['baseline'] == '18e27b3aadc3bd3fb21e829f1a97c25498cbf0d2'
     assert manifest['main_migration_baseline'] == '465e02046fa8d971897603742497444f884e89a2'
-    assert manifest['expected_head'] == '0036'
-    assert len(manifest['migrations']) == 35
-    assert expected_main_head(BACKEND) == '0036'
+    assert manifest['expected_head'] == '0038'
+    assert len(manifest['migrations']) == 37
+    assert expected_main_head(BACKEND) == '0038'
 
 
 @pytest.mark.parametrize('mutation', ['change', 'add', 'remove'])
