@@ -1,12 +1,16 @@
 # A股个人投资研究与决策助手 · REST 接口契约（MVP v1）
 
-- 作者：架构师；日期：2026-11-02；版本：**v0.2.9**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定；v0.2.7 为 T-A08 补齐个股数据接口、策略实例列表与状态机、周 K 口径与 `/today` 三块；v0.2.8 为 T-A09 按证书拆分 `/admin/ingest/status`、ETF 纳入、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi；v0.2.9 为 T-A10 处理前端 T-A09/T-F17/T-F18 遗留待定项与测试 T-T23 的三项裁定，同版并入 T-A11 研究候选接口与 T-F22 管理端证书遗留裁定）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
+- 作者：架构师；日期：2026-11-02；版本：**v0.2.10**；状态：**已评审修订（T-A01，2026-11-01；v0.2.1 同日小修；v0.2.2 为 T-A02 合入研究员 T006a；v0.2.3 为 T-A03 处理前端 T-F01 遗留 21 条并同步研究员 T006b；v0.2.4 为 T-A05 合入研究员 T-B15 合规文书与问卷、前端 T-F02 评审 D1–D7；v0.2.5 为 T-A06 按用户 2026-11-02 决定删除同意流程与风险测评；v0.2.6 为 T-A07 每用户自用麦蕊证书并入 T006e 裁定；v0.2.7 为 T-A08 补齐个股数据接口、策略实例列表与状态机、周 K 口径与 `/today` 三块；v0.2.8 为 T-A09 按证书拆分 `/admin/ingest/status`、ETF 纳入、注册蜜罐字段、管理员暂停期间的证书 PUT 规则、`/admin/*` 不进 openapi；v0.2.9 为 T-A10 处理前端 T-A09/T-F17/T-F18 遗留待定项与测试 T-T23 的三项裁定，同版并入 T-A11 研究候选接口与 T-F22 管理端证书遗留裁定）；本契约是唯一事实来源**——plan.md、原型、后端 schema、测试夹具与本文不一致时，以本文为准并修改对方
 - 配套：[`plan.md`](./plan.md)（架构方案）。本契约优先于代码：FastAPI 生成的 `openapi.json` 与本文不一致时**改代码**。例外：`/admin/*` 不进 `openapi.json`（v0.2.8，§1.3），其结构以本文为准、由契约测试验证。
 - **示例值全部虚构**：代码用 `600000.SH / 000001.SZ`，ID 用 `00000000-0000-4000-8000-0000000000xx`，金额为随意整数；不含任何真实账户、股东代码、姓名、金额或委托/成交编号。证券简称一律用“示例银行”“演示电子”这类虚构名称。
 
 ---
 
 ## 0. 变更记录
+
+### v0.2.10（2026-11-19，A2b：明确停牌的 K 线缺口与日报说明）
+
+- §3 的 `gap_reason` 在末尾新增 `suspended`；`/meta/enums.version` 由 `v0.2.9` 更新为 `v0.2.10`，同步前后端枚举、文案及既有内容 ETag。适用读入口和验收见 §7.3。
 
 > T-A198（2026-11-15）：前端响应差异裁定见 §9.1；同步 §7.2、§7.3、§7.7、§7.7A、§7.7B、§7.9，保持公共枚举与契约版本不变。逐入口实现验收仍待完成。
 >
@@ -414,7 +418,7 @@
 | `severity` | `info` `attention` `important` |
 | `channel` | `in_app` `email` `wecom_app`（预留） |
 | `data_status` | `fresh` `stale` `pending` `partial` `unavailable`（含义见 1.1） |
-| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable` `not_applicable`（`gaps[].reason`，1.1；v0.2.6 加 `data_licence_unavailable`；v0.2.8 加 `not_applicable`；BACKLOG A2b 加 `suspended`：来源明确确认该证券该交易日停牌（依据该日、可追溯来源的 `daily_bars.is_suspended=true`），不是缺数故障；不得据缺行、零成交或价格不变推断停牌；停牌日不生成有效 K，不插值、不以前值补齐、不前视；停牌说明保留但不计入缺数故障数；缺行或无来源仍用 `no_source`） |
+| `gap_reason` | `no_source` `not_yet_published` `upstream_error` `quota_deferred` `user_input_missing` `data_licence_unavailable` `not_applicable` `suspended`（`gaps[].reason`，§1.1；v0.2.6 加 `data_licence_unavailable`；v0.2.8 加 `not_applicable`；v0.2.10 加 `suspended`，只用于 §7.3 规定的确证停牌） |
 | `data_provider` | `mairui` `user_import` `user_input` `system` `exchange`（`Evidence.provider` 与 `ProviderRef.provider`；`system` = 系统计算；v0.2.3 起 `Evidence.provider` 只用此枚举，没有 `local`；v0.2.7 加 `exchange` = 沪深北交易所公开证券列表（T007），只用于证券公开主数据，且只在 Q2 / T-A04 确认来源为交易所公开列表时使用；若确认改由管理员本人证书拉取，则这些字段的 `provider` 为 `mairui`） |
 | `source_kind` | `market_data` `disclosure` `user_input` `system_calc`（证据来源类别，plan 3.1） |
 | `trade_side` | `buy` `sell` |
@@ -977,6 +981,13 @@ evidence: Evidence[]
 | `plan_triggers` | `/plans?status=triggered` | `GET /plans?status=triggered` |
 | `data_gaps` | 无（`more` 恒为 false） | — |
 
+**v0.2.10 A2b 停牌缺口**
+
+- `GET /securities/{code}/bars?freq=d&adjust=none` 仅对同证券、同交易日、属于本人当前可用证书且在读取截止前可见的麦蕊日线记录，以 `is_suspended=true` 作为停牌证据。虚构缺口示例 `{"key":"bars.2026-11-18","reason":"suspended","message":"当日停牌"}`。停牌日无有效 K，也无插值或补值。同页可用历史 K 及分页规则照常返回，仅停牌且无有效 K 时 `items=[]`。
+- 无行、非停牌行缺必需字段或来源不可证仍沿用 `no_source`；零成交或平价不作为停牌依据。证书不可用仍用 `data_licence_unavailable`，未知原因仍走既有 `no_source` 兜底。其他频率、复权和报价沿用各自现有规则。
+- 新构建日报以本人在当日报告知识截止内可见的同日合格停牌证据展示说明。日报缺数故障计数及今日页从日报派生的对应计数排除 `suspended`，保留真正缺数与停牌说明。已存档的日报不回写。日报证据口径见 [日 K 快照契约 §3](contracts/daily-snapshot-from-bars.md#3-异常行为一行一种)。
+- 离线验收覆盖停牌单日、混合历史 K、缺行与缺量额、零成交或平价、异证书与晚到记录、未知原因兼容，以及日报混合缺口计数。旧 `/meta/enums` ETag 请求返回 200 和新版本内容，当前 ETag 返回 304。
+
 ### 7.4 策略：L1 卡片、特征白名单、L2 模板与生命周期
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -1183,7 +1194,7 @@ evidence: Evidence[]
 - **ingest 心跳**（ingest 写、api 读）：leader 每 15 秒 `SET ingest:heartbeat <json> EX 600`，JSON 为 `{"ts": int(Unix 秒), "instance_id": string, "leader": true, "version": string, "budget_used_last_minute": int, "queue_depth": {"p0": int, "p1": int, "p2": int}}`；api 只依赖 `ts`，其余字段供 `/admin/ingest/status` 展示。判定顺序：Redis 不可用 → `unknown`；`ingest:paused` 存在（值为 JSON `{"by", "at", "reason"}`，管理员暂停时写入）→ `paused`；心跳缺失、无法解析或 `now - ts > 120` → `stale`；否则 `ok`。键名与阈值可配置（plan 6.1 `config/ingest.yaml`，环境变量 `INGEST_HEARTBEAT_KEY`、`INGEST_PAUSED_KEY`、`INGEST_STALE_AFTER_S`）。
 - **`/meta/enums` 结构**（取值全部来自后端的集中定义，路由里不写死）：
 ```json
-{"version": "v0.2.9",
+{"version": "v0.2.10",
  "enums": {"horizon": ["intraday_t", "short", "swing", "long"], "...": []},
  "reason_codes": [{"code": "T1_NOT_SELLABLE", "release_kinds": ["time"], "check_on": ["daily_close"], "manually_releasable": false, "note": "…"}],
  "error_codes": [{"code": "NOT_FOUND", "http_status": 404, "scope": "http"}],
