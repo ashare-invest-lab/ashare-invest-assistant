@@ -17,6 +17,7 @@ vi.mock('../../components/charts/IntradayChart', () => ({ IntradayChart: () => <
 
 const rows = TERMINAL_ROWS.slice(0, 2);
 const body: TerminalResponse = {
+  account_id: TERMINAL_ACCOUNT.account_id,
   server_time: '2026-11-02T02:31:00Z', trade_date: '2026-11-02', session: 'morning',
   account: TERMINAL_ACCOUNT, rows, truncated: true, unread_notifications: 0,
 };
