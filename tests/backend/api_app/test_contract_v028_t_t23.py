@@ -50,7 +50,7 @@ make_settings = _t22.make_settings  # 补一次性 X25519 封装公钥（运行�
 API = _auth.API
 assert_err = _auth.assert_err
 fields = _auth.fields
-reg, new_name, new_pw, random_client_ip = _auth.reg, _auth.new_name, _auth.new_pw, _auth.random_client_ip
+reg, new_name, new_pw = _auth.reg, _auth.new_name, _auth.new_pw
 fake_licence, body_of, Rec, leak_count = _t22.fake_licence, _t22.body_of, _t22.Rec, _t22.leak_count
 STATUS_KEYS, ADMIN_EXTRA = _t22.STATUS_KEYS, _t22.ADMIN_EXTRA
 
@@ -65,7 +65,7 @@ REPO = Path(__file__).resolve().parents[3]
 TESTS_DIR = REPO / "tests"
 V028 = "v0.2.8"
 #: v0.2.8 规则在之后的版本仍然成立（T-T25：契约 v0.2.9 687159f 无回退）
-V028_OR_LATER = (V028, "v0.2.9")
+V028_OR_LATER = (V028, "v0.2.9", "v0.2.10")
 INGEST_STREAM = "ingest:requests"
 #: 契约 v0.2.8 §5.1 IngestLicenceStatus 键集合
 INGEST_LICENCE_KEYS = {"licence_id", "user_id", "username", "display_name", "status", "tier", "has_quant_pro", "expires_on",
@@ -688,9 +688,11 @@ def test_10_honeypot_invite_mode_does_not_consume_invite(session: Callable[..., 
     assert sql("SELECT used_count FROM app.invite_codes WHERE id=:i", i=inv_id)[0][0] == 1
 
 
-def test_10_honeypot_hits_count_toward_ip_rate_limit(app_client: Callable[..., Any], sql: Callable[..., Any]) -> None:
+def test_10_honeypot_hits_count_toward_ip_rate_limit(
+    app_client: Callable[..., Any], sql: Callable[..., Any], next_auth_client_ip: Callable[[], str],
+) -> None:
     """第 10 条：蜜罐命中同样计入 IP 限速——同一 IP 5 次命中后，第 6 次（即使是正常请求）→ 429 RATE_LIMITED。"""
-    ip = random_client_ip()
+    ip = next_auth_client_ip()
     c = app_client("open", ip=ip)
     require_v028(c, O_B03D)
     for _ in range(5):

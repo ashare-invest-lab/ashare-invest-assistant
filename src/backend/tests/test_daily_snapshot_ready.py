@@ -7,13 +7,16 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from sqlalchemy import Connection
 from sqlalchemy.dialects import postgresql
 
+from app.config import Settings
 from app.marketdata import daily_snapshot
+from app.marketdata.daily_bars import daily_bars_fetch_task
+from app.workers import jobs
 
 OWNER = uuid.UUID(int=168)
 OTHER = uuid.UUID(int=169)
@@ -134,3 +137,16 @@ def test_query_keeps_date_kind_step_and_timestamp_order(conn: MagicMock) -> None
     assert "ORDER BY app.pipeline_runs.started_at DESC, app.pipeline_runs.finished_at DESC" in str(
         statement
     )
+
+
+def test_fetch_task_rejects_backfill_without_window_before_opening_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Mock(side_effect=AssertionError("invalid backfill must not open an engine"))
+    monkeypatch.setattr(jobs, "_engine", engine)
+    settings = Settings(_env_file=None, app_env="test")
+
+    with pytest.raises(ValueError, match="window_trading_days is required for backfill"):
+        daily_bars_fetch_task(settings, DAY.isoformat(), str(OWNER), batch_kind="backfill")
+
+    engine.assert_not_called()

@@ -298,6 +298,7 @@ class GapReason(StrEnum):
     USER_INPUT_MISSING = "user_input_missing"
     DATA_LICENCE_UNAVAILABLE = "data_licence_unavailable"  # v0.2.6（T-A07）
     NOT_APPLICABLE = "not_applicable"  # v0.2.8（T-A09）：该证券类型没有此类数据（本版只用于 ETF）
+    SUSPENDED = "suspended"
 
 
 class DataProvider(StrEnum):  # Evidence.provider
@@ -789,7 +790,7 @@ class InstancePausedBy(StrEnum):  # StrategyInstance.paused_by（契约 §5.1 �
 # ---------------------------------------------------------------------------
 
 #: 本模块对应的契约版本（``/meta/enums`` 的 ``version``）
-CONTRACT_VERSION: Final = "v0.2.9"
+CONTRACT_VERSION: Final = "v0.2.10"
 
 #: ``/meta/enums`` 的 ``enums``：契约 §3 各表名 → 取值（顺序同 §3）。``reason_code`` 不在其中，
 #: 只在 ``reason_codes`` 里带解除条件展开（契约 §7.10；评审 M7）。

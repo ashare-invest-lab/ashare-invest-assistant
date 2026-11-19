@@ -5,7 +5,7 @@ import { ALERT_STATUSES, DEFAULT_ALERT_STATUS, parseStatusParam, useAlerts, type
 import type { Alert } from '../../api/planAlertTypes';
 import { CursorPager } from '../../components/CursorPager';
 import { ErrorBox } from '../../components/common';
-import { ALERT_ORIGIN, ALERT_STATUS, SEVERITY, SEVERITY_TEXT } from '../../i18n/labels';
+import { ALERT_ORIGIN, ALERT_STATUS, severityTag, SEVERITY_TEXT } from '../../i18n/labels';
 import { ALERT_STATUS_COLOR } from '../../i18n/planAlertLabels';
 import { fmtTime } from '../../lib/format';
 
@@ -70,7 +70,7 @@ export function AlertsPage() {
         locale={{ emptyText: '没有符合条件的提醒' }}
         data-testid="alerts-table"
         columns={[
-          { title: '级别', dataIndex: 'severity', width: 70, render: (s: Severity) => <Tag color={SEVERITY[s]}>{SEVERITY_TEXT[s]}</Tag> },
+          { title: '级别', dataIndex: 'severity', width: 70, render: (s: Severity) => <Tag color={severityTag(s).color}>{severityTag(s).text}</Tag> },
           { title: '提醒', key: 't', render: (_v, a) => <Link to={`/alerts/${a.id}`} data-testid={`alert-link-${a.id}`}>{a.title}</Link> },
           { title: '证券', key: 's', width: 160, render: (_v, a) => (a.security_code ? <>{a.name} <span className="mono muted">{a.security_code}</span></> : <span className="muted">账户级</span>) },
           { title: '来源', dataIndex: 'origin', width: 100, render: (o: AlertOrigin) => ALERT_ORIGIN[o] },
