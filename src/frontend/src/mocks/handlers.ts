@@ -260,21 +260,22 @@ const routeHandlers = [
     // from/to 为包含端点的交易日期；1m 的 t 是 +08:00 datetime，不能直接与 to 日期比较。
     if (from) pool = pool.filter((b) => b.t.slice(0, 10) >= from);
     if (to) pool = pool.filter((b) => b.t.slice(0, 10) <= to);
-    const viewer = currentUser();
-    const { code: suspendedCode, date: suspendedDate } = CONFIRMED_DAILY_SUSPENSION;
-    const confirmedSuspension = freq === 'd' && adjust === 'none' && code === suspendedCode
-      && viewer && licenceState(viewer.id) === 'active'
+    const rawDaily = freq === 'd' && adjust === 'none';
+    const { code: suspendedCode, date: suspendedDate, owner } = CONFIRMED_DAILY_SUSPENSION;
+    const confirmedSuspension = rawDaily && code === suspendedCode
+      && currentUser()?.id === owner && licenceState(owner) === 'active'
       && (!from || from <= suspendedDate) && (!to || to >= suspendedDate) && (!before || suspendedDate < before);
     const suspendedGap: Gap | undefined = confirmedSuspension
       ? { key: `bars.${suspendedDate}`, reason: 'suspended', message: '当日停牌（示例）' }
       : undefined;
-    // 空窗只有在合成记录明确证明停牌时才用 suspended。
+    // 空窗按证书状态与明确停牌证据区分，其余沿用无源说明。
     if (pool.length === 0) {
+      const gap = suspendedGap ?? (rawDaily && licenceOut() ? licenceGap('bars') :
+        { key: 'bars', reason: 'no_source', message: '行情读取源尚未接入（示例数据）' });
       return HttpResponse.json({
-        security_code: res.security_code, name: res.name, freq: res.freq, adjust: suspendedGap ? 'none' : res.adjust,
+        security_code: res.security_code, name: res.name, freq: res.freq, adjust: rawDaily ? 'none' : res.adjust,
         pre_close: null, adjust_as_of: null, next_before: null, items: [],
-        data_status: 'unavailable', data_as_of: null,
-        gaps: suspendedGap ? [suspendedGap] : [{ key: 'bars', reason: 'no_source', message: '行情读取源尚未接入（示例数据）' }],
+        data_status: 'unavailable', data_as_of: null, gaps: [gap],
       });
     }
     const items = pool.slice(-limit);

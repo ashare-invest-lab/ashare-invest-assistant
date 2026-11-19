@@ -79,9 +79,13 @@ it('缺行和无源保持 no_source，复权与无有效本人证书不下发确
     expect(raw.items).toEqual([]);
     expect(raw.gaps.map((g) => g.reason)).toEqual(['no_source']);
   }
+  mockLoginAs('admin');
+  const otherOwner = await apiGet<BarsResponse>(barsPath, { ...day, adjust: 'none' });
+  expect(otherOwner.gaps.map((g) => g.reason)).toEqual(['no_source']);
+  mockLoginAs('demo_user');
   setMockLicence(uid(2), { status: 'expired' });
-  const denied = await apiGet<BarsResponse>(barsPath, { ...day, adjust: 'none' });
-  expect(denied.gaps.map((g) => g.reason)).toEqual(['no_source']);
+  const expired = await apiGet<BarsResponse>(barsPath, { ...day, adjust: 'none' });
+  expect(expired.gaps.map((g) => g.reason)).toEqual(['data_licence_unavailable']);
 });
 
 it.each([false, true])('前复权明确无源时沿既有入口回落并说明停牌（单日：%s）', async (singleDay) => {
