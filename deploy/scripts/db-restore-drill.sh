@@ -13,6 +13,10 @@
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
 
+if [ "${AIA_PSQL_MODE:-}" = direct ] || [ "${PGHOST+x}" = x ] || [ "${PGPORT+x}" = x ] || [ "${PGDATABASE+x}" = x ]; then
+  aia_die "恢复演练禁止直连：不得设置 AIA_PSQL_MODE=direct 或 PGHOST/PGPORT/PGDATABASE"
+fi
+
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 IMAGE="${AIA_PG_IMAGE:-$(aia_compose_image postgres)}"
 SECURITIES="${AIA_DRILL_SECURITIES:-50}"; DAYS="${AIA_DRILL_DAYS:-20}"
@@ -58,7 +62,32 @@ start_pg() {  # $1 容器名
   done
   aia_docker logs "$1" 2>&1 | tail -20 >&2; aia_die "$1 未在 90s 内就绪"
 }
-psql_in() { local c="$1" db="$2"; shift 2; aia_psql "$c" "$db" -q "$@"; }
+aia_psql() {
+  [ "${AIA_PSQL_MODE:-}" != direct ] || aia_die "恢复演练禁止直连：不得设置 AIA_PSQL_MODE=direct"
+  local c="$1" db="$2"; shift 2
+  aia_docker exec -i -e AIA_TARGET_DB="$db" "$c" \
+    sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$AIA_TARGET_DB" "$@"' sh "$@"
+}
+psql_in() {
+  [ "${AIA_PSQL_MODE:-}" != direct ] || aia_die "恢复演练禁止直连：不得设置 AIA_PSQL_MODE=direct"
+  local c="$1" db="$2" label; shift 2
+  case "$c" in
+    direct|aia_drill|exec) aia_die "拒绝演练容器名哨兵值：$c" ;;
+  esac
+  case "$db" in
+    aia_drill|aia_drill_restored) ;;
+    postgres)
+      # postgres 仅供源容器创建演练库，不允许其他 SQL 或额外参数。
+      [ "$c" = "$SRC" ] && [ "$#" -eq 2 ] && [ "$1" = -c ] && [ "$2" = 'CREATE DATABASE aia_drill' ] \
+        || aia_die "postgres 仅允许 CREATE DATABASE aia_drill"
+      ;;
+    *) aia_die "拒绝非演练库：$db" ;;
+  esac
+  label="$(aia_docker inspect --format '{{ index .Config.Labels "aia.drill" }}' "$c")" \
+    || aia_die "无法核对演练容器标签：$c"
+  [ "$label" = "$RUN_ID" ] || aia_die "拒绝非本次演练容器：$c"
+  aia_psql "$c" "$db" -q "$@"
+}
 metrics() { psql_in "$1" "$2" -tA -F '=' <"$DRILL_SQL/metrics.sql"; }
 
 aia_log "演练 $RUN_ID：镜像 $IMAGE，样例 ${SECURITIES} 只 × ${DAYS} 个交易日 × 240 根"
@@ -135,8 +164,8 @@ COMP_CHUNKS="$(getm chunks.compressed "$WORK/dst.metrics")"
 [ "$(getm jobs.count "$WORK/dst.metrics")" -ge 9 ] || { PASS=0; aia_log "恢复库策略作业不足 9 个"; }
 grep -q '^cagg.refresh_after_restore=ok' <<<"$POST_OUT" || PASS=0
 [ "${APPLY_NONOK_2ND:-0}" = "0" ] || { PASS=0; aia_log "第二次 apply 仍有改动（非幂等）"; }
-SRC_VER="$(aia_psql "$SRC" "$SRC_DB" -qtA -c "select current_setting('server_version') || ' / timescaledb ' || extversion from pg_extension where extname='timescaledb'")"
-DST_VER="$(aia_psql "$DST" "$DST_DB" -qtA -c "select current_setting('server_version') || ' / timescaledb ' || extversion from pg_extension where extname='timescaledb'")"
+SRC_VER="$(psql_in "$SRC" "$SRC_DB" -qtA -c "select current_setting('server_version') || ' / timescaledb ' || extversion from pg_extension where extname='timescaledb'")"
+DST_VER="$(psql_in "$DST" "$DST_DB" -qtA -c "select current_setting('server_version') || ' / timescaledb ' || extversion from pg_extension where extname='timescaledb'")"
 cv() { grep -m1 "^$1=" <<<"$COMPRESS_OUT" | cut -d= -f2-; }
 BEFORE=$(cv minute_bars.before_bytes); AFTER=$(cv minute_bars.after_bytes)
 RATIO="$(awk -v b="$BEFORE" -v a="$AFTER" 'BEGIN{ if (a>0) printf "%.1f", b/a; else print "n/a" }')"
