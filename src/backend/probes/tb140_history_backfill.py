@@ -674,7 +674,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        run_batch(
+        summary = run_batch(
             codes_file=args.codes_file,
             licence_file=args.licence_file,
             counter_path=args.counter,
@@ -686,7 +686,7 @@ def main(argv: list[str] | None = None) -> int:
             et=args.et,
             licence_ids=list(args.licence_id),
         )
-        return 0
+        return 1 if summary.get("blocked_bj_unconfirmed") else 0
     except Halt:
         return 1
 

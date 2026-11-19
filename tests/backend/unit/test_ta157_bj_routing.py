@@ -195,9 +195,18 @@ class MemoryDB:
 
 
 class MemoryCursor:
+    """Minimal DB-API adapter for the public SQLAlchemy writer path.
+
+    The fixture stays synthetic and in-memory, but accepts the compiled SELECT/
+    INSERT statements emitted by ``upsert_daily_bars`` so routing tests exercise
+    the same production entry point as a psycopg connection.
+    """
+
     def __init__(self, db):
         self.db = db
         self.rowcount = 0
+        self.description = None
+        self._result_rows = []
 
     def __enter__(self):
         return self
@@ -208,8 +217,43 @@ class MemoryCursor:
     def execute(self, sql, params=None):
         text = str(sql)
         self.db.statements.append((text, params))
-        assert text.lstrip().upper().startswith("SELECT"), text
-        return self
+        upper = text.lstrip().upper()
+        values = params or {}
+        self.rowcount = 0
+        if upper.startswith("SELECT"):
+            if "COUNT(" in upper:
+                self.description = [SimpleNamespace(name="count")]
+                self._result_rows = [(len(self.db.rows),)]
+            else:
+                self.description = [
+                    SimpleNamespace(name=column) for column in BAR_COLUMNS
+                ]
+                self._result_rows = [
+                    tuple(row.get(column) for column in BAR_COLUMNS)
+                    for row in self.db.rows.values()
+                ]
+            return self
+        if upper.startswith("INSERT"):
+            suffixes = sorted(
+                {key[len("code_") :] for key in values if key.startswith("code_")}
+            )
+            inserted = []
+            for suffix in suffixes:
+                row = {
+                    column: values.get(f"{column}_{suffix}") for column in BAR_COLUMNS
+                }
+                key = self.db.key(row)
+                if key not in self.db.rows:
+                    self.db.rows[key] = row
+                    inserted.append((row["code"], row["trade_date"], row["adj_type"]))
+            self.rowcount = len(inserted)
+            self.description = [
+                SimpleNamespace(name=column)
+                for column in ("code", "trade_date", "adj_type")
+            ]
+            self._result_rows = inserted
+            return self
+        raise AssertionError(text)
 
     def executemany(self, sql, rows):
         assert str(sql).lstrip().upper().startswith("INSERT")
@@ -222,10 +266,12 @@ class MemoryCursor:
                 self.rowcount += 1
 
     def fetchone(self):
+        if self._result_rows:
+            return self._result_rows[0]
         return (len(self.db.rows),)
 
     def fetchall(self):
-        return list(self.db.rows.values())
+        return list(self._result_rows)
 
 
 class NoCredentialFile:
@@ -427,15 +473,7 @@ def test_ta157_history_routes(api, monkeypatch, tmp_path, capsys):
 
 @pytest.mark.parametrize(
     "kind",
-    [
-        pytest.param("backfill", marks=pytest.mark.xfail(
-            strict=True, raises=AssertionError, reason="§10.10：backfill.main 在 BJ 阻断后仍返回 0，未传播未完成状态"
-        )),
-        pytest.param("supervisor", marks=pytest.mark.xfail(
-            strict=True, raises=AssertionError, reason="§10.10：supervisor.main 在 BJ 阻断后仍返回 0，未传播未完成状态"
-        )),
-        "daily",
-    ],
+    ["backfill", "supervisor", "daily"],
 )
 def test_ta157_history_blocked_exit_code(api, monkeypatch, tmp_path, kind):
     # 退出码单独验收，避免未实现项掩盖已实现的路由、阻断和沪深完成断言。
