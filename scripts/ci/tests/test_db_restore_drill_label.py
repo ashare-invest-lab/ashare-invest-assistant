@@ -1,10 +1,12 @@
 """使用合成命令替身验证恢复演练的目标身份和入口拒绝。"""
 
-from pathlib import Path
+import json
 import shutil
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
+from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve().parents[3] / "deploy/scripts/db-restore-drill.sh"
@@ -70,55 +72,98 @@ aia_docker() {
 
 
 DOCKER_FIXTURE = r'''
+role_for_id() {
+    case "$1" in
+        fixture-source) printf 'source\n' ;;
+        fixture-target) printf 'target\n' ;;
+        *) record unexpected-container; exit 90 ;;
+    esac
+}
+
 case "$1" in
-    info)
-        echo docker-info >> "$FIXTURE_CALLS"
+    info) record docker-info ;;
+    create)
+        [ "$2" = --name ] && [ "$4" = --label ] && [[ "$5" == aia.drill=* ]] || exit 90
+        [ "${19}" = postgres ] || exit 90
+        case "$3" in
+            aia-drill-src-*) role=source ;;
+            aia-drill-dst-*) role=target ;;
+            *) exit 90 ;;
+        esac
+        printf '%s\n' "${5#aia.drill=}" > "$FIXTURE_WORK/$role.label"
+        printf '%s\n' "${18}" > "$FIXTURE_WORK/$role.image"
+        record "$role-create"
+        printf 'fixture-%s\n' "$role"
         ;;
-    run)
-        [ "$5" = --label ] && [[ "$6" == aia.drill=* ]] || exit 90
-        printf '%s\n' "${6#aia.drill=}" > "$FIXTURE_LABEL"
+    start)
+        role=$(role_for_id "$2")
+        [ -f "$FIXTURE_WORK/$role.label" ] || exit 90
+        record "$role-start"
+        : > "$FIXTURE_WORK/$role.started"
         ;;
     exec)
         if [ "${3:-}" = pg_isready ]; then
-            exit 0
+            role=$(role_for_id "$2")
+            [ -f "$FIXTURE_WORK/$role.started" ]
+            exit
         fi
-        if [[ "${5:-}" == aia-drill-src-* && "${8:-}" == 'exec psql '* && ! -f "$FIXTURE_TARGET_INSPECTED" ]]; then
-            # The source setup gets an empty synthetic response from Docker itself.
-            echo source-sql-fixture >> "$FIXTURE_CALLS"
-            exit 0
-        fi
-        echo sql >> "$FIXTURE_CALLS"
-        exit 91
+        role=$(role_for_id "${5:-}")
+        record "$role-sql"
+        [ "$FIXTURE_CASE" = success ] || exit 91
+        [ -f "$FIXTURE_WORK/$role.started" ] && [[ "$8" == 'exec psql '* ]] || exit 90
+        case "${11:-}" in
+            -tA)
+                case "$(< /dev/stdin)" in
+                    fixture-metrics)
+                        printf '%s\n' 'chunks.compressed=2' 'chunks.compressed.minute_bars=1' \
+                            'jobs.count=9' 'rows.market.minute_bars=12' 'jobs=fixture'
+                        ;;
+                    *minute_bars.before_bytes*)
+                        printf '%s\n' 'minute_bars.before_bytes=24' 'minute_bars.after_bytes=12'
+                        ;;
+                    *cagg.refresh_after_restore*) printf 'cagg.refresh_after_restore=ok\n' ;;
+                    *) exit 90 ;;
+                esac
+                ;;
+            -qtA) printf '17 / timescaledb fixture\n' ;;
+            -c|-v|'') ;;
+            *) exit 90 ;;
+        esac
         ;;
     inspect)
         [ "$#" -eq 4 ] && [ "$2" = --format ] || exit 90
-        label=$(<"$FIXTURE_LABEL")
-        case "$4" in
-            aia-drill-src-*)
-                [ "$3" = '{{ index .Config.Labels "aia.drill" }}' ] || exit 90
-                printf '%s\n' "$label"
-                ;;
-            aia-drill-dst-*)
-                [ "$3" = '{{ index .Config.Labels "aia.drill" }}|{{ .Config.Image }}' ] || exit 90
-                echo target-inspect >> "$FIXTURE_CALLS"
-                : > "$FIXTURE_TARGET_INSPECTED"
+        role=$(role_for_id "$4")
+        label=$(<"$FIXTURE_WORK/$role.label")
+        case "$3" in
+            '{{ index .Config.Labels "aia.drill" }}') printf '%s\n' "$label" ;;
+            '{{ index .Config.Labels "aia.drill" }}|{{ .Config.Image }}')
+                [ "$role" = target ] || exit 90
+                image=$(<"$FIXTURE_WORK/$role.image")
+                record target-inspect
                 case "$FIXTURE_CASE" in
-                    label) printf 'different-drill|%s\n' "$AIA_PG_IMAGE" ;;
+                    label) printf 'different-drill|%s\n' "$image" ;;
                     image) printf '%s|fixture-postgres:other\n' "$label" ;;
                     inspect) exit 7 ;;
+                    success) printf '%s|%s\n' "$label" "$image" ;;
                     *) exit 90 ;;
                 esac
                 ;;
             *) exit 90 ;;
         esac
         ;;
-    *) exit 90 ;;
+    rm)
+        [ "$#" -eq 3 ] && [ "$2" = -fv ] || exit 90
+        role=$(role_for_id "$3")
+        [ -f "$FIXTURE_WORK/$role.label" ] || exit 90
+        record "$role-remove"
+        ;;
+    *) record unexpected-docker; exit 90 ;;
 esac
 '''
 
 
 class TestDrillEntrypoint(unittest.TestCase):
-    def assert_entrypoint_refused(self, scenario: str, reason: str) -> None:
+    def run_entrypoint(self, scenario: str) -> tuple[subprocess.CompletedProcess[str], list[str], dict | None]:
         system_path = "/usr/bin:/bin"
         bash = shutil.which("bash", path=system_path)
         self.assertIsNotNone(bash)
@@ -132,32 +177,56 @@ class TestDrillEntrypoint(unittest.TestCase):
 
             sql_dir = root / "deploy/db/drill"
             sql_dir.mkdir(parents=True)
-            for name in ("sample-schema.sql", "sample-data.sql", "metrics.sql"):
+            for name in ("sample-schema.sql", "sample-data.sql"):
                 (sql_dir / name).touch()
+            (sql_dir / "metrics.sql").write_text("fixture-metrics\n", encoding="utf-8")
             work = root / "work"
             work.mkdir()
-            dump = work / "fixture.dump"
-            dump.write_bytes(b"synthetic drill fixture\n")
             calls = root / "calls.log"
             calls.touch()
 
             bin_dir = root / "bin"
             bin_dir.mkdir()
-            for name in ("base64", "cut", "date", "dirname", "grep", "head", "mkdir", "seq", "sha256sum", "stat", "tail", "tr"):
+            for name in (
+                "awk", "base64", "cat", "cut", "date", "dirname", "grep", "head", "mkdir", "numfmt",
+                "python3", "sed", "seq", "sha256sum", "stat", "tail", "tr",
+            ):
                 tool = shutil.which(name, path=system_path)
                 self.assertIsNotNone(tool, name)
                 (bin_dir / name).symlink_to(tool)
 
+            # Both source helpers send queries in the real drill. Count their attempted
+            # invocations as source SQL requests before returning any fixture data.
             replacements = {
                 bin_dir / "docker": DOCKER_FIXTURE,
-                bin_dir / "psql": 'echo sql >> "$FIXTURE_CALLS"; exit 91',
+                bin_dir / "psql": "record direct-sql; exit 91",
                 bin_dir / "mktemp": 'printf "%s\\n" "$FIXTURE_WORK"',
-                scripts / "db-apply-timescale.sh": 'printf "NOTICE: [aia-ts] fixture OK\\n"',
-                scripts / "db-backup.sh": 'printf "%s\\n" "$FIXTURE_DUMP"',
-                scripts / "db-restore.sh": 'echo restore >> "$FIXTURE_CALLS"; exit 91',
+                bin_dir / "rm": '[ "$#" -eq 2 ] && [ "$1" = -rf ] && [ "$2" = "$FIXTURE_WORK" ]',
+                scripts / "db-apply-timescale.sh": r'''
+record source-sql
+record apply
+[ "$FIXTURE_CASE" = success ] && [ "$*" = '--container fixture-source --db aia_drill' ] || exit 91
+printf 'NOTICE: [aia-ts] fixture OK\n'
+''',
+                scripts / "db-backup.sh": r'''
+record source-sql
+record backup
+[ "$FIXTURE_CASE" = success ] && [ "$*" = "--container fixture-source --db aia_drill --out-dir $FIXTURE_WORK" ] || exit 91
+printf 'synthetic drill fixture\n' > "$FIXTURE_WORK/fixture.dump"
+printf '%s/fixture.dump\n' "$FIXTURE_WORK"
+''',
+                scripts / "db-restore.sh": r'''
+record restore
+[ "$FIXTURE_CASE" = success ] && [ "$*" = "$FIXTURE_WORK/fixture.dump --container fixture-target --db aia_drill_restored" ] || exit 91
+''',
             }
             for path, content in replacements.items():
-                path.write_text(f"#!{bash}\nset -euo pipefail\n{content}\n", encoding="utf-8")
+                path.write_text(
+                    f"#!{bash}\nset -euo pipefail\n"
+                    'record() { printf "%s\\n" "$1" >> "$FIXTURE_CALLS"; }\n'
+                    f"{content}\n",
+                    encoding="utf-8",
+                )
                 path.chmod(0o755)
 
             # A fresh environment and allowlisted PATH keep all service calls in the fixture.
@@ -165,13 +234,9 @@ class TestDrillEntrypoint(unittest.TestCase):
                 "PATH": str(bin_dir),
                 "LC_ALL": "C.UTF-8",
                 "AIA_PG_IMAGE": "fixture-postgres:fixed",
-                "AIA_DRILL_KEEP": "1",
                 "FIXTURE_CASE": scenario,
                 "FIXTURE_CALLS": str(calls),
-                "FIXTURE_LABEL": str(root / "label"),
-                "FIXTURE_TARGET_INSPECTED": str(root / "target-inspected"),
                 "FIXTURE_WORK": str(work),
-                "FIXTURE_DUMP": str(dump),
             }
             if scenario == "direct":
                 env["AIA_PSQL_MODE"] = "direct"
@@ -180,15 +245,26 @@ class TestDrillEntrypoint(unittest.TestCase):
                 encoding="utf-8", timeout=10,
             )
             events = calls.read_text(encoding="utf-8").splitlines()
-            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn(reason, result.stderr)
-            self.assertEqual(events.count("restore"), 0, events)
-            self.assertEqual(events.count("sql"), 0, events)
-            if scenario == "direct":
-                self.assertEqual(events, [])
-            else:
-                self.assertIn("source-sql-fixture", events)
-                self.assertEqual(events.count("target-inspect"), 1, events)
+            reports = list(root.glob("deploy/drills/*-restore-drill.json"))
+            self.assertLessEqual(len(reports), 1)
+            report = json.loads(reports[0].read_text(encoding="utf-8")) if reports else None
+            return result, events, report
+
+    def assert_entrypoint_refused(self, scenario: str, reason: str) -> None:
+        result, events, report = self.run_entrypoint(scenario)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        counts = Counter(events)
+        for call in ("source-sql", "target-sql", "direct-sql", "restore"):
+            self.assertEqual(counts[call], 0, (call, events))
+        self.assertIn(reason, result.stderr)
+        if scenario == "direct":
+            self.assertEqual(events, [])
+            self.assertIsNone(report)
+        else:
+            container_events = [event for event in events if event != "docker-info"]
+            self.assertEqual(container_events, ["target-create", "target-inspect", "target-remove"])
+            self.assertIsNotNone(report)
+            self.assertEqual(report["failed_step"], "prepare-target")
 
     def test_public_entrypoint_refuses_wrong_label(self) -> None:
         self.assert_entrypoint_refused("label", "的 aia.drill 标签与本次演练不符")
@@ -201,6 +277,28 @@ class TestDrillEntrypoint(unittest.TestCase):
 
     def test_public_entrypoint_refuses_direct_mode(self) -> None:
         self.assert_entrypoint_refused("direct", "恢复演练禁止直连")
+
+    def test_public_entrypoint_runs_with_verified_identity(self) -> None:
+        result, events, report = self.run_entrypoint("success")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIsNotNone(report)
+        self.assertEqual(report["result"], "PASS")
+        self.assertEqual(report["source"]["db"], "aia_drill")
+        self.assertEqual(report["target"]["db"], "aia_drill_restored")
+        counts = Counter(events)
+        self.assertEqual(counts["target-inspect"], 2, events)
+        self.assertEqual(counts["apply"], 2, events)
+        self.assertEqual(counts["backup"], 1, events)
+        self.assertEqual(counts["restore"], 1, events)
+        self.assertEqual(counts["direct-sql"], 0, events)
+        self.assertLess(events.index("target-inspect"), events.index("source-start"))
+        self.assertLess(events.index("source-start"), events.index("source-sql"))
+        self.assertLess(events.index("backup"), events.index("target-start"))
+        restore = events.index("restore")
+        self.assertGreater(restore, events.index("target-start"))
+        self.assertEqual(events[restore - 1], "target-inspect")
+        self.assertLess(restore, events.index("target-sql"))
+        self.assertEqual(events[-2:], ["source-remove", "target-remove"])
 
 
 if __name__ == "__main__":
