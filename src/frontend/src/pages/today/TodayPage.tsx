@@ -86,11 +86,13 @@ export function TodayPage() {
   const dr = t.daily_report;
   // T-F34 全局状态（契约 §2.1）：先看不依赖日报的 S1–S5；日报 ready 时由日报 gaps 判 S6–S8/S9；日报未取回前不判定
   const report = reportDate && rq.data ? rq.data : null;
+  const reportFaults = report?.gaps.filter((g) => g.reason !== 'suspended') ?? [];
+  const reportSuspensions = report?.gaps.filter((g) => g.reason === 'suspended') ?? [];
   const pre = preReportState(t);
   // §7 ③：S9 只能来自日报判定（ready 且读取成功）；未 ready 且前置状态都不命中（如 15:00 前）时不判定，不显示状态条与 R2
-  const state: GlobalState | null = pre ?? (report ? reportState(report) : null);
+  const state: GlobalState | null = pre ?? (report ? reportState({ gaps: reportFaults }) : null);
   const names = new Map([...(report?.stocks ?? []).map((x) => [x.security_code, x.name] as const), ...t.focus.items.map((r) => [r.security_code, r.name] as const)]);
-  const reportGaps = report ? buildReportGaps(report.gaps, state ?? 'S9', (c) => names.get(c) ?? null, new Set(t.data_gaps.items.map((g) => g.key))) : null;
+  const reportGaps = report ? buildReportGaps(reportFaults, state ?? 'S9', (c) => names.get(c) ?? null, new Set(t.data_gaps.items.map((g) => g.key))) : null;
   const reportGapCount = reportGaps ? reportGaps.securities.length + reportGaps.general.length : 0;
   return (
     <div className="page-scroll today" data-testid="today-page">
@@ -252,9 +254,14 @@ export function TodayPage() {
           </ul>
         </Section>
 
-        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty="数据完整" extra={reportGapCount}
+        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty={reportSuspensions.length ? '暂无缺数故障' : '数据完整'} extra={reportGapCount}
           after={<>
             {reportGaps ? <ReportGaps view={reportGaps} /> : null}
+            {reportSuspensions.length ? (
+              <ul className="today-list" aria-label="日报停牌说明">
+                {reportSuspensions.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{GAP_REASON.suspended}</Tag><span>{g.message}</span></li>)}
+              </ul>
+            ) : null}
             {reportDate && rq.isError ? <div className="muted small" data-testid="today-report-gaps-error">日报详情暂时读取失败，分析缺口稍后显示。</div> : null}
           </>}>
           <ul className="today-list">
