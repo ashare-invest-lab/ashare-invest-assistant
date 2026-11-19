@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import type { GateResultEntry, PromotionReport } from '../../api/promotionTypes';
 
 const GATES = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6'] as const;
@@ -25,7 +26,7 @@ export function promotionRows(report: PromotionReport): GateResultEntry[] {
     if (gate === 'G6' && report.g6_report.max_jaccard === null) {
       const reason = report.g6_report.max_jaccard_null_reason;
       return { ...row, result: row.result === 'pass' ? 'warn' : row.result,
-        detail: `${text}；${reason ? `${reason}：${NULL_REASON[reason]}` : '缺少 max_jaccard_null_reason'}（重合度未通过验证）` };
+        detail: `${text}；${reason ? `${reason}：${(labelOf(NULL_REASON, reason) ?? '未知')}` : '缺少 max_jaccard_null_reason'}（重合度未通过验证）` };
     }
     return { ...row, detail: text };
   });

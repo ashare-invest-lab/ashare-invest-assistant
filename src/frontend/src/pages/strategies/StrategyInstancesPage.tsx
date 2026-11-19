@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Segmented, Table, Tag } from 'antd';
 import type { InstanceStatus } from '../../api/enums';
@@ -53,7 +54,7 @@ export function StrategyInstancesPage() {
   };
 
   const scopeText = (x: StrategyInstance) =>
-    x.scope === 'security' ? `${SCOPE_TEXT.security}${x.security_code ? ` · ${x.security_code}` : ''}` : SCOPE_TEXT[x.scope];
+    x.scope === 'security' ? `${SCOPE_TEXT.security}${x.security_code ? ` · ${x.security_code}` : ''}` : (labelOf(SCOPE_TEXT, x.scope) ?? '未知');
 
   return (
     <div className="page-scroll" data-testid="strategy-instances-page">
@@ -89,7 +90,7 @@ export function StrategyInstancesPage() {
             expandedRowRender: (x) => (
               <div className="muted small" data-testid={`inst-detail-${x.id}`}>
                 {x.derived_strategy_version_id ? <div>运行派生版本（参数已改动）</div> : null}
-                <div>来源：{INSTANCE_ORIGIN[x.origin]}</div>
+                <div>来源：{(labelOf(INSTANCE_ORIGIN, x.origin) ?? '未知')}</div>
                 <div>预算：{x.budget_amount ?? '未设置'}　自动降权：{x.auto_downweight ? '开' : '关'}</div>
                 {x.paused_by ? <div>暂停方：{x.paused_by === 'user' ? '本人' : '系统'}{x.pause_reason_code ? `（${x.pause_reason_code}）` : ''}</div> : null}
                 {x.paused_until ? <div>暂停至：{x.paused_until}</div> : null}
@@ -107,15 +108,15 @@ export function StrategyInstancesPage() {
                 </span>
               ),
             },
-            { title: '版本', key: 'v', width: 130, render: (_, x) => <span>v{x.version_no} · {LIFECYCLE[x.lifecycle]}</span> },
-            { title: '周期', key: 'h', width: 90, render: (_, x) => HORIZON[x.horizon] },
+            { title: '版本', key: 'v', width: 130, render: (_, x) => <span>v{x.version_no} · {(labelOf(LIFECYCLE, x.lifecycle) ?? '未知')}</span> },
+            { title: '周期', key: 'h', width: 90, render: (_, x) => (labelOf(HORIZON, x.horizon) ?? '未知') },
             { title: '范围', key: 'scope', width: 150, render: (_, x) => scopeText(x) },
             {
               title: '状态',
               key: 'status',
               width: 110,
               render: (_, x) => (
-                <Tag color={STATUS_COLOR[x.status]} data-testid={`inst-status-${x.id}`}>{STATUS_TEXT[x.status]}</Tag>
+                <Tag color={labelOf(STATUS_COLOR, x.status)} data-testid={`inst-status-${x.id}`}>{(labelOf(STATUS_TEXT, x.status) ?? '未知')}</Tag>
               ),
             },
             {

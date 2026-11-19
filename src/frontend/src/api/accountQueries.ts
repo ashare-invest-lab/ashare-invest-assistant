@@ -62,7 +62,7 @@ export function useLogout() {
 }
 /**
  * 改密（契约 §7.1、#25）：204 后服务端轮换 sid 与 csrf_token。内存兜底令牌作废，之后的写请求从 Cookie 重新读取。
- * 目前没有改密页面（设置页任务另排），先把调用约定固定在这里。
+ * 设置页修改密码表单复用此变更。
  */
 export const useChangePassword = () =>
   useMutation({
@@ -184,12 +184,15 @@ export interface RowFilter { status?: string; code?: string; dedup_status?: stri
  * 前端对这两种状态不再请求逐行预览，计数一律取批次头 stats。只有 previewed 才有可看的预览行。
  */
 export const rowsAvailable = (status: ImportBatch['status']) => status === 'previewed';
+const importRowId = (row: ImportRow) => String(row.row_no);
 export const useImportRows = (id: string | null, enabled: boolean, f: RowFilter) =>
-  useQuery({
+  useCursorPages<ImportRow>({
     queryKey: ak.rows(id ?? '', JSON.stringify(f)),
-    queryFn: ({ signal }) => apiGet<Paged<ImportRow>>(`/imports/${encodeURIComponent(id!)}/rows`, { ...f, limit: 200 }, signal),
+    path: `/imports/${encodeURIComponent(id ?? '')}/rows`,
+    params: { ...f },
+    limit: 200,
     enabled: !!id && enabled,
-    staleTime: 0,
+    idOf: importRowId,
   });
 
 function useBatchMutation<V, R>(fn: (id: string, v: V) => Promise<R>) {

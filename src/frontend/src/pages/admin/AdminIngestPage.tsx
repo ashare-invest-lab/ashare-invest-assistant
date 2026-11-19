@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { Link } from 'react-router';
 import { Alert, Card, Descriptions, Space, Table, Tag } from 'antd';
 import { useAdminIngestStatus } from '../../api/adminQueries';
@@ -12,7 +13,7 @@ import { fmtTime } from '../../lib/format';
 const PRIORITY: Record<string, string> = { p0_intraday: 'P0 盘中', p1_daily: 'P1 日频', p2_backfill: 'P2 回补' };
 /** T-B47 裁定③、#31 ④：告警只有两级（严重/警告）；顺序按服务端返回，message 原样显示 */
 const ALERT_LEVEL: Record<IngestAlert['level'], { text: string; color: string }> = { critical: { text: '严重', color: 'red' }, warning: { text: '警告', color: 'orange' } };
-const levelView = (lv: string) => ALERT_LEVEL[lv as IngestAlert['level']] ?? { text: lv, color: 'default' };
+const levelView = (lv: string) => labelOf(ALERT_LEVEL, lv) ?? { text: lv, color: undefined };
 /** v0.2.9 #38：heartbeat 显示；缺失或不认识的取值按 unknown 显示“无法判断”；不据此生成告警（告警只由服务端给） */
 const HEARTBEAT: Record<IngestHealth, { text: string; color: string }> = {
   ok: { text: '正常', color: 'green' }, stale: { text: '心跳超时', color: 'red' }, paused: { text: '已暂停', color: 'orange' }, unknown: { text: '无法判断', color: 'default' },
@@ -38,9 +39,9 @@ export function AdminIngestPage() {
     { title: '用户', key: 'user', render: (_: unknown, r: IngestLicenceStatus) => <Link to={`/admin/data-licences?user=${r.user_id}`}>{r.display_name}<span className="muted small">（{r.username}）</span></Link> },
     {
       title: '状态', dataIndex: 'status', key: 'status',
-      render: (s: IngestLicenceStatus['status']) => <Tag color={LICENCE_STATUS[s].color} data-testid={`ingest-status-${s}`}>{LICENCE_STATUS[s].text}</Tag>,
+      render: (s: IngestLicenceStatus['status']) => <Tag color={tagOf(LICENCE_STATUS, s).color} data-testid={`ingest-status-${s}`}>{tagOf(LICENCE_STATUS, s).text}</Tag>,
     },
-    { title: '档位', key: 'tier', render: (_: unknown, r: IngestLicenceStatus) => <span>{r.tier ? LICENCE_TIER[r.tier] : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
+    { title: '档位', key: 'tier', render: (_: unknown, r: IngestLicenceStatus) => <span>{r.tier ? (labelOf(LICENCE_TIER, r.tier) ?? '未知') : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
     { title: '到期', key: 'exp', render: (_: unknown, r: IngestLicenceStatus) => <span data-testid={`ingest-exp-${r.licence_id}`}>{expiryCellText(r.expires_on, r.days_left)}</span> },
     { title: '今日调用', key: 'today', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.calls_today}${r.daily_limit !== null ? ` / ${r.daily_limit}` : ''}` },
     { title: '近 1 分钟 / 上限', key: 'min', align: 'right' as const, render: (_: unknown, r: IngestLicenceStatus) => `${r.calls_last_minute} / ${r.per_minute_limit}` },
@@ -48,7 +49,7 @@ export function AdminIngestPage() {
     { title: '熔断至', dataIndex: 'paused_until', key: 'pu', render: (v: string | null) => (v ? fmtTime(v) : '—') },
     {
       title: '最近错误', key: 'err',
-      render: (_: unknown, r: IngestLicenceStatus) => (r.last_error_code ? <span>{LICENCE_ERROR[r.last_error_code]}{r.last_error_at ? <span className="muted small">（{fmtTime(r.last_error_at)}）</span> : null}</span> : '—'),
+      render: (_: unknown, r: IngestLicenceStatus) => (r.last_error_code ? <span>{(labelOf(LICENCE_ERROR, r.last_error_code) ?? '未知')}{r.last_error_at ? <span className="muted small">（{fmtTime(r.last_error_at)}）</span> : null}</span> : '—'),
     },
   ];
   return (
@@ -77,10 +78,10 @@ export function AdminIngestPage() {
             <Descriptions.Item label="采集主实例">{d.leader ? `${d.leader.instance_id}（出口 ${dash(d.leader.egress_ip_masked)}，租约到 ${fmtTime(d.leader.lease_expires_at)}）` : '无（没有未过期的租约）'}</Descriptions.Item>
             <Descriptions.Item label="近 1 分钟调用 / 上限">{d.budget.used_last_minute} / {d.budget.per_minute_limit}</Descriptions.Item>
             <Descriptions.Item label="24 小时 IP 受限告警">{d.ip_limit_alerts_24h}</Descriptions.Item>
-            <Descriptions.Item label="队列">{d.queues.map((x) => `${PRIORITY[x.priority] ?? x.priority} ${x.depth}（最久 ${x.oldest_age_s} 秒）`).join('；')}</Descriptions.Item>
+            <Descriptions.Item label="队列">{d.queues.map((x) => `${labelOf(PRIORITY, x.priority) ?? x.priority} ${x.depth}（最久 ${x.oldest_age_s} 秒）`).join('；')}</Descriptions.Item>
             <Descriptions.Item label="24 小时上游错误">{d.errors_24h.length ? d.errors_24h.map((x) => `${x.upstream_code} × ${x.count}`).join('；') : '无'}</Descriptions.Item>
             <Descriptions.Item label="数据新鲜度">
-              {d.freshness.map((f) => <Tag key={f.dataset} color={DATA_STATUS[f.data_status].color} data-testid={`ingest-fresh-${f.dataset}`}>{INGEST_DATASET_NAME[f.dataset] ?? f.dataset} {fmtTime(f.data_as_of) || '—'} {DATA_STATUS[f.data_status].text}</Tag>)}
+              {d.freshness.map((f) => <Tag key={f.dataset} color={tagOf(DATA_STATUS, f.data_status).color} data-testid={`ingest-fresh-${f.dataset}`}>{labelOf(INGEST_DATASET_NAME, f.dataset) ?? f.dataset} {fmtTime(f.data_as_of) || '—'} {tagOf(DATA_STATUS, f.data_status).text}</Tag>)}
             </Descriptions.Item>
           </Descriptions>
         </Card>
