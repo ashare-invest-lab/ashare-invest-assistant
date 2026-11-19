@@ -55,7 +55,7 @@ T 日盘后确认，T+1 开盘价模拟入场（出处：docs/plan.md:1283），
 T+1：当日买入的股份当日不可卖，触发退出时记 `T1_NOT_SELLABLE`，顺延到可卖日。涨跌停价按 market_rules 计算（主板 10%、创业板和科创板 20%、ST 5%；注册制新股上市前 5 日无涨跌幅限制），一字封板按执行层原因 `LIMIT_LOCKED` 处理（写明 direction），不写成 veto。停牌记 `SUSPENDED`，可交易性、ST、退市整理由 G-01 处理，风险公告由 N-01 处理（均由系统挂载，本卡不重复写）。整手：科创板 ≥ 200 股、超出部分按 1 股递增；其余板块 100 股整数倍；零股须一次性卖出。
 
 ## 18 成本与滑点（estimate）
-佣金按用户费率，单笔最低 5 元，双边计；印花税仅卖出 0.05%；过户费 0.001%（双边）；滑点 `p.slippage_bp`（estimate）；冲击成本按 plan 2.13 分档（0/5/15/30/60bp），参与率 > 2% 标“容量受限”。
+佣金按买卖分别计收，费率和单笔最低额以券商协议为准。5 元仅作历史或建模参考，实收及费用实现未验证。沪深 A 股按市场和成交日选段：自 2022-04-29 起，过户费买卖每边为成交金额的 0.001%，此前按 F06–F08 核对市场、计费基数和日期；自 2023-08-28 起，卖方印花税为成交金额的 0.05%，此前按 F01–F04 选段。出处：docs/strategies/T-R74/param_audit.md §5.1 F01–F08、F10、F25。滑点 `p.slippage_bp`（estimate）；冲击成本按 plan 2.13 分档（0/5/15/30/60bp），参与率 > 2% 标“容量受限”。
 
 ## 20 冲突
 与 S-01（强势回踩）、W-02（突破）方向相反时并列；与 H-01 并列。 一律并列展示，不合并结论。
@@ -111,7 +111,7 @@ T+1：当日买入的股份当日不可卖，触发退出时记 `T1_NOT_SELLABLE
 | I1 / 结构止损回看 | 前5日低点、偏移1日；固定原值 | 延长最低价窗口使参照不升，跌破更难；偏移防止包含当日 | docs/strategies/T-R16/S-02_st_oversold_rebound.md:35；docs/strategies/T-R16/S-02_st_oversold_rebound.md:37 |
 | 有效期 / 成交时点 | 1日 / T+1开盘；固定原值 | 有效期变长增加陈旧暴露；不得用 T 收盘替代成交 | docs/strategies/T-R16/S-02_st_oversold_rebound.md:43 |
 | 验证周期 / 最少样本 | 1、3、5日 / 30；固定原值 | 延长周期增加标签重叠；提高最少样本使判定更晚 | docs/strategies/T-R16/S-02_st_oversold_rebound.md:46 |
-| 费用与冲击（estimate） | 佣金费率未给值（未验证、不扫描）；最低5元；卖出税0.05%；双边过户0.001%；冲击0/5/15/30/60bp；参与率界0.1%/0.5%/1%/2%，ADV20；均固定 | 提高费用使扣费结果不升；无费率/规模证据不计算净结果。档位为估算，不把它们当市场事实 | docs/strategies/T-R16/S-02_st_oversold_rebound.md:58；docs/strategies/_template.md:253；docs/strategies/_template.md:258；docs/strategies/_template.md:259；docs/strategies/_template.md:260；docs/strategies/_template.md:261；docs/strategies/_template.md:262 |
+| 费用与冲击（estimate） | 佣金率、最低额按券商协议，未验证、不扫描，5 元仅作建模参考；税费按 §18 的市场和成交日选段；冲击0/5/15/30/60bp；参与率界0.1%/0.5%/1%/2%，ADV20；冲击档位固定 | 提高费用使扣费结果不升；无费率/规模证据不计算净结果。档位为估算，不把它们当市场事实 | docs/strategies/T-R16/S-02_st_oversold_rebound.md:58；docs/strategies/_template.md:253；docs/strategies/_template.md:258；docs/strategies/_template.md:259；docs/strategies/_template.md:260；docs/strategies/_template.md:261；docs/strategies/_template.md:262 |
 
 防过拟合要求（方法已有出处，落到本卡的效果未验证）：
 

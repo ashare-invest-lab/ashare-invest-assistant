@@ -53,7 +53,7 @@ T 日盘后确认，T+1 开盘价模拟入场（出处：docs/plan.md:1283）；
 适用于 uptrend、range；每日盘后扫描。T+1 规则同 S-01。注册制新股上市前 5 日没有涨跌幅限制，但 F2 已经把这段时间排除在外。整手：科创板 ≥ 200 股、按 1 股递增，其余板块 100 股整数倍。
 
 ## 18 成本（estimate）
-佣金按用户费率，单笔最低 5 元；印花税仅卖出 0.05%；过户费 0.001%；`slippage_bp` 15（突破日流动性偏紧，取 S-01 的 1.5 倍）；冲击成本按 plan 2.13 分档。
+佣金按买卖分别计收，费率和单笔最低额以券商协议为准。5 元仅作历史或建模参考，实收及费用实现未验证。沪深 A 股按市场和成交日选段：自 2022-04-29 起，过户费买卖每边为成交金额的 0.001%，此前按 F06–F08 核对市场、计费基数和日期；自 2023-08-28 起，卖方印花税为成交金额的 0.05%，此前按 F01–F04 选段。出处：docs/strategies/T-R74/param_audit.md §5.1 F01–F08、F10、F25。`slippage_bp` 15（突破日流动性偏紧，取 S-01 的 1.5 倍）；冲击成本按 plan 2.13 分档。
 
 ## 20 冲突
 与 W-01（回踩买入）同标的同日都触发时并列展示；与 H-01 并列展示，不合并。
@@ -104,14 +104,14 @@ key 与 name 已改正；category 已归入枚举；下标写法已改为 `ref`�
 | X4 时间 / R门槛 | 持有≥3日且最大R<0.5；固定原值 | 提高时间阈值延后检查；提高R门槛使更多路径符合退出条件 | docs/strategies/T-R16/W-02_sw_breakout.md:33 |
 | 有效期 / 成交时点 | 1日 / T+1开盘；固定原值 | 延长有效期增加陈旧暴露；不得使用 T 收盘成交 | docs/strategies/T-R16/W-02_sw_breakout.md:44 |
 | 验证周期 / 最少样本 | 3、10日 / 30；固定原值 | 延长周期增加标签重叠；提高样本门槛推迟判定 | docs/strategies/T-R16/W-02_sw_breakout.md:47 |
-| 费用与冲击（estimate） | 佣金费率未给值（未验证、不扫描）；最低5元；卖出税0.05%；双边过户0.001%；冲击0/5/15/30/60bp；参与率界0.1%/0.5%/1%/2%，ADV20；均固定 | 提高费用使扣费结果不升；费率/规模无证据不计算净结果；冲击档位待校准 | docs/strategies/T-R16/W-02_sw_breakout.md:56；docs/strategies/_template.md:253；docs/strategies/_template.md:258；docs/strategies/_template.md:259；docs/strategies/_template.md:260；docs/strategies/_template.md:261；docs/strategies/_template.md:262 |
+| 费用与冲击（estimate） | 佣金率、最低额按券商协议，未验证、不扫描，5 元仅作建模参考；税费按 §18 的市场和成交日选段；冲击0/5/15/30/60bp；参与率界0.1%/0.5%/1%/2%，ADV20；冲击档位固定 | 提高费用使扣费结果不升；费率/规模无证据不计算净结果；冲击档位待校准 | docs/strategies/T-R16/W-02_sw_breakout.md:56；docs/strategies/_template.md:253；docs/strategies/_template.md:258；docs/strategies/_template.md:259；docs/strategies/_template.md:260；docs/strategies/_template.md:261；docs/strategies/_template.md:262 |
 
 防过拟合要求（方法有据、本卡效果未验证）：
 
 - **样本外**：按时间滚动5折，训练选参、下一折评估；隔离期 h 覆盖标签持有跨度，跨折标签剔除；最近12个月为只看一次的最终保留集。动态持有期的 h 规则须预先冻结，未冻结不开始扫描。来源：docs/strategies/validation.md:68、docs/strategies/validation.md:151。
 - **参数平原**：每参先查原默认值 ±1 step，扩展网格预登记，全部参数组合≤50；不穷举原范围笛卡尔积。邻点结果翻号或较中心下降超过一半即不稳健。原稿带宽0.1–0.3、放量1.3–2.0是另列稳健性窗口，不替换原默认值，也纳入试验预算。来源：docs/strategies/validation.md:141、docs/strategies/validation.md:142、docs/strategies/T-R16/W-02_sw_breakout.md:12。
 - **多重比较校正**：登记全部成功及失败试验，参数、窗口、分组构成预先冻结的检验族；统一 BH 校正 q=0.10，报告原始及校正后 p 值；q 为建议初值、未验证。来源：docs/strategies/validation.md:146、docs/strategies/validation.md:147。
-- 候选信号仅使用 `available_at ≤ T` 的输入、当时复权及交易制度；T 后结果只供成熟标签检验，不参与 T 的判断或选参。保留当日收敛与突破同时成立的定义，不改成事后择时；来源：docs/strategies/validation.md:21、docs/strategies/validation.md:35、docs/strategies/validation.md:41、docs/strategies/validation.md:190、docs/strategies/T-R71/W-02_sw_breakout.md:195。
+- 候选信号仅使用 `available_at ≤ T` 的输入、当时复权及交易制度；T 后结果只供成熟标签检验，不参与 T 的判断或选参。保留当日收敛与突破同时成立的定义，不改成事后择时；来源：docs/strategies/validation.md:21、docs/strategies/validation.md:35、docs/strategies/validation.md:41、docs/strategies/validation.md:190、[T-R71 W-02 §23「审计、差异与未决」](../T-R71/W-02_sw_breakout.md#23-审计差异与未决)。
 
 ## 3A 失效条件（T-R89 确定性研究规格）
 
@@ -123,7 +123,7 @@ key 与 name 已改正；category 已归入枚举；下标写法已改为 `ref`�
 | 策略假设失效 | 主基准扣费超额中位数 `median(E_10) ≤ 0` | 截至 D 最近120个交易日产生且10日标签已结束的样本外候选信号；去重后完整可成交样本 n≥30 | 10日与零阈值：docs/strategies/T-R16/W-02_sw_breakout.md:12；n：docs/strategies/T-R16/W-02_sw_breakout.md:47；120日借用 docs/strategies/validation.md:122，迁用未验证 |
 | 参数稳定性失效 | 中心 `median(E_10)>0`，任一 ±1 step 邻点中位数 ≤0 或 `< 中心中位数×0.5` | 同一上述120日样本外窗口、同一成本及基准；中心及各参评邻点分别 n≥30，缺样本不判通过 | 邻域与一半阈值：docs/strategies/validation.md:142；n：docs/strategies/T-R16/W-02_sw_breakout.md:47；确定性展开未验证 |
 
-结构判据按原稿 §3 的“突破位”假设写成研究量；**不把入场价替代突破位**。原 §7 I1 使用入场价，而 X5 使用突破位，且角色/ctx/plan 限制仍有缺口（docs/strategies/T-R71/W-02_sw_breakout.md:195）。本节不偷偷修订原 DSL；QFQ-2、角色及基准口径未核验前结构判据不执行，状态写未验证。
+结构判据按原稿 §3 的“突破位”假设写成研究量；**不把入场价替代突破位**。原 §7 I1 使用入场价，而 X5 使用突破位，且角色/ctx/plan 限制仍有缺口（[T-R71 W-02 §23「审计、差异与未决」](../T-R71/W-02_sw_breakout.md#23-审计差异与未决)）。本节不偷偷修订原 DSL；QFQ-2、角色及基准口径未核验前结构判据不执行，状态写未验证。
 
 `E_10`：T 盘后候选信号最早在 U=T+1 开盘模拟成交，从 U 开盘至 U+10 开盘的后复权收益，减同区间基准收益及完整往返成本；依据 docs/strategies/T-R16/W-02_sw_breakout.md:44、docs/strategies/validation.md:51、docs/strategies/validation.md:40。主基准沪深300、辅基准中证全指沿 docs/strategies/T-R71/W-02_sw_breakout.md:21，基准覆盖未验证，不代替原行业证伪；固定周期标签与按 §7 退出的研究统计分列。
 
