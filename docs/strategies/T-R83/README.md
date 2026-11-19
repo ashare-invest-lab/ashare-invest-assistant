@@ -6,25 +6,25 @@
 
 - [finance_inputs_audit.md](finance_inputs_audit.md)：逐项对照报告计数、ROE TTM、利润三年CAGR、现金分红连续年数，涵盖北交所、新股、ST及重述边界；末尾交架构师表列 F-Q01–F-Q09。
 - [fq_options.md](fq_options.md)：T-R85 对 F-Q01–F-Q09 逐项给出备选、公开出处及推荐，均已由 #225（T-A197，契约 docs/contracts/finance-inputs.md v1.0）裁定采用 Opt-A。
-- 规格基线为 `origin/docs/T-R78` 提交 `dd683be9e7763ea9b385820ed51427b98b56a7a9`，文件 `docs/strategies/T-R78/horizon_inputs_spec.md`（PR #205，定稿待批）；后端背景为团队报告 `T-R78.md` 两个 T-A188 小节。
+- 原审计规格基线为 `origin/docs/T-R78` 提交 `dd683be9e7763ea9b385820ed51427b98b56a7a9`，文件 `docs/strategies/T-R78/horizon_inputs_spec.md`；2026-11-19 复核采用已合入 #205 的 `main@952cc8eb` 及 [财务输入契约](../../contracts/finance-inputs.md)；后端背景为团队报告 `T-R78.md` 两个 T-A188 小节。
 - B9/B10/B11/B12 分别对应规格 §3.12/§3.8/§3.9/§3.10；§3.11 封板计数不属于本次财务审计。
-- 两份文档按 #178/#205 的非策略身份格式登记到 `docs/strategies/P2N-R10/horizon_inventory.json`；不修改其余规格、策略卡、checker或运行代码。
+- 本 README 及两份审计材料按 #178/#205 的非策略身份格式登记到 `docs/strategies/P2N-R10/horizon_inventory.json`；不修改其余规格、策略卡、checker或运行代码。
 - 团队报告 `T-R83.md` 记录判定计数、URL与HTTP状态、验收及提交尝试；不作为策略身份登记。
 
 ## 方法与局限
 
 访问日期统一为2026-11-15。先读固定规格与裁定，再检索证监会、沪深北交易所正式文本及附件；计算定义补充发布者自有方法材料，区分监管要求、数学推导、内部选择与供应商语义。
 2021信披办法已被2025版本替代，审计保留历史版本定位；季度时限与一季报顺序援引交易所规则。三年CAGR的零末期及负末期分别分析，不笼统写成数学无定义。
-25个独立判定：一致10、不一致0、规格缺失9、未验证6；边界表与F-Q表不重复计数。九个F-Q均已由 #225（T-A197，契约 docs/contracts/finance-inputs.md v1.0）裁定采用 Opt-A，无出处参数保持未验证。
+2026-11-15 的25个独立判定：一致10、不一致0、规格缺失9、未验证6；边界表与F-Q表不重复计数。审计表末列逐项记录 #205 合入后的语义。九个F-Q均已由 #225（T-A197，契约 docs/contracts/finance-inputs.md v1.0）裁定采用 Opt-A，无出处参数保持未验证。
 **公开资料≠供应商字段语义**。其他平台算法相容、合成算式成立、URL可打开，都不能解除Q02–Q05的主源单位、窗口、PIT、范围及年度闭合缺证条件；不启用本地替代，不证明候选信号有效性。
 北交所直接GET遇302循环，检索工具可读取原站PDF；HTTP状态如实记录。法规全文读取不代表穷尽所有行业、板块历史特别条款。未连接数据库、调用麦蕊或读取凭据/环境秘密文件。
 
 ## 复核方式
 
-1. 用 `git show origin/docs/T-R78:docs/strategies/T-R78/horizon_inputs_spec.md` 重读规格；先核对引用提交，分支推进时另记差异，不静默换基线。
+1. 用 `git show dd683be9:docs/strategies/T-R78/horizon_inputs_spec.md` 复原原判，再以 `952cc8eb` 读取同路径及财务输入契约核对末列。
 2. 打开审计表链接，核对发布机关、版本、生效日期、正文条号及附件；重新访问须另记日期和HTTP状态，失败不能当作内容核验通过。
 3. 按每个B编号复算定义与边界，再核对F-Q是否仍缺确定选择；法定截止日不等于披露日，公告日不等于系统实际可见时间，会计追溯不等于PIT回写。
 4. 运行 `git diff --check`，检查新文件无机器绝对路径；按任务给定的Python解释器，在清空环境、设置 `PYTHONDONTWRITEBYTECODE=1` 后，分别普通及 `-O` 执行 `git ls-files 'docs/strategies/**/check_*.py' 'docs/strategies/check_*.py'` 返回的所有脚本。
-5. `check_horizons` 仅容许既有R-R1八文件未登记；不修其历史登记。`check_f21_ready` 应在无数据库配置时拒绝退出；不可为跑绿去连接库。其余脚本须rc=0，实际结果见团队报告。
+5. 检查 `check_horizons` 的库存登记及退出码。无数据库时 `check_f21_ready` 应报告 `skipped_no_db`；实库状态留待验证。
 
 本轮只做文档及登记检查。供应商核验、真实数据完整性、历史PIT重放均需后续独立证据；口径选择已由 #225（T-A197，契约 docs/contracts/finance-inputs.md v1.0）裁定采用 Opt-A。

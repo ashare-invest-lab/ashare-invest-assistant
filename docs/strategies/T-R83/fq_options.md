@@ -1,7 +1,9 @@
 # T-R85｜F-Q01–F-Q09 备选口径与推荐（已由 #225（T-A197，契约 docs/contracts/finance-inputs.md v1.0）裁定采用 Opt-A）
 
 访问日期：**2026-11-15**。本稿仅解释候选信号，不荐股、不承诺收益；全部推荐均已由 #225（T-A197，契约 docs/contracts/finance-inputs.md v1.0）裁定采用 Opt-A，不改变代码、主供应商、评分或运行行为。
-输入：[T-R83 审计](finance_inputs_audit.md) §7及S索引、团队报告 `T-R83.md`；规格为 `origin/docs/T-R78` @ `dd683be9e7763ea9b385820ed51427b98b56a7a9` 的 `horizon_inputs_spec.md` §3.9–§3.12、§6，补读B10所在§3.8。B9/B10/B11/B12分别为报告期数/ROE TTM/利润三年CAGR/现金分红连续年数，§3.11封板计数不属财务范围。
+输入：[T-R83 审计](finance_inputs_audit.md) §7及S索引、团队报告 `T-R83.md`；历史规格为 `origin/docs/T-R78` @ `dd683be9e7763ea9b385820ed51427b98b56a7a9` 的 `horizon_inputs_spec.md` §3.9–§3.12、§6，补读B10所在§3.8。B9/B10/B11/B12分别为报告期数/ROE TTM/利润三年CAGR/现金分红连续年数，§3.11封板计数不属财务范围。
+
+2026-11-19 回核：#205 已合入 `952cc8eb`。[现行规格](../T-R78/horizon_inputs_spec.md) §2.1B、§3.8–§3.10、§3.12、§6 已引用 [#225 九项 Opt-A 裁定](../../contracts/finance-inputs.md)。以下保留备选比较及原访问记录；各字段的现状逐项见[审计表](finance_inputs_audit.md)。
 
 ## 共同定义与裁定边界
 
