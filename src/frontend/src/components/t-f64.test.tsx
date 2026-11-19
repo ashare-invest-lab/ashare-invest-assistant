@@ -115,3 +115,12 @@ it('已知确认错误的未知提示码显示中性未知，已知提示保留�
   within(error).getAllByText('未知').forEach(neutral);
   expect(within(error).getByText('证券不在主数据中')).toHaveClass('ant-tag-orange');
 });
+
+it('确认时批次状态冲突继续显示通用写入错误', async () => {
+  server.use(http.post('/api/v1/imports/:id/confirm', () => HttpResponse.json({ error: { code: 'INVALID_STATE_TRANSITION', message: '批次状态已变更', details: null, request_id: null } }, { status: 409 })));
+  batchPage(batch({ status: 'previewed' }));
+  fireEvent.click(await screen.findByTestId('confirm-import'));
+  const error = await within(screen.getByTestId('confirm-panel')).findByRole('alert');
+  expect(error).toHaveTextContent('写入失败');
+  expect(error).toHaveAttribute('data-code', 'INVALID_STATE_TRANSITION');
+});

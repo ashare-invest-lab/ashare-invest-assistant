@@ -1,0 +1,266 @@
+{
+  "task": "R-R3",
+  "range": {
+    "start": "2020-01-01",
+    "end": "2026-12-31",
+    "calendar_days": 2557
+  },
+  "repository": {
+    "coverage_start": "2026-01-01",
+    "coverage_end": "2026-12-31",
+    "open_days": 242
+  },
+  "totals": {
+    "repository_coverage_gap_rows": 6,
+    "repository_mismatch_days": 0,
+    "exchange_source_conflict_days": 0
+  },
+  "daily_comparison_sha256": "eaa994feee8499c6684478d95b06d1fad02a9cec39304f205a667bd06aa738b4",
+  "years": [
+    {
+      "year": 2020,
+      "calendar_days": 366,
+      "sse_open_days": 243,
+      "szse_open_days": 243,
+      "holiday_closed_days": 30,
+      "holiday_weekday_closed_days": 19,
+      "weekend_noted_days": 7,
+      "repository_covered_days": 0,
+      "repository_uncovered_days": 366,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2020",
+        "sse_2020_extension",
+        "szse_annual_2020",
+        "szse_2020_extension"
+      ],
+      "adjustment": {
+        "original_end": "2020-01-30",
+        "adjusted_end": "2020-02-02",
+        "added_closed_days": [
+          "2020-01-31",
+          "2020-02-01",
+          "2020-02-02"
+        ],
+        "reopen": "2020-02-03"
+      }
+    },
+    {
+      "year": 2021,
+      "calendar_days": 365,
+      "sse_open_days": 243,
+      "szse_open_days": 243,
+      "holiday_closed_days": 31,
+      "holiday_weekday_closed_days": 18,
+      "weekend_noted_days": 7,
+      "repository_covered_days": 0,
+      "repository_uncovered_days": 365,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2021",
+        "szse_annual_2021"
+      ]
+    },
+    {
+      "year": 2022,
+      "calendar_days": 365,
+      "sse_open_days": 242,
+      "szse_open_days": 242,
+      "holiday_closed_days": 31,
+      "holiday_weekday_closed_days": 18,
+      "weekend_noted_days": 7,
+      "repository_covered_days": 0,
+      "repository_uncovered_days": 365,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2022",
+        "szse_annual_2022"
+      ]
+    },
+    {
+      "year": 2023,
+      "calendar_days": 365,
+      "sse_open_days": 242,
+      "szse_open_days": 242,
+      "holiday_closed_days": 25,
+      "holiday_weekday_closed_days": 18,
+      "weekend_noted_days": 7,
+      "repository_covered_days": 0,
+      "repository_uncovered_days": 365,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2023",
+        "szse_annual_2023"
+      ]
+    },
+    {
+      "year": 2024,
+      "calendar_days": 366,
+      "sse_open_days": 242,
+      "szse_open_days": 242,
+      "holiday_closed_days": 29,
+      "holiday_weekday_closed_days": 20,
+      "weekend_noted_days": 8,
+      "repository_covered_days": 0,
+      "repository_uncovered_days": 366,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2024",
+        "szse_annual_2024"
+      ]
+    },
+    {
+      "year": 2025,
+      "calendar_days": 365,
+      "sse_open_days": 243,
+      "szse_open_days": 243,
+      "holiday_closed_days": 28,
+      "holiday_weekday_closed_days": 18,
+      "weekend_noted_days": 5,
+      "repository_covered_days": 0,
+      "repository_uncovered_days": 365,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2025",
+        "szse_annual_2025"
+      ]
+    },
+    {
+      "year": 2026,
+      "calendar_days": 365,
+      "sse_open_days": 242,
+      "szse_open_days": 242,
+      "holiday_closed_days": 33,
+      "holiday_weekday_closed_days": 19,
+      "weekend_noted_days": 6,
+      "repository_covered_days": 365,
+      "repository_uncovered_days": 0,
+      "repository_mismatch_days": 0,
+      "exchange_source_conflict_days": 0,
+      "source_ids": [
+        "sse_annual_2026",
+        "szse_annual_2026"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "sse_2020_extension",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20200127_4991582.shtml",
+      "fetched_at_utc": "2026-11-16T11:31:44.847100+00:00",
+      "bytes": 27731,
+      "sha256": "8baf26a6732bdad76bbf8a2456d587ea87d26080d031ba2b9ce341d8d7d66009"
+    },
+    {
+      "id": "sse_annual_2020",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20191220_4969627.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:54.692828+00:00",
+      "bytes": 27642,
+      "sha256": "297c616224c31ea52fb58b8c3bed308f45cae2178ed7293707c58c3b91e5682b"
+    },
+    {
+      "id": "sse_annual_2021",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20201224_5286949.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:55.304962+00:00",
+      "bytes": 27794,
+      "sha256": "fb89d523d7f969a946bd153ed3bdcfd053982a49f02e6e7a8a449b30fe81be64"
+    },
+    {
+      "id": "sse_annual_2022",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20211220_5662606.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:55.695149+00:00",
+      "bytes": 27788,
+      "sha256": "8cab034cb119931f0d131fbf86eb8ccdc2eec716cfed6c4b7cece5538d8b2b85"
+    },
+    {
+      "id": "sse_annual_2023",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20221227_5714458.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:56.051142+00:00",
+      "bytes": 27651,
+      "sha256": "20f8940d0facbfc762ef9d18fe0d755d096d6e9bb323adc8640bf479d93c37f0"
+    },
+    {
+      "id": "sse_annual_2024",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20231226_5733939.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:56.455403+00:00",
+      "bytes": 27754,
+      "sha256": "f614daa5a6a53916e47ee1ac8e7682d2f15369f0f7d0f90611819a6daad92263"
+    },
+    {
+      "id": "sse_annual_2025",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20241223_10767108.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:56.776515+00:00",
+      "bytes": 27766,
+      "sha256": "d403c40f29bbf1fe7f39b02b7fb93c9a0bfbd71f8f04c6350c3b5050921bf889"
+    },
+    {
+      "id": "sse_annual_2026",
+      "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml",
+      "fetched_at_utc": "2026-11-16T10:52:57.019538+00:00",
+      "bytes": 28038,
+      "sha256": "ff188c710b8904758c185eb955e9eaa2c9bd7c2061af984d4f1d743f899c12a4"
+    },
+    {
+      "id": "szse_2020_extension",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20200127_573917.html",
+      "fetched_at_utc": "2026-11-16T11:20:12.062720+00:00",
+      "bytes": 18653,
+      "sha256": "f1c667041e81524b4b0fe36b9cf728b0f4a1d2b0225e0fddada7259c1b8725aa"
+    },
+    {
+      "id": "szse_annual_2020",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20191220_572766.html",
+      "fetched_at_utc": "2026-11-16T11:20:10.283957+00:00",
+      "bytes": 18324,
+      "sha256": "ae066dfac576813a52b6409f9eb7a56dcbf45a3185400c1dfef0ffff8ad799c9"
+    },
+    {
+      "id": "szse_annual_2021",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20201224_583950.html",
+      "fetched_at_utc": "2026-11-16T11:20:10.599604+00:00",
+      "bytes": 18654,
+      "sha256": "dc7bc37ddf67c5d6b7a9601545bc26f72cc3324a5bf39a1f73c74a8ff560036a"
+    },
+    {
+      "id": "szse_annual_2022",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20211220_590321.html",
+      "fetched_at_utc": "2026-11-16T11:20:10.808976+00:00",
+      "bytes": 18660,
+      "sha256": "c678aba813c8d8076d6e0f7492f3ca077ff3e45e995bf5e9f70f35d84c56bb5c"
+    },
+    {
+      "id": "szse_annual_2023",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20221227_598022.html",
+      "fetched_at_utc": "2026-11-16T11:20:11.062072+00:00",
+      "bytes": 18943,
+      "sha256": "85e2a05b8968f1a4cadd975184962b648cf2cb2cea0071314f0e81bc17f1df96"
+    },
+    {
+      "id": "szse_annual_2024",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20231226_605108.html",
+      "fetched_at_utc": "2026-11-16T11:20:11.286443+00:00",
+      "bytes": 27386,
+      "sha256": "a7b1b433fe93a474b89ec906c36155c7c540918f1fea53ccbd91c3f6fb093541"
+    },
+    {
+      "id": "szse_annual_2025",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20241223_611283.html",
+      "fetched_at_utc": "2026-11-16T11:20:11.564282+00:00",
+      "bytes": 33553,
+      "sha256": "1c5da711eadf27308c84f12b5908ef461fa9dc739d1476512da2754249c90c1f"
+    },
+    {
+      "id": "szse_annual_2026",
+      "url": "https://www.szse.cn/disclosure/notice/general/t20251222_618087.html",
+      "fetched_at_utc": "2026-11-16T11:20:11.826761+00:00",
+      "bytes": 24946,
+      "sha256": "1656d8708d5faed33c7588538639d96128f39fdface02cfa6eb66d796c40f14e"
+    }
+  ]
+}

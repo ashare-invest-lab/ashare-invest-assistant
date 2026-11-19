@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import socket
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -58,6 +60,28 @@ def repo_root() -> Path:
 @pytest.fixture(scope="session")
 def fixtures_dir() -> Path:
     return FIXTURES_DIR
+
+
+@pytest.fixture
+def fixed_aggregate_clock(monkeypatch: pytest.MonkeyPatch) -> dt.datetime:
+    """Freeze only the aggregates API clock, within the public 2026 calendar seed."""
+    from app.api.v1 import aggregates
+
+    instant = dt.datetime(2026, 11, 6, 2, tzinfo=dt.UTC)
+
+    class FixedDateTime(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
+            return (
+                instant.astimezone(tz)
+                if tz is not None
+                else instant.replace(tzinfo=None)
+            )
+
+    monkeypatch.setattr(
+        aggregates, "dt", SimpleNamespace(datetime=FixedDateTime, UTC=dt.UTC)
+    )
+    return instant
 
 
 # hypothesis 示例库放在 tests/.hypothesis（已 .gitignore），不污染仓库根目录

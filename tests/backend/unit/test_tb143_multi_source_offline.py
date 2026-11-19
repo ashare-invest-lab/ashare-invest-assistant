@@ -586,7 +586,7 @@ def _migration():
         str(Path(__file__).resolve().parents[3] / "src/backend/migrations"),
     )
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0036"]
+    assert script.get_heads() == ["0038"]
     revision = script.get_revision("0036")
     assert revision.down_revision == "0035"
     return revision.module

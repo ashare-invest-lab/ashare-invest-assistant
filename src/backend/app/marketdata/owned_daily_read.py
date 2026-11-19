@@ -89,7 +89,7 @@ class OwnedDailyBarsReader(PlaceholderBarsReader):
                 gaps.append(
                     {
                         "key": "bars." + day,
-                        "reason": "suspended" if row.is_suspended else "no_source",
+                        "reason": "no_source",
                         "message": "当日停牌" if row.is_suspended else "日线缓存字段不完整",
                     }
                 )
