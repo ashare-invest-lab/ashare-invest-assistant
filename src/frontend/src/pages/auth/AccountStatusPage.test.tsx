@@ -28,9 +28,12 @@ describe('账号状态页', () => {
     expect(await screen.findByRole('heading', { name: '登录页面' })).toBeInTheDocument();
   });
 
-  it.each(['', '?status=unknown'])('缺失或未知状态安全回退到审核中：%s', (search) => {
+  it.each([
+    ['', '账号正在审核中'],
+    ['?status=unknown', '未知'],
+  ])('账号状态 %s 显示标题「%s」', (search, title) => {
     renderAt(search);
-    expect(screen.getByText('账号正在审核中')).toBeInTheDocument();
+    expect(screen.getByText(title, { exact: true, selector: '.ant-result-title' })).toBeInTheDocument();
     expect(screen.queryByText(/用户名：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/原因：/)).not.toBeInTheDocument();
   });
