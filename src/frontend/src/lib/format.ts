@@ -54,7 +54,7 @@ export const bjToChartTime = (t: string) => {
 
 /** 证据来源：数据源 + 接口路径 */
 export const providerText = (e: Evidence) =>
-  `${(PROVIDER as Record<string, string | undefined>)[e.provider] ?? e.provider}${e.endpoint ? ' ' + e.endpoint : ''}`;
+  `${Object.hasOwn(PROVIDER, e.provider) ? PROVIDER[e.provider] : e.provider}${e.endpoint ? ' ' + e.endpoint : ''}`;
 
 /** 维度单元格规则计数：入场类 “规则 x/y”；纯离场策略（rules_total = 0）显示 “离场 x/y”（v0.2.3 #20） */
 export const ruleCountText = (c: Pick<DimensionCell, 'rules_passed' | 'rules_total' | 'exit_hits' | 'exit_total'>) =>
