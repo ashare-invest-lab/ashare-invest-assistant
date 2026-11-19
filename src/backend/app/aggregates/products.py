@@ -17,6 +17,7 @@ from app.db.tables.signals import candidate_signals, non_executable_reasons, pla
 from app.db.tables.strategy import risk_events, strategy_instances
 from app.plans.service import alert_body
 from app.signals.models import Evidence
+from app.strategy.reviews import lint
 
 
 def encoded(value: Any) -> str:  # noqa: ANN401
@@ -107,14 +108,14 @@ def today_alerts(
             alerts.c.triggered_at.desc(),
             alerts.c.id,
         )
-        .limit(51)
+        .execution_options(yield_per=128)
     )
     items: list[m.TodayAlert] = []
     evidence: list[Evidence] = []
-    skipped, offset = False, 0
-    # Refill after missing evidence so more means another displayable alert exists.
-    while len(items) < 51:
-        rows = conn.execute(query.offset(offset)).all()
+    skipped = False
+    # One ordered SELECT; stream past malformed evidence without issuing refill queries.
+    # Close the cursor on the 51st displayable item or on a compliance rejection.
+    with conn.execute(query) as rows:
         for row in rows:
             body = alert_body(row)
             try:
@@ -130,16 +131,15 @@ def today_alerts(
             body = {key: body[key] for key in m.TodayAlert.model_fields}
             body["name"] = body["name"] if row.security_code is not None else None
             body["evidence_ids"] = [prefix + identifier for identifier in ids]
-            items.append(m.TodayAlert.model_validate_json(encoded(body)))
+            item = m.TodayAlert.model_validate_json(encoded(body))
+            lint(item.title)
+            items.append(item)
             if len(items) <= 50:
                 evidence.extend(
                     item.model_copy(update={"id": prefix + item.id}) for item in sources
                 )
             else:
                 break
-        if len(rows) < 51:
-            break
-        offset += len(rows)
     return m.ProductBlock[m.TodayAlert](items=items[:50], more=len(items) > 50), evidence, skipped
 
 

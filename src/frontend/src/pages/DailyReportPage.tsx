@@ -204,6 +204,8 @@ export function DailyReportPage() {
     );
   }
   const r = q.data;
+  const gapCount = r.gaps.filter((g) => g.reason !== 'suspended').length;
+  const gapHeading = gapCount ? '数据缺口' : '停牌说明';
   const raw = sp.get('filter');
   const filter: StockFilter = (STOCK_FILTERS as readonly string[]).includes(raw ?? '') ? (raw as StockFilter) : 'all';
   const count = (f: StockFilter) => r.stocks.filter((s) => matchFilter(s, f)).length;
@@ -229,7 +231,7 @@ export function DailyReportPage() {
       </div>
       <nav className="report-nav small" aria-label="日报章节">
         <a href="#report-overview">本期总览</a>
-        {r.gaps.length ? <a href="#report-data-gaps">数据缺口（{r.gaps.length}）</a> : null}
+        {r.gaps.length ? <a href="#report-data-gaps">{gapCount ? `数据缺口（${gapCount}）` : gapHeading}</a> : null}
         <a href="#report-context">账户与市场</a>
         <a href="#report-stocks">逐股卡片</a>
       </nav>
@@ -241,11 +243,18 @@ export function DailyReportPage() {
       </section>
       {r.gaps.length ? (
         <section id="report-data-gaps" className="report-section" aria-labelledby="report-data-gaps-title">
-          <h2 id="report-data-gaps-title">数据缺口</h2>
+          <h2 id="report-data-gaps-title">{gapHeading}</h2>
           <Alert
-            className="gap-alert" type="warning" showIcon data-testid="report-gaps"
-            title={`数据缺口 ${r.gaps.length} 项（缺失不臆测；相关维度标为“未知”）`}
-            description={<details className="report-gap-details" data-testid="report-gap-details"><summary>查看全部 {r.gaps.length} 项缺口与来源说明</summary><ul className="gap-grid report-gap-list">{r.gaps.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{(labelOf(GAP_REASON, g.reason) ?? '未知')}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}</ul></details>}
+            className="gap-alert" type={gapCount ? 'warning' : 'info'} showIcon data-testid="report-gaps"
+            title={gapCount ? `数据缺口 ${gapCount} 项（缺失不臆测；相关维度标为“未知”）` : '已确认停牌'}
+            description={
+              <details className="report-gap-details" data-testid="report-gap-details">
+                <summary>查看全部 {r.gaps.length} 项{gapCount === r.gaps.length ? '缺口与来源说明' : '数据与来源说明'}</summary>
+                <ul className="gap-grid report-gap-list">
+                  {r.gaps.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{labelOf(GAP_REASON, g.reason) ?? '未知'}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}
+                </ul>
+              </details>
+            }
           />
         </section>
       ) : null}

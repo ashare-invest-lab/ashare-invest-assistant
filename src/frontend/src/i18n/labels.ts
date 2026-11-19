@@ -87,7 +87,7 @@ export const EPISTEMIC: Record<EpistemicType, { text: string; color: string }> =
   hypothesis: { text: '假设', color: 'purple' }, execution: { text: '执行', color: 'blue' },
 };
 export const GAP_REASON: Record<GapReason, string> = {
-  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用', not_applicable: '不适用',
+  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用', not_applicable: '不适用', suspended: '停牌',
 };
 export const ORIGIN: Record<SuggestionOrigin, string> = {
   daily_batch: '盘后批处理', intraday_event: '盘中事件', manual_refresh: '手动刷新',

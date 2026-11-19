@@ -26,6 +26,8 @@ const DIMENSIONS = ENUMS.dimension;
 
 /** 契约约定的虚构 ID 格式 00000000-0000-4000-8000-0000000000xx */
 export const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+// 本人同证券同日确证停牌的合成记录，不从零量、平价或缺行推断。
+export const CONFIRMED_DAILY_SUSPENSION = { code: '601001.SH', date: TRADE_DATE, owner: uid(2) } as const;
 export const ACCOUNT_ID = uid(1);
 const f2 = (n: number) => n.toFixed(2);
 
