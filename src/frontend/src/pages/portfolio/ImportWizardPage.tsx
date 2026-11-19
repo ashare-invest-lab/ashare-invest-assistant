@@ -11,9 +11,11 @@ import {
 import type { ImportBatch, ImportConfirmResponse, ImportFinding, ImportKind, ImportRow } from '../../api/accountTypes';
 import { ApiError, newIdempotencyKey } from '../../api/client';
 import { ENUMS } from '../../api/enums';
-import { IMPORT_422_TEXT, IMPORT_CODES, IMPORT_TONE, rowTone } from '../../api/importCodes';
-import { ErrorBox, Loading } from '../../components/common';
+import { IMPORT_422_TEXT, IMPORT_CODES, IMPORT_CODE_MAP, IMPORT_TONE, rowTone } from '../../api/importCodes';
+import { EnumTag, ErrorBox, Loading } from '../../components/common';
+import { CursorPager } from '../../components/CursorPager';
 import { DEDUP_STATUS, ENCODINGS, IMPORT_FIELDS, IMPORT_ROW_STATUS, IMPORT_STATUS, RECON_STATUS, TRADE_SIDE } from '../../i18n/importLabels';
+import { ownValue } from '../../lib/enumValue';
 import { fmtAmount, fmtNum, fmtTime } from '../../lib/format';
 import { otherKindHint, parsersFor } from '../../lib/importKind';
 import { FindingItem, FindingTag, ToneLegend } from './importParts';
@@ -83,7 +85,7 @@ function UploadStep() {
           </Form.Item>
           {/* T-F20（T-B66）：混合入口不再默认交割单，必须明确选择文件类型 */}
           <Form.Item name="kind" label="文件类型" rules={[{ required: true, message: '请选择文件类型：交割单或持仓快照' }]} data-testid="upload-kind">
-            <Radio.Group optionType="button" options={(['trades', 'positions'] as const).map((k) => ({ value: k, label: KIND_TEXT[k] }))} />
+            <Radio.Group optionType="button" options={(['trades', 'positions'] as const).map((k) => ({ value: k, label: ownValue(KIND_TEXT, k, '未知') }))} />
           </Form.Item>
           {kind === 'positions' ? (
             <Form.Item name="snapshot_as_of" label="持仓快照时间（可后补）" extra="不填时按文件推断，并给出“快照时间按推断处理”的提示">
@@ -132,10 +134,10 @@ function KindMismatch({ b }: { b: ImportBatch }) {
   if (!other) return null;
   return (
     <Alert type="warning" showIcon style={{ marginBottom: 8 }} data-testid="kind-mismatch"
-      title={`这是${KIND_SHORT[other]}文件，请按${KIND_SHORT[other]}重新上传`}
-      description={`本批次按“${KIND_TEXT[b.kind]}”上传，解析器只能在同类型内调整；编码仍会自动识别。`}
+      title={`这是${ownValue(KIND_SHORT, other, '未知')}文件，请按${ownValue(KIND_SHORT, other, '未知')}重新上传`}
+      description={`本批次按“${ownValue(KIND_TEXT, b.kind, '未知')}”上传，解析器只能在同类型内调整；编码仍会自动识别。`}
       action={<Button size="small" type="primary" data-testid="kind-reupload"
-        onClick={() => navigate(`/portfolio/import?account_id=${encodeURIComponent(b.account_id)}&kind=${other}`)}>按{KIND_SHORT[other]}重新上传</Button>} />
+        onClick={() => navigate(`/portfolio/import?account_id=${encodeURIComponent(b.account_id)}&kind=${other}`)}>按{ownValue(KIND_SHORT, other, '未知')}重新上传</Button>} />
   );
 }
 
@@ -146,14 +148,13 @@ function BatchView({ id }: { id: string }) {
   if (q.isPending) return <Loading />;
   if (q.isError) return <div className="page-scroll page"><ErrorBox error={q.error} /></div>;
   const b = q.data;
-  const st = IMPORT_STATUS[b.status];
   const step = b.status === 'uploaded' || b.status === 'parsing' ? 1 : b.status === 'previewed' || b.status === 'failed' ? 2 : 4;
   return (
     <div className="page-scroll page" data-testid="import-batch">
       <div className="page-head">
-        <h2 className="page-title">交割单导入 <Tag color={st.color} data-testid="batch-status">{st.text}</Tag></h2>
+        <h2 className="page-title">交割单导入 <EnumTag map={IMPORT_STATUS} value={b.status} data-testid="batch-status" /></h2>
         <Space>
-          <span className="muted">{KIND_TEXT[b.kind]} · 上传于 <span className="mono">{fmtTime(b.created_at)}</span></span>
+          <span className="muted">{ownValue(KIND_TEXT, b.kind, '未知')} · 上传于 <span className="mono">{fmtTime(b.created_at)}</span></span>
           <Link to={`/portfolio?account_id=${b.account_id}&tab=imports`}>返回导入记录</Link>
         </Space>
       </div>
@@ -211,7 +212,8 @@ function DetectPanel({ b }: { b: ImportBatch }) {
                     {
                       title: '映射到字段', key: 'f',
                       render: (_v, r) => (
-                        <Select size="small" style={{ width: 240 }} value={mapping[r.col] ?? ''} options={fieldOptions}
+                        <Select size="small" style={{ width: 240 }} value={ownValue(mapping, r.col, '') ?? ''} options={fieldOptions}
+                          labelRender={({ value, label }) => value === '' || ownValue(IMPORT_FIELDS, String(value), undefined) !== undefined ? label : '未知'}
                           onChange={(v) => setMapping((m) => ({ ...m, [r.col]: v }))} data-testid={`map-${r.col}`} />
                       ),
                     },
@@ -241,8 +243,8 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
   const [dlErr, setDlErr] = useState<unknown>(null);
 
   const actionable = useMemo(
-    () => [...b.file_findings, ...(allRows.data?.items ?? []).flatMap((r) => r.findings)].filter((f) => f.needs_action),
-    [b.file_findings, allRows.data],
+    () => [...b.file_findings, ...allRows.items.flatMap((r) => r.findings)].filter((f) => f.needs_action),
+    [b.file_findings, allRows.items],
   );
   const fileErrors = b.file_findings.filter((f) => f.severity === 'error');
   const s = b.stats;
@@ -273,24 +275,28 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
           <section className="imp-section">
             <Space wrap style={{ marginBottom: 8 }}>
               <Select allowClear placeholder="行状态" style={{ width: 120 }} value={filter.status} onChange={(v) => setFilter((f) => ({ ...f, status: v }))}
-                options={ENUMS.import_row_status.map((x) => ({ value: x, label: IMPORT_ROW_STATUS[x].text }))} data-testid="filter-status" />
+                options={ENUMS.import_row_status.map((x) => ({ value: x, label: ownValue(IMPORT_ROW_STATUS, x, { text: '未知' }).text }))} data-testid="filter-status" />
               <Select allowClear placeholder="去重结果" style={{ width: 160 }} value={filter.dedup_status} onChange={(v) => setFilter((f) => ({ ...f, dedup_status: v }))}
-                options={ENUMS.dedup_status.map((x) => ({ value: x, label: DEDUP_STATUS[x].text }))} />
+                options={ENUMS.dedup_status.map((x) => ({ value: x, label: ownValue(DEDUP_STATUS, x, { text: '未知' }).text }))} />
               <Select allowClear showSearch placeholder="提示码" style={{ width: 260 }} value={filter.code} onChange={(v) => setFilter((f) => ({ ...f, code: v }))}
                 optionFilterProp="label" options={IMPORT_CODES.filter((c) => c.scope === 'row').map((c) => ({ value: c.code, label: `${c.title} ${c.code}` }))} />
             </Space>
-            {rows.isError ? <ErrorBox error={rows.error} /> : null}
-            <RowsTable rows={rows.data?.items ?? []} loading={rows.isPending} />
+            {rows.isError && !rows.isFetchNextPageError ? <ErrorBox error={rows.error} /> : null}
+            <RowsTable rows={rows.items} loading={rows.isPending} />
+            <CursorPager query={rows} loaded={rows.items.length} testId="import-rows-pager" unit="行" />
           </section>
 
-          {actionable.length ? (
+          {actionable.length || allRows.hasNextPage || allRows.isError ? (
             <section className="imp-section" data-testid="needs-action">
-              <h3>需处理的警告（{actionable.filter((f) => !f.resolution).length} 项未处理 / 共 {actionable.length} 项）</h3>
+              <h3>需处理的警告（已加载提示中 {actionable.filter((f) => !f.resolution).length} 项未处理 / {actionable.length} 项）</h3>
               <p className="muted">可以逐项选择处理方式；也可以在确认时勾选“接受默认处理”。选择“仍然导入”等覆盖默认处理的选项时必须填写理由。</p>
+              {allRows.hasNextPage ? <p className="muted">还有预览行未加载，后续行可能含需处理的警告。可继续加载全部预览行后检查。</p> : null}
+              {allRows.isError && !allRows.isFetchNextPageError ? <ErrorBox error={allRows.error} prefix="警告行读取失败" /> : null}
               {actionable.filter((f) => f.row_no != null).map((f) => (
                 <FindingItem key={`${f.id}-${f.resolution?.choice ?? ''}`} f={f} busy={resolve.isPending && resolve.variables?.v.finding_id === f.id}
                   onResolve={(choice, reason) => resolve.mutate({ id: b.batch_id, v: { finding_id: f.id, choice, reason } }, { onSuccess: () => void allRows.refetch() })} />
               ))}
+              <CursorPager query={allRows} loaded={allRows.items.length} testId="import-action-rows-pager" unit="行" />
             </section>
           ) : null}
 
@@ -324,16 +330,16 @@ export function RowsTable({ rows, loading }: { rows: ImportRow[]; loading?: bool
     <Table<ImportRow>
       size="small" rowKey="row_no" loading={loading} dataSource={rows} pagination={{ pageSize: 50, hideOnSinglePage: true }}
       scroll={{ x: 1200 }}
-      rowClassName={(r) => { const t = rowTone(r); return t ? IMPORT_TONE[t].rowClass : ''; }}
+      rowClassName={(r) => { const t = rowTone(r); return t ? ownValue(IMPORT_TONE, t, { rowClass: '' }).rowClass : ''; }}
       locale={{ emptyText: '没有符合条件的行' }}
       data-testid="rows-table"
       columns={[
         { title: '行', dataIndex: 'row_no', width: 56, render: (v: number) => <span className="mono">{v}</span> },
-        { title: '状态', dataIndex: 'status', width: 70, render: (v: ImportRow['status']) => <Tag color={IMPORT_ROW_STATUS[v].color}>{IMPORT_ROW_STATUS[v].text}</Tag> },
-        { title: '去重', dataIndex: 'dedup_status', width: 130, render: (v: ImportRow['dedup_status']) => (v ? <Tag color={DEDUP_STATUS[v].color}>{DEDUP_STATUS[v].text}</Tag> : <span className="muted">—</span>) },
+        { title: '状态', dataIndex: 'status', width: 70, render: (v: ImportRow['status']) => <EnumTag map={IMPORT_ROW_STATUS} value={v} /> },
+        { title: '去重', dataIndex: 'dedup_status', width: 130, render: (v: ImportRow['dedup_status']) => (v ? <EnumTag map={DEDUP_STATUS} value={v} /> : <span className="muted">—</span>) },
         { title: '日期', key: 'd', width: 150, render: (_v, r) => <span className="mono">{r.normalized ? `${r.normalized.trade_date} ${r.normalized.trade_time ?? ''}` : '—'}</span> },
         { title: '证券', key: 's', width: 160, render: (_v, r) => (r.normalized ? <span><span className="mono">{r.normalized.security_code}</span> {r.normalized.name}</span> : '—') },
-        { title: '业务', key: 'b', width: 110, render: (_v, r) => (r.normalized ? (r.normalized.side ? <Tag color={TRADE_SIDE[r.normalized.side].color}>{TRADE_SIDE[r.normalized.side].text}</Tag> : r.normalized.biz_type_raw) : '—') },
+        { title: '业务', key: 'b', width: 110, render: (_v, r) => (r.normalized ? (r.normalized.side ? <EnumTag map={TRADE_SIDE} value={r.normalized.side} /> : r.normalized.biz_type_raw) : '—') },
         { title: '数量', key: 'q', width: 80, align: 'right', render: (_v, r) => <span className="mono">{r.normalized ? fmtNum(r.normalized.qty, 0) : '—'}</span> },
         { title: '价格', key: 'p', width: 80, align: 'right', render: (_v, r) => <span className="mono">{r.normalized ? fmtNum(r.normalized.price, 3) : '—'}</span> },
         { title: '金额', key: 'a', width: 110, align: 'right', render: (_v, r) => <span className="mono">{r.normalized ? fmtAmount(r.normalized.amount) : '—'}</span> },
@@ -352,6 +358,7 @@ function ConfirmPanel({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Imp
   const [key, setKey] = useState(newIdempotencyKey);
   const change = (fn: () => void) => { fn(); setKey(newIdempotencyKey()); confirm.reset(); };
   const e = confirm.error instanceof ApiError ? confirm.error : null;
+  const errorTitle = e ? ownValue(IMPORT_422_TEXT, e.code, e.status === 422 ? '未知' : undefined) : undefined;
   const codes = e?.code === 'IMPORT_WARNINGS_UNACKNOWLEDGED' ? ((e.details as { codes?: string[] } | null)?.codes ?? []) : [];
   return (
     <section className="imp-section imp-confirm" data-testid="confirm-panel">
@@ -369,9 +376,12 @@ function ConfirmPanel({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Imp
           确认写入
         </Button>
       </Space>
-      {e && IMPORT_422_TEXT[e.code] ? (
-        <Alert type="error" showIcon style={{ marginTop: 8 }} data-testid="confirm-error" title={IMPORT_422_TEXT[e.code]}
-          description={codes.length ? <Space size={2} wrap>{codes.map((c) => <Tag key={c} color="orange">{IMPORT_CODES.find((x) => x.code === c)?.title ?? c}</Tag>)}</Space> : e.message} />
+      {e && errorTitle !== undefined ? (
+        <Alert type="error" showIcon style={{ marginTop: 8 }} data-testid="confirm-error" title={errorTitle}
+          description={codes.length ? <Space size={2} wrap>{codes.map((c) => {
+            const spec = IMPORT_CODE_MAP.get(c);
+            return <Tag key={c} color={spec ? 'orange' : undefined}>{spec ? spec.title : '未知'}</Tag>;
+          })}</Space> : e.message} />
       ) : confirm.isError ? <ErrorBox error={confirm.error} prefix="写入失败" /> : null}
     </section>
   );
@@ -415,7 +425,7 @@ function DoneStep({ b, result }: { b: ImportBatch; result: ImportConfirmResponse
       subTitle={
         <div>
           {result ? <div>写入成交 {result.written.trades} 条、事件 {result.written.events} 条、快照持仓 {result.written.snapshot_positions} 条。</div> : <div>写入于 {b.committed_at ? fmtTime(b.committed_at) : '—'}。</div>}
-          {rec ? <div>对账：<Tag color={RECON_STATUS[rec.status].color}>{RECON_STATUS[rec.status].text}</Tag>{rec.diff_count ? `${rec.diff_count} 项差异` : ''}</div> : null}
+          {rec ? <div>对账：<EnumTag map={RECON_STATUS} value={rec.status} />{rec.diff_count ? `${rec.diff_count} 项差异` : ''}</div> : null}
         </div>
       }
       extra={[

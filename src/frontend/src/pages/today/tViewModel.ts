@@ -94,7 +94,7 @@ export function notApplicableText(gaps: readonly Gap[], nonTradingDay: boolean):
   const na = gaps.find((g) => g.reason === 'not_applicable');
   if (!na) return null;
   if (na.key === 't_view.session' && nonTradingDay) return T_VIEW_NA_HOLIDAY;
-  return T_VIEW_NA_TEXT[na.key] ?? T_VIEW_NA_FALLBACK;
+  return Object.hasOwn(T_VIEW_NA_TEXT, na.key) ? T_VIEW_NA_TEXT[na.key] : T_VIEW_NA_FALLBACK;
 }
 
 /**

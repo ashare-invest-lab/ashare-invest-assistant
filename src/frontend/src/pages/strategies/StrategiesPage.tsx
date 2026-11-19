@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { Alert, Table, Tag } from 'antd';
@@ -89,12 +90,12 @@ export function StrategiesPage() {
               ),
             },
             { title: '健康度', key: 'health', render: (_, t) => t.health ? `${t.health.state} · n=${t.health.n} · 权重 ${t.health.weight}` : '暂无健康度' },
-            { title: '周期', key: 'h', width: 120, render: (_, t) => t.horizons.map((h) => HORIZON[h]).join('、') },
+            { title: '周期', key: 'h', width: 120, render: (_, t) => t.horizons.map((h) => (labelOf(HORIZON, h) ?? '未知')).join('、') },
             {
               title: '版本', key: 'v', width: 160,
               render: (_, t) => (
                 <span>
-                  v{t.current_version.version_no} · {t.current_version.lifecycle === 'simulating' ? '模拟中' : LIFECYCLE[t.current_version.lifecycle]}
+                  v{t.current_version.version_no} · {t.current_version.lifecycle === 'simulating' ? '模拟中' : (labelOf(LIFECYCLE, t.current_version.lifecycle) ?? '未知')}
                   {!runnable(t) ? <span className="muted small" data-testid={`not-runnable-${t.key}`}>（{t.horizons.length ? '该版本暂不可启用' : '未声明适用周期'}）</span> : null}
                 </span>
               ),

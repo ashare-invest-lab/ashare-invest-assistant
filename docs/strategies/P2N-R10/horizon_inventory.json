@@ -9,6 +9,18 @@
   ],
   "scope_snapshot": [
     {
+      "path": "docs/strategies/T-R81/README.md",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R81/gen_reference.py",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R81/reference_values.csv",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
       "path": "docs/strategies/T-R16/L-01_lt_value.md",
       "scope_role": "enumerated_identity_source"
     },
@@ -908,6 +920,36 @@
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
     },
     {
+      "path": "docs/strategies/T-R86/sources_ext/announcement_indexes.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/calendar_excerpts.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/dividend_excerpts.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/public_profiles.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/report_excerpts.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/url_status.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
       "path": "docs/strategies/R-R1/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
@@ -948,6 +990,36 @@
       "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
     },
     {
+      "path": "docs/strategies/T-R78/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R78/horizon_inputs_spec.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R79/README.md",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79 draft benchmark specification; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/benchmark_spec.md",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79 draft benchmark specification; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/readonly_checks.sql",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79c unexecuted read-only SQL draft; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/u11_calib.py",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R80 offline U11 descriptive calibration; no system suggestions or runtime change"
+    },
+    {
       "path": "docs/strategies/R-R2/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
@@ -986,6 +1058,26 @@
       "path": "docs/strategies/R-R2/test_audit_bse_code_map.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/audit_exchange_calendar.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/report.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/summary.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
     },
     {
       "path": "docs/strategies/cards/history/hold_risk_monitor.v3.md",
@@ -2914,11 +3006,11 @@
   "t_r88c_merge_refresh": {
     "basis": "T-R88c 解冲突（第四批）：以 origin/main 为底，保留 #178 的 R-R1 八文件登记与 HEAD 的三卡升版、三个冻结身份及证据",
     "previous_scope_files": 205,
-    "scope_files": 216,
+    "scope_files": 235,
     "identity_records": 48,
     "source_identity_files": 26,
     "historical_frozen": 7,
     "runtime_changed": false,
-    "change": "scope 205→216；身份45→48、来源身份文件23→26、冻结身份4→7；H-01 v4、S-01 v3、W-01 v3；保留两侧历史刷新记录，不推断运行态"
+    "change": "scope 205→235；身份45→48、来源身份文件23→26、冻结身份4→7；H-01 v4、S-01 v3、W-01 v3；保留两侧历史刷新记录，不推断运行态"
   }
 }
