@@ -16,7 +16,6 @@ import socket
 import struct
 import subprocess
 import sys
-import tarfile
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -453,12 +452,17 @@ def _run_sql(conn, schema: str, name: str, rows: dict[str, list], before="2031-0
     source = source.replace("market.", f'"{schema}".').replace(
         ":'before'", f"'{before}'"
     )
+    stages_day = name == "tb143_load_day.sql"
     pending: list[str] = []
     for line in source.splitlines():
-        if line.startswith("\\") or line in (
-            "BEGIN;",
-            "COMMIT;",
-            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;",
+        if not stages_day and (
+            line.startswith("\\")
+            or line
+            in (
+                "BEGIN;",
+                "COMMIT;",
+                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;",
+            )
         ):
             continue
         if line.startswith("COPY "):
@@ -475,6 +479,8 @@ def _run_sql(conn, schema: str, name: str, rows: dict[str, list], before="2031-0
         else:
             pending.append(line)
     conn.execute("\n".join(pending))
+    if stages_day:
+        return conn.execute("SELECT * FROM pg_temp.day_stage").fetchall()
     counts = conn.execute("SELECT * FROM load_counts").fetchall()
     conn.execute(
         "DROP VIEW IF EXISTS catalog_effective; DROP VIEW IF EXISTS mairui_count"
@@ -550,119 +556,72 @@ def test_pn03_entry_load_meta_sql(pg_conn) -> None:
     assert result["gaps"] == [f"adjust_factor_missing:{D0}"]
 
 
-def test_pn03_entry_day_runner_ps1(tmp_path) -> None:
-    def execute(directory: Path, before: str | None) -> list[list[str]]:
-        directory.mkdir()
-        members = {
-            "day_2030.csv": f"code,trade_date,adj_type,open,high,low,close,volume,amount\n{CODE_A},{D0},none,1,1,1,1,1,1\n",
-            "day_2031.csv": f"code,trade_date,adj_type,open,high,low,close,volume,amount\n{CODE_A},{D2},none,1,1,1,1,1,1\n",
-            "tb143_load_day.sql": (BACKEND / "probes/tb143_load_day.sql").read_text(
-                encoding="utf-8"
-            ),
-        }
-        members["SUMS"] = "".join(
-            hashlib.sha256(text.encode()).hexdigest() + "  " + name + "\n"
-            for name, text in members.items()
-        )
-        bundles = []
-        for index in range(5):
-            buffer = io.BytesIO()
-            with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-                if index == 0:
-                    for name, text in members.items():
-                        raw = text.encode()
-                        info = tarfile.TarInfo(name)
-                        info.size = len(raw)
-                        archive.addfile(info, io.BytesIO(raw))
-            data = buffer.getvalue()
-            (directory / f"b{index + 1}.tgz").write_bytes(data)
-            bundles.append(data)
-        combined = b"".join(bundles)
-        (directory / "all.bin").write_bytes(combined)
-        empty = hashlib.sha256(b"").hexdigest()
-        (directory / "PARTS").write_text(
-            "".join(f"{empty}  p{n:02}\n" for n in range(57))
-        )
-        for n in range(57):
-            (directory / f"p{n:02}").write_bytes(b"")
-        (directory / "BUNDLES").write_text(
-            "".join(
-                f"{hashlib.sha256(data).hexdigest()}  b{n}.tgz\n"
-                for n, data in enumerate(bundles, 1)
-            )
-        )
-        fake = tmp_path / (directory.name + "_docker.py")
-        fake.write_text(
-            "import json, os, sys\n"
-            "with open(os.environ['PN03_DOCKER_LOG'], 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')\n"
-            "if 'find' in sys.argv: print('./day_2030.csv\\n./day_2031.csv')\n"
-            "if 'psql' in sys.argv:\n"
-            "    print('1 | 1 | 0')\n"
-            "    print('blocked_bj_unconfirmed | 0')\n",
-            encoding="utf-8",
-        )
-        bindir = tmp_path / (directory.name + "_bin")
-        bindir.mkdir()
+@pytest.mark.parametrize("before", [None, D2.isoformat()], ids=["default", "explicit"])
+def test_pn03_entry_day_runner_ps1(tmp_path, before) -> None:
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    original = {"all.bin": b"synthetic archive\n", "SUMS": b"synthetic manifest\n"}
+    for name, content in original.items():
+        (artifacts / name).write_bytes(content)
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    calls = tmp_path / "external-calls"
+    for name in ("docker", "psql"):
         if os.name == "nt":
-            (bindir / "docker.cmd").write_text(
-                f'@"{sys.executable}" "{fake}" %*\n', encoding="utf-8"
+            (bindir / f"{name}.cmd").write_text(
+                f'@echo {name}>>"%PN03_CALLS%"\n@exit /b 1\n', encoding="utf-8"
             )
         else:
-            command = bindir / "docker"
-            command.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" "$@"\n')
+            command = bindir / name
+            command.write_text(f'#!/bin/sh\necho {name} >> "$PN03_CALLS"\nexit 1\n')
             command.chmod(0o755)
-        log = tmp_path / (directory.name + "_docker.jsonl")
-        env = dict(
-            os.environ,
-            PATH=str(bindir) + os.pathsep + os.environ["PATH"],
-            PN03_DOCKER_LOG=str(log),
-        )
-        shell = shutil.which("pwsh") or shutil.which("powershell")
-        assert shell is not None, "原 PS1 入口需要 pwsh/powershell"
-        argv = [
-            shell,
-            "-NoProfile",
-            "-File",
-            str(BACKEND / "probes/tb143_day_load_runner.ps1"),
-            "-Dir",
-            str(directory),
-            "-AllSha",
-            hashlib.sha256(combined).hexdigest(),
-            "-BundleSizes",
-            ",".join(str(len(data)) for data in bundles),
-            "-Lock",
-            str(directory / "lock"),
-            "-Log",
-            str(directory / "runner.log"),
-            "-PauseSeconds",
-            "0",
-        ]
-        if before is not None:
-            argv += ["-Before", before]
-        completed = subprocess.run(
-            argv, check=False, env=env, capture_output=True, text=True, timeout=30
-        )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
-        return [json.loads(line) for line in log.read_text().splitlines()]
-
-    default_calls = execute(tmp_path / "default", None)
-    explicit_calls = execute(tmp_path / "explicit", D2.isoformat())
-    for calls, expected in (
-        (default_calls, "2023-11-13"),
-        (explicit_calls, D2.isoformat()),
-    ):
-        psql = [call for call in calls if "psql" in call]
-        assert len(psql) == 2
-        assert all("before=" + expected in call for call in psql)
-        assert not any(
-            "trading_calendar" in argument or "daily_bars_ready" in argument
-            for call in calls
-            for argument in call
-        )
+    env = dict(
+        os.environ,
+        PATH=str(bindir) + os.pathsep + os.environ["PATH"],
+        PN03_CALLS=str(calls),
+    )
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    assert shell is not None, "原 PS1 入口需要 pwsh/powershell"
+    lock, log = tmp_path / "lock", tmp_path / "runner.log"
+    argv = [
+        shell,
+        "-NoProfile",
+        "-File",
+        str(BACKEND / "probes/tb143_day_load_runner.ps1"),
+        "-Dir",
+        str(artifacts),
+        "-AllSha",
+        hashlib.sha256(original["all.bin"]).hexdigest(),
+        "-BundleSizes",
+        str(len(original["all.bin"])),
+        "-Lock",
+        str(lock),
+        "-Log",
+        str(log),
+        "-PauseSeconds",
+        "0",
+    ]
+    if before is not None:
+        argv += ["-Before", before]
+    completed = subprocess.run(
+        argv, check=False, env=env, capture_output=True, text=True, timeout=30
+    )
+    output = completed.stdout + completed.stderr
+    assert completed.returncode == 1, output
+    assert "legacy tb143 load path is disabled" in output
+    assert "python -m app.cli daily-bars-import-tdx" in output
+    assert "python -m app.cli.tb143_day_load" in output
+    assert not calls.exists() and not lock.exists() and not log.exists()
+    assert {path.name: path.read_bytes() for path in artifacts.iterdir()} == original
 
 
-def test_pn03_entry_load_day_sql(pg_conn) -> None:
-    schema = _probe_schema(pg_conn)
+@pytest.mark.parametrize(
+    "invalid_offset", [None, 0, 1], ids=["valid", "at-before", "after-before"]
+)
+def test_pn03_entry_load_day_sql(pg_conn, invalid_offset) -> None:
+    before = dt.date(2023, 11, 13)
+    early = before - dt.timedelta(days=1)
     header = [
         "code",
         "trade_date",
@@ -674,20 +633,34 @@ def test_pn03_entry_load_day_sql(pg_conn) -> None:
         "volume",
         "amount",
     ]
-    row = [CODE_A, D0.isoformat(), "none", 1, 1, 1, 1, 1, 1]
-    counts = _run_sql(
-        pg_conn, schema, "tb143_load_day.sql", {"day_stage": [header, row]}
+    valid = (CODE_A, early, "none", 10, 12, 9, 11, 40, 440)
+    rows = [header, valid]
+    # 只在隔离测试事务中写入虚构的既有行，回滚后不留状态。
+    pg_conn.execute(
+        "INSERT INTO market.daily_bars (code, trade_date, close, source) "
+        "VALUES (%s, %s, 20, 'fake')",
+        (CODE_A, early),
     )
-    # T-B163 在 candidates/inserted/skipped 后新增 blocked_bj 计数。
-    assert counts == [(1, 1, 0, 0)]
-    assert pg_conn.execute(
-        f'SELECT source FROM "{schema}".daily_bars WHERE code=%s AND trade_date=%s',
-        (CODE_A, D0),
-    ).fetchone() == ("tdx_local",)
-    before = dt.date(2023, 11, 13)
-    for invalid in (before, before + dt.timedelta(days=1)):
-        valid = [CODE_A, "2023-01-04", "none", 1, 1, 1, 1, 1, 1]
-        bad = [CODE_B, invalid.isoformat(), "none", 1, 1, 1, 1, 1, 1]
+    pg_conn.execute(
+        "INSERT INTO market.trading_calendar (date, is_open) VALUES (%s, true)",
+        (early,),
+    )
+    bars_query = "SELECT * FROM market.daily_bars ORDER BY code, trade_date, adj_type"
+    calendar_query = "SELECT * FROM market.trading_calendar ORDER BY date"
+    before_bars = pg_conn.execute(bars_query).fetchall()
+    before_calendar = pg_conn.execute(calendar_query).fetchall()
+
+    if invalid_offset is None:
+        assert _run_sql(
+            pg_conn,
+            "market",
+            "tb143_load_day.sql",
+            {"day_stage": rows},
+            before.isoformat(),
+        ) == [valid]
+    else:
+        invalid_date = before + dt.timedelta(days=invalid_offset)
+        rows.append((CODE_B, invalid_date, "none", 10, 12, 9, 11, 40, 440))
         with (
             pytest.raises(
                 psycopg.errors.RaiseException, match="日线日期必须全部小于 before"
@@ -696,18 +669,17 @@ def test_pn03_entry_load_day_sql(pg_conn) -> None:
         ):
             _run_sql(
                 pg_conn,
-                schema,
+                "market",
                 "tb143_load_day.sql",
-                {"day_stage": [header, valid, bad]},
+                {"day_stage": rows},
                 before.isoformat(),
             )
         assert pg_conn.execute(
-            f'SELECT count(*) FROM "{schema}".daily_bars WHERE trade_date=%s',
-            (valid[1],),
-        ).fetchone() == (0,)
-    assert pg_conn.execute(
-        "SELECT count(*) FROM market.trading_calendar"
-    ).fetchone() == (0,)
+            "SELECT to_regclass('pg_temp.day_stage')"
+        ).fetchone() == (None,)
+
+    assert pg_conn.execute(bars_query).fetchall() == before_bars
+    assert pg_conn.execute(calendar_query).fetchall() == before_calendar
 
 
 def test_pn03_entry_research_calendar(tmp_path) -> None:
