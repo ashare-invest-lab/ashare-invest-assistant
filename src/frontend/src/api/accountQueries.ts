@@ -184,12 +184,15 @@ export interface RowFilter { status?: string; code?: string; dedup_status?: stri
  * 前端对这两种状态不再请求逐行预览，计数一律取批次头 stats。只有 previewed 才有可看的预览行。
  */
 export const rowsAvailable = (status: ImportBatch['status']) => status === 'previewed';
+const importRowId = (row: ImportRow) => String(row.row_no);
 export const useImportRows = (id: string | null, enabled: boolean, f: RowFilter) =>
-  useQuery({
+  useCursorPages<ImportRow>({
     queryKey: ak.rows(id ?? '', JSON.stringify(f)),
-    queryFn: ({ signal }) => apiGet<Paged<ImportRow>>(`/imports/${encodeURIComponent(id!)}/rows`, { ...f, limit: 200 }, signal),
+    path: `/imports/${encodeURIComponent(id ?? '')}/rows`,
+    params: { ...f },
+    limit: 200,
     enabled: !!id && enabled,
-    staleTime: 0,
+    idOf: importRowId,
   });
 
 function useBatchMutation<V, R>(fn: (id: string, v: V) => Promise<R>) {
