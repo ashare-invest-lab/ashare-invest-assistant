@@ -160,7 +160,7 @@ WHERE id = CAST(:result_snapshot_id AS uuid) AND purpose = 'review';
 -- 因子/事实见Q02；辅槽/分钟及未来扩展字段不假定已有schema，不据此宣称全输入通过。
 -- current_container_status/computed_at仅作当前状态参照，不代表本版结果或历史冻结时点。
 -- 混合终态容器须逐结果核对原冻结包，不能借另一unavailable的新as_of解冻终态。
--- 单次SELECT不证明五日逐日作业、旧版重放或冻结历史；须另行跨日审计，日历未知不推进5日。
+-- 单次SELECT不能证明R13窗口内每日补算、旧版重放或冻结历史。跨日审计须核第5个开市日后的已覆盖休市日仍在窗内、第6个开市日出窗、缺日历不推进也不冻结。
 -- 股票complete缺基准仍冻结、新增对照仅研究包；第5日作业具体钟点「未验证」。
 WITH snapshot AS (
     SELECT id, items
