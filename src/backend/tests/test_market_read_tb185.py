@@ -3,7 +3,9 @@
 # ruff: noqa: S101
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import hashlib
 import json
 import uuid
 from decimal import Decimal
@@ -14,10 +16,15 @@ import pytest
 import redis
 from starlette.requests import Request
 
-from app.api.v1 import health, securities
+from app.aggregates import reconciliation
+from app.api.v1 import health, meta, securities
+from app.db.tables.realtime import daily_reports
 from app.licences import ingest_status
 from app.marketdata import bars_read, daily_snapshot, owned_daily_read, quotes_read
-from app.schemas.enums import DataStatus, GapReason
+from app.replay.baseline import VERSION as REPLAY_VERSION
+from app.reports import dimensions
+from app.reports import service as report_service
+from app.schemas.enums import DataStatus, Dimension, GapReason
 
 DAY = dt.date(2026, 11, 13)
 OWNER = uuid.UUID(int=185)
@@ -172,7 +179,7 @@ def test_bars_unknown_gap_reason_returns_200(reason: object) -> None:
     )
     assert response.status_code == 200
     gap = json.loads(response.body)["gaps"][0]
-    assert gap["reason"] == GapReason.NO_SOURCE
+    assert gap["reason"] == (GapReason.SUSPENDED if reason == "suspended" else GapReason.NO_SOURCE)
     assert gap["message"] == "当日停牌"
 
 
@@ -195,7 +202,7 @@ def test_owned_suspension_uses_contract_reason(monkeypatch: pytest.MonkeyPatch) 
     body = owned_daily_read.OwnedDailyBarsReader(engine).read(
         OWNER, CODE, bars_read.BarsQuery("d", "none", None, None, None, 500)
     )
-    assert body["gaps"][0]["reason"] == GapReason.NO_SOURCE
+    assert body["gaps"][0]["reason"] == GapReason.SUSPENDED
     assert body["gaps"][0]["message"] == "当日停牌"
     assert bars_read.BarsResponse.model_validate(body).data_status is DataStatus.UNAVAILABLE
 
@@ -204,3 +211,111 @@ def test_owned_suspension_uses_contract_reason(monkeypatch: pytest.MonkeyPatch) 
 def test_bars_preserves_known_gap_reason(reason: GapReason) -> None:
     gap = bars_read.BarsGap(key="bars", reason=reason, message="合成缺口")
     assert gap.reason is reason
+
+
+def test_meta_enums_exposes_versioned_suspension_and_refreshes_cache() -> None:
+    old_payload = meta.build_enums().model_dump(mode="json")
+    old_payload["version"] = "v0.2.9"
+    old_payload["enums"]["gap_reason"].remove("suspended")
+    old_body = json.dumps(old_payload, ensure_ascii=False, separators=(",", ":")).encode()
+    old_etag = '"' + hashlib.sha256(old_body).hexdigest()[:32] + '"'
+
+    updated = asyncio.run(meta.meta_enums(old_etag))
+    assert updated.status_code == 200
+    payload = json.loads(updated.body)
+    assert payload["version"] == "v0.2.10"
+    assert payload["enums"]["gap_reason"] == [*old_payload["enums"]["gap_reason"], "suspended"]
+    etag = updated.headers["etag"]
+    assert etag != old_etag
+    same = asyncio.run(meta.meta_enums(etag))
+    assert same.status_code == 304
+    assert same.body == b""
+
+
+@pytest.mark.parametrize(
+    ("schema", "trade_date", "reason", "expected"),
+    [
+        (daily_snapshot.OWNED_VERSION, DAY, "suspended", True),
+        (daily_snapshot.OWNED_VERSION, DAY - dt.timedelta(days=1), "suspended", False),
+        (daily_snapshot.OWNED_VERSION, DAY, "no_source", False),
+        (REPLAY_VERSION, DAY, "suspended", False),
+    ],
+)
+def test_report_only_recognizes_suspension_from_same_day_owned_snapshot(
+    monkeypatch: pytest.MonkeyPatch, schema: str, trade_date: dt.date, reason: str, expected: bool
+) -> None:
+    items = {
+        "schema_version": schema,
+        "trade_date": DAY.isoformat(),
+        "sessions": [DAY.isoformat()],
+        "instruments": [
+            {
+                "security_code": CODE,
+                "bars": [],
+                "gaps": [{"trade_date": trade_date.isoformat(), "reason": reason}],
+            }
+        ],
+    }
+    conn = MagicMock()
+    conn.execute.return_value = [
+        SimpleNamespace(
+            id=uuid.UUID(int=279), hash=dimensions.digest(items), _mapping={"items": items}
+        )
+    ]
+    monkeypatch.setattr(dimensions, "prepare", Mock(return_value={"series": {"f.close_qfq": []}}))
+    now = dt.datetime.combine(DAY, dt.time(10), dt.UTC)
+    assert (
+        dimensions.load_inputs(conn, OWNER, CODE, DAY, now, registry={})["suspended_today"]
+        is expected
+    )
+
+
+def test_daily_report_preserves_confirmed_suspension_as_its_own_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = MagicMock()
+    conn.execute.return_value.scalars.return_value = [CODE]
+    conn.execute.return_value.scalar_one_or_none.return_value = None
+    conn.execute.return_value.scalar_one.return_value = 0
+    monkeypatch.setattr(report_service, "select_account", Mock(return_value=None))
+    monkeypatch.setattr(report_service, "apply_comparison", Mock(return_value=True))
+    monkeypatch.setattr(report_service, "latest", Mock(return_value=None))
+    monkeypatch.setattr(
+        reconciliation,
+        "read",
+        Mock(
+            return_value={
+                "status": "not_imported",
+                "as_of": None,
+                "diff_count": 0,
+                "important_count": 0,
+            }
+        ),
+    )
+    facts = [
+        {
+            "dimension": dimension,
+            "facts": [],
+            "feature_refs": [],
+            "data_status": "unavailable",
+            "data_as_of": None,
+            "gaps": [],
+        }
+        for dimension in Dimension
+    ]
+    monkeypatch.setattr(
+        dimensions, "build", Mock(return_value=(uuid.UUID(int=279), facts, [], True))
+    )
+    report_service.build(conn, OWNER, DAY, dt.datetime.combine(DAY, dt.time(10), dt.UTC))
+    body = next(
+        statement.compile().params["body"]
+        for call in conn.execute.call_args_list
+        if (statement := call.args[0]).is_insert and statement.table is daily_reports
+    )
+    bar_gaps = [gap for gap in body["gaps"] if gap["key"] == f"stocks.{CODE}.bars"]
+    assert bar_gaps == [
+        {"key": f"stocks.{CODE}.bars", "reason": "suspended", "message": "当日停牌"}
+    ]
+    assert any(gap["reason"] == "no_source" for gap in body["gaps"])
+    assert body["stocks"][0]["close"] is None
+    assert body["stocks"][0]["change_pct"] is None

@@ -266,7 +266,7 @@ def test_gap_only_response_has_no_timestamp(world: Any, suspended: bool) -> None
     assert result["items"] == []
     assert result["data_as_of"] is None
     assert result["data_status"] == "unavailable"
-    assert result["gaps"][0]["reason"] == "no_source"
+    assert result["gaps"][0]["reason"] == ("suspended" if suspended else "no_source")
     assert result["gaps"][0]["message"] == ("当日停牌" if suspended else "日线缓存字段不完整")
 
 

@@ -21,6 +21,7 @@ from app.db.tables.signals import non_executable_reasons, plan_drafts
 from app.db.tables.strategy import strategy_instances
 from app.reports.comparison import apply as apply_comparison
 from app.reports.models import DailyReport
+from app.schemas.enums import GapReason
 from app.suggestions.service import summary
 
 COMPLETE = ("ready", "partial")
@@ -281,9 +282,17 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             )
         from app.reports.dimensions import build as build_dimensions
 
-        snapshot, dimensions, dimension_evidence = build_dimensions(
+        snapshot, dimensions, dimension_evidence, suspended = build_dimensions(
             conn, user_id, identifier, code, date, now
         )
+        if suspended:
+            gaps.append(
+                {
+                    "key": "stocks." + code + ".bars",
+                    "reason": GapReason.SUSPENDED.value,
+                    "message": "当日停牌",
+                }
+            )
         report_evidence.extend(dimension_evidence)
         gaps.extend(
             dict(g, key="stocks." + code + "." + d["dimension"] + "." + g["key"])
