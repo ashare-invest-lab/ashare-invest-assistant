@@ -62,7 +62,7 @@ export function useLogout() {
 }
 /**
  * 改密（契约 §7.1、#25）：204 后服务端轮换 sid 与 csrf_token。内存兜底令牌作废，之后的写请求从 Cookie 重新读取。
- * 目前没有改密页面（设置页任务另排），先把调用约定固定在这里。
+ * 设置页修改密码表单复用此变更。
  */
 export const useChangePassword = () =>
   useMutation({
