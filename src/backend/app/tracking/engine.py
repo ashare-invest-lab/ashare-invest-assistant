@@ -97,6 +97,7 @@ def evaluate(
     now: dt.datetime,
     minutes: list[dict[str, Any]] | None = None,
     benchmark_minutes: list[dict[str, Any]] | None = None,
+    recompute: bool = False,
 ) -> Result:
     with localcontext() as precision:
         precision.prec = 64
@@ -113,6 +114,7 @@ def evaluate(
             now=now,
             minutes=minutes or [],
             benchmark_minutes=benchmark_minutes or [],
+            recompute=recompute,
         )
 
 
@@ -130,6 +132,7 @@ def _evaluate(
     now: dt.datetime,
     minutes: list[dict[str, Any]],
     benchmark_minutes: list[dict[str, Any]],
+    recompute: bool,
 ) -> Result:
     result = Result(
         strategy_version_id=conclusion["strategy_version_id"],
@@ -168,10 +171,15 @@ def _evaluate(
     if now < result.exit_at:
         return result
     result.state = "unavailable"
-    cutoff = min(
-        now,
-        dt.datetime.combine(due + dt.timedelta(days=1), dt.time.min, BEIJING)
-        - dt.timedelta(microseconds=1),
+    # T-B171 changes the knowledge cutoff only for unavailable recomputations.
+    cutoff = (
+        now
+        if recompute
+        else min(
+            now,
+            dt.datetime.combine(due + dt.timedelta(days=1), dt.time.min, BEIJING)
+            - dt.timedelta(microseconds=1),
+        )
     )
     evidence: list[Evidence] = []
 

@@ -39,6 +39,7 @@ const empty = { items: [], more: false };
 
 function today(x: Partial<TodayResponse> = {}): TodayResponse {
   return {
+    account_id: null,
     server_time: bj('18:40'), trade_date: DATE, session: 'closed',
     market: { regime: null, regime_position_range: null, data_status: 'fresh' },
     focus: { items: [held], more: false },

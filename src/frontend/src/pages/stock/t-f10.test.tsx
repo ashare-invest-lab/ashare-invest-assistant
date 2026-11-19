@@ -7,15 +7,13 @@
  *
  * 前端守则：两个字段为 null 时如实显示「未知」，**不得用常量兜底**（否则等于伪造因子集版本）。
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
-import { AppProviders } from '../../app/AppProviders';
-import { makeQueryClient } from '../../app/queryClient';
 import { routes } from '../../app/routes';
 import { server } from '../../mocks/server';
 import { mockLoginAs } from '../../mocks/session';
 import { preloadRoutes } from '../../test/preloadRoutes';
+import { renderTestRoute as renderAt } from '../../test/renderTestRoute';
 
 vi.mock('../../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
@@ -26,18 +24,6 @@ beforeEach(() => mockLoginAs('demo_user'));
 afterEach(() => server.resetHandlers());
 
 const API = '/api/v1';
-
-function renderAt(path: string) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(
-    <AppProviders client={makeQueryClient(true)}>
-      <RouterProvider router={router} />
-    </AppProviders>,
-  );
-  return router;
-}
 
 async function getFactors(path: string): Promise<Record<string, unknown>> {
   const res = await fetch(`${window.location.origin}${API}${path}`);
@@ -70,7 +56,7 @@ describe('② ETF：not_applicable 空态，两字段为 null', () => {
 
 describe('③ 页面层：null 时显示「未知」，不拿常量兜底', () => {
   it('指数因子页签显示「未知」而不是编造的截面日/因子集', async () => {
-    renderAt('/stocks/000300.SH?tab=factors');
+    await renderAt('/stocks/000300.SH?tab=factors');
     await screen.findByTestId('tab-factors');
     await waitFor(() => expect(screen.getByTestId('tab-factors').textContent).toMatch(/截面日/));
     const text = screen.getByTestId('tab-factors').textContent ?? '';
@@ -92,7 +78,7 @@ describe('③ 页面层：null 时显示「未知」，不拿常量兜底', () =
         }),
       ),
     );
-    renderAt('/stocks/600000.SH?tab=factors');
+    await renderAt('/stocks/600000.SH?tab=factors');
     await screen.findByTestId('tab-factors');
     await waitFor(() => expect(screen.getByTestId('tab-factors').textContent).toContain('real-factors-v1'));
     expect(screen.getByTestId('tab-factors').textContent).not.toMatch(/截面日 未知/);

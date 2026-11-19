@@ -133,7 +133,7 @@ function todayBody(): TodayResponse {
   // 只带被引用到的 evidence（契约：alerts、plan_triggers 的 evidence_ids 都能在 evidence[] 找到）
   const used = new Set([...alerts, ...triggers].flatMap((x) => x.evidence_ids));
   return {
-    server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
+    account_id: TERMINAL_ACCOUNT.account_id, server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
     // T-F36/T-F36b：持仓行一律带 t_view，非持仓行为 null（契约 intraday-bars.md §3.7 ①）
     focus: more(TERMINAL_ROWS.filter((r) => r.focus).map((r, i) => ({ ...r, t_view: todayTView(r, i) }))),
@@ -180,7 +180,7 @@ const routeHandlers = [
     const rows = TERMINAL_ROWS.filter((r) => (scope === 'all' ? true : scope === 'holdings' ? r.holding !== null : r.in_watchlist));
     // v0.2.3 #16：trade_date 由服务端给出；弱 ETag，If-None-Match 未变时 304
     return jsonWithEtag(request, {
-      server_time: NOW, trade_date: TRADE_DATE, session: 'morning', account: TERMINAL_ACCOUNT, rows: rows.slice(0, 300), truncated: rows.length > 300,
+      account_id: TERMINAL_ACCOUNT.account_id, server_time: NOW, trade_date: TRADE_DATE, session: 'morning', account: TERMINAL_ACCOUNT, rows: rows.slice(0, 300), truncated: rows.length > 300,
       unread_notifications: notifications().filter((n) => n.read_at === null).length,
     });
   }),

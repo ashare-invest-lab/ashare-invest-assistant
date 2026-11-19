@@ -1,3 +1,4 @@
+import { labelOf } from '../lib/explanations';
 import { trackingDecimal } from '../lib/trackingDecimal';
 import type { Stat, Suggestion } from '../api/types';
 import type { StrategyTracking } from '../api/strategyTypes';
@@ -23,7 +24,7 @@ export function StrategyTrackingStats({ data }: { data: StrategyTracking }) {
         <td>{count(row.max_loss_streak)}</td><td>{count(row.pending_count)}</td><td>{count(row.untradable_count)}</td><td>{count(row.excluded_count)}</td>
       </tr>)}</tbody></table></div>
     {!data.by_horizon.length ? <p>缺口：暂无策略版本聚合结果，不填0。</p> : null}
-    {data.gaps.map((gap, i) => <p key={`${gap.key}-${i}`}>缺口 · <code>{gap.key}</code> · {GAP_REASON[gap.reason]}：{gap.message}</p>)}
+    {data.gaps.map((gap, i) => <p key={`${gap.key}-${i}`}>缺口 · <code>{gap.key}</code> · {(labelOf(GAP_REASON, gap.reason) ?? '未知')}：{gap.message}</p>)}
   </div>;
 }
 function VersionTracking({ strategyId, versionId, name }: { strategyId: string; versionId: string; name: string }) {
