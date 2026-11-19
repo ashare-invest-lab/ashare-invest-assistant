@@ -126,6 +126,7 @@ tests:
   - {"file": "tests/backend/unit/test_set_licence_retain_id_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
   - {"file": "tests/backend/unit/test_signal_rt_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake Consumer/Redis/engine/runner", "socket connections denied", "runpy and automatically restored monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta169_top_data_as_of.py", "group": "parallel", "keywords": ["synthetic read-only connection and quote batch", "ASGI TestClient without network", "socket connections denied and monkeypatch restored"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta172_confirmation_material.py", "group": "parallel", "keywords": ["synthetic raw bytes", "isolated hash list", "MagicMock or monkeypatch，不连真实 PG/Redis/docker/网络"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta172_entry_bj_gates.py", "group": "parallel", "keywords": ["read-only source/static scan", "monkeypatch", "tmp_path", "no real PG/Redis or docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta173_quotes_unusable_licence.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "fake DB/ASGI TestClient", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "ipl global replacement restored in finally"], "unverified": false}
