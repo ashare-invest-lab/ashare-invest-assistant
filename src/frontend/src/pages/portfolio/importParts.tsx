@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Button, Input, Radio, Space, Tag, Tooltip } from 'antd';
 import type { ImportFinding } from '../../api/accountTypes';
@@ -6,7 +7,7 @@ import { OVERRIDE_CHOICES, choiceText } from '../../i18n/importLabels';
 
 export function FindingTag({ f }: { f: ImportFinding }) {
   const spec = importCodeSpec(f.code, f.severity);
-  const tone = IMPORT_TONE[findingTone(f)];
+  const tone = (labelOf(IMPORT_TONE, findingTone(f)) ?? { tag: undefined, label: '未知', rowClass: '' });
   return (
     <Tooltip title={<div><div>{findingText(f)}</div>{spec.handling ? <div className="muted">处理：{spec.handling}</div> : null}<div className="mono muted">{f.code}</div></div>}>
       <Tag color={tone.tag} data-code={f.code}>{spec.title}{f.resolution ? ' ✓' : ''}</Tag>
@@ -31,7 +32,7 @@ export function FindingItem({ f, onResolve, busy, readOnly }: { f: ImportFinding
   const [reason, setReason] = useState(f.resolution?.reason ?? '');
   const needReason = !!choice && OVERRIDE_CHOICES.has(choice);
   return (
-    <div className={`imp-finding ${IMPORT_TONE[tone].rowClass}`} data-testid={`finding-${f.id}`}>
+    <div className={`imp-finding ${(labelOf(IMPORT_TONE, tone) ?? { tag: undefined, label: '未知', rowClass: '' }).rowClass}`} data-testid={`finding-${f.id}`}>
       <div className="imp-finding-head">
         <FindingTag f={f} />
         {f.row_no != null ? <span className="mono muted">第 {f.row_no} 行</span> : <span className="muted">文件</span>}

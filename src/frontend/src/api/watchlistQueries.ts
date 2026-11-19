@@ -1,3 +1,4 @@
+import { labelOf } from '../lib/explanations';
 /**
  * T-F33 自选股：GET /watchlist、POST /watchlist（Idempotency-Key + CSRF）、DELETE /watchlist/{security_code}。
  * 契约 docs/contracts/watchlist.md（T-A129 4c89336）。CSRF 由 api/client 对所有写请求统一带 X-CSRF-Token。
@@ -100,7 +101,7 @@ export function watchlistErrorText(e: unknown, op: 'add' | 'remove'): string {
     const f = (e.details?.fields as { field?: string; issue?: string; superseded_by?: string }[] | undefined)?.[0];
     const issue = f?.issue as WatchlistIssue | undefined;
     if (issue === 'superseded' && f?.superseded_by) return `该代码已变更为 ${f.superseded_by}`;
-    if (issue && issue in ISSUE_TEXT) return ISSUE_TEXT[issue];
+    if (issue && Object.hasOwn(ISSUE_TEXT, issue)) return (labelOf(ISSUE_TEXT, issue) ?? '未知');
   }
   return `${op === 'add' ? '加入自选失败' : '移出自选失败'}：${e.message}`;
 }

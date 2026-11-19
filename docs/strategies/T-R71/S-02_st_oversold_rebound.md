@@ -2,7 +2,7 @@
 
 ## 0. 定位与使用边界
 
-lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.md §0–§24 编排为文字研究草稿，不使用正式导入围栏。仅收敛既有卡，不登记新策略版本，不替换源卡。所有规则均待复测，输出统一称“候选信号”。 G7：☐。
+lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.md §0–§24 编排为文字研究草稿，不使用正式导入围栏。仅收敛既有卡，不登记新策略版本，不替换源卡。所有规则均待复测，输出统一称“候选信号”。
 
 ## 1. 身份
 
@@ -43,7 +43,7 @@ lifecycle: draft。当前状态：不可导入。按 docs/strategies/_template.m
 
 字段口径依据团队报告 T-A159：保留 f.*_qfq、plan.entry_price_qfq、ctx.cost_price_qfq、ctx.highest_close_since_entry_qfq 等现有名称，均按 qfq@as_of 使用；成交日价格按 A(成交日)/A(T) 折算。plan.stop_loss_qfq、plan.breakout_level_qfq 的 QFQ-1/QFQ-2 派生尚未实现，持久化与换算要求见三张相关卡的 §7、§9；字段口径裁定不代表派生已经实现。
 
-S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖边界未验证（仓内定义：docs/strategies/feature_spec.md:121；仓内定义：docs/strategies/feature_spec.md:215；仓内定义：docs/strategies/feature_spec.md:389；仓内定义：docs/strategies/feature_spec.md:53）；建议阈值的 A 股有效性仍未验证（待复测），见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
+S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能偷换为 S-01 的最近有效 K 均额。F01 的 15 根覆盖门槛、F11 的 15 根及任一涨停价未知则整段 null、F32 的 90 个带宽值等边界均沿 docs/strategies/feature_spec.md §F01、§F11、§F32；覆盖阈值原本属建议的部分仍未验证，见 README §6。关键字段缺失不填零、不前值填充，不生成可执行计划。
 
 ## 数据接口依赖（T-R72 P1 对照）
 
@@ -61,7 +61,7 @@ S-02/S-04/W-02 的 amount_20d_avg 按 feature_spec 的交易日窗口，不能�
 | 股本/股东/分红：权息前置，股东不依赖 | `/hsstock/financial/{capital,topholder,flowholder,hm}/{code}.{market}/<LICENCE>`；`/hscp/jnfh/{code}/<LICENCE>` | 团队报告 T-R72 §7 B08；团队报告 T-R72 §7 A37 | 部分：本卡 §5、README §3 已给定 gbbq；事件可见性及麦蕊链路未验证 | 复权必须有截至 T 可见且已生效的权息证据；可继续用经验证 gbbq，不能假设近年分红接口覆盖全部复杂权息。两源均无法核验则 qfq@as_of（B08 权息事件逐日复权）失效、阻断相关求值；不依赖股东排名/估值分母，不据缺失另改规则。 |
 | 公告/问董秘：产品否决前置 | `/hsstock/{announcement,interactiveqa}/{code}/<LICENCE>?st={ST}&et={ET}&lt={N}` | 团队报告 T-R72 §7 B09 | 未接：本卡 §14、README §4 明确本轮无公告输入，N-01 为 unknown | 技术候选可登记；公告风险未核验时 N-01 保持 unknown、买入草案由 KEY_DATA_MISSING 阻断。公告只有日期保守次交易日生效；问董秘不依赖且不能替代风险公告正文。 |
 | 资金流：不依赖 | `/hsstock/history/transaction/{code}/<LICENCE>?st={ST}&et={ET}`；`/hsstock/history/transaction/{YYYYMMDD}/{code}/<LICENCE>` | 团队报告 T-R72 §7 B10 | 未验证：本卡 §5、§7 无资金流输入；README §2 将 W-03 延后 | 不依赖：本卡使用成交额量价条件，缺失不影响原规则，不以成交额冒称净流入，也不把资金流缺日补零。 |
-| 指数基准/环境：规则及验证前置 | `/hsindex/list/<LICENCE>`；`/hsindex/history/{index}.{market}/{period}/<LICENCE>`；`/hsindex/real/time/{index}.{market}/<LICENCE>` | 团队报告 T-R72 §7 B11；团队报告 T-R72 §7 A02 | 未验证：本卡 §5、§11 和 README §3、§7 的 tdx 指数仍待确认；麦蕊链路未验证 | F25（指数加完整沪深宽度） 所需日线缺失则环境 unknown，不能默认震荡；记录缺口并按本卡 §7、§14 处理。指数列表核代码/市场/证券类型，历史 period=d、路径无 adj；实时接口不替代定稿日线。主基准沪深300（000300）、辅基准中证全指（000985）；选择依据为编排者 11-14 裁定，接入/覆盖未验证；行业超额仍未验证。 |
+| 指数基准/环境：规则及验证前置 | `/hsindex/list/<LICENCE>`；`/hsindex/history/{index}.{market}/{period}/<LICENCE>`；`/hsindex/real/time/{index}.{market}/<LICENCE>` | 团队报告 T-R72 §7 B11；团队报告 T-R72 §7 A02 | 未验证：本卡 §5、§11 和 README §3、§7 的 tdx 指数仍待确认；麦蕊链路未验证 | F25（指数加完整沪深宽度） 所需日线缺失则环境 unknown，不能默认震荡；记录缺口并按本卡 §7、§14 处理。指数列表核代码/市场/证券类型，历史 period=d、路径无 adj；实时接口不替代定稿日线。真实指数具体定稿保证时点：未验证（T-R87）。主基准沪深300（000300）、辅基准中证全指（000985）；选择依据为编排者 11-14 裁定，接入/覆盖未验证；行业超额仍未验证。 |
 | 行业概念板块：验证对照 | `/hszg/list/<LICENCE>`；`/hszg/{gg,zg}/{code}/<LICENCE>`；`/hslt/{sectorslist,primarylist}/<LICENCE>`；`/hslt/sectors/{primary_name}/<LICENCE>` | 团队报告 T-R72 §7 B12 | 未接：本卡 §3、§4、§11 与 README §3、§5 明示行业历史/基准缺失 | 本卡入场不依赖行业板块；§11 的行业对照/分组及行业超额均未验证；待 B12 接入后用申万一级，主辅大盘基准按 §3，不能冒称行业超额已完成验证。 B12 只有树/成分/列表不等于行业收益序列已齐，仍需历史成员与对应指数日线；按当日有效成员留存，禁用当前成分回填。sectors 参数取编码后的一级板块名称；不新增行业选股、分散约束。 |
 
 时点硬约束：日线及指数以北京时间 17:10 后的定稿版本为准；信号生成时间不早于 17:10、不早于实际定稿和依赖齐全时点。团队报告 T-R72 §7 A02 指出早批行可能未被晚批覆盖，必须核定稿标志与修订版本，不能仅看拉取时间。晚数据未就绪则等待；若错过次日执行窗口，本次候选过期，不沿用旧信号。
@@ -135,50 +135,25 @@ KEY_DATA_MISSING / DATA_STALE：对应字段与≤T 可见性证据补齐且快�
 
 涨跌停价按成交日有效段、当日 pre_close 和 0.01 元 ROUND_HALF_UP 计算，含不足一价位及最低价格边界；除权日 pre_close 必须是可核对的参考价。pre_close 无效、状态未知或校验冲突则限价未知，不以昨天 close 或 gbbq 推值补缺。来源：docs/strategies/feature_spec.md §F35/F36。止损/止盈的展示和申报价需截断至执行日合法涨跌停区间；截断不能解释为阈值处一定能成交。来源：docs/strategies/_template.md §7.3、§17。
 
-停牌日不补值，伪停牌按缺失；复牌若此前停牌≥5 个交易日，首个复牌交易日阻断入场，退出继续求值。上市不足 30 个交易日买入阻断，各卡上市门槛与预热还需满足；注册制上市前 5 日无涨跌幅，不进波动类窗口。来源：docs/strategies/_template.md §7.3。G-01 另含 none 价格低于2元的买入阻断（初值未验证；A 股有效性未验证（待复测）；仓内定义：docs/strategies/catalog.md:73；共用登记 P14），使用实际 none 价格比较。上市年龄按日历从上市日计，不能以已回填 K 线根数代替。来源：docs/strategies/feature_spec.md §F13。
+停牌日不补值，伪停牌按缺失；复牌若此前停牌≥5 个交易日，首个复牌交易日阻断入场，退出继续求值。上市不足 30 个交易日买入阻断，各卡上市门槛与预热还需满足；注册制上市前 5 日无涨跌幅，不进波动类窗口。来源：docs/strategies/_template.md §7.3。G-01 另含 none 价格低于2元的买入阻断（既有初值未验证，出处：docs/strategies/catalog.md §3 G-01；共用登记 P14），使用实际 none 价格比较。上市年龄按日历从上市日计，不能以已回填 K 线根数代替。来源：docs/strategies/feature_spec.md §F13。
 
 沪深主板/创业板买入为 100 股整数倍；科创板单笔买卖≥200 股，200 以上按 1 股递增为“部分核实”口径；不足申报单位的卖出余额须一次性申报，且不得超过可卖量。单笔数量上限沿 config/market_rules.yaml §segments.lot，不在本稿重新设值。来源：docs/strategies/market_rules_T-R10.md §1.1–§1.3、§2.1–§2.2。
 
-
-T-R94 制度事实核验：以下登记只核对本卡已有市场制度，不验证策略有效性、数据覆盖或成交能力。仓内定义及原有来源保留；“沪23/沪26/深23/深26”分别为下列官方原文，表中条款按版本对应。访问日期均为 2026-11-16。历史版核对范围为本卡已建模的 2023-04-10 至 2026-07-05，现行版自 2026-07-06 施行；不外推未来修订。
-
-| 编号／位置／制度项 | 仓内定义 | 官方原文条款 | 核验结论 |
-|---|---|---|---|
-| M01／§8／09:30 执行时点的交易时段依据 | docs/strategies/_template.md §7.2；config/market_rules.yaml §segments.sessions | 沪23/沪26 第2.4.2条；深23/深26 第2.3.2条 | 已核对连续竞价起点；“最早次日执行”及开盘价回放仍是卡内执行约定，不声称集合竞价不能成交 |
-| M02／§17／买入当日不可卖（T+1） | docs/strategies/_template.md §17；config/market_rules.yaml §segments.t_plus | 沪23/沪26、深23/深26 第3.1.4–3.1.5条 | 已核对普通A股不属当日回转品种；本卡信号日与买入日的偏移不改变 |
-| M03／§17／普通主板涨跌幅 | config/market_rules.yaml §segments.price_limit_pct.main_board | 沪23/沪26、深23/深26 第3.3.13条 | 已核对；无涨跌幅限制的例外仍按本卡原规则处理 |
-| M04／§17／创业板涨跌幅（含风险警示） | config/market_rules.yaml §segments.price_limit_pct.chinext | 深23 第3.3.13、4.5.5条；深26 第3.3.13条 | 已核对，历史及现行区间取值一致 |
-| M05／§17／科创板涨跌幅（含风险警示） | config/market_rules.yaml §segments.price_limit_pct.star | 沪23 第6.1.6、6.1.14条；沪26 第6.6、6.14条 | 已核对；科创板风险警示股票不进入主板风险警示板 |
-| M06／§17／主板ST/*ST涨跌幅分段 | config/market_rules.yaml §segments.price_limit_pct.main_board_st | 沪23 第4.4.10条、深23 第4.5.5条；沪26/深26 第3.3.13条及两所2026版发布通知 | 已核对旧段与2026-07-06起新段；不将现行比例回填历史 |
-| M07／§17／最小价位、四舍五入及限价边界 | docs/strategies/feature_spec.md §F35/F36；config/market_rules.yaml §segments.price_limit_pct | 沪23/沪26 第3.3.11、3.3.13、3.3.17、4.3.3条；深23/深26 第3.3.11、3.3.14、3.3.19、4.4.3条 | 已核对制度计算口径；pre_close数据及ROUND_HALF_UP实现的正确性仍需复测 |
-| M08／§17／注册制新股前五个交易日无涨跌幅 | docs/strategies/_template.md §7.3；config/market_rules.yaml §segments.no_limit | 沪23 第3.3.13、6.1.6条；沪26 第3.3.13、6.6条；深23/深26 第3.3.15条 | 已核对沪深股票规则；不核实卡内上市年龄及波动窗口过滤阈值 |
-| M09／§17／主板及创业板买入申报单位 | docs/strategies/market_rules_T-R10.md §1.3；config/market_rules.yaml §segments.lot.buy_lot | 沪23/沪26、深23/深26 第3.3.8条 | 已核对竞价买入申报单位及整数倍要求 |
-| M10／§17／科创板买卖申报下限 | docs/strategies/market_rules_T-R10.md §1.1；config/market_rules.yaml §segments.lot.star_min_buy | 沪23 第6.1.7、6.2.6条；沪26 第6.7条 | 已核对；不足单位的卖出余额按M12 |
-| M11／§17／科创板递增单位 | docs/strategies/market_rules_T-R10.md §1.2；config/market_rules.yaml §segments.lot.star_step | 上交所，[《上海证券交易所交易规则（2023年修订）》第6.1.7条](https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/c_20250612_10824490.shtml)、[《上海证券交易所交易规则（2026年修订）》第6.7条](https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml)仅明确上下限；[《科创板投资修炼手册》§5.12，第26–27页（官方PDF）](https://edu.sse.com.cn/tib/manual/c/10608392/files/cd2f63893add490490f61a508b7c0ed2.pdf)有1股递增说明；访问日期 2026-11-16 | 未验证：保留原“部分核实”；官方PDF说明与取值一致，但未载该递增单位的生效日期，尚未找到规则、通知或公告的对应明文及历史适用区间；未认定冲突 |
-| M12／§17／不足申报单位的卖出余额一次申报 | docs/strategies/market_rules_T-R10.md §2.1–§2.2；config/market_rules.yaml §segments.lot | 沪23/沪26、深23/深26 第3.3.8条；沪23 第6.1.7、6.2.6条；沪26 第6.7条 | 已核对；可卖量数据及订单实际成交不在本结论内 |
-| M13／§17／已引用的各板块单笔数量上限 | config/market_rules.yaml §segments.lot | 沪23/沪26、深23/深26 第3.3.9条；沪23 第6.1.7、6.2.6条；沪26 第6.7条 | 已逐项核对主板、创业板限价/市价及科创板限价/市价/盘后上限；不新增上限或交易方式 |
-
-官方原文：上交所，[《上海证券交易所交易规则（2023年修订）》及发布通知（沪23）](https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/c_20250612_10824490.shtml)；上交所，[《上海证券交易所交易规则（2026年修订）》及发布通知（沪26）](https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml)；深交所，[《深圳证券交易所交易规则（2023年修订）》（深23）](https://docs.static.szse.cn/www/lawrules/rule/repeal/rules/W020230217564423808793.pdf)；深交所，[《深圳证券交易所交易规则（2026年修订）》（深26）](https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf)；深交所，[2026版发布通知（深证上〔2026〕551号）](https://www.szse.cn/lawrules/rule/trade/current/t20260424_620190.html)。条款见上表；访问日期 2026-11-16。2023版施行事件按发布通知及深23第10.9条，上市日期对照上交所[《关于中信金属股份有限公司人民币普通股股票上市交易的公告》正文](https://www.sse.com.cn/disclosure/announcement/listing/ipo/c/c_20230407_88930832.shtml)，访问日期 2026-11-16。
+§17 的交易时段、涨跌幅和申报数量出处见[沪深交易制度出处 M01–M13](README.md#沪深交易制度出处)。
 
 ## 18. 成本与滑点
 
-佣金双边分别按 max(单笔成交额×实际费率，5 元) 计算。实际费率记“用户配置项（券商个体费率，不找出处；复测须冻结所用费率）”，不默认填零。最低佣金出处：config/market_rules.yaml §segments.fees.commission_min_yuan；双边口径：docs/strategies/_template.md §18。
+佣金双边分别按 max(单笔成交额×用户实际佣金率，用户实际最低额) 计算。实际佣金率状态为「未验证」；最低佣金状态为「以用户券商为准、未验证」，实际最低额以用户券商为准，不默认填零。5 元仅作历史背景/仓库建模默认值，不晋级卡参数；复测须冻结用户实际佣金率、最低额及协议生效日。含规费佣金不重复叠加相同经手费、证管费；净佣金须先冻结含费范围、最低额作用对象与按边计收口径。出处：docs/strategies/T-R74/param_audit.md §5.1 F24/F25、§5.2、§5.3；双边口径：docs/strategies/_template.md §18。
 
-印花税按实际卖出交易日分段：2023-04-10 至 2023-08-27 为 0.1%；2023-08-28 起为 0.05%，仅卖出计。过户费在仓库已建模区间为双边 0.001%；更早日期不外推。来源：config/market_rules.yaml §segments（2023-04-10、2023-08-28、2026-07-06）.fees。
+印花税按实际卖出交易日分段：2023-04-10 至 2023-08-27 为 0.1%；2023-08-28 起为 0.05%，仅卖出计。来源：config/market_rules.yaml §segments（2023-04-10、2023-08-28、2026-07-06）.fees。
 
+过户费按实际成交日及市场分段：2012-06-01至2012-08-31，沪市买卖各按成交面额0.375‰、深市买卖各按成交金额0.0255‰；2012-09-01至2015-07-31，沪市买卖各按成交面额0.3‰、深市买卖各按成交金额0.0255‰；2015-08-01至2022-04-28，沪深买卖各按成交金额0.02‰=0.002%；2022-04-29起，沪深买卖各按成交金额0.01‰=0.001%。以上各段状态均为「已验证」，出处：docs/strategies/T-R74/param_audit.md §5.1 F06/F07/F08/F10、§5.2（中国结算官方原文）。2012年两段仅为中国结算收费部分，沪市证券公司留存部分不能混同，不能当作完整历史实收；成交面额与成交金额不可混用。2012-06-01之前无已核起点，不外推；北交所仍排除。制度段验证不代表用户实收或完整费用实现已验证。
 
-T-R94 费用制度核验（仅制度事实；仓内定义及原值保留）：
-
-| 编号／制度项 | 仓内定义 | 官方出处（条款、URL、访问日期）及生效区间 | 核验结论 |
-|---|---|---|---|
-| M14／实际佣金费率 | config/market_rules.yaml §segments.fees.commission_rate_default_pct；docs/strategies/_template.md §18 | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，2002-05-01起；证监会，[《证券经纪业务管理办法》（第204号令）第十三、二十八、五十三条及发布令](https://www.csrc.gov.cn/csrc/c101953/c6987676/content.shtml)，2023-02-28起；访问日期 2026-11-16 | 制度上下限已核对：佣金（含代收规费等）不高于成交金额3‰，不低于代收证券交易监管费和交易所手续费等；2023年办法另禁止明显低于经纪服务成本。实际佣金费率为用户配置项（券商个体费率，不找出处；复测须冻结所用费率）；不将制度边界设为默认费率 |
-| M15／A股单笔最低佣金 | config/market_rules.yaml §segments.fees.commission_min_yuan | 证监会、国家计委、国家税务总局，[《关于调整证券交易佣金收取标准的通知》（证监发〔2002〕21号）第一、八条](https://neris.csrc.gov.cn/falvfagui/rdqsHeader/mainbody?navbarId=3&secFutrsLawId=b25a17fb262742f2aea99515380cf3bb)，访问日期 2026-11-16；2002-05-01起，法规库标现行有效 | 已核对最低收费制度；不等于M14费率或用户实际账单已验证 |
-| M16／卖出印花税及日期分段 | config/market_rules.yaml §segments.fees.stamp_duty_sell_pct；docs/strategies/_template.md:252 | 国家税务总局官网，[《中华人民共和国印花税法》第三、四、五、二十条及附表“证券交易”税目](https://shanghai.chinatax.gov.cn/zcfw/zcfgk/yhs/202106/t458595.html)，2022-07-01起；财政部、国家税务总局，[《关于减半征收证券交易印花税的公告》（2023年第39号）正文](https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm)，2023-08-28起；访问日期均为 2026-11-16 | 已核对单向征收、成交额基数及本卡两个税率区间；未向建模起点前外推 |
-| M17／双向过户费 | config/market_rules.yaml §segments.fees.transfer_fee_pct；docs/strategies/_template.md:253 | 中国结算，[《中国结算关于降低股票交易过户费收费标准的通知》正文唯一调整段（2022-04-28发布）](https://www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml)，自2022-04-29起，沪深市场A股、北京市场A股和挂牌公司股份统一按成交金额0.01‰双向收取；[《上海市场证券登记结算业务收费及代收税费一览表》“投资者业务收费—交易过户费—A股”](https://m.chinaclear.cn/zdjs/fbzyls/202512/922adc26c2ff4865930c7fb77688bb8a/files/上海市场证券登记结算业务收费及代收税费一览表.pdf)及[深圳市场同表同项](https://m.chinaclear.cn/zdjs/fbzyls/202512/a59388fbfa714c5fa546784891a42e30/files/深圳市场证券登记结算业务收费及代收税费一览表.pdf)，2026-01-01更新；访问日期 2026-11-16 | 已核对：0.01‰＝0.001%，2022年通知与现行沪深收费表一致，覆盖本卡2023-04-10起全部已建模区间；仅摘除该范围的未验证标记。北交所旧0.025‰起始日仍未验证，2022年通知只证明调整前费率，不能倒推起始日；不扩展卡内市场或历史区间 |
-
-单边基础滑点见 §22（estimate，未验证；仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:74；成本校准未验证（待复测））；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate，档表及回退口径未验证，成本校准未验证（待复测），不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。仓内定义：docs/strategies/_template.md:252；仓内定义：docs/strategies/_template.md:253；仓内定义：docs/strategies/_template.md:258；仓内定义：docs/strategies/_template.md:259；仓内定义：docs/strategies/_template.md:260；仓内定义：docs/strategies/_template.md:261；仓内定义：docs/strategies/_template.md:262；仓内定义：docs/strategies/_template.md:266；仓内定义：docs/strategies/_template.md:267；仓内定义：docs/strategies/_template.md:268。
+单边基础滑点见 §22（estimate，未验证）；单边冲击成本按拟成交额/最近 20 根有效 K 平均成交额，参与率≤0.1%/0.5%/1%/2%/其余分别取 0/5/15/30/60 bp；大于 2% 标容量受限。均额为零或有效 K 少于 5 根按最高档；不可成交不计算冲击成本。整个档表为 estimate、未验证、待复测，不据此宣称收益。往返总成本为两边滑点及冲击成本、两笔佣金、两边过户费及卖出印花税之和。来源：docs/strategies/_template.md §18。
 
 T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实成交额、税率及滑点只属于执行账本。T+1 的实际开盘不能参与 T 的入场规则。仓位金额未知时不生成精确费用数字。共用参数登记见 docs/strategies/T-R71/README.md §6。
+
+§18 的佣金、印花税和过户费出处见[沪深交易制度出处 M14–M17](README.md#沪深交易制度出处)。
 
 ## 19. 信号强度与置信度
 
@@ -194,34 +169,50 @@ T 的计划成本使用≤T 的 ADV 和参考金额；回放中成交日真实�
 
 ## 22. 参数与敏感性
 
-表中 default 仅照录原值，min/max/step 只保留原网格，均不自动生效；没有经过本轮选择。slippage_bp 为 estimate，其余具名参数为 hypothesis。固定规则参数也属待检验假设或口径，不因写成常数而省略出处。 本节仓内材料只标“仓内定义”，相关项仍未验证；外部出处须有 URL、访问日期并核对原文。论文只证明有文献采用该取值或方法，不能证明本卡网格、组合或 A 股有效性；A 股有效性仍未验证（待复测）。
+表中 default 仅照录原值，min/max/step 只保留原网格，均不自动生效；没有经过本轮选择。slippage_bp 为 estimate，其余具名参数为 hypothesis。固定规则参数也属待检验假设或口径，不因写成常数而省略出处。
 
-| 参数 | 类型 | 原 default | 原范围 | 原 step | 仓内定义（相对路径:行号）／外部出处 | 状态 |
+| 参数 | 类型 | 原 default | 原范围 | 原 step | 出处（文件 §节） | 状态 |
 |---|---|---|---|---|---|---|
-| rsi_os | float | 30.0 | 20.0–35.0 | 1.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:66；外部出处：Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.7（PDF第5页，期刊第182页） | 文献采用阈值30已核对；本卡网格未验证；A 股有效性未验证（待复测）；不证明组合有效 |
-| drop_5d | float | 0.08 | 0.05–0.15 | 0.01 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:67 | 未验证；A 股有效性未验证（待复测） |
-| stop_pct | float | 0.03 | 0.02–0.05 | 0.005 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:68 | 未验证；A 股有效性未验证（待复测） |
-| tp_pct | float | 0.06 | 0.04–0.1 | 0.01 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:69 | 未验证；A 股有效性未验证（待复测） |
-| rsi_exit | float | 55.0 | 50.0–65.0 | 1.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:70 | 未验证；A 股有效性未验证（待复测） |
-| max_hold | int | 5 | 3–10 | 1 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:71 | 未验证；A 股有效性未验证（待复测） |
-| min_amount | float | 50000000.0 | 10000000.0–500000000.0 | 10000000.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:72 | 未验证；A 股有效性未验证（待复测） |
-| min_list_days | int | 60 | 30–120 | 10 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:73 | 未验证；A 股有效性未验证（待复测） |
-| slippage_bp | float | 10.0 | 0.0–50.0 | 1.0 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:74 | 未验证；成本校准未验证（待复测） |
+| rsi_os | float | 30.0 | 20.0–35.0 | 1.0 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| drop_5d | float | 0.08 | 0.05–0.15 | 0.01 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| stop_pct | float | 0.03 | 0.02–0.05 | 0.005 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| tp_pct | float | 0.06 | 0.04–0.1 | 0.01 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| rsi_exit | float | 55.0 | 50.0–65.0 | 1.0 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| max_hold | int | 5 | 3–10 | 1 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| min_amount | float | 50000000.0 | 10000000.0–500000000.0 | 10000000.0 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| min_list_days | int | 60 | 30–120 | 10 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
+| slippage_bp | float | 10.0 | 0.0–50.0 | 1.0 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §22 | 未验证；待复测 |
 
-| 固定参数登记项 | 原值/含义 | 仓内定义（相对路径:行号）／外部出处 | 状态 |
+| 固定参数登记项 | 原值/含义 | 出处（文件 §节） | 状态 |
 |---|---|---|---|
-| RSI 周期/预热 | 14/28 根有效日 K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:24；仓内定义：docs/strategies/feature_spec.md:281；仓内定义：docs/strategies/feature_spec.md:284；外部出处：Dirk F. Gerritsen，Are chartists artists? The determinants and profitability of recommendations based on technical analysis，https://research-portal.uu.nl/ws/files/23204603/chartists.pdf，访问日期 2026-11-16，§2.1.7（PDF第5页，期刊第182页） | 文献采用14日已核对；Wilder 递推及28根预热仅为仓内定义，未验证；A 股有效性未验证（待复测） |
-| 超卖回看窗口 | 3 根有效日 K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:29 | 未验证；A 股有效性未验证（待复测） |
-| 跌幅/结构低点窗口 | 5 根有效日 K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:30；仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:35；仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:37 | 未验证；A 股有效性未验证（待复测） |
-| 回收高点/衰竭偏移 | 前 1 根有效日 K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:31；仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:39 | 未验证；A 股有效性未验证（待复测） |
-| 反证放量倍数 | 1.5 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:34 | 未验证；A 股有效性未验证（待复测） |
-| 卡预热 | 30 根有效日 K | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:24 | 未验证；A 股有效性未验证（待复测） |
-| 候选有效期 | 1 个交易日 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:43 | 未验证；A 股有效性未验证（待复测） |
-| 原证伪窗口 | 3 个交易日 | 仓内定义：docs/strategies/T-R16/S-02_st_oversold_rebound.md:11 | 未验证；A 股有效性未验证（待复测） |
+| RSI 周期/预热 | 14/28 根有效日 K | docs/strategies/T-R16/S-02_st_oversold_rebound.md §5；docs/strategies/feature_spec.md §F20 | 未验证；待复测 |
+| 超卖回看窗口 | 3 根有效日 K | docs/strategies/T-R16/S-02_st_oversold_rebound.md §7 E1 | 未验证；待复测 |
+| 跌幅/结构低点窗口 | 5 根有效日 K | docs/strategies/T-R16/S-02_st_oversold_rebound.md §7 E2/I1/X1b | 未验证；待复测 |
+| 回收高点/衰竭偏移 | 前 1 根有效日 K | docs/strategies/T-R16/S-02_st_oversold_rebound.md §7 E3/X3 | 未验证；待复测 |
+| 反证放量倍数 | 1.5 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §7 C1 | 未验证；待复测 |
+| 卡预热 | 30 根有效日 K | docs/strategies/T-R16/S-02_st_oversold_rebound.md §5 | 未验证；待复测 |
+| 候选有效期 | 1 个交易日 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §8–10 | 未验证；待复测 |
+| 原证伪窗口 | 3 个交易日 | docs/strategies/T-R16/S-02_st_oversold_rebound.md §3 | 未验证；待复测 |
 
-敏感性：先只测试原值与原网格内单因素邻域，结果未评估；不添加自拟阈值。逐卡具名参数 9 项、固定参数组 8 项，A 股有效性均未验证（待复测）；共用环境/成本/研究参数只在 README §6 计一次。
+敏感性：先只测试原值与原网格内单因素邻域，结果未评估；不添加自拟阈值。逐卡具名参数 9 项、固定参数组 8 项，均未验证；共用环境/成本/研究参数只在 README §6 计一次。
+
+费用参数与制度段对照（共用费用口径，不新增策略默认参数；历史段按 docs/strategies/T-R74/param_audit.md §5 单列，不增添该审计 §2 的逐卡参数行数；本表不计入上列具名参数/固定参数组）：
+
+| 项目 | 值/含义 | 生效日及适用段 | 出处（文件 §节） | 状态 |
+|---|---|---|---|---|
+| 最低佣金 | 实际最低额以用户券商为准；复测须冻结用户实际佣金率与最低额 | 用户协议生效日、实际最低额未核 | docs/strategies/T-R74/param_audit.md §5.1 F25、§5.2、§5.3 | 以用户券商为准、未验证 |
+| F06 过户费：2012年第一次下调 | 中国结算收取的沪市A股按成交面额0.5‰→0.375‰；深市按成交金额0.0255‰维持；双向口径结合F07核对 | 2012-06-01至2012-08-31；更早段起点未核 | docs/strategies/T-R74/param_audit.md §5.1 F06、§5.2 | 已验证 |
+| F07 过户费：2012年第二次下调 | 中国结算在沪市向买卖双方各按成交面额0.375‰→0.3‰；深市按成交金额0.0255‰维持 | 2012-09-01至2015-07-31 | docs/strategies/T-R74/param_audit.md §5.1 F07、§5.2 | 已验证 |
+| F08 过户费：统一金额计费 | 沪深A股统一按成交金额0.02‰=0.002%，买卖各收；替代沪市成交面值0.3‰、深市成交金额0.0255‰ | 2015-08-01至2022-04-28 | docs/strategies/T-R74/param_audit.md §5.1 F08、§5.2 | 已验证 |
+| F10 过户费：统一下调 | 沪深北A股/挂牌股份按成交金额0.01‰=0.001%，买卖各收；沪深由0.02‰、北市由0.025‰下调 | 2022-04-29起 | docs/strategies/T-R74/param_audit.md §5.1 F10、§5.2 | 已验证 |
+
+F06/F07仅验证中国结算收费部分，沪市成交面额与成交金额不可混用；表中F10原文覆盖沪深北，本卡仍排除北交所。没有出处的区间不外推，用户实收与费用实现仍需核对，复测冻结要求见 §18。
+
+Gerritsen（2016）§2.1.7 记载 RSI 常用 14 日窗口及 30/70 阈值。文中公式采用平均涨跌幅，卡内 Wilder 递推、28 根预热、阈值网格及其在 A 股的有效性仍待验。[原文，第 182 页](https://research-portal.uu.nl/ws/files/23204603/chartists.pdf)
 
 ## 23. 审计、差异与未决
+
+T-R71c：依据 docs/strategies/T-R74/param_audit.md §5 对齐 §18/§22 的最低佣金状态及过户费分段出处；仅修订费用文案，候选信号 lifecycle 保持 draft。
 
 F25 保留宽度，不能偷换成 F50；全市场回填、退市股和除权日 pre_close 口径均影响宽度。RSI 全平盘为 null，不补成 50。结构止损按 §9 裁定；plan.entry_price_qfq、plan.stop_loss_qfq 按团队报告 T-A159 的 qfq@as_of 口径，派生实现未验证。 T-R71 只形成可审阅文字草稿；lifecycle 始终为 draft。G1–G7 未执行，本次文档 checker 的通过不能替代它们。来源：docs/strategies/card_promotion_gates.md §0、§3、§4。
 
