@@ -403,7 +403,6 @@ class _Redis:
 
     lpush = lambda self, key, value: self.rows.append(json.loads(value)); rpop = lambda self, key: self.rows.pop() if self.rows else None; close = lambda self: None; zrangebyscore = lambda self, *args: []; zrem = lambda self, *args: 0
 
-@pytest.mark.xfail(strict=True, reason="T-B168: daily_bars_ready 对窗口/失败运行判定未实现")
 def test_pn06_entry_ready(conn):
     good, windowed, failed = [uuid.uuid4() for _ in range(3)]
     _run(conn, good)
@@ -426,7 +425,6 @@ def test_pn06_entry_snapshot(conn):
     assert "factors" not in body["instruments"][0]
     assert f"adjust_factor_missing:{D2}" in _prepare()["gaps"]
 
-@pytest.mark.xfail(strict=True, reason="T-B168: fetch_task 对 backfill 冲突未拒")
 def test_pn06_entry_fetch_task(pn06_engine, pg_url):
     with pn06_engine.begin() as conn:
         owner = _base(conn)[0]
