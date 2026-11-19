@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../../lib/explanations';
 import { Button, Result } from 'antd';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import { ACCOUNT_STATUS } from '../../i18n/importLabels';
@@ -15,8 +16,8 @@ const VIEW: Record<AccountStatus, { status: 'info' | 'warning' | 'error' | 'succ
 export function AccountStatusPage() {
   const [sp] = useSearchParams();
   const raw = sp.get('status') ?? 'pending';
-  const status = (raw in VIEW ? raw : 'pending') as AccountStatus;
-  const v = VIEW[status];
+  const status = raw;
+  const v = (labelOf(VIEW, status) ?? { status: 'info' as const, title: '未知', desc: '未知' });
   // 原因从 history state 读取（评审 m4）；刷新或直接打开时没有原因，只显示状态
   const loc = useLocation();
   const reason = (loc.state as { reason?: string | null } | null)?.reason ?? null;
@@ -28,7 +29,7 @@ export function AccountStatusPage() {
         title={v.title}
         subTitle={
           <div>
-            {username ? <div>用户名：<span className="mono">{username}</span> · 状态：{ACCOUNT_STATUS[status].text}</div> : null}
+            {username ? <div>用户名：<span className="mono">{username}</span> · 状态：{tagOf(ACCOUNT_STATUS, status).text}</div> : null}
             {reason ? <div data-testid="status-reason">原因：{reason}</div> : null}
             <div className="muted">{v.desc}</div>
           </div>

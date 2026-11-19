@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../../lib/explanations';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { Alert, Button, Checkbox, Input, Modal, Segmented, Space, Table, Tag, Tooltip, type ButtonProps } from 'antd';
@@ -62,7 +63,7 @@ export function AdminDataLicencesPage() {
   const [reason, setReason] = useState('');
   const [ack, setAck] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  const rows = list.items.filter(MATCH[filter]);
+  const rows = list.items.filter(labelOf(MATCH, filter) ?? MATCH.all);
 
   // 评审 d26e1d3 m2：契约没有按用户查询的参数（§7.9 只有游标分页；?status=/?q= 属问题 72 后续），
   // 所以按已有能力逐页续加载，直到找到 ?user= 指定的行，再高亮并滚动到该行。
@@ -97,7 +98,7 @@ export function AdminDataLicencesPage() {
       { userId: row.user_id, op, reason: trimmed },
       {
         onSuccess: () => {
-          setDone(`已${OP_TEXT[op]} ${row.display_name}（${row.username}）的数据证书${op === 'resume' && deletedWhilePaused(row) ? '；该用户证书已删除，当前为“未设置”' : ''}`);
+          setDone(`已${(labelOf(OP_TEXT, op) ?? '未知')} ${row.display_name}（${row.username}）的数据证书${op === 'resume' && deletedWhilePaused(row) ? '；该用户证书已删除，当前为“未设置”' : ''}`);
           setPending(null);
         },
       },
@@ -113,12 +114,12 @@ export function AdminDataLicencesPage() {
       title: '状态', key: 'status', width: 170,
       render: (_: unknown, r: AdminDataLicence) => (
         <span>
-          <Tag color={LICENCE_STATUS[r.status].color} data-testid={`lic-status-${r.username}`}>{LICENCE_STATUS[r.status].text}</Tag>
+          <Tag color={tagOf(LICENCE_STATUS, r.status).color} data-testid={`lic-status-${r.username}`}>{tagOf(LICENCE_STATUS, r.status).text}</Tag>
           {deletedWhilePaused(r) ? <Tooltip title="用户在暂停期间删除了证书；恢复后为“未设置”"><Tag data-testid={`lic-deleted-${r.username}`}>证书已删除</Tag></Tooltip> : null}
         </span>
       ),
     },
-    { title: '档位', key: 'tier', render: (_: unknown, r: AdminDataLicence) => <span>{r.tier ? LICENCE_TIER[r.tier] : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
+    { title: '档位', key: 'tier', render: (_: unknown, r: AdminDataLicence) => <span>{r.tier ? (labelOf(LICENCE_TIER, r.tier) ?? '未知') : '—'}{r.has_quant_pro ? <Tag style={{ marginLeft: 4 }}>量化Pro</Tag> : null}</span> },
     { title: '到期', key: 'exp', render: (_: unknown, r: AdminDataLicence) => <span data-testid={`dl-exp-${r.user_id}`}>{r.licence_id ? expiryCellText(r.expires_on, r.days_to_expiry) : '—'}</span> },
     { title: '最近验证', key: 'ver', render: (_: unknown, r: AdminDataLicence) => (r.last_verified_at ? <span className="mono">{fmtTime(r.last_verified_at)}</span> : '—') },
     { title: '今日调用', dataIndex: 'calls_today', key: 'today', align: 'right' as const },
@@ -127,7 +128,7 @@ export function AdminDataLicencesPage() {
     { title: '熔断至', dataIndex: 'paused_until', key: 'pu', render: (v: string | null) => (v ? fmtTime(v) : '—') },
     {
       title: '最近错误', key: 'err',
-      render: (_: unknown, r: AdminDataLicence) => (r.last_error_code ? <span>{LICENCE_ERROR[r.last_error_code]}{r.last_error_at ? <span className="muted small">（{fmtTime(r.last_error_at)}）</span> : null}</span> : '—'),
+      render: (_: unknown, r: AdminDataLicence) => (r.last_error_code ? <span>{(labelOf(LICENCE_ERROR, r.last_error_code) ?? '未知')}{r.last_error_at ? <span className="muted small">（{fmtTime(r.last_error_at)}）</span> : null}</span> : '—'),
     },
     {
       title: '操作', key: 'op', width: 90,
@@ -136,7 +137,7 @@ export function AdminDataLicencesPage() {
         if (!op) return <Tooltip title="该用户未设置证书，无需暂停"><span className="muted">—</span></Tooltip>;
         return (
           <Button size="small" danger={op === 'pause'} type={op === 'resume' ? 'primary' : 'default'} onClick={() => open(r, op)} data-testid={`lic-${op}-${r.username}`}>
-            {OP_TEXT[op]}
+            {(labelOf(OP_TEXT, op) ?? '未知')}
           </Button>
         );
       },
@@ -178,8 +179,8 @@ export function AdminDataLicencesPage() {
       <CursorPager query={list} loaded={list.items.length} unit="位用户" testId="lic-pager" />
       <Modal
         open={!!pending}
-        title={pending ? `${OP_TEXT[pending.op]}数据证书：${pending.row.display_name}（${pending.row.username}）` : ''}
-        okText={pending ? `确认${OP_TEXT[pending.op]}` : '确认'}
+        title={pending ? `${(labelOf(OP_TEXT, pending.op) ?? '未知')}数据证书：${pending.row.display_name}（${pending.row.username}）` : ''}
+        okText={pending ? `确认${(labelOf(OP_TEXT, pending.op) ?? '未知')}` : '确认'}
         okButtonProps={{ disabled: !ready, loading: action.isPending, danger: pending?.op === 'pause', 'data-testid': 'lic-ok' } as ButtonProps}
         onOk={submit}
         onCancel={() => setPending(null)}
@@ -188,7 +189,7 @@ export function AdminDataLicencesPage() {
         {pending ? (
           <>
             <Alert type={pending.op === 'pause' ? 'warning' : 'info'} showIcon style={{ marginBottom: 8 }} title={effectText(pending.row, pending.op)} data-testid="lic-effect" />
-            <div className="small muted" style={{ marginBottom: 4 }}>当前状态：{LICENCE_STATUS[pending.row.status].text}</div>
+            <div className="small muted" style={{ marginBottom: 4 }}>当前状态：{tagOf(LICENCE_STATUS, pending.row.status).text}</div>
             <Input.TextArea
               rows={3}
               maxLength={ADMIN_REASON_MAX}
@@ -199,7 +200,7 @@ export function AdminDataLicencesPage() {
               data-testid="lic-reason"
             />
             <Checkbox checked={ack} onChange={(e) => setAck(e.target.checked)} style={{ marginTop: 8 }} data-testid="lic-ack">
-              我已核对：要{OP_TEXT[pending.op]}的是用户 {pending.row.username} 的数据证书
+              我已核对：要{(labelOf(OP_TEXT, pending.op) ?? '未知')}的是用户 {pending.row.username} 的数据证书
             </Checkbox>
             {action.isError ? <Alert type="error" showIcon style={{ marginTop: 8 }} title={`操作失败：${adminErrorText(action.error)}`} data-testid="lic-error" /> : null}
           </>

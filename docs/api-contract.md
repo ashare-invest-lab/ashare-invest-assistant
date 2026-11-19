@@ -15,6 +15,9 @@
 > O-CI1-PROFILE-CONTRACT（2026-11-12）：§7.3 因子响应的 `factor_set_version` 增加限定的 `null`，空集无真实因子集不造版本，真实因子集保留真实版本；旧消费者的必为字符串假设需同步，详见该节及 `reviews/O-CI1-PROFILE-CONTRACT.md`。
 >
 > S1-3（2026-11-12）承接 A-12、T-A157、T-A158 与 Notification/ST205 的文档增量，保留上述真实版本/缺口原因与四 GET provider/cache 未接限制；各处标注目标规则与实现差距。可空类型的客户端兼容影响、源资产例外及受影响任务见 [汇总](reviews/S1-3-consolidation.md)。
+> T-A207（2026-11-16）：§7.3 明确 TodayAlert 的 id 升序及未合入实现出处，新增所有 severity 渲染页面的未知档位兜底与服务端顺序保留规则。
+>
+> T-R87c（2026-11-16）：按 T-R87 G2-09 裁定澄清 §7.11.3 T-A33(1) 补算窗口，只有遇到第 6 个开市日才出窗，D+5 之后已覆盖的休市日仍在窗口内，日历缺日不推进、不冻结；只是文字澄清，不升版本，实现归后端 T-B171。
 
 
 ### v0.2.9（2026-11-02，T-A10：处理前端 T-A09、T-F17、T-F18 与 review-fixes 遗留的待定项（报告 `T-A10-pending.md` P01–P21，按建议裁定采纳），并入测试 T-T23 的三项裁定；同版并入 T-A11（研究候选接口，#19–#25，版本号不升）与管理端证书遗留裁定（T-F22 遗留 1–5，#26）；**含不兼容变更**：#6（候选信号事件改为分页包装）、#11（放弃草案的请求体）、#12（`/non-executable-reasons` 默认只返回 `active`）；其余为新增字段、可空性放宽或规则写明）
@@ -943,7 +946,8 @@ evidence: Evidence[]
 - 范围：`status ∈ {new, read}` 的提醒（未处理的一直显示，不限日期）；**不含** `origin=plan_condition` 的提醒，这类放进 `plan_triggers`，避免重复。
 - `title`：“发生了什么”的事实陈述（例如“示例银行发布业绩预告”），经过禁用词校验，不包含动作建议。`security_code` 为 `null` 时 `name` 也为 `null`（账户级提醒）。
 - `evidence_ids` 非空，每个 id 都能在同一响应的 `evidence[]` 中找到（提醒的“事实 + 来源”）。
-- 排序：`severity`（important > attention > info）→ `triggered_at` 降序 → `id`。最多 50 条，`more=true` 时到 `/alerts?status=new,read` 查看。
+- 排序：`severity`（important > attention > info）→ `triggered_at` 降序 → `id` 升序（按 uuid 值升序；与 #256@5086bc3 `aggregates/products.py:今日提醒查询 order_by`（未合入）一致）。最多 50 条，`more=true` 时到 `/alerts?status=new,read` 查看。
+- 未知档位兜底：后端只输出 `important`、`attention`、`info` 三档（模型层拒绝契约外值）；前端消费 `severity` 时只按三档自有键取映射（不得取到原型链属性，例如 `__proto__`、`constructor`、`toString`），其他任何值（含空串、带空格、未来新档）显示固定文案「未知」与默认（中性）颜色，条目照常显示、不崩溃；只用 `severity` 取颜色而不显示其文案的位置（如通知面板的类型标签）用中性色即可。本列表不在客户端重排，保留服务端顺序；其他列表沿用各自既有排序，但未知档位不得改变排序或筛选结果。该兜底适用于所有渲染 `severity` 的页面。
 
 **`TodayPlanTrigger`**（plan “计划触发”；来源：`plan_conditions` 的满足记录，即 SSE `plan_triggered` 与 `origin=plan_condition` 的提醒）
 `{plan_id: uuid, plan_version_no: int, security_code: string, name: string, condition_id: uuid, condition_kind: plan_condition_kind, condition_text: string, triggered_at: string(datetime), alert_id: uuid | null, evidence_ids: string[]}`
@@ -1314,7 +1318,7 @@ evidence: Evidence[]
 
 **T-A33 裁定（status: draft；P2N-R08 歧义 084–092 + T-A32 R5）**：交易日一律按交易日历、北京时间；日历缺失时不推进计数、不解除暂停，记 gap。
 
-1. **跟踪结果冻结（R5）**：complete/untradable/excluded 一经写入即冻结；`unavailable` 由盘后作业在到期后 5 个交易日内每日重算，数据补齐即改写为相应状态（版本统计同步重算），满 5 个交易日仍缺则冻结为 unavailable。
+1. **跟踪结果冻结（R5）**：complete/untradable/excluded 一经写入即冻结；`unavailable` 由盘后作业在到期后 5 个交易日的补算窗口内每日重算（只有遇到第 6 个开市日才出窗，D+5 之后已覆盖的休市日仍在窗口内；日历缺日时不推进、不冻结），数据补齐即改写为相应状态（版本统计同步重算），出窗时仍缺则冻结为 unavailable；首次晚于窗口只算一次后冻结。
 2. **模拟失败（084）**：失败 ⇔ `state=complete` 且 `direction_correct=false`；`true` 为成功并清零计数。范围：**本人**建议 × 策略版本；跟踪期按**策略自身周期**取（T-A36，用户已定选项 B）：`intraday_t`→1、`short`→5、`swing`→20、`long`→20（T-A37 修正：取不短于典型持有期的最长可用跟踪期，跟踪期只有 1/5/20；RC5 此项只是早期预警，终评见 plan §2.5.7/§2.8.2），周期取该观测所属建议中该版本结论的 `horizon`，缺失时取策略版本声明的周期；仍不清楚 → 该观测跳过（不计失败、不清零）并记 gap `sim_fail_horizon_unknown`，不默认 5 日。TB-A48 裁定：多周期版本（`horizons` 长度 > 1，如 H-01 v1/v2）无唯一声明周期，该级回退终局不可解析——结论缺 horizon 的观测保持跳过 + gap，不得回填挂载周期 swing、不得取数组首元素；`simulated_failures(version_horizon=…)` 生产者对多周期版本必须传 `None`。H-01 系统实例挂载周期 = `swing`（新挂载传 `horizon="swing"`，已存实例不回溯）。详见 `docs/reviews/TB-A48-horizon-ruling.md`。映射配置键 `rc5_loss_streak_drawdown.sim_fail_horizon_by_horizon`（取代 `sim_fail_horizon_days`）；观测按 T-A27 第 3 点去重。序列按 `exit_at` 升序（并列按 suggestion_id），pending/unavailable/untradable/excluded 跳过，既不计失败也不清零。连续失败数 = 序列尾部连续失败条数。
 3. **已平仓一笔（085）**：账户 × 证券的一个持仓段：持仓数从 0 变正起，到回到 0 的那笔成交止（部分减仓不结束）。盈亏 = 段内卖出金额 − 买入金额 − 全部费用税（含费用）；< 0 为亏损，> 0 为盈利并清零，= 0（平本）跳过、不清零。按结束成交 `executed_at` 升序，并列按成交 id。段起点早于导入数据（无开仓成交）→ 该段不计入并记 gap。
 4. **暂停期（086/091）**：第 0 天 = 触发时刻所在交易日（非交易日或 15:00 后触发 → 下一交易日）；暂停覆盖第 1..N 个交易日，`paused_until` = 第 N 个交易日 15:00；系统在 `paused_until` 及之后的首次作业恢复（幂等，晚跑不补偿）。触发为**边沿**：亏损笔数/失败数增至 ≥ 阈值的那次、回撤从阈值下方越过阈值的那次；暂停中再次边沿触发 → `paused_until` 取 max(现值, 新计算值)，不叠加。期满时条件仍满足但无新边沿 → 不重新暂停，只保留 RC5 `triggered` 标记。
