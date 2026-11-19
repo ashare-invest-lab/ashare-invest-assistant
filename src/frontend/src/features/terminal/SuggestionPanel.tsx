@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../../lib/explanations';
 import { RiskFlagView } from '../../components/RiskFlagView';
 import { Button, Tag, Tooltip } from 'antd';
 import { useNavigate } from 'react-router';
@@ -7,7 +8,7 @@ import { ActionBadge, ConfidenceTag, ErrorBox, Loading } from '../../components/
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { ACTION_FULL, ACTION_SHORT, HORIZON, REASON_CODE, SIGNAL_STATE } from '../../i18n/labels';
 
-const shortAction = (a: keyof typeof ACTION_FULL) => ACTION_FULL[a].replace(/^规则信号：|（候选）$/g, '');
+const shortAction = (a: keyof typeof ACTION_FULL) => (labelOf(ACTION_FULL, a) ?? '未知').replace(/^规则信号：|（候选）$/g, '');
 
 export function SuggestionPanel({ row, suggestion, loading, error }: { row: TerminalRow | undefined; suggestion: Suggestion | undefined; loading: boolean; error: unknown }) {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
       {head}
       <div className={`consensus-bar ${sg.consensus.status}`} data-testid="consensus-bar">
         {sg.consensus.status === 'divergent'
-          ? `存在分歧（${sg.strategies.length} 个策略：${sg.strategies.map((s) => ACTION_SHORT[s.action]).join(' / ')}）· 并列展示，不合并`
+          ? `存在分歧（${sg.strategies.length} 个策略：${sg.strategies.map((s) => (labelOf(ACTION_SHORT, s.action) ?? '未知')).join(' / ')}）· 并列展示，不合并`
           : sg.consensus.status === 'unanimous'
             ? (sg.strategies[0] ? `各策略一致：${shortAction(sg.strategies[0].action)}` : "各策略一致")
             : sg.consensus.status === 'single' ? '仅 1 个策略实例' : '暂无启用的策略实例'}
@@ -45,7 +46,7 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
               <div className="sm-head">
                 <ActionBadge action={s.action} tLeg={s.t_leg} lifecycle={s.lifecycle} size="lg" />
                 <span className="sm-name">{s.strategy_name}</span>
-                <span className="muted small">{HORIZON[s.horizon]} · v{s.version_no}</span>
+                <span className="muted small">{(labelOf(HORIZON, s.horizon) ?? '未知')} · v{s.version_no}</span>
               </div>
               <div className="sm-row">
                 <span>满足度 <b className="mono">{s.score ?? '—'}</b></span>
@@ -54,14 +55,14 @@ export function SuggestionPanel({ row, suggestion, loading, error }: { row: Term
               </div>
               <div className="sm-row mono small">
                 止损 <b className="down">{s.stops.stop_loss ?? '—'}</b>　止盈 <b className="up">{s.stops.take_profit ?? '—'}</b>
-                {sig ? <Tag color={SIGNAL_STATE[sig.state].color} style={{ marginLeft: 'auto' }}>{SIGNAL_STATE[sig.state].text}</Tag> : <span className="muted" style={{ marginLeft: 'auto' }}>不生成候选信号</span>}
+                {sig ? <Tag color={tagOf(SIGNAL_STATE, sig.state).color} style={{ marginLeft: 'auto' }}>{tagOf(SIGNAL_STATE, sig.state).text}</Tag> : <span className="muted" style={{ marginLeft: 'auto' }}>不生成候选信号</span>}
               </div>
               <div className="sm-reason small">理由：{s.reasons[0]?.text ?? '—'}</div>
               <div className="sm-counter small">反证：{s.counter_evidence[0]?.text ?? '—'}</div>
               <div className="small muted">失效：{s.invalidation[0]?.text ?? '—'}</div>
               {rs.map((r) => (
                 <div key={r.id} className="sm-block small">
-                  不可执行：{REASON_CODE[r.code]}<span className="muted">（解除条件：{r.release_condition.human_text}）</span>
+                  不可执行：{(labelOf(REASON_CODE, r.code) ?? '未知')}<span className="muted">（解除条件：{r.release_condition.human_text}）</span>
                 </div>
               ))}
             </div>

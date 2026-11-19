@@ -5,7 +5,7 @@ import { ApiError } from '../../api/client';
 import { useAlert, usePatchAlert } from '../../api/planAlertQueries';
 import { ALERT_NEXT } from '../../api/planAlertTypes';
 import { ErrorBox, Loading } from '../../components/common';
-import { ALERT_ORIGIN, ALERT_STATUS, SEVERITY, SEVERITY_TEXT } from '../../i18n/labels';
+import { ALERT_ORIGIN, ALERT_STATUS, severityTag } from '../../i18n/labels';
 import { ALERT_ACTION_TEXT, ALERT_STATUS_COLOR } from '../../i18n/planAlertLabels';
 import { fmtTime } from '../../lib/format';
 
@@ -33,7 +33,7 @@ export function AlertDetailPage() {
     <div className="page-scroll page" data-testid="alert-detail">
       <div className="detail-head">
         <Button size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/alerts')}>提醒中心</Button>
-        <Tag color={SEVERITY[a.severity]}>{SEVERITY_TEXT[a.severity]}</Tag>
+        <Tag color={severityTag(a.severity).color}>{severityTag(a.severity).text}</Tag>
         <span className="q-name">{a.title}</span>
         <Tag color={ALERT_STATUS_COLOR[a.status]} data-testid="alert-detail-status">{ALERT_STATUS[a.status]}</Tag>
       </div>

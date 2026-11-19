@@ -153,6 +153,24 @@ describe('④ m3：freshness 显示数据集中文名（#31 ③）', () => {
     }
     expect(Object.values(INGEST_DATASET_NAME)).toEqual(['实时行情', '分钟线', '日线', '财务数据', '公告', '证券主数据']);
   });
+
+  it('采集状态页将新鲜度时间转换为北京时间，缺失时间显示横线', async () => {
+    mockLoginAs('admin');
+    const status: AdminIngestStatus = {
+      ...quiet,
+      alerts: [],
+      freshness: [
+        { dataset: 'quotes', data_as_of: '2026-11-02T02:15:00Z', data_status: 'fresh' },
+        { dataset: 'minute_bars', data_as_of: null, data_status: 'stale' },
+      ],
+    };
+    server.use(http.get(`${API}/admin/ingest/status`, () => HttpResponse.json(status)));
+
+    renderAt('/admin/ingest');
+
+    expect(await screen.findByTestId('ingest-fresh-quotes')).toHaveTextContent(/^实时行情 2026-11-02 10:15 最新$/);
+    expect(screen.getByTestId('ingest-fresh-minute_bars')).toHaveTextContent(/^分钟线 — 已过期$/);
+  });
 });
 
 describe('⑤ 可选：React key 防御与 heartbeat 示例场景', () => {

@@ -35,11 +35,11 @@ key `st_limitup_relay`；category `momentum`；horizons `[short]`；risk_level `
 | X3 | exit | `f.market_breadth < p.breadth_exit` |  |
 | X4 | exit（时间） | `ctx.holding_days >= p.max_hold` |  |
 - 连续板数：`f.is_limit_up_close == true for p.min_boards days` 可以表达“至少 N 连板”，但参数化的 N 需要 `for p.x days`（plan W-01 缺口③），**待定**。
-- 原稿的盘中观察窗 09:35–09:45 与 `ctx.last_price` 需要分钟数据（DAT-1），已删除；本卡只做日线收盘确认、次日开盘模拟入场。
+- 原稿的盘中观察窗 09:35–09:45 与 `ctx.last_price` 需要分钟数据（DAT-1），已删除；本卡只做日线收盘确认、次日开盘模拟入场（出处：docs/plan.md:1283）。
 - 次日一字开盘买不进 → `LIMIT_LOCKED(buy)`，必须计入统计，不能剔除。
 
 ## 8–10 执行与仓位
-T 日盘后确认，T+1 开盘价模拟入场；一字涨停记 `LIMIT_LOCKED` 并计入偏差统计；单票仓位按 RC2 建议，高风险模板默认不启用。
+T 日盘后确认，T+1 开盘价模拟入场（出处：docs/plan.md:1283）；一字涨停记 `LIMIT_LOCKED` 并计入偏差统计；单票仓位按 RC2 建议，高风险模板默认不启用。
 
 ## 11 验证（本轮不写 golden）
 `fixture`、`trigger_stats`（含买不进样本）、`tracking_sim`；horizon_days [1,3]；`min_n=30`；按板块分组统计。

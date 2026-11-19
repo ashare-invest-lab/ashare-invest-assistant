@@ -1,3 +1,4 @@
+import { labelOf } from './explanations';
 /** 候选信号的纯函数：终止态、方向、同股方向冲突（T-F17） */
 import type { Action, CandidateSignalState } from '../api/enums';
 import type { CandidateSignal, NonExecutableReason } from '../api/types';
@@ -30,10 +31,10 @@ export const VIA_RESTRICTIONS: ReadonlySet<string> = new Set(['BLOCKLISTED', 'US
 
 /** 自动重评状态（契约 v0.2.7 §7.6：由原因的 status / released_at / released_by 推出） */
 export function reevalText(r: NonExecutableReason): string {
-  if (r.status === 'released') return `${RELEASED_BY[r.released_by]}${r.released_at ? ` · ${fmtTime(r.released_at)}` : ''}`;
+  if (r.status === 'released') return `${(labelOf(RELEASED_BY, r.released_by) ?? '未知')}${r.released_at ? ` · ${fmtTime(r.released_at)}` : ''}`;
   if (r.status === 'obsolete') return '所属信号已结束，该原因作废';
   if (VIA_RESTRICTIONS.has(r.code)) return r.code === 'USER_MUTED' ? '需在限制名单中取消屏蔽后由系统解除' : '需在禁投名单中移除后由系统解除';
-  if (r.release_condition.machine_checkable) return `等待系统自动重评（${r.release_condition.check_on.map((c) => CHECK_ON[c]).join('、')}）`;
+  if (r.release_condition.machine_checkable) return `等待系统自动重评（${r.release_condition.check_on.map((c) => (labelOf(CHECK_ON, c) ?? '未知')).join('、')}）`;
   return '需你确认后手动解除';
 }
 export const manuallyReleasable = (r: NonExecutableReason) => r.status === 'active' && !r.release_condition.machine_checkable && !VIA_RESTRICTIONS.has(r.code);
