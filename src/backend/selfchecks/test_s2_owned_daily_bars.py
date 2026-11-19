@@ -231,8 +231,10 @@ def test_suspension_incomplete_future_and_calendar_gap(world: Any) -> None:
     seed(world, day=DAY - dt.timedelta(days=2), fetched_at=NOW + dt.timedelta(seconds=1))
     result = world.reader.read(OWNER, CODE, query())
     assert result["items"] == []
-    assert {gap["reason"] for gap in result["gaps"]} == {
-        "no_source",
+    assert len(result["gaps"]) == 2
+    assert {gap["key"]: gap["reason"] for gap in result["gaps"]} == {
+        f"bars.{DAY.isoformat()}": "suspended",
+        f"bars.{(DAY - dt.timedelta(days=1)).isoformat()}": "no_source",
     }
     with world.engine.begin() as conn:
         conn.execute(daily_bars.delete())
