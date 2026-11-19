@@ -65,7 +65,7 @@ REPO = Path(__file__).resolve().parents[3]
 TESTS_DIR = REPO / "tests"
 V028 = "v0.2.8"
 #: v0.2.8 规则在之后的版本仍然成立（T-T25：契约 v0.2.9 687159f 无回退）
-V028_OR_LATER = (V028, "v0.2.9")
+V028_OR_LATER = (V028, "v0.2.9", "v0.2.10")
 INGEST_STREAM = "ingest:requests"
 #: 契约 v0.2.8 §5.1 IngestLicenceStatus 键集合
 INGEST_LICENCE_KEYS = {"licence_id", "user_id", "username", "display_name", "status", "tier", "has_quant_pro", "expires_on",
