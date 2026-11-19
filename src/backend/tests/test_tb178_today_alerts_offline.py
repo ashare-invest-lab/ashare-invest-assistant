@@ -16,7 +16,9 @@ from pydantic import ValidationError
 from sqlalchemy import Connection, Select
 
 from app.aggregates import models, products
+from app.common.errors import AppError, ErrorCode
 from app.db.tables.research import alerts
+from app.strategy.reviews import COMPLIANCE_TERMS
 
 OWNER = uuid.UUID(int=178)
 AT = dt.datetime(2020, 1, 2, 8, tzinfo=dt.UTC)
@@ -76,10 +78,19 @@ def connection(rows: list[SimpleNamespace]) -> tuple[MagicMock, list[int]]:
         result.scalar_one.return_value = 0
         if statement.get_final_froms()[0] is alerts:
             assert OWNER in statement.compile().params.values()
-            offset = int(statement._offset_clause.value)
-            limit = int(statement._limit_clause.value)
+            offset = (
+                int(statement._offset_clause.value) if statement._offset_clause is not None else 0
+            )
+            limit = (
+                int(statement._limit_clause.value)
+                if statement._limit_clause is not None
+                else len(rows)
+            )
             offsets.append(offset)
-            result.all.return_value = rows[offset : offset + limit]
+            page = rows[offset : offset + limit]
+            result.all.return_value = page
+            result.__iter__.side_effect = lambda: iter(page)
+            result.__enter__.return_value = result
         return result
 
     conn.execute.side_effect = execute
@@ -181,7 +192,8 @@ def test_refill_uses_displayable_items_for_more_and_does_not_leak_hidden_evidenc
 
     block, evidence, skipped = products.today_alerts(conn, OWNER)
 
-    assert offsets == [0, 51]
+    assert offsets == [0]
+    assert conn.execute.call_count == 1
     assert skipped
     assert [item.id for item in block.items] == [row.id for row in good[:50]]
     assert block.more is (valid_count > 50)
@@ -222,3 +234,76 @@ def test_no_alert_records_mean_no_alert_gap_or_evidence() -> None:
     assert result["alerts"].model_dump(mode="json") == {"items": [], "more": False}
     assert result["evidence"] == []
     assert not any(key == "alerts" for key, _ in result["gaps"])
+
+
+@pytest.mark.parametrize("term", COMPLIANCE_TERMS)
+@pytest.mark.parametrize("template", ["发生{term}事件", "不{term}", "引用“{term}”"])
+def test_today_alert_title_uses_real_compliance_lint(term: str, template: str) -> None:
+    row = alert(1)
+    row.what_happened["title"] = template.format(term=term)
+    conn, _ = connection([row])
+
+    with pytest.raises(AppError) as caught:
+        products.today_alerts(conn, OWNER)
+
+    assert caught.value.code is ErrorCode.COMPLIANCE_LINT_FAILED
+    assert caught.value.details == {"terms": [term]}
+    assert conn.execute.call_count == 1
+
+
+@pytest.mark.parametrize("invalid_count", [0, 1, 51, 300])
+@pytest.mark.parametrize("valid_count", [0, 50, 51])
+def test_alert_select_count_independent_of_invalid_and_displayable_rows(
+    invalid_count: int,
+    valid_count: int,
+) -> None:
+    invalid = [alert(1000 + index) for index in range(invalid_count)]
+    for row in invalid:
+        row.what_happened["evidence_ids"] = []
+    valid = [alert(index + 1) for index in range(valid_count)]
+    conn, offsets = connection([*invalid, *valid])
+
+    block, evidence, skipped = products.today_alerts(conn, OWNER)
+
+    assert conn.execute.call_count == 1
+    assert offsets == [0]
+    assert skipped is bool(invalid_count)
+    assert [item.id for item in block.items] == [row.id for row in valid[:50]]
+    assert block.more is (valid_count > 50)
+    assert len(evidence) == min(valid_count, 50)
+    statement = conn.execute.call_args.args[0]
+    assert statement.is_select
+    assert statement._offset_clause is None
+    assert statement.get_execution_options()["yield_per"] == 128
+
+
+@pytest.mark.parametrize("invalid_count", [0, 51, 300])
+def test_all_today_blocks_keep_fixed_select_count(invalid_count: int) -> None:
+    rows = [alert(index + 1) for index in range(invalid_count + 51)]
+    for row in rows[:invalid_count]:
+        row.what_happened["evidence_ids"] = []
+    conn, _ = connection(rows)
+
+    result = products.blocks(conn, OWNER, None, AT, AT.date(), {}, {}, [])
+
+    assert conn.execute.call_count == 5
+    assert len(result["alerts"].items) == 50
+    assert result["alerts"].more
+    assert len(result["evidence"]) == 50
+
+
+def test_stream_closes_on_compliance_rejection() -> None:
+    row = alert(1)
+    row.what_happened["title"] = COMPLIANCE_TERMS[0]
+    result = MagicMock()
+    result.__enter__.return_value = result
+    result.__iter__.side_effect = lambda: iter([row])
+    result.all.return_value = [row]
+    conn = MagicMock(spec=Connection)
+    conn.execute.return_value = result
+
+    with pytest.raises(AppError, match="COMPLIANCE_LINT_FAILED"):
+        products.today_alerts(conn, OWNER)
+
+    result.__exit__.assert_called_once()
+    assert result.__exit__.call_args.args[0] is AppError
