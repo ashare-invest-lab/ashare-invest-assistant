@@ -1,3 +1,4 @@
+import { tagOf } from '../lib/explanations';
 import { Button } from 'antd';
 import type { DataLicenceState } from '../api/enums';
 import { LICENCE_BANNER_TEXT, LICENCE_NOT_SET_TEXT, LICENCE_STATUS, LICENCE_UNAVAILABLE } from '../i18n/licenceLabels';
@@ -11,7 +12,7 @@ export function LicenceBanner({ status, onOpen }: { status: DataLicenceState | u
   const unavailable = status !== 'not_set';
   return (
     <div className={`licence-banner${unavailable ? ' bad' : ''}`} role="status" data-testid="licence-banner" data-status={status}>
-      <span>{unavailable ? `${LICENCE_BANNER_TEXT}（${LICENCE_STATUS[status].text}）` : LICENCE_NOT_SET_TEXT}</span>
+      <span>{unavailable ? `${LICENCE_BANNER_TEXT}（${tagOf(LICENCE_STATUS, status).text}）` : LICENCE_NOT_SET_TEXT}</span>
       <Button size="small" type="link" onClick={onOpen}>去设置 ›</Button>
     </div>
   );
