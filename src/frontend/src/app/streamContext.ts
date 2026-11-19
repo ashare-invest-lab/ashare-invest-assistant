@@ -9,8 +9,6 @@ import type { StreamState } from '../lib/eventStream';
 export type StreamStatus = StreamState | 'off';
 export const StreamStatusContext = createContext<StreamStatus>('off');
 export const useStreamStatus = () => useContext(StreamStatusContext);
-/** SSE 已连上：未读数、终端、首页不再定时轮询 */
-export const useStreamLive = () => useContext(StreamStatusContext) === 'open';
 
 /**
  * 运行开关与时间参数。单元测试环境默认关闭（避免每个页面测试都挂一条长连接），

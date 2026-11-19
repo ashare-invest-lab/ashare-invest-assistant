@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Descriptions, Form, Input, Popconfirm, Select, Space, Tag, Tooltip } from 'antd';
 import { ApiError } from '../../api/client';
@@ -21,7 +22,7 @@ const inCooldown = (r: DataLicenceStatus) => r.status === 'quota_exceeded' || r.
 const DEFAULTS: FormValues = { licence: '', tier: 'diamond', has_quant_pro: false, expires_on: '' };
 
 export function LicenceBadge({ s }: { s: DataLicenceStatus['status'] }) {
-  return <Tag color={LICENCE_STATUS[s].color} data-testid="licence-badge">{LICENCE_STATUS[s].text}</Tag>;
+  return <Tag color={tagOf(LICENCE_STATUS, s).color} data-testid="licence-badge">{tagOf(LICENCE_STATUS, s).text}</Tag>;
 }
 
 /**
@@ -85,8 +86,8 @@ export function DataLicencePage() {
         : r.status === 'pending_verification'
           ? '已提交，正在验证。证书已加密保存，之后不会再显示。'
           : inCooldown(r)
-            ? `证书已加密保存，之后不会再显示。当前状态“${LICENCE_STATUS[r.status].text}”，冷却到期前不会重新验证。`
-            : `证书已加密保存，之后不会再显示。当前状态“${LICENCE_STATUS[r.status].text}”。`),
+            ? `证书已加密保存，之后不会再显示。当前状态“${tagOf(LICENCE_STATUS, r.status).text}”，冷却到期前不会重新验证。`
+            : `证书已加密保存，之后不会再显示。当前状态“${tagOf(LICENCE_STATUS, r.status).text}”。`),
       onError: onMutError,
     });
   };
@@ -115,7 +116,7 @@ export function DataLicencePage() {
 
       <Descriptions size="small" column={2} bordered style={{ margin: '12px 0' }} data-testid="licence-status">
         <Descriptions.Item label="状态"><LicenceBadge s={s.status} /></Descriptions.Item>
-        <Descriptions.Item label="档位（自报）">{s.tier ? LICENCE_TIER[s.tier] : '—'}{s.has_quant_pro ? <Tag style={{ marginLeft: 6 }}>Quant Pro</Tag> : null}</Descriptions.Item>
+        <Descriptions.Item label="档位（自报）">{s.tier ? (labelOf(LICENCE_TIER, s.tier) ?? '未知') : '—'}{s.has_quant_pro ? <Tag style={{ marginLeft: 6 }}>Quant Pro</Tag> : null}</Descriptions.Item>
         <Descriptions.Item label="到期日（自填）">
           {/* #40：已设置证书时 null 显示“未填写到期日”（不告警）；未设置证书显示 — */}
           <span data-testid="licence-expiry">
@@ -125,7 +126,7 @@ export function DataLicencePage() {
         <Descriptions.Item label="设置时间">{s.set_at ? fmtTime(s.set_at) : '—'}</Descriptions.Item>
         <Descriptions.Item label="最近验证">{s.last_verified_at ? fmtTime(s.last_verified_at) : '—'}</Descriptions.Item>
         <Descriptions.Item label="最近错误">
-          {s.last_error_code ? <span data-testid="licence-error">{LICENCE_ERROR[s.last_error_code]}（{s.last_error_code}）{s.last_error_at ? ` · ${fmtTime(s.last_error_at)}` : ''}</span> : '—'}
+          {s.last_error_code ? <span data-testid="licence-error">{(labelOf(LICENCE_ERROR, s.last_error_code) ?? '未知')}（{s.last_error_code}）{s.last_error_at ? ` · ${fmtTime(s.last_error_at)}` : ''}</span> : '—'}
         </Descriptions.Item>
         {s.paused_until ? <Descriptions.Item label="暂停至" span={2}>{fmtTime(s.paused_until)}</Descriptions.Item> : null}
       </Descriptions>
@@ -144,7 +145,7 @@ export function DataLicencePage() {
         </Form.Item>
         <Space size="large" align="start" wrap>
           <Form.Item name="tier" label="档位">
-            <Select style={{ width: 140 }} options={ENUMS.data_licence_tier.map((t) => ({ value: t, label: LICENCE_TIER[t] }))} />
+            <Select style={{ width: 140 }} options={ENUMS.data_licence_tier.map((t) => ({ value: t, label: (labelOf(LICENCE_TIER, t) ?? '未知') }))} />
           </Form.Item>
           <Form.Item name="has_quant_pro" label="Quant Pro" valuePropName="checked">
             <Checkbox>已开通</Checkbox>

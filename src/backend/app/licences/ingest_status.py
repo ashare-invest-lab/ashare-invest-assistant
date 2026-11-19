@@ -37,7 +37,7 @@ from app.db.tables.licences import data_licence_events
 from app.db.tables.ops import ingest_leases, ingest_request_log
 from app.licences import service
 from app.master.alerts import master_alerts
-from app.schemas.enums import DataLicenceStatus
+from app.schemas.enums import DataLicenceStatus, IngestHealth
 
 logger = logging.getLogger("app.licences.ingest_status")
 
@@ -65,20 +65,28 @@ def mask_ip(raw: str | None) -> str | None:
     return ":".join(g.lstrip("0") or "0" for g in groups) + ":x"
 
 
-def _heartbeat(rds: redis.Redis, settings: Settings) -> dict[str, Any]:
+def _heartbeat(
+    rds: redis.Redis, settings: Settings, now: dt.datetime
+) -> tuple[dict[str, Any], IngestHealth]:
+    from app.api.v1.health import ingest_state
+
     try:
+        paused = bool(rds.exists(settings.ingest_paused_key))
         raw = rds.get(settings.ingest_heartbeat_key)
     except redis.RedisError as exc:
         logger.warning("ingest-status: heartbeat unavailable (%s)", type(exc).__name__)
-        return {}
-    if raw is None:
-        return {}
+        return {}, IngestHealth.UNKNOWN
+    state = ingest_state(
+        paused=paused,
+        heartbeat=raw,
+        stale_after_s=settings.ingest_stale_after_s,
+        now=now.timestamp(),
+    )
     try:
-        text = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
-        data = json.loads(text)
+        data = json.loads(raw) if raw is not None else {}
     except (UnicodeDecodeError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        data = {}
+    return (data if isinstance(data, dict) else {}), state
 
 
 def _leader(conn: Connection, settings: Settings, hb: dict[str, Any]) -> dict[str, Any]:
@@ -150,7 +158,7 @@ def _ip_alerts_24h(conn: Connection, now: dt.datetime) -> int:
 def build(conn: Connection, rds: redis.Redis, settings: Settings) -> dict[str, Any]:
     now = now_utc()
     licences, truncated = service.ingest_licences(conn, rds, settings)
-    hb = _heartbeat(rds, settings)
+    hb, heartbeat = _heartbeat(rds, settings, now)
     oldest = _oldest_queued(conn, now)
     queues = [
         {
@@ -161,6 +169,7 @@ def build(conn: Connection, rds: redis.Redis, settings: Settings) -> dict[str, A
         for log_p, key, name in QUEUE_NAMES
     ]
     return {
+        "heartbeat": heartbeat.value,
         "leader": _leader(conn, settings, hb),
         "budget": {
             "per_minute_limit": sum(
