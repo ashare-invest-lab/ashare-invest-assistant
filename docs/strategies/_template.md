@@ -29,13 +29,13 @@
 1. **措辞**：只写"候选信号 / 计划条件 / 规则条件满足（候选）"。禁用"推荐、建议买入、立即买入/卖出、必涨、稳赚、保证、目标价、金股、牛股"等词（plan §7.2）。不承诺收益，不推荐具体股票。
 2. **认识论标注**（`epistemic`，[B]）：至少标出 `hypothesis` 和每个阈值参数的类型：`fact`（数据事实）/ `estimate`（估算：费率、冲击成本、置信度）/ `hypothesis`（策略逻辑与经验阈值）。
 3. **时间**：A 股时刻一律写**北京时间（UTC+8）**；天数一律是交易日。
-4. **禁止未来函数**：规则在时点 t 只能用 `available_at ≤ t` 的数据（§7.2）。
+4. **禁止未来函数**：规则在时点 t 只能用 `available_at ≤ t` 的数据（出处：T-A190 §一、逐条裁定／共同约束；卡内说明见 §7.2）。
 5. **可追溯**：每条规则都能产出 `rule_refs`（契约 `RuleRef`：`rule_id`、`role`、`dimension`、`passed`、`value`、`threshold`、`evidence_ids[]`；结果字段是 `passed`，不是 `pass`）和 `evidence`（特征键、取值、`data_as_of`、`fetched_at`、来源）。每张卡至少 1 条 `counter`、1 条 `invalidation`、1 种止损（G1）。
 6. **数值**：模板与示例中的数字都是"示例"，不是回测或实测结论。
 7. **黑盒模型**（机器学习、合成打分）只能出现在 `model_refs`，角色固定为 `auxiliary`，不计入规则满足率，不能单独触发计划草案（P1b）。LLM 只把结构化证据改写成文字（P1a）。
 8. **DSL**：只用 §2.5.14 C 节白名单及 H 节⑤新增：比较、`and/or/not`、`+ - * /`、`ma/ema/atr/highest/lowest/ref/cross_up/cross_down/between/rank_pct/pct_change`；H⑤新增 `max2(a,b)`/`min2(a,b)`（两数取大/小，别名 `greatest`/`least`）、`std(x,n)`、`ts_pct_rank(x,n)`、`rank_pct_in(x, group_key)`；`for N days`、`within N days` 的 N 可以是整数字面量或 `int` 参数 `p.xxx`（须在 `params_schema` 范围内，上限 250）；日内规则用 `for N bars`/`within N bars`。`min(x,n)`/`max(x,n)` 是滚动的 `lowest`/`highest` 别名，**两数取大/小只能用 `max2`/`min2`**。特征写 `f.` 前缀、参数写 `p.` 前缀。`ctx.*`（`ctx.last_price`、`ctx.holding_days`、`ctx.sellable_qty`、`ctx.max_r_reached`；T-B42 新增 `ctx.cost_price`、`ctx.position_weight`、`ctx.sector_weight`、`ctx.highest_close_since_entry`、`ctx.now_hhmm`）和 `plan.*`（`plan.stop_loss`、`plan.take_profit`、`plan.entry_price`）**只能在 hold/weakening/exit 规则中用**，且只在绑定实例与计划时求值。表达式 ≤ 300 字符，嵌套 ≤ 6 层。
 9. **契约命名（api-contract v0.2）**：所有 `score` 为 0–100 **整数**或 `null`；证据引用一律 `evidence_ids`（复数数组），不写 `evidence_id`；止损止盈一律嵌套在 `stops{stop_loss, take_profit, time_stop_days}` 中，不平铺。
-10. **样本量**（plan H⑧ / §2.12.3）：n < 5 不显示数值；5 ≤ n < 30 标"样本少"（`small_sample=true`）；n ≥ 30 正常。
+10. **样本量**（出处：docs/api-contract.md:615）：n < 5 不显示数值；5 ≤ n < 30 标"样本少"（`small_sample=true`）；n ≥ 30 正常。
 
 ---
 
@@ -112,7 +112,7 @@
 ### 7.2 时点规则（禁止未来函数，所有卡共用，不可放宽）
 | 情形 | 规则 |
 |---|---|
-| 日线信号 | T 日收盘后、日线数据到齐后求值（文档：约 17:1x 完成，待交易日实测）；**最早执行 T+1 09:30**；模拟入场价 = T+1 开盘价（plan §2.8.1）。不得把 T 日收盘价当作可成交价 |
+| 日线信号 | T 日收盘后、日线数据到齐后求值（文档：约 17:1x 完成，待交易日实测）；**最早执行 T+1 09:30**；模拟入场价 = T+1 开盘价（出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154）。不得把 T 日收盘价当作可成交价 |
 | 盘中信号 | 只用已收完的 1 分钟 bar；模拟入场价 = 下一根 1 分钟 bar 的开盘价。盘中可用的只有实时快照和 1 分钟 K（1 分钟 Pro 待T003验证）；**因子全部日频，盘中只能用 T−1 日的因子值** |
 | 集合竞价 | 没有实时竞价数据：竞价类特征只能在盘后取得，最早用于次一交易日；当日开盘缺口只能用 09:30 后快照的开盘价 |
 | 财务数据 | 以披露日 `plrq` 为准，不以报告期为准；披露时刻未知 → 一律按盘后处理，次一交易日 09:30 起可用 |
@@ -184,7 +184,7 @@
 系统在卡片详情页展示：最近扫描时间与 `snapshot_id`、数据状态（fresh/stale/partial 与缺失特征）、最近信号与阻断原因。
 
 ## 13. 复盘 [SYS + 用户备注，不填]
-系统回填"表现记录"：模拟跟踪 T+1/5/20 `{value, n, window, small_sample}`（n < 5 不显示数值；5 ≤ n < 30 标"样本少"）、执行偏差（实际成交 vs 草案参考价）、失效记录、结果归因（市场 / 判断 / 执行，validation.md §7.5）。
+系统回填"表现记录"：模拟跟踪 T+1/5/20 `{value, n, window, small_sample}`（n < 5 不显示数值；5 ≤ n < 30 标"样本少"）（出处：docs/plan.md:1277；出处：docs/api-contract.md:615）、执行偏差（实际成交 vs 草案参考价）、失效记录、结果归因（市场 / 判断 / 执行，validation.md §7.5）。
 
 ## 14. 不可执行原因及解除条件 [L2]
 - **信号级**（L3）：候选信号成立但不生成计划草案时，写原因码 + `release_condition`（kind = expr / time / event / user_action，是否机器可判断），共 23 个原因码（plan §2.5.9）。卡片里填 `non_executable.applicable[]`（适用的原因码）和 `non_executable.card_specific[]`（本卡特有的触发情形，必须带解除条件，原因码仍从 23 个里选）。
@@ -275,7 +275,7 @@
 | 项 | 规则（确定性，随 `engine_policy` 版本记录） |
 |---|---|
 | `score`（0–100 **整数**，四舍五入；契约 `int \| null`） | 本策略规则满足度 = Σ(通过的 entry 规则 weight) / Σ(entry 规则 weight) × 100；**不是股票好坏评分，不跨策略合成** |
-| `confidence`（0–1；high ≥ 0.7，medium ≥ 0.4，其余 low） | `0.5×数据完整度 + 0.3×维度一致度 + 0.2×条件余量`（plan §2.5.4）。本模板的确定性定义：数据完整度 = 必需特征中非缺失且 fresh 的比例；维度一致度 = 非 unknown 维度中观点与本策略候选方向一致的比例（维度观点按 `dimension_view_thresholds` 划分）；条件余量 = 已通过的数值规则 `clip(|取值 − 阈值| / scale, 0, 1)` 的平均，`scale` 在 `margin_scale` 中逐条定义 |
+| `confidence`（0–1；high ≥ 0.7，medium ≥ 0.4，其余 low）（出处：docs/api-contract.md:724） | `0.5×数据完整度 + 0.3×维度一致度 + 0.2×条件余量`（plan §2.5.4）。本模板的确定性定义：数据完整度 = 必需特征中非缺失且 fresh 的比例；维度一致度 = 非 unknown 维度中观点与本策略候选方向一致的比例（维度观点按 `dimension_view_thresholds` 划分）；条件余量 = 已通过的数值规则 `clip(|取值 − 阈值| / scale, 0, 1)` 的平均，`scale` 在 `margin_scale` 中逐条定义 |
 | `epistemic` | 规则通过与否为 `fact`；score、confidence 为 `estimate`；策略逻辑为 `hypothesis` |
 | 低置信 | 低于用户阈值（默认 0.4）→ `LOW_CONFIDENCE` |
 
@@ -485,7 +485,7 @@ dimension_view_thresholds: {bullish: 0.67, bearish: 0.33}
 entry_policy:
   core: [E1, E2, E3]
   auxiliary: [A1]
-  confirm: "日线收盘确认；最早执行 T+1 09:30；模拟入场价 = T+1 开盘价"
+  confirm: "日线收盘确认；最早执行 T+1 09:30；模拟入场价 = T+1 开盘价"  # 出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154
   price_band: "参考价 ×（1 ± (slippage_bp + 冲击成本 bp) / 10000），截断到 T+1 涨跌停价之内"
   cooldown_days: 3
 valid_until: {trading_days: 5}

@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { Alert, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CursorPager } from '../../components/CursorPager';
@@ -16,7 +17,7 @@ export const ANNOUNCEMENT_DISCLAIMER = '公告内容以交易所及上市公司�
 /** v0.2.7 sources：数据来源说明（提供方去重） */
 export function SourcesNote({ sources }: { sources: { provider: keyof typeof PROVIDER }[] }) {
   if (!sources.length) return null;
-  return <span className="muted small" data-testid="sources-note">来源：{[...new Set(sources.map((x) => PROVIDER[x.provider]))].join('、')}</span>;
+  return <span className="muted small" data-testid="sources-note">来源：{[...new Set(sources.map((x) => (labelOf(PROVIDER, x.provider) ?? '未知')))].join('、')}</span>;
 }
 
 function TabHead({ children, status }: { children: React.ReactNode; status?: React.ReactNode }) {
@@ -30,7 +31,7 @@ function TabHead({ children, status }: { children: React.ReactNode; status?: Rea
 }
 
 // ---------------- 财务 ---------------- // 契约 v0.2.7 §5.1 FinancialPeriod
-const periodLabel = (p: FinancialPeriod) => `${p.period_end.slice(0, 4)} ${REPORT_PERIOD[p.report_period]}`;
+const periodLabel = (p: FinancialPeriod) => `${p.period_end.slice(0, 4)} ${(labelOf(REPORT_PERIOD, p.report_period) ?? '未知')}`;
 type FinRow = { key: string; label: string; kind: 'amount' | 'pct' | 'num'; get: (p: FinancialPeriod) => string | null; signedPct?: boolean };
 const FIN_ROWS: FinRow[] = [
   { key: 'revenue', label: '营业收入', kind: 'amount', get: (p) => p.revenue },
@@ -186,7 +187,7 @@ export function AnnouncementsTab({ code }: { code: string }) {
     { title: '发布时间', dataIndex: 'published_at', width: 140, render: (v: string) => <span className="mono">{fmtTime(v)}</span> },
     {
       title: '类别', dataIndex: 'category', width: 110,
-      render: (v: Announcement['category'], r) => <Tag variant="outlined" title={r.category_raw ?? undefined}>{v === 'other' && r.category_raw ? r.category_raw : ANNOUNCEMENT_CATEGORY[v]}</Tag>,
+      render: (v: Announcement['category'], r) => <Tag variant="outlined" title={r.category_raw ?? undefined}>{v === 'other' && r.category_raw ? r.category_raw : (labelOf(ANNOUNCEMENT_CATEGORY, v) ?? '未知')}</Tag>,
     },
     { title: '标题', dataIndex: 'title', render: (v: string, r) => <ExternalLink href={r.url}>{v}</ExternalLink> },
     {

@@ -40,7 +40,7 @@ function build(type: Exclude<T, 'none'>, id: string): string | null {
 
 export function notificationRoute(t: NotificationTarget): string | null {
   if (t.type === 'none') return null;
-  const shape = SHAPES[t.type];
+  const shape = Object.hasOwn(SHAPES, t.type) ? SHAPES[t.type] : undefined;
   if (!shape) return null;
   const r = safeInternalRoute(t.route);
   if (r && shape.test(r)) return r;

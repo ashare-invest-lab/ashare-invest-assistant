@@ -402,7 +402,13 @@ export const accountHandlers = [
   http.get(`${API}/trades`, ({ request }) => {
     const url = new URL(request.url);
     const acc = url.searchParams.get('account_id');
-    const items = state.trades.filter((t) => !acc || t.account_id === acc).sort((a, b) => b.trade_date.localeCompare(a.trade_date) || b.created_at.localeCompare(a.created_at));
+    const code = url.searchParams.get('security_code');
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    const items = state.trades.filter((t) => (!acc || t.account_id === acc)
+      && (!code || t.security_code === code) && (!from || t.trade_date >= from) && (!to || t.trade_date <= to)
+      && (url.searchParams.get('include_voided') !== 'false' || !t.voided))
+      .sort((a, b) => b.trade_date.localeCompare(a.trade_date) || b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
     return json(page(items, url));
   }),
   http.get(`${API}/trades/:id`, ({ params }) => {
