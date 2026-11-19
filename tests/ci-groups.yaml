@@ -14,6 +14,7 @@
 version: 1
 tests:
   - {"file": "src/backend/tests/test_market_read_tb185.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic database and Redis; no external IO"], "unverified": false}
+  - {"file": "src/backend/tests/test_tb163r4_bj_lock.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic BJ list; no real PG", "read-only AST/SQL guards"], "unverified": false}
   - {"file": "src/backend/tests/test_tb178_today_alerts_offline.py", "group": "parallel", "keywords": ["synthetic SQL result pages", "real alert/evidence validation", "socket connections denied; no PG"], "unverified": false}
   - {"file": "src/backend/tests/test_tb178_today_alerts.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL only", "isolated PostgreSQL database", "synthetic alerts; in-process Today API"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172a_horizon_asof.py", "group": "parallel", "keywords": ["synthetic evidence/calendar", "fake connection/provider", "deny_network monkeypatch"], "unverified": false}
@@ -125,6 +126,7 @@ tests:
   - {"file": "tests/backend/unit/test_set_licence_retain_id_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
   - {"file": "tests/backend/unit/test_signal_rt_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake Consumer/Redis/engine/runner", "socket connections denied", "runpy and automatically restored monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta169_top_data_as_of.py", "group": "parallel", "keywords": ["synthetic read-only connection and quote batch", "ASGI TestClient without network", "socket connections denied and monkeypatch restored"], "unverified": false}
+  - {"file": "tests/backend/unit/test_ta172_entry_bj_gates.py", "group": "parallel", "keywords": ["read-only source/static scan", "monkeypatch", "tmp_path", "no real PG/Redis or docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta173_quotes_unusable_licence.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "fake DB/ASGI TestClient", "monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta75_ip_limit_escalation_t_t41.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "ipl global replacement restored in finally"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta81_l6781_t_t45.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "thread contention"], "unverified": false}
@@ -141,9 +143,11 @@ tests:
   - {"file": "tests/backend/unit/test_tb114_bootstrap_restart_t_t47.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "TB114_DATABASE_URL", "create_engine real PG", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb115_o66b_paths_b2_t_t47.py", "group": "parallel", "keywords": ["fixed /run constants asserted only", "writes exclusively tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb117_session_filter_t_t61.py", "group": "parallel", "keywords": ["pure session calculations", "existing probe results read-only", "no probe execution"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb143_day_load_cli.py", "group": "parallel", "keywords": ["Mock/monkeypatch/tmp_path", "synthetic CSV and fake transactions", "no real PG/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_offline.py", "group": "parallel", "keywords": ["offline DDL compile", "tmp_path ZIP/CSV", "no_socket monkeypatch", "import-only RNG"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb143_multi_source_pg.py", "group": "serial_pg", "keywords": ["offline_schema->pg_conn->pg_url", "psycopg", "docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb163r2_bj_gate.py", "group": "parallel", "keywords": ["Mock/monkeypatch", "confirm_bj_offline_volume_units and upsert gate", "no database connection"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb163r_trade_date_and_decimal.py", "group": "parallel", "keywords": ["pure _trade_date and confirm precision", "synthetic fixtures", "no database connection"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
   - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
