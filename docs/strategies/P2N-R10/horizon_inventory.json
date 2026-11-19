@@ -988,6 +988,26 @@
       "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
     },
     {
+      "path": "docs/strategies/R-R3/audit_exchange_calendar.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/report.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/summary.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
       "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
       "scope_role": "enumerated_identity_source",
       "note": "T-R88b：st_pullback_ma v2 升版前原文冻结；历史身份，不晋级"
