@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Alert, Button, Descriptions, Drawer, Form, Input, Modal, Radio, Space, Tag } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -16,17 +17,17 @@ import { fmtTime } from '../../lib/format';
 
 function paramText(c: PlanCondition): string {
   const p = c.params as Record<string, string | undefined>;
-  if (c.type === 'price_above' || c.type === 'price_below') return `${PLAN_CONDITION_TYPE[c.type]} ${p.price ?? '—'}`;
-  if (c.type === 'pct_change') return `${PLAN_CONDITION_TYPE[c.type]} ${p.pct ?? '—'}%`;
-  if (c.type === 'date') return `${PLAN_CONDITION_TYPE[c.type]} ${p.on ?? '—'}`;
-  return PLAN_CONDITION_TYPE[c.type];
+  if (c.type === 'price_above' || c.type === 'price_below') return `${(labelOf(PLAN_CONDITION_TYPE, c.type) ?? '未知')} ${p.price ?? '—'}`;
+  if (c.type === 'pct_change') return `${(labelOf(PLAN_CONDITION_TYPE, c.type) ?? '未知')} ${p.pct ?? '—'}%`;
+  if (c.type === 'date') return `${(labelOf(PLAN_CONDITION_TYPE, c.type) ?? '未知')} ${p.on ?? '—'}`;
+  return (labelOf(PLAN_CONDITION_TYPE, c.type) ?? '未知');
 }
 
 function VersionBody({ v }: { v: PlanVersion }) {
   return (
     <>
       <Descriptions size="small" column={2} bordered items={[
-        { key: 'a', label: '计划动作', children: ACTION_SHORT[v.action] },
+        { key: 'a', label: '计划动作', children: (labelOf(ACTION_SHORT, v.action) ?? '未知') },
         { key: 'q', label: '数量', children: v.qty ?? '—' },
         { key: 'p', label: '价格', children: v.price ?? '—' },
         { key: 'r', label: '复核日期', children: v.review_date ?? '—' },
@@ -41,8 +42,8 @@ function VersionBody({ v }: { v: PlanVersion }) {
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} data-testid="plan-conditions">
           {v.conditions.map((c) => (
             <li key={c.id} data-testid="plan-condition">
-              <Tag color={c.kind === 'invalidation' ? 'orange' : 'blue'}>{PLAN_CONDITION_KIND[c.kind]}</Tag>
-              <Tag color={EPISTEMIC[c.epistemic_type].color}>{EPISTEMIC[c.epistemic_type].text}</Tag>
+              <Tag color={labelOf(PLAN_CONDITION_KIND, c.kind) ? c.kind === 'invalidation' ? 'orange' : 'blue' : undefined}>{(labelOf(PLAN_CONDITION_KIND, c.kind) ?? '未知')}</Tag>
+              <Tag color={tagOf(EPISTEMIC, c.epistemic_type).color}>{tagOf(EPISTEMIC, c.epistemic_type).text}</Tag>
               <span className="mono small">{paramText(c)}</span> · {c.description}
             </li>
           ))}
@@ -51,7 +52,7 @@ function VersionBody({ v }: { v: PlanVersion }) {
       {v.checklist_answers.length ? (
         <div className="small" style={{ marginTop: 6 }} data-testid="plan-checklist">
           <div className="muted">确认草案时的判断清单回答</div>
-          {v.checklist_answers.map((a) => <div key={a.id}>{a.question}：{{ yes: '是', no: '否', unsure: '不确定' }[a.answer]}{a.note ? `（${a.note}）` : ''}</div>)}
+          {v.checklist_answers.map((a) => <div key={a.id}>{a.question}：{(labelOf({ yes: '是', no: '否', unsure: '不确定' }, a.answer) ?? '未知')}{a.note ? `（${a.note}）` : ''}</div>)}
         </div>
       ) : null}
     </>
@@ -83,9 +84,9 @@ export function PlanDetailPage() {
         <Button size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/plans')}>操作计划</Button>
         <Link to={`/stocks/${p.security_code}`} className="q-name">{p.name}</Link>
         <span className="mono muted">{p.security_code}</span>
-        <Tag color={PLAN_STATUS[p.status].color} data-testid="plan-detail-status">{PLAN_STATUS[p.status].text}</Tag>
+        <Tag color={tagOf(PLAN_STATUS, p.status).color} data-testid="plan-detail-status">{tagOf(PLAN_STATUS, p.status).text}</Tag>
         <span className="muted small">
-          来源 {PLAN_ORIGIN[p.origin]}
+          来源 {(labelOf(PLAN_ORIGIN, p.origin) ?? '未知')}
           {p.plan_draft_id ? <> · <Link to={`/plan-drafts/${p.plan_draft_id}`}>来源计划草案</Link></> : null}
           {' '}· 第 {p.current_version_no} 版 / 共 {p.version_count} 版 · 创建 {fmtTime(p.created_at)}（北京时间）
         </span>
@@ -95,13 +96,13 @@ export function PlanDetailPage() {
           <Button size="small" disabled={terminal} onClick={() => setClosing(true)} data-testid="plan-close-btn">关闭计划</Button>
         </Space>
       </div>
-      {terminal ? <Alert type="info" showIcon style={{ margin: '8px 0' }} data-testid="plan-terminal-note" title={`计划${PLAN_STATUS[p.status].text}：不能再修改或关闭，版本历史保留可回看。`} /> : null}
+      {terminal ? <Alert type="info" showIcon style={{ margin: '8px 0' }} data-testid="plan-terminal-note" title={`计划${tagOf(PLAN_STATUS, p.status).text}：不能再修改或关闭，版本历史保留可回看。`} /> : null}
       {p.pending_triggers.length ? (
         <section className="panel" style={{ margin: '8px 0' }} data-testid="plan-pending">
           <div className="panel-head"><span className="panel-title">已满足的条件</span><span className="muted small">满足只代表事实已发生；系统不会下单，也不会自动关闭计划</span></div>
           {p.pending_triggers.map((t) => (
             <div key={t.condition_id} className="small" data-testid="plan-pending-item">
-              <Tag color={t.condition_kind === 'invalidation' ? 'orange' : 'blue'}>{PLAN_CONDITION_KIND[t.condition_kind]}</Tag>
+              <Tag color={labelOf(PLAN_CONDITION_KIND, t.condition_kind) ? t.condition_kind === 'invalidation' ? 'orange' : 'blue' : undefined}>{(labelOf(PLAN_CONDITION_KIND, t.condition_kind) ?? '未知')}</Tag>
               {t.condition_text} · <span className="mono">{fmtTime(t.triggered_at)}</span>
               {t.alert_id ? <> · <Link to={`/alerts/${t.alert_id}`} data-testid="plan-pending-alert">查看提醒</Link></> : null}
               {t.evidence_ids.map((eid) => {
@@ -135,7 +136,7 @@ function VersionHistory({ plan }: { plan: Plan }) {
       {vs.items.map((v) => (
         <div key={v.version_no} className="small" data-testid="plan-version-row">
           <Button type="link" size="small" onClick={() => setOpen(open === v.version_no ? null : v.version_no)}>第 {v.version_no} 版</Button>
-          <span className="mono muted">{fmtTime(v.created_at)}</span> · {ACTION_SHORT[v.action]} · {v.change_reason ?? '首版'}
+          <span className="mono muted">{fmtTime(v.created_at)}</span> · {(labelOf(ACTION_SHORT, v.action) ?? '未知')} · {v.change_reason ?? '首版'}
           {open === v.version_no ? <div style={{ margin: '4px 0 8px' }}><VersionBody v={v} /></div> : null}
         </div>
       ))}

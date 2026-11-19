@@ -1,3 +1,4 @@
+import { labelOf } from '../lib/explanations';
 /** T-F25：证券主数据对账差异文案（契约 v0.2.9 内 T-A04 #33 ③④；plan 4.6.4） */
 import type { SecurityReconciliationKind, SecurityReconciliationSource } from '../api/enums';
 import type { SecurityReconField } from '../api/adminTypes';
@@ -26,7 +27,7 @@ export const RECON_FIELD: Record<SecurityReconField, string> = {
 };
 
 /** 服务端给了前端不认识的取值时原样显示，不丢行（与 /admin/ingest 告警处理一致） */
-export const reconKindText = (k: string) => RECON_KIND[k as SecurityReconciliationKind]?.text ?? k;
-export const reconKindHint = (k: string) => RECON_KIND[k as SecurityReconciliationKind]?.hint ?? null;
-export const reconSourceText = (s: string) => RECON_SOURCE[s as SecurityReconciliationSource] ?? s;
-export const reconFieldText = (f: string) => RECON_FIELD[f as SecurityReconField] ?? f;
+export const reconKindText = (k: string) => labelOf(RECON_KIND, k as SecurityReconciliationKind)?.text ?? k;
+export const reconKindHint = (k: string) => labelOf(RECON_KIND, k as SecurityReconciliationKind)?.hint ?? null;
+export const reconSourceText = (s: string) => labelOf(RECON_SOURCE, s as SecurityReconciliationSource) ?? s;
+export const reconFieldText = (f: string) => labelOf(RECON_FIELD, f as SecurityReconField) ?? f;

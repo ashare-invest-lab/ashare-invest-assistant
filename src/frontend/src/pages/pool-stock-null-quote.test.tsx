@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { http, HttpResponse } from 'msw';
-import type { Bar, BarsResponse } from '../api/types';
+import type { Bar, BarsResponse, QuoteItem } from '../api/types';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
 import { server } from '../mocks/server';
@@ -15,13 +15,13 @@ vi.mock('../components/charts/FundFlowChart', () => ({ FundFlowChart: () => <div
 const code = '600000.SH';
 const stamp = '2026-11-02T10:31:00+08:00';
 const bar: Bar = { t: '2026-11-02', open: '10', high: '11', low: '9', close: '10.24', pre_close: '10', volume: '100', amount: '1024', avg_price: null, is_final: true };
-function arm(nullQuote: boolean, minutePreClose: boolean) {
+function arm(nullQuote: boolean, minutePreClose: boolean, quoteOverrides: Partial<QuoteItem> = {}) {
   mockLoginAs('demo_user');
   server.use(
     http.get('/api/v1/quotes', () => HttpResponse.json({ items: [{ security_code: code, name: '合成行情',
       price: nullQuote ? null : '10.24', change_pct: nullQuote ? null : '2.40', volume: nullQuote ? null : '100', amount: nullQuote ? null : '1024',
       t: nullQuote ? null : stamp, data_as_of: nullQuote ? null : stamp, data_status: nullQuote ? 'unavailable' : 'fresh',
-      gaps: nullQuote ? [{ key: 'quotes', reason: 'no_source', message: '合成本人行情缓存无来源' }] : [] }] })),
+      gaps: nullQuote ? [{ key: 'quotes', reason: 'no_source', message: '合成本人行情缓存无来源' }] : [], ...quoteOverrides }] })),
     http.get('/api/v1/securities/:code/bars', ({ request }) => {
       const query = new URL(request.url).searchParams;
       const freq = query.get('freq') === '1m' ? '1m' : 'd';
@@ -53,9 +53,39 @@ it.each([false, true])('HTTP行情全空、日K有值，分时前收存在=%s时
 it('有可信行情时保留当日OHLC和涨跌展示', async () => {
   arm(false, true);
   const head = await screen.findByTestId('stock-head');
-  await waitFor(() => expect(stat(head, '今开')).toHaveTextContent(/^10$/));
-  expect(stat(head, '昨收')).toHaveTextContent(/^10$/);
+  await waitFor(() => expect(stat(head, '今开')).toHaveTextContent(/^10\.00$/));
+  expect(stat(head, '昨收')).toHaveTextContent(/^10\.00$/);
   expect(stat(head, '成交量')).toHaveTextContent('1手');
   expect(head.querySelector('.q-price')).toHaveTextContent('10.24');
   expect(head.textContent).toContain('+2.40%');
+});
+
+it('Decimal 四位价格在行情头及 OHLC 只显示两位，涨跌额和涨跌幅仍为两位', async () => {
+  arm(false, true, { price: '187.5800', change_pct: '2.4000' });
+  const head = await screen.findByTestId('stock-head');
+  await waitFor(() => expect(stat(head, '昨收')).toHaveTextContent(/^10\.00$/));
+  expect(head.querySelector('.q-price')).toHaveTextContent(/^187\.58$/);
+  for (const [label, value] of [['今开', '10.00'], ['最高', '11.00'], ['最低', '9.00']]) {
+    expect(stat(head, label).textContent).toBe(value);
+  }
+  expect(head.querySelector('.sh-quote')).toHaveTextContent('+177.58 (+2.40%)');
+});
+
+it.each([
+  { data_status: 'stale', volume: null, amount: null, hint: '收盘价回退，无成交量/额' },
+  { data_status: 'fresh', volume: null, amount: null, hint: '暂无数据' },
+  { data_status: 'stale', volume: '0', amount: null, hint: '暂无数据' },
+] as const)('量额缺失说明依据现有行情字段：%j', async ({ hint, ...quoteOverrides }) => {
+  arm(false, false, quoteOverrides);
+  const head = await screen.findByTestId('stock-head');
+  await waitFor(() => expect(head.querySelector('.q-price')).toHaveTextContent('10.24'));
+  expect(stat(head, '成交额')).toHaveTextContent(/^—$/);
+  expect(stat(head, '成交额').parentElement).toHaveAccessibleDescription(hint);
+  if (quoteOverrides.volume === null) {
+    expect(stat(head, '成交量')).toHaveTextContent(/^—$/);
+    expect(stat(head, '成交量').parentElement).toHaveAccessibleDescription(hint);
+  } else {
+    expect(stat(head, '成交量')).toHaveTextContent(/^0手$/);
+    expect(stat(head, '成交量').parentElement).not.toHaveTextContent('暂无数据');
+  }
 });

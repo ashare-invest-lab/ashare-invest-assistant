@@ -12,7 +12,10 @@ plan §3A.1/§8.0：单元与集成测试都用 PostgreSQL（testcontainers）�
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+import secrets
+from collections.abc import Callable, Iterator
+from ipaddress import IPv4Network
+from itertools import chain
 
 import pytest
 
@@ -84,6 +87,22 @@ def redis_url() -> Iterator[str]:
         yield f"redis://{host}:{port}/0"
 
 
+@pytest.fixture(scope="session")
+def next_auth_client_ip() -> Callable[[], str]:
+    """从同一池分配测试来源，防止动态导入的认证夹具复用 Redis 限流桶。"""
+    network = IPv4Network("198.18.0.0/15")
+    start = secrets.randbelow(network.num_addresses)
+    offsets = chain(range(start, network.num_addresses), range(start))
+
+    def allocate() -> str:
+        offset = next(offsets, None)
+        if offset is None:
+            raise RuntimeError("认证测试来源 IP 池耗尽")
+        return str(network.network_address + offset)
+
+    return allocate
+
+
 @pytest.fixture()
 def pg_conn(pg_url: str):  # type: ignore[no-untyped-def]
     """每个用例一个连接，事务结束后回滚，用例之间互不污染。"""
@@ -92,3 +111,14 @@ def pg_conn(pg_url: str):  # type: ignore[no-untyped-def]
     with psycopg.connect(pg_url, autocommit=False) as conn:
         yield conn
         conn.rollback()
+
+
+@pytest.fixture
+def bj_isolated_list(monkeypatch):
+    """仅合成测试显式注入 BJ 隔离清单。"""
+    from app import bj_offline_volume
+
+    def inject(codes):
+        monkeypatch.setattr(bj_offline_volume, "_BJ_ISOLATED_CONFIRMATIONS", frozenset(codes))
+
+    return inject
