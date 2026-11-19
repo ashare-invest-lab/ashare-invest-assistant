@@ -20,39 +20,39 @@
 - Q：团队报告 T-A159「*_qfq 口径裁定」及条件 C1；仓库内同步见 `docs/strategies/T-R71/S-02_st_oversold_rebound.md` §5。
 - `docs/reviews/TB-A48-horizon-ruling.md` §2 R1–R6：H-01 新系统实例挂 swing、旧实例不回写、多周期 RC5 不取首值、valid_until 仍为 1 交易日；**没有新增分类器输入**。本卡不把实例周期当分类器真值。
 
-“已接”只表示 I.collect 有赋值路径，不保证历史 PIT 完整；“未接”指已有该键计算路径而 collect 不读；“无实现”指没有该键生产算法，只有登记、透传、DSL 原语或消费不算实现。
+下表按 `main@453d297b` 的 T-B172 A0 代码核对。已接表示 `collect` 在输入可见时有非 null 赋值路径。配置内单列两项固定 null 并记 gap 的证券属性；F49 单列为已有特征但未接入。其余 14 项沿原盘点列为无实现。
 B:230–240 的 scalar 透传可接受注册键，但不计算该键；B:107–111 的 ma 与 pct_change 也不是下表的交易日窗口算法。
-I:11–13 的旧注释不能代替 I:97–109 的实际 ST 时点读取路径。
+当前代码出处为 `src/backend/app/strategy/horizon/inputs.py` 的 `collect`、`app/auth/service.py` 的 `latest_profile` 和 `app/features/horizon_windows.py` 的 `select_day`（后两处路径相对 `src/backend/`）。
 
 | 输入字段 | 状态 | 用途、规划出处 | 实现证据/缺口 |
 |---|---|---|---|
-| `profile.horizon_pref` | 已在 collect 中 | P §6.1 SH6/SW6/LG6；H §1 | I:75–87，最新画像；历史版本按 as_of 尚未筛选 |
-| `profile.effort` | 已在 collect 中 | P §6.1 IT0B/IT3/SH0B/SH7 | I:75–87 |
-| `profile.risk_tolerance` | 已在 collect 中 | P §6.1 SH0 | I:75–87 |
-| `profile.experience` | 已在 collect 中 | P §6.1 IT0C/IT5/SH0C | I:75–87 |
-| `sec.type` | 已在 collect 中 | P §6.1 HG1；H §1 | I:89–96，当前证券主数据 |
-| `sec.board` | 已在 collect 中 | P §6.1 HG2；H §1 | I:89–113，缺失时代码推断并标 estimate |
-| `user.has_position` | 已在 collect 中 | P §6.1 IT0 | I:115–135，本人任一账户该证券 quantity>0 |
-| `user.has_t_trades` | 已在 collect 中 | P §6.1 IT4 | I:116–157，同账户同证券同日买卖；无成交 null；不证明日内回转合法 |
-| `user.avg_holding_days` | 无实现 | P §6.1、§9 问题76；F §10.1 | I:7–8、72、158：初始化 null 后未赋值；见 §5 |
-| `f.amount_20d_avg` | 无实现 | F §2 F01；IT2/SH1/SW1 | I:72、158；B:217–221 仅原始 f.amount，无20日均值 |
-| `f.turnover_20d_avg` | 无实现 | F §2 F02；SH2 | I:72、158；B:230–240 仅透传，无归一化/均值/截面 |
-| `f.amihud_20d` | 无实现 | F §2 F03；配置保留、无计分规则 | I:72、158；B:42–111 无专门派生 |
-| `f.volatility_20d` | 无实现 | F §2 F04；SH4/SW4/LG5 | I:72、158；B:109–111 未实现 std/截面 |
-| `f.intraday_amplitude_20d` | 无实现 | F §2 F05；IT1 | I:72、158；B:194–221 仅价序列 |
+| `profile.horizon_pref` | 已在 collect 中 | P §6.1 SH6/SW6/LG6；H §1 | I:87–99，按本人及 as_of 过滤 created_at≤as_of、confirmed_at 为空或≤as_of，再取 version_no 最大的一版；无可见画像或值缺失则 null |
+| `profile.effort` | 已在 collect 中 | P §6.1 IT0B/IT3/SH0B/SH7 | 同一可见画像版本，effort 非空时赋值 |
+| `profile.risk_tolerance` | 已在 collect 中 | P §6.1 SH0 | 同一可见画像版本，risk_tolerance 非空时赋值 |
+| `profile.experience` | 已在 collect 中 | P §6.1 IT0C/IT5/SH0C | 同一可见画像版本，experience 非空时赋值 |
+| `sec.type` | 固定 null + gap | P §6.1 HG1；H §1 | I:84、101，声明此键即保留 null 并把 sec.type 记入 gaps；无可见历史类型版本 |
+| `sec.board` | 固定 null + gap | P §6.1 HG2；H §1 | I:84、101，声明此键即保留 null 并把 sec.board 记入 gaps；原按代码推断板块的路径已移除 |
+| `user.has_position` | 已在 collect 中 | P §6.1 IT0 | I:115、127–137，按本人账户及该证券汇总。仅当 max(rebuilt_at) 非空且≤as_of，才按正数量记录数返回 true/false；缺重建时点或重建较晚则 null |
+| `user.has_t_trades` | 已在 collect 中 | P §6.1 IT4 | I:116–126、138–162，本人同证券的买卖两侧均要求 created_at≤as_of、trade_date≤北京截止日、traded_at 为空或≤as_of，且 voided_at 为空或>as_of。可见成交中有同账户同日买卖为 true，有成交但无配对为 false，无可见成交为 null |
+| `user.avg_holding_days` | 无实现 | P §6.1、§9 问题76；F §10.1 | I:84、163，初始化为 null，未进行 FIFO 配对；§5 是目标规格 |
+| `f.amount_20d_avg` | 无实现 | F §2 F01；IT2/SH1/SW1 | I:84、163；B:217–221 仅原始 f.amount，无20日均值 |
+| `f.turnover_20d_avg` | 无实现 | F §2 F02；SH2 | I:84、163；B:230–240 仅透传，无归一化/均值/截面 |
+| `f.amihud_20d` | 无实现 | F §2 F03；配置保留、无计分规则 | I:84、163；B:42–111 无专门派生 |
+| `f.volatility_20d` | 无实现 | F §2 F04；SH4/SW4/LG5 | I:84、163；B:109–111 未实现 std/截面 |
+| `f.intraday_amplitude_20d` | 无实现 | F §2 F05；IT1 | I:84、163；B:194–221 仅价序列 |
 | `f.ma_trend` | 无实现 | F §2 F06；SH5/SW2 | B:107–108 只有 ma 原语，没有本键的20/60日历窗比值 |
 | `f.momentum_60d` | 无实现 | F §2 F07；SW3 | B:97–99 只有 pct_change 原语，无本键锚点/覆盖率逻辑 |
 | `f.roe_ttm` | 无实现 | F §2 F08；SW5/LG0B/LG2 | B:230–240 只有 scalar 透传；不得把 F44 偷换为本键 |
-| `f.profit_cagr_3y` | 无实现 | F §2 F09；LG3 | I:72、158；B:230–240 无财务派生 |
+| `f.profit_cagr_3y` | 无实现 | F §2 F09；LG3 | I:84、163；B:230–240 无财务派生 |
 | `f.dividend_continuous_years` | 无实现 | F §2 F10；LG4 | 同上，无分红年度连续性算法 |
 | `f.limit_up_count_20d` | 无实现 | F §2 F11、§7 F35/F37；SH3 | 同上，无本键封板计数 |
 | `f.fin_report_count` | 无实现 | F §2 F12；LG0/LG1 | 同上，无可见报表期去重算法 |
-| `f.list_days` | 无实现 | F §2 F13；HG5/HG6、截面池 | I:38 仅登记单位，不是计算；B 无上市交易日计数 |
-| `f.is_st` | 已在 collect 中 | F §2 F14；HG4 | I:97–109，latest_visible_flags(as_of=now)，非当前简称直接推历史 |
-| `f.is_delisting_period` | 已在 collect 中 | F §2 F15；HG3 | 同上，精确前一交易日交付、失败/无成员保持未知 |
+| `f.list_days` | 无实现 | F §2 F13；HG5/HG6、截面池 | I:37 仅登记单位，不是计算；B 无上市交易日计数 |
+| `f.is_st` | 已在 collect 中 | F §2 F14；HG4 | I:102–114，将调用方的 as_of 传给 latest_visible_flags；仅当返回值非空才赋值 |
+| `f.is_delisting_period` | 已在 collect 中 | F §2 F15；HG3 | 同一状态读取路径，采用精确前一交易日的可见交付，交付失败或成员缺失时保持未知 |
 | `f.is_suspended` | 已有特征实现但未接入 | P §2.5.14 T-R15⑦；F §2 F49 | B:223–227 有派生；config/horizon_classifier.yaml features 与 I 均未接，语义差异见 Q08 |
 
-**计数**：配置内24项＝已接10、未接0、无实现14；加后补F49后25项＝**已接10、未接1、无实现14**。
+**计数**　原盘点 `95967e1` 把两项证券主数据计入已接，配置内为 10 已接、14 无实现。`453d297b` 的 24 个配置键中，8 项有取值路径（画像 4、账户 2、状态标志 2），2 项证券属性固定 null + gap，14 项无实现；另加配置外未接的 F49，共 25 项。这里统计代码路径，真实历史重放仍未验证。
 规划提及但已排除的两项不混入上述分母：
 
 | 规划概念 | 状态与处理 | 证据 |
@@ -85,7 +85,7 @@ I:11–13 的旧注释不能代替 I:97–109 的实际 ST 时点读取路径。
 3. 日线须有 `trade_date/first_seen_at/available_at` 的不可变版本及绑定该版本的 `is_final` 完成证明；因子取 `date/available_at/value`；财报取 `jzrq/plrq/first_seen_at` 的可见版本。现日线表无 first_seen_at/is_final，`_bar_item` 由 fetched_at 造二者的旧路径不得供 horizon 认证；源字段缺可见证据则 null+gap，不能倒推历史已知（底座契约 A0-1，T-A188 Q12）。
 4. F §1.1 的约17:00/因子16:30只是计划时刻；`docs/strategies/phase2_daily_dimensions.md` D 行要求完成且实际落库（并列日线≥17:10限定），不能仅凭时钟判可用。
 5. 同一评估固定 user_id、证券、as_of、d、日历/特征/因子/截面版本和来源证书。按 `per_licence` 独立取数，不跨证书补洞（F §1.4）。来源及原始值、变换值均留证据；历史快照不被后修订值覆盖。
-6. `collect` 按底座契约 A0-2 显式接收 as_of，无缺省 now、不自取 now、不内部截到17:30；每日决策调用方传北京 T 日17:30，HTTP 入口捕获一次请求时刻，离线复算传原 as_of；HTTP 仍只公开 security_code（T-A188 Q12）。基点 I:70–71 仍固定 now_utc()，画像/持仓/成交未历史过滤，是待实现缺口；缺版本证据保留 null，“已接”不证明历史 PIT。
+6. T-B172 A0 已在 `collect` 实现必传带时区 `as_of` 与证据提供者，同一截止时点交给 `read_basis` 和 `select_day`。选日逐日检查可见日历、逐证券定稿证据与当日 17:10 门槛；日历缺口阻断回溯，无合格日则 d=null 并记 gap。HTTP 入口仅接收 security_code，捕获一次请求时刻；研究入口沿用传入的 as_of，两者均使用 `EmptyEvidenceProvider`。每日决策的 17:30 为调用方契约。画像、持仓和成交的实际过滤见 §1，真实历史重放仍未验证。
 7. 因子通道只有在源单位、PIT、窗口与转换版本可证时采用；未证实不猜倍数、不把未知当0。F02/F03/F08/F09/F10 的供应商主口径不擅自改为本地备选；备选算术仅用于离线合成对数，自动切换暂缓；须补主源语义与转换证据（T-A188 Q02–Q04，解除条件见 §6）。
 
 ### 2.1A A0/A1 底座契约引用（PR #219）
@@ -97,7 +97,7 @@ I:11–13 的旧注释不能代替 I:97–109 的实际 ST 时点读取路径。
 | A0-1 完成证据 | `E(s,T,as_of)` 必须同时具备：已持久化且可见的日线不可变版本；精确绑定该版本、可见的同源逐证券定稿声明及可审计回执；本人/证书/源版本一致且无修订冲突；当日例行 mairui 路径另须截止前可见的适用批回执（ok/partial 且该证券无缺行/冲突）。完整判据与回执筛选沿契约，批成功/钟点/非空 OHLC 均不代替 E；`daily_bars_ready` 只是该路径必要批门禁之一。真实完成声明映射及回执来源仍未验证，A1b 只接已证材料，无证据则 gap；默认空提供者不冒称生产可用。 |
 | A0-2 调用责任 | 按 §2.1 第6项显式传入 as_of；缺参数/时区拒绝，等价瞬时同结果。后算保留真实 computed_at/created_at；历史公开参数另行同步契约。 |
 | A0-3 盘中边界 | 按 §2.1 第1项及契约时段表选 d；09:15/09:30/11:30/13:00/14:57/15:00/17:10/17:30 边界、午休、休市及日历缺覆盖分别验收，不能凭钟点放行。历史特殊时段/真实完成时刻/供应商延迟仍未验证，不猜测。 |
-| A1-1 两张追加表 | 按契约 §3 拟建 `app.horizon_input_versions`、`app.horizon_completion_evidence`，保留源/派生版本与逐证券完成证明，拒绝 UPDATE，不回填历史可见时间；复用已有 horizon 快照/评估表，共享现值表零列变更，不改行情写入口。两表尚属目标，不能据此称存储已完成。 |
+| A1-1 两张追加表 | 契约 §3 指定 `app.horizon_input_versions`、`app.horizon_completion_evidence`，保留源/派生版本与逐证券完成证明，拒绝 UPDATE，不回填历史可见时间；复用已有 horizon 快照/评估表，共享现值表零列变更，不改行情写入口。主线已有 0037、0038 两份迁移；本文未验证实库迁移、历史覆盖或提供者接线。 |
 | A1-2 拆单 | A0 先定义协议并用假提供者离线验收，不依赖 A1 模型；A1a（be/T-B172b1）负责两表，A1b（be/T-B172b2）负责版本/完成证据读取及权息适配，各独立 PR、净增≤800行；B/C 后续装配与 C2 完整持久化另交付。 |
 | A1-3 PN-03 | 权息可见性采用契约 §4 `read_adjustment_factors(conn, *, user_id, licence_id, code, dates, as_of, snapshot_sha256)` 协议，归 A1b 实装并与 PN-03 共用，不再等待未定义前置接口。返回 factors、dependency_ids、snapshot_sha256、coverage、gaps，校验事件可见/生效、同快照、完整性与转换版本后适配 prepare。 |
 
@@ -355,10 +355,10 @@ D0、D1…表示连续交易所开市日（无假期错位），未说明时证�
 | Q06 | F13转板/换码连续身份与历史版本 | 后续覆盖：#219 §3.1/§4确定可见版本原则；#225 F-Q02仅确定B9身份边界，不证明F13连续身份历史。按可见上市日至d开市日含首日计数定稿；连续身份追溯仍未验证，现映射仅支持bse_code_map。解除须交易所身份/上市日依据、有效区间、首次可见版本及完整日历；缺证不拼接或重置 | §3.13 普通完整证据可实现、停牌照计；当前主数据时间戳不证历史字段，未知交Q07，北交所仍HG2 |
 | Q07 | 原null、保守闸门、顶层缺失与计分职责 | 后续覆盖：#219 §1继承T-A188且不重开缺失/评分语义；求值、缺失集合和版本记录仍待实现。定稿：原值保留null，求值层ST未知命中HG4、上市日未知按不足20日命中HG5/适用HG6、类型未知命中HG1，理由写未知；退市整理未知不伪存false，沿既有不命中HG3且不证明可交易。顶层列本次声明中所有缺失已登记f.*；计分缺失仅各周期组件 | §7 落实原值/求值/缺失集合分层，含Amihud缺口但不加新权重；gate caps不填缺失键，user/profile/sec不进f.*；新行为版本化，历史输出不回写 |
 | Q08 | F49 sf映射、null与分类器规则位置 | 后续覆盖：#219 §3.1存储日线原始停牌字段/证据；来源映射、接线及新增规则位置仍待处理。证据接线定稿：只认有来源语义sf；标准is_suspended须可证映射，pro的sf为涨跌额不能映射；1/0/缺失为true/false/null。null按true仅用于既有可交易性阻断/截面排除。新增评分/闸门仍未验证，须P/H规则协调、明确编号/作用周期/分数 | §3.14、§4 纳入输入/缺口，停牌及未知不入池，先修证据适配；不造HG7，阻断不冒充cap完成；F49不混入14个无实现 |
-| Q09 | FIFO无时间/冲突编号、事件/期初仓可见性 | 后续覆盖：#219 §2 A0-2确定截止原则，并指向账户版本/FIFO后续交付；事件/期初仓不可变版本和源顺序证据仍待补。真实可见可排序账户链定稿；成交与可见时点均≤as_of，导入取max(created_at,committed_at)，未来作废/撤销不抹历史。仅日期且顺序影响配对的链路仍未验证，须后端补不可变事件/期初版本、available_at及源顺序证据，不以DB ID补序、不回填缺证历史 | §5.1–§5.2 可明确识别的未知来源库存所配片段可剔除；批次也不确定则账户链null，其他完整账户可合并但披露缺口；已接持仓/同日买卖也需历史过滤，不把缺数当0天或列入f.* |
+| Q09 | FIFO无时间/冲突编号、事件/期初仓可见性 | 后续覆盖：#219 §2 A0-2确定截止原则，并指向账户版本/FIFO后续交付；事件/期初仓不可变版本和源顺序证据仍待补。真实可见可排序账户链定稿；成交与可见时点均≤as_of，导入取max(created_at,committed_at)，未来作废/撤销不抹历史。仅日期且顺序影响配对的链路仍未验证，须后端补不可变事件/期初版本、available_at及源顺序证据，不以DB ID补序、不回填缺证历史 | §5.1–§5.2 可明确识别的未知来源库存所配片段可剔除；批次也不确定则账户链null，其他完整账户可合并但披露缺口；持仓及同日买卖已按 §1 过滤时点，FIFO 仍需事件版本，不把缺数当0天或列入f.* |
 | Q10 | FIFO零碎股/同日事件/IPO及转出批次 | 覆盖核对：#219未新增零碎股、IPO及转出事件裁定；本项结论和解除条件保持原样。无歧义链按实际股数、交易日FIFO定稿：卖出日365自然日左开右闭窗，数量加权，至少3个合格买入批次，HALF_UP，未平仓不计；送转按事前比例继承买日，现金不增股、rights须证明上市日。零碎股/顺序/IPO/转出仍未验证，须经纪商事件明细、生效及可卖日期，歧义链null | §5.2–§5.3 不造分配或买日/转出序；未知来源片段剔除、transfer_out不算卖出；不用摊薄成本回放或qfq因子推股份 |
 | Q11 | 已取消sign与配置/Evidence单位冲突 | 后续覆盖：#219 §1明确不重开单位，沿既有F单位裁定；配置、catalog与Evidence同步仍待后端实现。定稿：SH5/SW2/SW3、catalog与Evidence统一pct，阈值仍gt0、真0不加分；三处分位Evidence标ratio并留原值/转换。既有单位修正沿H附录不改变classifier_version；Q07新行为版本另记 | §3.6–§3.7、§4、§7 对齐单位，当前sign冲突仍待后端修复；本单不改配置，不混为新评分 |
-| Q12 | collect时点、T−1/T与版本/持久化责任 | 后续覆盖：#219 §2六项裁定、§3存储及§4协议细化A0/A1a/A1b及后续B/C责任；§2.1A已引用。A0/A1/B/C实现与验收仍待完成，公开历史API另单，不是本次新增授权。定稿：采用共同as_of/d，内部collect显式as_of、冻结来源版本；HTTP仍只security_code，公开历史参数另同步契约。每日决策固定截止；源保留版本/可见性，派生保留窗口/因子/截面，服务保存本人/证书快照与assessment，复用含时点/来源/转换版本，不仅values UUID | §2、§4、§7 引用#219底座细化；全部已接10项仍审查PIT，未知历史null。历史重放仍未验证，须版本存储、存储接线与公开历史接口完成，不能凭fetched_at造first_seen/is_final；候选解释不改策略horizons/自动启用实例 |
+| Q12 | collect 时点、选日与版本责任 | #219 §2–§4 确定职责。T-B172 A0 已在 `453d297b` 实现显式 as_of、按可见完成证据选 d、画像及成交/持仓截止过滤；证券类型和板块固定 null + gap。HTTP 与研究入口使用空证据提供者，取不到完成日时保留 d=null 和缺口。 | §1、§2.1 区分 8 条有值路径与 2 条证券缺口。版本存储、提供者接线、真实来源覆盖和公开历史接口须各自取证；真实历史重放与 F21 实库仍未验证。 |
 
 ### 6.1 未决解除与交付边界
 
@@ -383,12 +383,12 @@ Q01参数依据、Q02–Q04供应商映射及实际可比链/支付/闭合材料
 ## 7. 给后端的实施顺序与验收边界
 
 1. 按底座契约 A0→A1a→A1b→B/C 装配；A1a 可在协议确定后独立建模。先固定 as_of、d、来源版本与完成证据，再独立派生、分层保存原值/分位并装配 collect。B.prepare 对停牌删 sessions 的旧路径不能替代完整交易日历窗；日线 sessions 截到 d，qfq 锚仍为 T。
-2. 每张卡三类合成样例显式传 as_of，再加晚到 available_at 不改变旧值反例；覆盖未来因子、除权同锚、截面并列、FIFO未平仓/账户隔离。底座契约六项测试及后端草稿业务测试均待实现验收，本次文档 checker 不替代这些测试。
+2. 每张卡三类合成样例显式传 as_of，再加晚到 available_at 不改变旧值反例；覆盖未来因子、除权同锚、截面并列、FIFO未平仓/账户隔离。A0 合成选日及调用方用例见 `src/backend/tests/test_tb172a_horizon_asof.py`；真实版本接线及业务验收仍需独立取证。
 3. T-A188 Q07：顶层 inputs_missing 列本次声明输入中所有缺失的已登记 f.*（含无组件 Amihud、接入后的F49）；caps 的缺失键与40分累计只来自该周期缺失计分组件，gate caps 不填缺失键，不增权重/封顶。当前 C:194–210 只收组件缺失，仍待后端修复。
 4. T-A188 Q07：原null不伪存true/0；求值层ST未知→HG4，上市日未知按不足20日→HG5及适用HG6，类型未知→HG1，理由明确未知；退市整理未知沿既有不命中HG3，不能推断可交易。当前 C.cond 的null分支仍有漏闸缺口；历史输出不回写，新行为版本化记录。
 5. 画像缺失跳过提示/不加分；user.avg_holding_days未知不封顶、不提示，不进入f.*缺失清单；profile/user/sec也不进该清单（T-A188 Q07/Q09）。不把用户行为缺数当0天。
 6. T-A188 Q11：SH5/SW2/SW3、catalog与Evidence统一pct；分位另标ratio，gt0与真实0语义不变。旧sign冲突待后端同步；单位修正不改变classifier_version，Q07行为变更另留版本记录。
-7. T-A188 Q12：按 A §7.4、P §3.3 及底座契约复用已有 data_snapshots/symbol_horizon_assessments，purpose=horizon、user_id/licence_id、as_of/d、来源/特征/日历/因子/截面版本和Evidence闭合；复用键含时点/来源/转换/分类器版本。I:161–179目前只是UUID/证据组装，不证明持久化/来源隔离完成；缺证历史null，事后产出留真实时间，旧结果不回写。
+7. T-A188 Q12：按 A §7.4、P §3.3 及底座契约复用已有 data_snapshots/symbol_horizon_assessments，purpose=horizon、user_id/licence_id、as_of/d、来源/特征/日历/因子/截面版本和Evidence闭合；复用键含时点/来源/转换/分类器版本。I:166 起为 UUID 与证据组装，不证明持久化/来源隔离完成；缺证历史null，事后产出留真实时间，旧结果不回写。
 8. 本卡不改已有60分门槛、40缺分封顶59、12财报期；来源P §6.1的 `calibration: initial_values` 表明统计有效性仍**未验证**。候选信号不等于收益承诺。
 
 ## 8. 本单交付限制
