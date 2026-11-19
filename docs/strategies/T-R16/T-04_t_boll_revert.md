@@ -54,7 +54,7 @@ T 腿数量 ≤ `p.t_ratio` × `ctx.sellable_qty`，按整手规则取整；同�
 | 项目 | 本卡约束与出处 |
 |---|---|
 | 涨跌停（按板块） | 普通主板 10%；创业板、科创板（含 ST/*ST）20%；北交所（含 ST/*ST）30%。来源：config/market_rules.yaml:8、config/market_rules.yaml:10、config/market_rules.yaml:11、config/market_rules.yaml:12。 |
-| 主板 ST 历史分段 | 沪深主板 ST/*ST 在已建模的 2023-04-10 至 2026-07-05 为 5%，2026-07-06 起为 10%，不得把历史 5% 用于全部板块或当前交易日。回看按成交日有效段；2023-04-10 之前标“交易规则未建模”。来源：config/market_rules.yaml:4、config/market_rules.yaml:6、config/market_rules.yaml:9、config/market_rules.yaml:66、config/market_rules.yaml:69、config/market_rules.yaml:126、config/market_rules.yaml:129。 |
+| 主板 ST 历史分段 | 在已建模的 2023-04-10 至 2026-07-05，沪深主板 ST/*ST 涨跌幅限制为 5%，2026-07-06 起为 10%。按交易日和板块取值，早于建模起点的日期标“交易规则未建模”。见 config/market_rules.yaml 的 `modeled_from`、`segments[].price_limit_pct.main_board_st` 及[沪深交易所发布通知与修订说明 O1–O6](../market_rules_check.md)。 |
 | 无涨跌幅及不可成交 | 沪深注册制新股前 5 个交易日、北交所新股首日、退市整理期首日按无涨跌幅限制处理，不套普通比例；一字涨停不能买，一字跌停不能卖，执行层记 `LIMIT_LOCKED` 并写明方向，不假定候选信号必然成交。来源：config/market_rules.yaml:13、config/market_rules.yaml:14、config/market_rules.yaml:15、config/market_rules.yaml:16、config/market_rules.yaml:58、config/market_rules.yaml:59；docs/strategies/_template.md:268。 |
 | T+1 | 当日买入股份当日不可卖；设计层退出候选信号遇可卖量不足时记 `T1_NOT_SELLABLE`，不能靠回补新股恢复当日可卖量；当前仅盘后统计，不生成运行中的候选信号。来源：config/market_rules.yaml:36；docs/plan.md:1614；docs/strategies/_template.md:230。 |
 | ST / 退市整理 | G-01 阻断买入；已有持仓仍须评估退出候选信号并服从 T+1、停牌及跌停约束，不能把排除 ST 当作省略历史比例的理由。来源：docs/strategies/_template.md:236；docs/plan.md:1624；config/market_rules.yaml:36、config/market_rules.yaml:59、config/market_rules.yaml:60。 |
@@ -69,9 +69,9 @@ T 腿数量 ≤ `p.t_ratio` × `ctx.sellable_qty`，按整手规则取整；同�
 
 | 成本项 | 计算口径与出处 |
 |---|---|
-| 佣金 | 买卖双边各按 `max(单笔成交额 × 用户实际费率, 5 元)` 计算，单笔最低 5 元；实际费率未设置时不得填零，记“未验证”。来源：config/market_rules.yaml:45、config/market_rules.yaml:46；docs/plan.md:1621。 |
-| 印花税 | 只计卖出，按实际成交日取有效段：2023-04-10 至 2023-08-27 为 0.1%，2023-08-28 起为 0.05%；更早日期不外推。来源：config/market_rules.yaml:4、config/market_rules.yaml:126、config/market_rules.yaml:163、config/market_rules.yaml:66、config/market_rules.yaml:103、config/market_rules.yaml:43。 |
-| 过户费 | 买卖双边各计成交额的 0.001%。来源：config/market_rules.yaml:44、config/market_rules.yaml:104、config/market_rules.yaml:164；docs/plan.md:1621。 |
+| 佣金 | 沪深普通 A 股按买、卖每笔分别估算。实际费率、最低额及所含规费以券商协议为准，均未验证。5 元为仓库建模默认及历史制度背景。含规费佣金中已计的经手费、证管费不再叠加；缺实际收费口径时保留费用缺口。见 config/market_rules.yaml 的 `fees` 与[费用审计 §5 F24–F25](../T-R74/param_audit.md)。 |
+| 印花税 | 仅卖出方按成交金额计税。本卡建模期内，2023-04-10 至 2023-08-27 为 0.1%，2023-08-28 起为 0.05%。依据[《印花税法》第三、五条及税目税率表](https://fgk.chinatax.gov.cn/zcfgk/c100009/c5193058/content.html)和[财政部、税务总局 2023 年第 39 号公告](https://www.mof.gov.cn/jrttts/202308/t20230828_3904235.htm)。 |
+| 过户费 | 中国结算自 2022-04-29 起按成交金额的 0.001% 向买卖双方分别收取，覆盖本卡从 2023-04-10 开始的建模期。此前沪深计费基数和费率按历史有效段另查。[中国结算降费通知](https://www.chinaclear.cn/zdjs/gszb/202204/837e3c5031104aa099d6597ba381342a.shtml)；[历史对照 F06–F10](../T-R74/param_audit.md)。 |
 | 基础滑点 | 单边默认 10 bp（0.1%），为估算初值、未验证；不视为真实成交偏差。来源：config/market_rules.yaml:47；docs/plan.md:1621。 |
 | 冲击成本 | 参与率 r = 拟成交额 ÷ 近 20 个有效交易日日成交额均值（停牌日不计），拟成交额 = 计划数量 × 参考价；各单边按 r≤0.1%、0.1%<r≤0.5%、0.5%<r≤1%、1%<r≤2%、r>2% 依次计 0/5/15/30/60 bp；最高档标“容量受限”（来源：docs/strategies/_template.md:262）。均为估算初值、未验证、待校准。来源：config/market_rules.yaml:48、config/market_rules.yaml:49、config/market_rules.yaml:50、config/market_rules.yaml:52、config/market_rules.yaml:53、config/market_rules.yaml:54、config/market_rules.yaml:55、config/market_rules.yaml:56；docs/plan.md:1622。 |
 
