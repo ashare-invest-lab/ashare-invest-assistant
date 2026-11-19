@@ -20,7 +20,7 @@ from sqlalchemy.engine import Connection
 
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import daily_bars
-from app.marketdata.daily_bars import update_mairui_source_licence_id
+from app.marketdata.daily_bars import daily_bar_write_allowed, update_mairui_source_licence_id
 
 Key = tuple[str, dt.date, str]
 HEADER = ["code", "trade_date", "adj_type"]
@@ -80,8 +80,12 @@ def bind(
     if apply:
         stmt = stmt.with_for_update()
     keys: list[Key] = [(r.code, r.trade_date, r.adj_type) for r in conn.execute(stmt)]
+    writable = [key for key in keys if daily_bar_write_allowed(key[0], licence_update=True)]
+    blocked = len(keys) - len(writable)
+    refused = f"blocked_bj_unconfirmed:{blocked}" if blocked else None
+    keys = writable
     if not apply or not keys:
-        return BindReport(licence_id, len(keys), apply)
+        return BindReport(licence_id, len(keys), apply, refused)
     fd = os.open(manifest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
         suffix = f" from_licence={from_licence}" if from_licence is not None else ""
@@ -96,7 +100,7 @@ def bind(
     )
     if count != len(keys):
         raise RuntimeError(f"bind rowcount mismatch: expected {len(keys)}, got {count}")
-    return BindReport(licence_id, count, True)
+    return BindReport(licence_id, count, True, refused)
 
 
 def rollback(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
@@ -125,8 +129,12 @@ def rollback(conn: Connection, manifest: Path, *, apply: bool) -> BindReport:
             keys.append((row[0], date, row[2]))
         if len(set(keys)) != len(keys):
             raise ValueError("duplicate manifest key")
-    count = _process(conn, keys, licence_id, apply=apply, undo=True, restore_to=restore_to)
-    return BindReport(licence_id, count, apply)
+    writable = [key for key in keys if daily_bar_write_allowed(key[0], licence_update=True)]
+    blocked = len(keys) - len(writable)
+    count = _process(conn, writable, licence_id, apply=apply, undo=True, restore_to=restore_to)
+    return BindReport(
+        licence_id, count, apply, f"blocked_bj_unconfirmed:{blocked}" if blocked else None
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

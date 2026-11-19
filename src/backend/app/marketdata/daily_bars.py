@@ -104,6 +104,7 @@ class UpsertStats:
     _replacement_results: tuple[dict[str, object], ...] = field(default=(), repr=False)
     _reconcile_sink: ReconcileSink | None = field(default=None, repr=False, compare=False)
     blocked_bj_unconfirmed: int = 0
+    licence_rows: int = 0
 
     def reconcile_after_transaction(self, *, committed: bool) -> None:
         """事务拥有者在提交成功或回滚后调用；不能把 UPDATE 成功当成提交成功。"""
@@ -286,7 +287,7 @@ def _replacement_audit(bar: DailyBar, row: object, replacement_id: str) -> list[
         "incoming_source": "mairui",
     }
     records: list[dict[str, object]] = []
-    for name in ("open", "high", "low", "close", "volume", "amount"):
+    for name in ("open", "high", "low", "close", "pre_close", "volume", "amount"):
         old = _q_field(row, name)
         new = getattr(bar, name)
         tolerance = (
@@ -294,7 +295,7 @@ def _replacement_audit(bar: DailyBar, row: object, replacement_id: str) -> list[
             if name == "amount"
             else Decimal(0)
         )
-        if name in ("open", "high", "low", "close"):
+        if name in ("open", "high", "low", "close", "pre_close"):
             old = old.quantize(_PRICE_Q) if old is not None else None
             new = new.quantize(_PRICE_Q) if new is not None else None
         same = old == new or (old is not None and new is not None and abs(old - new) <= tolerance)
@@ -309,6 +310,16 @@ def _replacement_audit(bar: DailyBar, row: object, replacement_id: str) -> list[
                     tolerance=str(tolerance),
                 )
             )
+    old_suspended = _field(row, "is_suspended")
+    if old_suspended != bar.is_suspended:
+        records.append(
+            dict(
+                common, kind="replaced_tdx_local", field="is_suspended",
+                existing_value=None if old_suspended is None else str(old_suspended),
+                incoming_value=None if bar.is_suspended is None else str(bar.is_suspended),
+                tolerance="0",
+            )
+        )
     return records or [
         dict(
             common,
@@ -321,16 +332,40 @@ def _replacement_audit(bar: DailyBar, row: object, replacement_id: str) -> list[
     ]
 
 
+@dataclass(frozen=True)
+class SourceLicenceUpdate:
+    keys: Sequence[tuple[str, dt.date, str]]
+    match: uuid.UUID | None
+    apply: bool
+
+
+def daily_bar_write_allowed(code: str, *, licence_update: bool = False) -> bool:
+    """日线和元数据写入共用的身份与当前进程许可门闩。"""
+    if (code.endswith(".BJ") or code[:6].startswith(_BJ)) and (
+        not _QUALIFIED_RE.fullmatch(code)
+        or not code[:6].startswith(_BJ)
+        or qualified_code(code[:6]) != code
+    ):
+        raise ValueError("qualified_code_invalid")
+    # licence 迁移完成前，即使本进程已确认量单位，也不允许 BJ 元数据 UPDATE。
+    return not (licence_update and code.endswith(".BJ")) and not _bj_write_unconfirmed(
+        {"code": code}
+    )
+
+
 def upsert_daily_bars(
     conn: Connection,
-    result: FetchResult,
+    result: FetchResult | None = None,
     *,
     source: str | None,
     licence_id: uuid.UUID | None,
-    fetched_at: dt.datetime,
+    fetched_at: dt.datetime | None = None,
     reconcile_sink: ReconcileSink | None = None,
+    source_licence_update: SourceLicenceUpdate | None = None,
 ) -> UpsertStats:
-    """追加日线，麦蕊可在对账成功后条件替换 tdx_local。
+    """追加日线、对账替换，或仅按 key/match 更新麦蕊 source_licence_id。
+
+    source_licence_update 独占元数据模式，不修改行情字段；dry-run 返回匹配行数。
 
     默认不替换并保留原冲突计数。启用替换须由调用方显式提供 sink，
     sink 必须同步持久化，失败须抛异常。
@@ -345,27 +380,65 @@ def upsert_daily_bars(
     if licence_id is not None and not isinstance(licence_id, uuid.UUID):
         raise TypeError("licence_id must be uuid.UUID or None")
 
+    if source_licence_update is not None:
+        if source != "mairui" or result is not None or reconcile_sink is not None:
+            raise ValueError("source_licence_update requires exclusive mairui metadata mode")
+        request = source_licence_update
+        if request.match is not None and not isinstance(request.match, uuid.UUID):
+            raise TypeError("match must be uuid.UUID or None")
+        keys = [key for key in request.keys if daily_bar_write_allowed(key[0], licence_update=True)]
+        blocked = len(request.keys) - len(keys)
+        count = 0
+        bars = daily_bars.c
+        for offset in range(0, len(keys), _BIND_BATCH):
+            batch = values(
+                *(column(name, daily_bars.c[name].type) for name in _BIND_KEYS),
+                name="manifest_keys",
+            ).data(keys[offset : offset + _BIND_BATCH])
+            conditions = (
+                bars.code == batch.c.code,
+                bars.trade_date == batch.c.trade_date,
+                bars.adj_type == batch.c.adj_type,
+                bars.source == "mairui",
+                (
+                    bars.source_licence_id == request.match
+                    if request.match is not None
+                    else bars.source_licence_id.is_(None)
+                ),
+            )
+            if request.apply:
+                count += conn.execute(
+                    update(daily_bars).where(*conditions).values(source_licence_id=licence_id)
+                ).rowcount
+            else:
+                count += conn.execute(
+                    select(func.count()).select_from(daily_bars, batch).where(*conditions)
+                ).scalar_one()
+        return UpsertStats(
+            inserted=0, unchanged=0, conflicts=0,
+            issues=("blocked_bj_unconfirmed",) if blocked else (),
+            blocked_bj_unconfirmed=blocked, licence_rows=count,
+        )
+
+    if result is None or fetched_at is None:
+        raise ValueError("result and fetched_at are required for daily bars")
+
     inserted = unchanged = conflicts = replaced = 0
     issues: list[str] = []
     replacement_results: list[dict[str, object]] = []
     if not result.bars:
         return UpsertStats(inserted=0, unchanged=0, conflicts=0, issues=())
 
-    for bar in result.bars:
-        if (bar.code.endswith(".BJ") or bar.code[:6].startswith(_BJ)) and (
-            not _QUALIFIED_RE.fullmatch(bar.code)
-            or not bar.code[:6].startswith(_BJ)
-            or qualified_code(bar.code[:6]) != bar.code
-        ):
-            raise ValueError("qualified_code_invalid")
-    writable = [bar for bar in result.bars if not _bj_write_unconfirmed({"code": bar.code})]
+    writable = [bar for bar in result.bars if daily_bar_write_allowed(bar.code)]
     blocked_bj = len(result.bars) - len(writable)
     if blocked_bj:
         issues.append("blocked_bj_unconfirmed")
     ordered = sorted(writable, key=lambda bar: (bar.code, bar.trade_date, bar.adj_type))
     for offset in range(0, len(ordered), UPSERT_BATCH_ROWS):
         chunk = ordered[offset : offset + UPSERT_BATCH_ROWS]
-        values = [
+        if any(not daily_bar_write_allowed(bar.code) for bar in chunk):
+            raise ValueError("bj_offline_volume_units_unconfirmed")
+        payloads = [
             {
                 "code": bar.code,
                 "trade_date": bar.trade_date,
@@ -386,7 +459,7 @@ def upsert_daily_bars(
         ]
         ret = conn.execute(
             pg_insert(daily_bars)
-            .values(values)
+            .values(payloads)
             .on_conflict_do_nothing(index_elements=["code", "trade_date", "adj_type"])
             .returning(daily_bars.c.code, daily_bars.c.trade_date, daily_bars.c.adj_type)
         ).all()
@@ -424,6 +497,8 @@ def upsert_daily_bars(
                         "trade_date": bar.trade_date.isoformat(),
                         "adj_type": bar.adj_type,
                     }
+                    if not daily_bar_write_allowed(bar.code):
+                        raise ValueError("bj_offline_volume_units_unconfirmed")
                     changed = conn.execute(
                         update(daily_bars)
                         .where(
@@ -801,30 +876,7 @@ def update_mairui_source_licence_id(
     apply: bool,
 ) -> int:
     """T-B141：只改 mairui 行的 source_licence_id（绑定、改绑或回滚）。"""
-    count = 0
-    bars = daily_bars.c
-    for offset in range(0, len(keys), _BIND_BATCH):
-        batch = values(
-            *(column(name, daily_bars.c[name].type) for name in _BIND_KEYS),
-            name="manifest_keys",
-        ).data(keys[offset : offset + _BIND_BATCH])
-        conditions = (
-            bars.code == batch.c.code,
-            bars.trade_date == batch.c.trade_date,
-            bars.adj_type == batch.c.adj_type,
-            bars.source == "mairui",
-            (
-                bars.source_licence_id == match
-                if match is not None
-                else bars.source_licence_id.is_(None)
-            ),
-        )
-        if apply:
-            count += conn.execute(
-                update(daily_bars).where(*conditions).values(source_licence_id=value)
-            ).rowcount
-        else:
-            count += conn.execute(
-                select(func.count()).select_from(daily_bars, batch).where(*conditions)
-            ).scalar_one()
-    return count
+    return upsert_daily_bars(
+        conn, source="mairui", licence_id=value,
+        source_licence_update=SourceLicenceUpdate(keys, match, apply),
+    ).licence_rows

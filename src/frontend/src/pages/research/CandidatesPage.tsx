@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Button, Checkbox, Input, Select, Space, Table, Tag } from 'antd';
 import { Link, useSearchParams } from 'react-router';
@@ -54,14 +55,14 @@ export function CandidatesPage() {
           placeholder="默认：研究中、观察中、已计划"
           value={status === 'all' ? [] : status}
           onChange={(v) => setParam('status', v.join(','))}
-          options={STATUSES.map((s) => ({ value: s, label: RESEARCH_STATUS[s].text }))}
+          options={STATUSES.map((s) => ({ value: s, label: tagOf(RESEARCH_STATUS, s).text }))}
           data-testid="filter-status"
         />
         <Select<ResearchCandidateOrigin | ''>
           style={{ width: 150 }}
           value={f.origin ?? ''}
           onChange={(v) => setParam('origin', v)}
-          options={[{ value: '', label: '全部来源' }, ...ORIGINS.map((o) => ({ value: o, label: RESEARCH_ORIGIN[o] }))]}
+          options={[{ value: '', label: '全部来源' }, ...ORIGINS.map((o) => ({ value: o, label: (labelOf(RESEARCH_ORIGIN, o) ?? '未知') }))]}
           data-testid="filter-origin"
         />
         <Input.Search
@@ -91,11 +92,11 @@ export function CandidatesPage() {
           },
           {
             title: '状态', dataIndex: 'status', width: 90,
-            render: (s: ResearchCandidateStatus) => <Tag color={RESEARCH_STATUS[s].color} data-testid="cand-status">{RESEARCH_STATUS[s].text}</Tag>,
+            render: (s: ResearchCandidateStatus) => <Tag color={tagOf(RESEARCH_STATUS, s).color} data-testid="cand-status">{tagOf(RESEARCH_STATUS, s).text}</Tag>,
           },
-          { title: '来源', dataIndex: 'origin', width: 110, render: (o: ResearchCandidateOrigin) => RESEARCH_ORIGIN[o] },
+          { title: '来源', dataIndex: 'origin', width: 110, render: (o: ResearchCandidateOrigin) => (labelOf(RESEARCH_ORIGIN, o) ?? '未知') },
           { title: '当前版本', dataIndex: 'current_version_no', width: 90, align: 'right', render: (n: number) => <span className="mono">第 {n} 版</span> },
-          { title: '当前版本决定', dataIndex: 'decision', width: 120, render: (d: ResearchCandidateSummary['decision']) => (d ? CANDIDATE_DECISION[d] : <span className="muted">—</span>) },
+          { title: '当前版本决定', dataIndex: 'decision', width: 120, render: (d: ResearchCandidateSummary['decision']) => (d ? (labelOf(CANDIDATE_DECISION, d) ?? '未知') : <span className="muted">—</span>) },
           { title: '最近版本时间', dataIndex: 'last_version_at', width: 140, render: (v: string) => <span className="mono small">{fmtTime(v).slice(5)}</span> },
           { title: '创建时间', dataIndex: 'created_at', width: 140, render: (v: string) => <span className="mono small">{fmtTime(v).slice(5)}</span> },
         ]}

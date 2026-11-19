@@ -1,3 +1,4 @@
+import { labelOf } from '../lib/explanations';
 /** T-F17 候选信号 / 不可执行原因的展示文案 */
 import type { ReasonStatus } from '../api/enums';
 
@@ -18,7 +19,7 @@ const CAUSE_TEXT: Record<string, string> = {
   supersede: '被新信号取代',
 };
 export function causeText(cause: string): string {
-  return CAUSE_TEXT[cause] ?? cause;
+  return labelOf(CAUSE_TEXT, cause) ?? cause;
 }
 
 /** 生命周期徽标：只对“模拟中 / 观察中”等非正式状态加醒目徽标 */
