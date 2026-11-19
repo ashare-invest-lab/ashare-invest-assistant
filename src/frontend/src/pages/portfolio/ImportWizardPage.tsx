@@ -89,7 +89,7 @@ function UploadStep() {
         <Form<UploadForm> form={form} layout="vertical" requiredMark={false} onFinish={submit}
           initialValues={{ account_id: sp.get('account_id') ?? sp.get('account') ?? list[0].id, kind: sp.get('kind') === 'positions' || sp.get('kind') === 'trades' ? (sp.get('kind') as ImportKind) : undefined }}>
           <Form.Item name="account_id" label="导入到账户" rules={[{ required: true }]}>
-            <Select options={list.map((a) => ({ value: a.id, label: `${a.alias} · ${a.broker_name}` }))} style={{ maxWidth: 320 }} />
+            <Select options={list.map((a) => ({ value: a.id, label: `${a.alias} · ${a.broker_name ?? '—'}` }))} style={{ maxWidth: 320 }} />
           </Form.Item>
           {/* T-F20（T-B66）：混合入口不再默认交割单，必须明确选择文件类型 */}
           <Form.Item name="kind" label="文件类型" rules={[{ required: true, message: '请选择文件类型：交割单或持仓快照' }]} data-testid="upload-kind">

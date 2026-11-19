@@ -32,6 +32,7 @@ const cell = (code = '000001.SZ') => screen.findByTestId(`t-view-${code}`);
 
 async function setup(items: TodayFocusRow[], session: TodayResponse['session'] = 'morning') {
   const body: TodayResponse = {
+    account_id: null,
     server_time: '2026-11-10T10:31:30+08:00', trade_date: DATE, session,
     market: { regime: null, regime_position_range: null, data_status: 'fresh' },
     focus: { items, more: false },

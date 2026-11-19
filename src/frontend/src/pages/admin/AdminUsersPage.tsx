@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Alert, Button, Input, Modal, Segmented, Space, Table, Tag, Tooltip } from 'antd';
 import { usePatchAdminUser, useAdminUsers } from '../../api/accountQueries';
@@ -60,7 +61,7 @@ export function AdminUsersPage() {
         columns={[
           { title: '用户名', dataIndex: 'username', render: (v: string, r) => <span><span className="mono">{v}</span>{r.role === 'admin' ? <Tag style={{ marginLeft: 6 }}>{ROLE_TEXT.admin}</Tag> : null}</span> },
           { title: '显示名', dataIndex: 'display_name' },
-          { title: '状态', dataIndex: 'status', width: 90, render: (s: AccountStatus) => <Tag color={ACCOUNT_STATUS[s].color}>{ACCOUNT_STATUS[s].text}</Tag> },
+          { title: '状态', dataIndex: 'status', width: 90, render: (s: AccountStatus) => <Tag color={tagOf(ACCOUNT_STATUS, s).color}>{tagOf(ACCOUNT_STATUS, s).text}</Tag> },
           { title: '申请说明', dataIndex: 'apply_note', ellipsis: true, render: (v: string | null) => v ?? <span className="muted">—</span> },
           { title: '注册时间', dataIndex: 'created_at', width: 150, render: (v: string) => <span className="mono">{fmtTime(v)}</span> },
           { title: '注册 IP 属地', dataIndex: 'register_ip_region', width: 120, render: (v: string | null) => v ?? '—' },
@@ -73,9 +74,9 @@ export function AdminUsersPage() {
             title: '操作', key: 'op', width: 140,
             render: (_v, r) => (
               <Space size={4}>
-                {ACTIONS[r.status].map((t) => (
+                {(labelOf(ACTIONS, r.status) ?? []).map((t) => (
                   <Button key={t} size="small" danger={t !== 'approved'} type={t === 'approved' ? 'primary' : 'default'} onClick={() => open(r, t)} data-testid={`act-${t}-${r.username}`}>
-                    {ACTION_TEXT[t]}
+                    {(labelOf(ACTION_TEXT, t) ?? '未知')}
                   </Button>
                 ))}
               </Space>
@@ -86,8 +87,8 @@ export function AdminUsersPage() {
       <CursorPager query={list} loaded={rows.length} testId="admin-users-pager" />
       <Modal
         open={!!pending}
-        title={pending ? `${ACTION_TEXT[pending.to]}：${pending.user.display_name}（${pending.user.username}）` : ''}
-        okText={pending ? `确认${ACTION_TEXT[pending.to]}` : '确认'}
+        title={pending ? `${(labelOf(ACTION_TEXT, pending.to) ?? '未知')}：${pending.user.display_name}（${pending.user.username}）` : ''}
+        okText={pending ? `确认${(labelOf(ACTION_TEXT, pending.to) ?? '未知')}` : '确认'}
         okButtonProps={{ disabled: !!pending && NEEDS_REASON(pending.to, pending.user.status) && !reason.trim(), loading: patch.isPending, danger: pending?.to !== 'approved' }}
         onOk={submit}
         onCancel={() => setPending(null)}

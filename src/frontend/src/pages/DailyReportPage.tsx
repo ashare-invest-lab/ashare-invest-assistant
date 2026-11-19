@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../lib/explanations';
 import { ExplanationView } from '../components/ExplanationView';
 import { DailyDimensions } from '../features/daily/DailyDimensions';
 import { IS_MOCK } from '../lib/env';
@@ -6,7 +7,7 @@ import { useEffect, useId, useRef } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useDailyReport, useDailyReportPages, useDailyReports } from '../api/queries';
 import type { DailyReport, DailyReportStock, TextWithEvidence } from '../api/types';
-import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../components/common';
+import { ActionBadge, ConsensusBadge, DataStatusTag, EmptyState, ErrorBox, Loading } from '../components/common';
 import { EvidenceChips } from '../components/EvidenceChips';
 import { CardDisclaimer } from '../components/RiskDisclosure';
 import { DIMENSION, EXECUTABILITY, GAP_REASON, RECONCILIATION, REGIME, RISK_LEVEL } from '../i18n/labels';
@@ -37,7 +38,7 @@ export function DailyReportIndex() {
   if (list.isLoading) return <Loading />;
   if (list.isError) return <ErrorBox error={list.error} />;
   const latest = list.data?.items[0];
-  return latest ? <Navigate to={`/daily-reports/${latest.date}`} replace /> : <div className="loading-box">暂无日报</div>;
+  return latest ? <Navigate to={`/daily-reports/${latest.date}`} replace /> : <EmptyState title="暂无日报" description="尚未找到已生成的日报；本页仅读取已有快照，不触发生成。" />;
 }
 
 const LOAD_MORE = '__more__';
@@ -108,15 +109,15 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
         ) : (
           <span id={titleId} className="stc-title"><b>{s.name}</b> <span className="mono muted small">{s.security_code}</span></span>
         )}
-        {s.change_from_previous === null ? <Tag>无比较基准 · 见数据缺口</Tag> : <Tag color={CHANGE[s.change_from_previous].c}>{CHANGE[s.change_from_previous].t}</Tag>}
-        {s.change_fields?.length ? <span className="muted small">变化：{s.change_fields.map((field) => CHANGE_FIELD[field]).join('、')}</span> : null}
+        {s.change_from_previous === null ? <Tag>无比较基准 · 见数据缺口</Tag> : <Tag color={(labelOf(CHANGE, s.change_from_previous) ?? { t: '未知', c: undefined }).c}>{(labelOf(CHANGE, s.change_from_previous) ?? { t: '未知', c: undefined }).t}</Tag>}
+        {s.change_fields?.length ? <span className="muted small">变化：{s.change_fields.map((field) => (labelOf(CHANGE_FIELD, field) ?? '未知')).join('、')}</span> : null}
         <span className="spacer" />
         {/* v0.2.3 #3：收盘价、涨跌幅、数据状态、最高风险级别 */}
         <span className={`mono small ${pctClass(s.change_pct)}`} data-testid="stc-close">
           收盘价 {s.close ?? '—（缺数据）'} · 涨跌幅 {s.change_pct == null ? '—（缺数据）' : `${signed(s.change_pct)}%`}
         </span>
         <DataStatusTag status={s.data_status} />
-        {s.max_risk_level ? <Tag color={RISK_LEVEL[s.max_risk_level].color}>风险 {RISK_LEVEL[s.max_risk_level].text}</Tag> : null}
+        {s.max_risk_level ? <Tag color={tagOf(RISK_LEVEL, s.max_risk_level).color}>风险 {tagOf(RISK_LEVEL, s.max_risk_level).text}</Tag> : null}
         {s.suggestion ? <ConsensusBadge status={s.suggestion.consensus} /> : null}
       </div>
       {s.suggestion?.actions.length ? (
@@ -124,9 +125,9 @@ function StockCard({ s, r }: { s: DailyReportStock; r: DailyReport }) {
       ) : <div className="small muted">{s.change_from_previous === 'removed' ? '已移出持仓与自选，本期不再生成策略结论' : '暂无启用的策略实例'}</div>}
       {s.suggestion ? (
         <div className="small muted">
-          {EXECUTABILITY[s.suggestion.executability_status].text}
+          {tagOf(EXECUTABILITY, s.suggestion.executability_status).text}
           {s.suggestion.top_score != null ? ` · 最高满足度 ${s.suggestion.top_score}` : ''}
-          {s.suggestion.divergent_dimensions.length ? ` · 分歧维度：${s.suggestion.divergent_dimensions.map((d) => DIMENSION[d]).join('、')}` : ''}
+          {s.suggestion.divergent_dimensions.length ? ` · 分歧维度：${s.suggestion.divergent_dimensions.map((d) => (labelOf(DIMENSION, d) ?? '未知')).join('、')}` : ''}
         </div>
       ) : null}
       <div className="report-stock-notes">
@@ -146,7 +147,7 @@ function AccountPanel({ r }: { r: DailyReport }) {
   const range = r.market.regime_position_range;
   const lo = range ? clampPct(Number(range.min_pct)) : 0;
   const hi = range ? clampPct(Number(range.max_pct)) : 0;
-  const rec = RECONCILIATION[r.reconciliation.status];
+  const rec = tagOf(RECONCILIATION, r.reconciliation.status);
   const recTo = r.account_id ? `/portfolio?tab=reconciliation&account_id=${encodeURIComponent(r.account_id)}` : null;
   return (
     <section className="panel acct" data-testid="report-account">
@@ -168,8 +169,8 @@ function AccountPanel({ r }: { r: DailyReport }) {
           </div>
           <div className="regime">
             <div className="small">
-              大盘环境 <Tag color="blue">{r.market.regime ? REGIME[r.market.regime] : '未知'}</Tag>
-              {range ? `参考仓位区间 ${lo}–${hi}%（模板参数，不是指令）` : '参考仓位区间：缺失'}{a.position_vs_regime ? ` · 当前${VS_REGIME[a.position_vs_regime]}` : ''}
+              大盘环境 <Tag color={labelOf(REGIME, r.market.regime) ? 'blue' : undefined}>{r.market.regime ? (labelOf(REGIME, r.market.regime) ?? '未知') : '未知'}</Tag>
+              {range ? `参考仓位区间 ${lo}–${hi}%（模板参数，不是指令）` : '参考仓位区间：缺失'}{a.position_vs_regime ? ` · 当前${(labelOf(VS_REGIME, a.position_vs_regime) ?? '未知')}` : ''}
             </div>
             {range && a.position_pct !== null ? (
               <div className="regime-bar" role="img" aria-label={`当前仓位 ${a.position_pct === null ? '—（缺少资产分母）' : `${fmtNum(a.position_pct, 1)}%`}，参考区间 ${lo}–${hi}%`}>
@@ -244,7 +245,7 @@ export function DailyReportPage() {
           <Alert
             className="gap-alert" type="warning" showIcon data-testid="report-gaps"
             title={`数据缺口 ${r.gaps.length} 项（缺失不臆测；相关维度标为“未知”）`}
-            description={<details className="report-gap-details" data-testid="report-gap-details"><summary>查看全部 {r.gaps.length} 项缺口与来源说明</summary><ul className="gap-grid report-gap-list">{r.gaps.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{GAP_REASON[g.reason]}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}</ul></details>}
+            description={<details className="report-gap-details" data-testid="report-gap-details"><summary>查看全部 {r.gaps.length} 项缺口与来源说明</summary><ul className="gap-grid report-gap-list">{r.gaps.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{(labelOf(GAP_REASON, g.reason) ?? '未知')}</Tag><span className="mono muted small">{g.key}</span><p>{g.message}</p></li>)}</ul></details>}
           />
         </section>
       ) : null}
@@ -279,13 +280,13 @@ export function DailyReportPage() {
         <h2 id="report-stocks-title">逐股卡片（持仓 + 自选，共 {r.stocks.length} 只）</h2>
         <Segmented
           size="small" value={filter} onChange={(v) => setFilter(v as StockFilter)} aria-label="按变化筛选"
-          options={STOCK_FILTERS.map((f) => ({ value: f, label: `${FILTER_LABEL[f]} ${count(f)}` }))}
+          options={STOCK_FILTERS.map((f) => ({ value: f, label: `${(labelOf(FILTER_LABEL, f) ?? '未知')} ${count(f)}` }))}
         />
         <span className="muted small">各策略结论并列；点击卡片进入候选信号卡</span>
       </div>
       {shown.length ? (
         <div className="stock-grid">{shown.map((s) => <StockCard key={s.security_code} s={s} r={r} />)}</div>
-      ) : <div className="loading-box" data-testid="report-empty">{r.stocks.length ? '没有符合筛选条件的证券' : '本期没有持仓或自选证券'}</div>}
+      ) : <div data-testid="report-empty"><EmptyState title={r.stocks.length ? '没有符合筛选条件的证券' : '本期没有持仓或自选证券'} description="可调整日期或筛选条件查看已有内容；空列表不代表数据齐全。" /></div>}
       </section>
     </div>
   );
