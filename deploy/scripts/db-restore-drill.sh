@@ -2,10 +2,10 @@
 # 备份/恢复演练（可重复执行；全程使用临时容器与临时库，绝不连接 aia 主库）。
 #   deploy/scripts/db-restore-drill.sh
 #   AIA_DRILL_SECURITIES=50 AIA_DRILL_DAYS=20 deploy/scripts/db-restore-drill.sh
-# 流程：起源容器（与 compose 相同的固定镜像 + 同一份 postgresql.conf，内存参数调小）
+# 流程：创建且核验未启动的目标容器 → 启动源容器（同一镜像和配置）
 #   → 建演练库 aia_drill + 样例表（deploy/db/drill/）→ db-apply-timescale.sh 应用策略
 #   → 灌样例数据 → 跑压缩作业 → 刷新连续聚合 → db-backup.sh
-#   → 起全新目标容器 → db-restore.sh 恢复到 aia_drill_restored
+#   → 启动目标容器并复核身份 → db-restore.sh 恢复到 aia_drill_restored
 #   → 校验：各表行数、逐行 md5、压缩 chunk 数、连续聚合可查询且可继续刷新、策略作业齐全
 #   → 结果写 deploy/drills/<UTC时间>-restore-drill.{md,json}；删除容器、卷与 dump。
 # 环境变量：AIA_PG_IMAGE（默认取 compose 中 postgres 的镜像）、AIA_DRILL_SECURITIES（50）、
@@ -20,7 +20,8 @@ fi
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 IMAGE="${AIA_PG_IMAGE:-$(aia_compose_image postgres)}"
 SECURITIES="${AIA_DRILL_SECURITIES:-50}"; DAYS="${AIA_DRILL_DAYS:-20}"
-SRC="aia-drill-src-${RUN_ID,,}"; DST="aia-drill-dst-${RUN_ID,,}"
+SRC_NAME="aia-drill-src-${RUN_ID,,}"; DST_NAME="aia-drill-dst-${RUN_ID,,}"
+SRC=""; DST=""  # 只用本次 Docker create 返回的容器 ID 执行演练与清理。
 SRC_DB=aia_drill; DST_DB=aia_drill_restored
 WORK="$(mktemp -d /tmp/aia-drill-XXXXXX)"
 OUT_DIR="$AIA_ROOT/deploy/drills"; mkdir -p "$OUT_DIR"
@@ -38,8 +39,11 @@ cleanup() {
     printf '{"run_id": "%s", "result": "FAIL", "failed_step": "%s", "exit_code": %d}\n' "$RUN_ID" "${STEP_NAME:-?}" "$rc" >"$REPORT_JSON"
     aia_log "结果：FAIL（步骤 ${STEP_NAME:-?}）→ ${REPORT_MD#$AIA_ROOT/}"
   fi
-  if [ "${AIA_DRILL_KEEP:-0}" = "1" ]; then aia_log "AIA_DRILL_KEEP=1：保留 $SRC $DST 与 $WORK"; return; fi
-  aia_docker rm -fv "$SRC" "$DST" >/dev/null 2>&1 || true
+  if [ "${AIA_DRILL_KEEP:-0}" = "1" ]; then aia_log "AIA_DRILL_KEEP=1：保留 $WORK 与已创建的容器（源 ${SRC:-无}，目标 ${DST:-无}）"; return; fi
+  local container
+  for container in "$SRC" "$DST"; do
+    if [ -n "$container" ]; then aia_docker rm -fv "$container" >/dev/null 2>&1 || true; fi
+  done
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -47,13 +51,18 @@ trap cleanup EXIT
 step() { STEP_NAME="$1"; STEP_START=$(date +%s); aia_log "== $1"; }
 done_step() { STEP_SECS["$STEP_NAME"]=$(( $(date +%s) - STEP_START )); }
 
-start_pg() {  # $1 容器名
-  local pw; pw="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
-  aia_docker run -d --name "$1" --label aia.drill="$RUN_ID" --shm-size 256m \
+create_pg() {  # $1 容器名，输出 Docker 返回的容器 ID
+  local pw
+  pw="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')" || aia_die "无法生成演练容器密码"
+  aia_docker create --name "$1" --label aia.drill="$RUN_ID" --shm-size 256m \
     -e POSTGRES_PASSWORD="$pw" -e POSTGRES_USER=aia -e POSTGRES_DB=postgres -e TZ=UTC \
     -v "$CONF:/etc/postgresql/postgresql.conf:ro" \
     "$IMAGE" postgres -c config_file=/etc/postgresql/postgresql.conf \
-      -c shared_buffers=256MB -c effective_cache_size=1GB -c maintenance_work_mem=256MB -c max_wal_size=1GB >/dev/null
+      -c shared_buffers=256MB -c effective_cache_size=1GB -c maintenance_work_mem=256MB -c max_wal_size=1GB
+}
+
+start_pg() {  # $1 容器 ID
+  aia_docker start "$1" >/dev/null
   local i
   for i in $(seq 1 90); do
     # 初始化阶段只监听 unix socket；TCP 可连即为正式启动后的实例
@@ -90,9 +99,27 @@ psql_in() {
 }
 metrics() { psql_in "$1" "$2" -tA -F '=' <"$DRILL_SQL/metrics.sql"; }
 
+assert_drill_container() {
+  local identity label image
+  identity=$(aia_docker inspect --format '{{ index .Config.Labels "aia.drill" }}|{{ .Config.Image }}' "$1") || aia_die "拒绝恢复：无法 inspect 目标容器 $1"
+  label=${identity%%|*}
+  image=${identity#*|}
+  [ "$label" = "$RUN_ID" ] || aia_die "拒绝恢复：目标容器 $1 的 aia.drill 标签与本次演练不符"
+  [ "$image" = "$IMAGE" ] || aia_die "拒绝恢复：目标容器 $1 的镜像与演练镜像不符"
+}
+
 aia_log "演练 $RUN_ID：镜像 $IMAGE，样例 ${SECURITIES} 只 × ${DAYS} 个交易日 × 240 根"
 
-step "start-source";  start_pg "$SRC"; done_step
+# 镜像和标签在容器创建后即可核验，先通过此检查再启动容器和执行 SQL。
+step "prepare-target"
+DST="$(create_pg "$DST_NAME")"
+assert_drill_container "$DST"
+done_step
+
+step "start-source"
+SRC="$(create_pg "$SRC_NAME")"
+start_pg "$SRC"
+done_step
 step "seed"
 psql_in "$SRC" postgres -c "CREATE DATABASE $SRC_DB"
 psql_in "$SRC" "$SRC_DB" -c "SET client_min_messages = warning; CREATE EXTENSION IF NOT EXISTS timescaledb"
@@ -131,6 +158,7 @@ done_step
 
 step "start-target"; start_pg "$DST"; done_step
 step "restore"
+assert_drill_container "$DST"
 "$AIA_ROOT/deploy/scripts/db-restore.sh" "$DUMP" --container "$DST" --db "$DST_DB"
 done_step
 
@@ -178,13 +206,13 @@ RESULT=$([ "$PASS" -eq 1 ] && echo PASS || echo FAIL)
   echo "# 备份/恢复演练 $RUN_ID — $RESULT"
   echo
   echo "- 镜像：\`$IMAGE\`"
-  echo "- 源：临时容器 \`$SRC\` 库 \`$SRC_DB\`（$SRC_VER）"
-  echo "- 目标：全新临时容器 \`$DST\` 库 \`$DST_DB\`（$DST_VER）"
+  echo "- 源：临时容器 \`$SRC_NAME\` 库 \`$SRC_DB\`（$SRC_VER）"
+  echo "- 目标：全新临时容器 \`$DST_NAME\` 库 \`$DST_DB\`（$DST_VER）"
   echo "- 样例规模：${SECURITIES} 只 × ${DAYS} 个交易日 × 240 根 = ${ROWS_1M} 行 1 分钟 K"
   echo "- dump：pg_dump -Fc，$(numfmt --to=iec "$DUMP_SIZE")，sha256 \`${DUMP_SHA:0:16}…\`（演练结束已删除，未入库）"
   echo "- minute_bars 压缩：压缩前 $(numfmt --to=iec "${BEFORE:-0}") → 压缩后 $(numfmt --to=iec "${AFTER:-0}")，压缩比 ${RATIO}×（$(getm chunks.compressed.minute_bars "$WORK/src.metrics") 个 chunk）"
   echo "- 策略二次应用：${APPLY_CHANGES_2ND} 条输出，非 OK/SKIP 改动 ${APPLY_NONOK_2ND:-0} 条（幂等）"
-  echo "- 总耗时：${TOTAL}s（$(for s in start-source seed compress+cagg backup start-target restore verify; do printf '%s %ss; ' "$s" "${STEP_SECS[$s]:-?}"; done)）"
+  echo "- 总耗时：${TOTAL}s（$(for s in prepare-target start-source seed compress+cagg backup start-target restore verify; do printf '%s %ss; ' "$s" "${STEP_SECS[$s]:-?}"; done)）"
   echo
   echo "## 源库 vs 恢复库"
   echo
@@ -213,8 +241,8 @@ def load(p):
 src, dst = load(sys.argv[2]), load(sys.argv[3])
 json.dump({
   "run_id": "$RUN_ID", "result": "$RESULT", "image": "$IMAGE",
-  "source": {"container": "$SRC", "db": "$SRC_DB", "version": "$SRC_VER"},
-  "target": {"container": "$DST", "db": "$DST_DB", "version": "$DST_VER"},
+  "source": {"container": "$SRC_NAME", "db": "$SRC_DB", "version": "$SRC_VER"},
+  "target": {"container": "$DST_NAME", "db": "$DST_DB", "version": "$DST_VER"},
   "sample": {"securities": $SECURITIES, "trading_days": $DAYS, "minute_rows": int("$ROWS_1M" or 0)},
   "dump": {"size_bytes": $DUMP_SIZE, "sha256": "$DUMP_SHA", "kept": False},
   "compression": {"minute_bars_before_bytes": int("${BEFORE:-0}" or 0), "minute_bars_after_bytes": int("${AFTER:-0}" or 0), "ratio": "$RATIO"},
