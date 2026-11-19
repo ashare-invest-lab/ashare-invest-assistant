@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 /** T-F23 研究候选表单的纯函数（与组件分文件，满足 react-refresh） */
 import type { FormInstance } from 'antd';
 import { ApiError } from '../../api/client';
@@ -34,7 +35,7 @@ export function applyCandidateErrors(form: FormInstance, e: unknown, known: read
   const rest: string[] = [];
   const set: { name: (string | number)[]; errors: string[] }[] = [];
   for (const f of fields) {
-    const msg = CANDIDATE_ISSUE[f.issue] ?? f.issue;
+    const msg = labelOf(CANDIDATE_ISSUE, f.issue) ?? f.issue;
     const m = /^conditions_to_hold\[(\d+)\](?:\.(\w+))?$/.exec(f.field);
     if (m) {
       const sub = m[2] ?? 'verify_method';
@@ -42,7 +43,7 @@ export function applyCandidateErrors(form: FormInstance, e: unknown, known: read
       continue;
     }
     if (known.includes(f.field)) set.push({ name: [f.field], errors: [msg] });
-    else rest.push(`${FIELD_LABEL[f.field] ?? f.field}：${msg}`);
+    else rest.push(`${labelOf(FIELD_LABEL, f.field) ?? f.field}：${msg}`);
   }
   form.setFields(set);
   return rest;

@@ -49,6 +49,8 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
         code=CODE,
         close=Decimal("7.8750"),
         pre_close=None,
+        volume=None,
+        amount=None,
         trade_date=dt.date(2026, 11, 13),
         fetched_at=FETCHED_AT,
     )
@@ -71,6 +73,8 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
             ]
             result.all.return_value = rows
             result.__iter__.side_effect = lambda: iter(rows)
+        elif table == "market.trading_calendar":
+            result.scalar_one_or_none.return_value = None
         elif table == "app.notifications":
             result.scalar_one.return_value = 0
         else:
@@ -140,7 +144,7 @@ def test_empty_master_skips_quote_read(world: World, watched: list[str]) -> None
     assert all(row.data_status is DataStatus.UNAVAILABLE for row in terminal.rows)
 
 
-@pytest.mark.parametrize("status", [DataStatus.STALE, DataStatus.UNAVAILABLE])
+@pytest.mark.parametrize("status", [DataStatus.FRESH, DataStatus.STALE, DataStatus.UNAVAILABLE])
 def test_row_preserves_quote_item_status_and_as_of(world: World, status: DataStatus) -> None:
     world.reader.side_effect = None
     world.reader.return_value = quotes_read.QuotesResponse(
@@ -148,7 +152,7 @@ def test_row_preserves_quote_item_status_and_as_of(world: World, status: DataSta
             quotes_read.QuoteItem(
                 security_code=CODE,
                 name="合成",
-                price="8.25" if status is DataStatus.STALE else None,
+                price="8.25" if status is not DataStatus.UNAVAILABLE else None,
                 change_pct="1.25",
                 amount="123.45",
                 t=FETCHED_AT.isoformat(),
@@ -162,7 +166,7 @@ def test_row_preserves_quote_item_status_and_as_of(world: World, status: DataSta
     row = next(row for row in world.terminal().rows if row.security_code == CODE)
 
     assert row.data_status is status
-    if status is DataStatus.STALE:
+    if status is not DataStatus.UNAVAILABLE:
         assert row.data_as_of == FETCHED_AT
         assert row.quote is not None
         assert row.quote.price == "8.25"
