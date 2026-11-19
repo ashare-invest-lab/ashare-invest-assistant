@@ -41,7 +41,7 @@ f.close_qfq（qfq@as_of）；f.boll_bw20_pct120；f.amount、f.amount_20d_avg（
 - X5 跌回突破位（实现 MVP 后）：`f.close_qfq < plan.breakout_level_qfq * (1 - p.fail_pct)`（83a66cd 裁定）；本卡在 MVP 前不可导入，不以入场价替代突破位。
 
 ## 8–10 执行与仓位
-T 日盘后确认，T+1 开盘价模拟入场；信号有效 1 个交易日。止损价截断到涨跌停价之内。仓位按 RC2/RC3 建议。
+T 日盘后确认，T+1 开盘价模拟入场（出处：docs/plan.md:1283）；信号有效 1 个交易日。止损价截断到涨跌停价之内。仓位按 RC2/RC3 建议。
 
 ## 11 验证
 `fixture`、`trigger_stats`、`tracking_sim`；horizon_days `[3,10]`；`min_n=30`；基准：中证全指或所属行业指数；对照组为“无收敛条件的 20 日新高”样本。正式卡导入前需补 ≥ 6 个虚构 golden，包括 140 根预热不足和停牌跨越的用例。

@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 /** T-F23 裁定跟进：操作计划表单的纯函数（契约 v0.2.9 §7.7B）；组件见 PlanForm.tsx */
 import type { FormInstance } from 'antd';
 import { ApiError } from '../../api/client';
@@ -76,7 +77,7 @@ export function applyPlanErrors(form: FormInstance<PlanFormValues>, e: unknown):
   const out = fs.map((f) => {
     const m = /^conditions\[(\d+)\]\.?(\w+)?$/.exec(f.field);
     const name = m ? ['conditions', Number(m[1]), m[2] === 'params' ? 'value' : (m[2] ?? 'description')] : [f.field];
-    return { name, errors: [ISSUE[f.issue] ?? f.issue] };
+    return { name, errors: [labelOf(ISSUE, f.issue) ?? f.issue] };
   });
   try {
     form.setFields(out as Parameters<typeof form.setFields>[0]);
