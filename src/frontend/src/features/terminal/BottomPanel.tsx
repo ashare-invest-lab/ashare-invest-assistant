@@ -2,7 +2,7 @@ import { additionalSignalInstances } from '../../lib/signalEvents';
 import { Tabs, Tag } from 'antd';
 import { useNavigate } from 'react-router';
 import { useDailyReports, useMarkNotificationRead, useNotifications, useSignals } from '../../api/queries';
-import { NOTIFY_KIND, RECONCILIATION, REGIME, SEVERITY, SIGNAL_KIND } from '../../i18n/labels';
+import { NOTIFY_KIND, RECONCILIATION, REGIME, severityTag, SIGNAL_KIND } from '../../i18n/labels';
 import { notificationRoute } from '../../lib/notificationTarget';
 import { fmtTime } from '../../lib/format';
 
@@ -53,7 +53,7 @@ export function BottomPanel({ selected, onSelect }: { selected: string | null; o
                     }}
                   >
                     <span className="mono muted">{fmtTime(n.created_at).slice(5, 16)}</span>
-                    <Tag color={SEVERITY[n.severity]} className="ev-kind">{NOTIFY_KIND[n.kind]}</Tag>
+                    <Tag color={severityTag(n.severity).color} className="ev-kind">{Object.hasOwn(NOTIFY_KIND, n.kind) ? NOTIFY_KIND[n.kind] : '未知'}</Tag>
                     <span className="ev-text">{n.title}</span>
                   </div>
                 ))}

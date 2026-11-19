@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Alert, Button, Drawer, Form, Input, Radio, Space, Tag } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -40,9 +41,9 @@ export function CandidateDetailPage() {
         <Button size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/candidates')}>研究候选</Button>
         <Link to={`/stocks/${c.security_code}`} className="q-name">{c.name}</Link>
         <span className="mono muted">{c.security_code}</span>
-        <Tag color={RESEARCH_STATUS[c.status].color} data-testid="cand-detail-status">{RESEARCH_STATUS[c.status].text}</Tag>
+        <Tag color={tagOf(RESEARCH_STATUS, c.status).color} data-testid="cand-detail-status">{tagOf(RESEARCH_STATUS, c.status).text}</Tag>
         <span className="muted small">
-          来源 {RESEARCH_ORIGIN[c.origin]}
+          来源 {(labelOf(RESEARCH_ORIGIN, c.origin) ?? '未知')}
           {c.suggestion_id ? <> · <Link to={`/suggestions/${c.suggestion_id}`} data-testid="cand-source-suggestion">查看来源候选信号卡</Link></> : null}
           {' '}· 共 {c.version_count} 版 · 创建 {fmtTime(c.created_at)}（北京时间）
         </span>
@@ -125,7 +126,7 @@ function NewVersionPanel({ c, onReload }: { c: ResearchCandidate; onReload: () =
         <Form.Item name="decision" label="决定" style={{ marginTop: 12 }}>
           <Radio.Group data-testid="ver-decision">
             <Radio value="none">只修改内容，不做决定</Radio>
-            {(['continue', 'watch', 'drop'] as const).map((d) => <Radio key={d} value={d} data-testid={`ver-decision-${d}`}>{CANDIDATE_DECISION[d]}</Radio>)}
+            {(['continue', 'watch', 'drop'] as const).map((d) => <Radio key={d} value={d} data-testid={`ver-decision-${d}`}>{(labelOf(CANDIDATE_DECISION, d) ?? '未知')}</Radio>)}
           </Radio.Group>
         </Form.Item>
         {decision && decision !== 'none' ? (
@@ -164,7 +165,7 @@ function VersionHistory({ id }: { id: string }) {
         <div key={v.id} className="tw small" data-testid={`cand-history-${v.version_no}`}>
           <span className="mono">第 {v.version_no} 版</span>
           <span className="muted"> · {fmtTime(v.created_at)}</span>
-          {v.decision ? <Tag style={{ marginLeft: 6 }}>{CANDIDATE_DECISION[v.decision]}</Tag> : null}
+          {v.decision ? <Tag style={{ marginLeft: 6 }}>{(labelOf(CANDIDATE_DECISION, v.decision) ?? '未知')}</Tag> : null}
           <Button size="small" type="link" onClick={() => setViewing(v.version_no)} data-testid={`cand-view-${v.version_no}`}>查看</Button>
         </div>
       ))}

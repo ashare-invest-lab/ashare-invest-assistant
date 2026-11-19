@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useMemo, useState } from 'react';
 import { Button, Tooltip } from 'antd';
 import { BorderOuterOutlined, MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
@@ -60,7 +61,7 @@ export function TerminalPage() {
         <span className="panel-title">交易终端</span>
         {terminal.data ? (
           <span className="muted small">
-            {SESSION[terminal.data.session]} · 交易日 {terminal.data.trade_date} · 服务器时间 {fmtTime(terminal.data.server_time)}{terminal.data.truncated ? " · 列表已截断" : ""}
+            {(labelOf(SESSION, terminal.data.session) ?? '未知')} · 交易日 {terminal.data.trade_date} · 服务器时间 {fmtTime(terminal.data.server_time)}{terminal.data.truncated ? " · 列表已截断" : ""}
           </span>
         ) : null}
         <span className="spacer" />

@@ -57,11 +57,11 @@ export function SecuritySearch() {
         <span className="mono">{h.security_code}</span>
         <span>{h.name}</span>
         {/* v0.2.8：默认结果含 ETF（stock > cdr > etf > index），非股票显示类型徽标 */}
-        {h.type !== 'stock' ? <span className="search-flag type" data-testid={`search-type-${h.security_code}`}>{SECURITY_TYPE[h.type] ?? h.type}</span> : null}
-        {h.risk_flag ? <span className="search-flag" title={SECURITY_RISK_FLAG_TIP[h.risk_flag]} data-testid={`search-risk-${h.security_code}`}>{SECURITY_RISK_FLAG[h.risk_flag] ?? h.risk_flag}</span> : null}
-        {h.listing_status && h.listing_status !== 'listed' ? <span className="search-flag">{LISTING_STATUS[h.listing_status] ?? h.listing_status}</span> : null}
+        {h.type !== 'stock' ? <span className="search-flag type" data-testid={`search-type-${h.security_code}`}>{Object.hasOwn(SECURITY_TYPE, h.type) ? SECURITY_TYPE[h.type] : h.type}</span> : null}
+        {h.risk_flag ? <span className="search-flag" title={Object.hasOwn(SECURITY_RISK_FLAG_TIP, h.risk_flag) ? SECURITY_RISK_FLAG_TIP[h.risk_flag] : undefined} data-testid={`search-risk-${h.security_code}`}>{Object.hasOwn(SECURITY_RISK_FLAG, h.risk_flag) ? SECURITY_RISK_FLAG[h.risk_flag] : h.risk_flag}</span> : null}
+        {h.listing_status && h.listing_status !== 'listed' ? <span className="search-flag">{Object.hasOwn(LISTING_STATUS, h.listing_status) ? LISTING_STATUS[h.listing_status] : h.listing_status}</span> : null}
         {h.quote_missing === true ? <span className="search-flag" title={QUOTE_MISSING_TIP} data-testid={`search-quote-missing-${h.security_code}`}>{QUOTE_MISSING_TEXT}</span> : null}
-        {h.matched_text ? <span className="muted" data-testid={`search-matched-${h.security_code}`}>{MATCH_KIND[h.match_kind] ?? h.match_kind}：{h.matched_text}</span> : null}
+        {h.matched_text ? <span className="muted" data-testid={`search-matched-${h.security_code}`}>{Object.hasOwn(MATCH_KIND, h.match_kind) ? MATCH_KIND[h.match_kind] : h.match_kind}：{h.matched_text}</span> : null}
       </span>
     ),
   }));
