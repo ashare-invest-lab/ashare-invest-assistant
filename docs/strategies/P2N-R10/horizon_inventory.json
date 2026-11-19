@@ -920,6 +920,21 @@
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
     },
     {
+      "path": "docs/strategies/T-R83/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R83 B9–B12 财务输入公开出处审计；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R83/finance_inputs_audit.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R83 B9–B12 财务输入公开出处审计；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R83/fq_options.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R85 F-Q01–F-Q09 备选口径、出处与推荐，已由 T-A197 / #225 裁定采用 Opt-A；非策略身份，不改变运行周期"
+    },
+    {
       "path": "docs/strategies/T-R86/sources_ext/announcement_indexes.csv",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
