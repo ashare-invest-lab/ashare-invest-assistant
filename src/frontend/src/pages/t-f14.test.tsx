@@ -164,6 +164,43 @@ describe('示例接口 /notifications*（§7.8）', () => {
 
 // ---------------------------------------------------------------- 页面
 describe('通知中心页面', () => {
+  it.each(['future_level', '__proto__'])('T-F54r2：通知中心未知严重度 %s 使用中性“未知”标签', async (severity) => {
+    const n = { ...sampleNotification(990), severity };
+    server.use(http.get(`${API}/notifications`, () => HttpResponse.json({ items: [n], next_cursor: null })));
+    const router = renderAt('/notifications');
+    const item = await screen.findByTestId(`nc-item-${n.id}`);
+    expect(item).toHaveTextContent(n.title);
+    const tag = within(item).getByText('未知', { exact: true });
+    expect(tag).toHaveClass('ant-tag');
+    for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
+    expect(tag.style.color).toBe('');
+    expect(tag.style.backgroundColor).toBe('');
+    expect(router.state.errors).toBeNull();
+  });
+
+  it.each([
+    ['future_level', 'system', '系统'],
+    ['__proto__', '__proto__', '未知'],
+  ])('T-F54r2：通知面板和终端以类型显示 %s / %s，严重度未知只回退颜色', async (severity, kind, text) => {
+    const n = { ...sampleNotification(991), severity, kind };
+    server.use(http.get(`${API}/notifications`, () => HttpResponse.json({ items: [n], next_cursor: null })));
+    const router = renderAt('/terminal');
+    const bottom = await screen.findByTestId('bottom-panel');
+    fireEvent.click(within(bottom).getByRole('tab', { name: /^通知/ }));
+    await within(bottom).findByText(n.title);
+    fireEvent.click(screen.getByRole('button', { name: /^通知$/ }));
+    const panel = await screen.findByTestId('notification-panel');
+    await within(panel).findByText(n.title);
+    for (const container of [bottom, panel]) {
+      const tag = within(container).getByText(text, { exact: true });
+      expect(tag).toHaveClass('ant-tag');
+      for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
+      expect(tag.style.color).toBe('');
+      expect(tag.style.backgroundColor).toBe('');
+    }
+    expect(router.state.errors).toBeNull();
+  });
+
   it('列表：严重度、类型、标题、证券与跳转目标；默认全部，?unread=1 只看未读', async () => {
     renderAt('/notifications');
     const first = NOTIFICATIONS[0];

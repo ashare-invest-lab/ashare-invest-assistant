@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip } from 'antd';
+import { Alert, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
@@ -10,6 +10,7 @@ import { newIdempotencyKey } from '../../api/client';
 import { usePortfolio } from '../../api/queries';
 import type { PortfolioPosition } from '../../api/types';
 import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import { CursorPager } from '../../components/CursorPager';
 import { DILUTED_COST_NOTE, IMPORT_STATUS, RECON_KIND, RECON_STATUS, TRADE_SIDE, voidReasonText } from '../../i18n/importLabels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { applyFieldErrors } from '../../lib/formErrors';
@@ -19,6 +20,14 @@ import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 
 type TabKey = 'positions' | 'trades' | 'imports' | 'reconciliation';
 const TABS: TabKey[] = ['positions', 'trades', 'imports', 'reconciliation'];
+
+function ownValue<K extends string, V>(labels: Record<K, V>, key: string): V | undefined {
+  return Object.hasOwn(labels, key) ? labels[key as K] : undefined;
+}
+
+function EnumTag({ value }: { value: { text: string; color: string } | undefined }) {
+  return value ? <Tag color={value.color}>{value.text}</Tag> : <Tag>未知</Tag>;
+}
 
 /** 持仓与账户（T-F02a）：账户选择 / 新建，持仓、成交（手工录入）、导入记录（撤销）、对账（摊薄成本口径）。 */
 export function PortfolioPage() {
@@ -85,7 +94,7 @@ export function PortfolioPage() {
   );
 }
 
-const accountLabel = (a: BrokerAccount) => `${a.alias} · ${a.broker_name}${a.fund_account_masked ? `（${a.fund_account_masked}）` : ''}`;
+const accountLabel = (a: BrokerAccount) => `${a.alias} · ${a.broker_name ?? '—'}${a.fund_account_masked ? `（${a.fund_account_masked}）` : ''}`;
 
 function CreateAccountModal({ open, onClose }: { open: boolean; onClose: (id?: string) => void }) {
   const [form] = Form.useForm<{ alias: string; broker_name: string }>();
@@ -153,7 +162,7 @@ function PositionsTab({ accountId }: { accountId: string }) {
             render: (v: string, r) => (
               <span>
                 {v}
-                {r.security_type !== null && r.security_type !== 'stock' ? <Tag style={{ marginInlineStart: 6 }} data-testid={`type-tag-${r.security_code}`}>{SECURITY_TYPE[r.security_type]}</Tag> : null}
+                {r.security_type !== null && r.security_type !== 'stock' ? <Tag style={{ marginInlineStart: 6 }} data-testid={`type-tag-${r.security_code}`}>{ownValue(SECURITY_TYPE, r.security_type) ?? '未知'}</Tag> : null}
                 {est(r) ? <Tag color="default" style={{ marginInlineStart: 6 }} data-testid={`est-label-${r.security_code}`}>{estLabel(r)}</Tag> : null}
               </span>
             ),
@@ -211,7 +220,16 @@ const TRADE_FIELDS = ['trade_date', 'trade_time', 'security_code', 'side', 'qty'
 
 
 function TradesTab({ accountId }: { accountId: string }) {
-  const q = useTrades(accountId);
+  const [code, setCode] = useState('');
+  const [dates, setDates] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  // 延续原成交页：作废后仍能看见记录及原因。
+  const [includeVoided, setIncludeVoided] = useState(true);
+  const q = useTrades(accountId, {
+    security_code: code.trim().toUpperCase() || undefined,
+    from: dates?.[0]?.format('YYYY-MM-DD'),
+    to: dates?.[1]?.format('YYYY-MM-DD'),
+    include_voided: includeVoided,
+  });
   const create = useCreateTrade();
   const voidTrade = useVoidTrade();
   const [open, setOpen] = useState(false);
@@ -254,16 +272,21 @@ function TradesTab({ accountId }: { accountId: string }) {
         <Button type="primary" size="small" onClick={() => openCreate(null)}>手工录入成交</Button>
         <span className="muted">原记录不可修改；录错时请录入一条更正记录或作废该条，导入的记录也可撤销整批。</span>
       </Space>
-      {q.isError ? <ErrorBox error={q.error} /> : null}
+      <Space wrap className="kv-line">
+        <Input.Search aria-label="证券代码筛选" placeholder="证券代码，如 600000.SH" allowClear style={{ width: 240 }} onSearch={setCode} />
+        <DatePicker.RangePicker aria-label="成交日期范围" placeholder={['开始日期', '结束日期']} value={dates} onChange={setDates} allowEmpty={[true, true]} />
+        <Space><Switch aria-label="含已作废" checked={includeVoided} onChange={setIncludeVoided} />含已作废</Space>
+      </Space>
+      {q.isError && !q.isFetchNextPageError ? <ErrorBox error={q.error} /> : null}
       <Table<Trade>
-        size="small" rowKey="id" loading={q.isPending} dataSource={q.data?.items ?? []} pagination={{ pageSize: 20, hideOnSinglePage: true }}
+        size="small" rowKey="id" loading={q.isPending} dataSource={q.items} pagination={false}
         rowClassName={(r) => (r.voided ? 'row-voided' : '')}
         locale={{ emptyText: '暂无成交' }}
         columns={[
           { title: TERM.tradeDate, dataIndex: 'trade_date', render: (v: string, r) => <span className="mono">{v} {r.trade_time ?? ''}</span> },
           { title: '代码', dataIndex: 'security_code', render: (v: string) => <span className="mono">{v}</span> },
           { title: '名称', dataIndex: 'name' },
-          { title: '方向', dataIndex: 'side', render: (s: Trade['side']) => <Tag color={TRADE_SIDE[s].color}>{TRADE_SIDE[s].text}</Tag> },
+          { title: '方向', dataIndex: 'side', render: (s: Trade['side']) => <EnumTag value={ownValue(TRADE_SIDE, s) ?? { text: '未知', color: 'default' }} /> },
           { title: '数量', dataIndex: 'qty', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 0)}</span> },
           { title: '价格', dataIndex: 'price', align: 'right', render: (v: string) => <span className="mono">{fmtNum(v, 3)}</span> },
           { title: '金额', dataIndex: 'amount', align: 'right', render: (v: string) => <span className="mono">{fmtAmount(v)}</span> },
@@ -272,7 +295,7 @@ function TradesTab({ accountId }: { accountId: string }) {
             title: '来源', dataIndex: 'source',
             render: (s: Trade['source'], r) => (
               <Space size={4}>
-                <Tag>{s === 'import' ? '导入' : '手工'}</Tag>
+                <Tag>{s === 'import' ? '导入' : s === 'manual' ? '手工' : '未知'}</Tag>
                 {r.voided ? <Tooltip title={voidReasonText(r)}><Tag color="purple" data-testid={`voided-${r.id}`}>已作废</Tag></Tooltip> : null}
                 {r.corrects_trade_id ? <Tag>更正记录</Tag> : null}
               </Space>
@@ -289,6 +312,7 @@ function TradesTab({ accountId }: { accountId: string }) {
           },
         ]}
       />
+      <CursorPager query={q} loaded={q.items.length} testId="trades-pager" />
       <Modal
         open={!!voiding} title="作废这条成交？" okText="作废" okButtonProps={{ danger: true, disabled: !voidReason.trim(), loading: voidTrade.isPending }}
         onCancel={() => setVoiding(null)} destroyOnHidden
@@ -333,16 +357,16 @@ function ImportsTab({ accountId }: { accountId: string }) {
   const [dlErr, setDlErr] = useState<unknown>(null);
   return (
     <div data-testid="imports-tab">
-      {q.isError ? <ErrorBox error={q.error} /> : null}
+      {q.isError && !q.isFetchNextPageError ? <ErrorBox error={q.error} /> : null}
       {revert.isError ? <ErrorBox error={revert.error} prefix="撤销失败" /> : null}
       {dlErr ? <ErrorBox error={dlErr} prefix="下载失败" /> : null}
       <Table<ImportBatchSummary>
-        size="small" rowKey="batch_id" loading={q.isPending} dataSource={q.data?.items ?? []} pagination={false}
+        size="small" rowKey="batch_id" loading={q.isPending} dataSource={q.items} pagination={false}
         locale={{ emptyText: '暂无导入记录' }}
         columns={[
           { title: '上传时间', dataIndex: 'created_at', render: (v: string) => <span className="mono">{fmtTime(v)}</span> },
-          { title: '类型', dataIndex: 'kind', render: (k: ImportBatchSummary['kind']) => (k === 'trades' ? '交割单 / 成交' : '持仓快照') },
-          { title: '状态', dataIndex: 'status', render: (s: ImportBatchSummary['status']) => <Tag color={IMPORT_STATUS[s].color}>{IMPORT_STATUS[s].text}</Tag> },
+          { title: '类型', dataIndex: 'kind', render: (k: ImportBatchSummary['kind']) => (k === 'trades' ? '交割单 / 成交' : k === 'positions' ? '持仓快照' : '未知') },
+          { title: '状态', dataIndex: 'status', render: (s: ImportBatchSummary['status']) => <EnumTag value={ownValue(IMPORT_STATUS, s)} /> },
           {
             title: '行数（正常 / 警告 / 错误 / 跳过）', key: 'stats',
             render: (_v, b) => <span className="mono">{b.stats.rows}（{b.stats.ok} / {b.stats.warning} / {b.stats.error} / {b.stats.skipped}）</span>,
@@ -366,6 +390,7 @@ function ImportsTab({ accountId }: { accountId: string }) {
           },
         ]}
       />
+      <CursorPager query={q} loaded={q.items.length} testId="imports-pager" />
     </div>
   );
 }
@@ -376,11 +401,10 @@ function ReconTab({ accountId, onGo }: { accountId: string; onGo: (tab: TabKey) 
   if (q.isPending) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} />;
   const r = q.data;
-  const st = RECON_STATUS[r.status];
   return (
     <div data-testid="recon-tab">
       <Space className="kv-line">
-        对账结果 <Tag color={st.color}>{st.text}</Tag>
+        对账结果 <EnumTag value={ownValue(RECON_STATUS, r.status)} />
         {r.as_of ? <span className="muted">券商数据截至 <span className="mono">{fmtTime(r.as_of)}</span></span> : null}
       </Space>
       <Alert type="info" showIcon title="成本口径" description={DILUTED_COST_NOTE} style={{ marginBottom: 12 }} data-testid="diluted-cost-note" />
@@ -393,17 +417,18 @@ function ReconTab({ accountId, onGo }: { accountId: string; onGo: (tab: TabKey) 
           size="small" rowKey={(x) => `${x.kind}-${x.security_code ?? 'cash'}`} pagination={false} dataSource={r.items}
           locale={{ emptyText: '没有差异' }}
           columns={[
-            { title: '差异', dataIndex: 'kind', render: (k: ReconciliationItem['kind'], x) => <Space size={4}><Tag color={RECON_KIND[k].color}>{RECON_KIND[k].text}</Tag>{x.important ? <Tag color="red">重要</Tag> : null}</Space> },
+            { title: '差异', dataIndex: 'kind', render: (k: ReconciliationItem['kind'], x) => <Space size={4}><EnumTag value={ownValue(RECON_KIND, k)} />{x.important ? <Tag color="red">重要</Tag> : null}</Space> },
             { title: '证券', key: 'sec', render: (_v, x) => (x.security_code ? <span><span className="mono">{x.security_code}</span> {x.name}</span> : <span className="muted">资金</span>) },
             { title: '我方', dataIndex: 'ours', align: 'right', render: (v: string | null) => <span className="mono">{v ?? '—'}</span> },
             { title: '券商', dataIndex: 'broker', align: 'right', render: (v: string | null) => <span className="mono">{v ?? '—'}</span> },
             { title: '差额', dataIndex: 'diff', align: 'right', render: (v: string | null) => <span className="mono">{v ?? '—'}</span> },
             { title: '说明', dataIndex: 'note', render: (v: string) => v || '—' },
-            { title: '可能原因（假设）', key: 'cause', render: (_v, x) => <span className="muted">{RECON_KIND[x.kind].cause}</span> },
+            { title: '可能原因（假设）', key: 'cause', render: (_v, x) => <span className="muted">{ownValue(RECON_KIND, x.kind)?.cause ?? '未知'}</span> },
             {
               title: '数据整理', key: 'act',
               render: (_v, x) => {
-                const k = RECON_KIND[x.kind];
+                const k = ownValue(RECON_KIND, x.kind);
+                if (!k) return <span className="muted">未知</span>;
                 return <Button size="small" type="link" onClick={() => (k.actionTo === 'import' ? navigate(`/portfolio/import?account_id=${encodeURIComponent(accountId ?? '')}`) : onGo('trades'))}>{k.action}</Button>;
               },
             },
