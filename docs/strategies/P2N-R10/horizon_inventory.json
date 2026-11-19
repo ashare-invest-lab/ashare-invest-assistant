@@ -960,6 +960,16 @@
       "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
     },
     {
+      "path": "docs/strategies/T-R78/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R78/horizon_inputs_spec.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
       "path": "docs/strategies/T-R79/README.md",
       "scope_role": "research_support_not_strategy",
       "note": "T-R79 draft benchmark specification; no strategy identity or runtime change"
