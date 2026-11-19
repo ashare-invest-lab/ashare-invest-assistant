@@ -11,10 +11,10 @@ import { isNotApplicable } from '../lib/dataGaps';
 
 /** 策略 + 动作徽标。措辞为“规则信号/候选”，不是投资建议 */
 export function ActionBadge({ action, strategyName, tLeg, lifecycle, size = 'sm' }: { action: Action; strategyName?: string; tLeg?: TLeg | null; lifecycle?: Lifecycle; size?: 'sm' | 'lg' }) {
-  const label = ACTION_SHORT[action] + (tLeg ? (tLeg === 'sell_first' ? '·先卖' : '·先买') : '');
+  const label = (Object.hasOwn(ACTION_SHORT, action) ? ACTION_SHORT[action] : '未知动作') + (tLeg ? (tLeg === 'sell_first' ? '·先卖' : '·先买') : '');
   return (
-    <Tooltip title={`${strategyName ? strategyName + '：' : ''}${ACTION_FULL[action]}`}>
-      <span className={`action-badge ${size}`} style={{ borderColor: ACTION_COLOR[action], color: ACTION_COLOR[action] }}>
+    <Tooltip title={`${strategyName ? strategyName + '：' : ''}${Object.hasOwn(ACTION_FULL, action) ? ACTION_FULL[action] : '未知动作'}`}>
+      <span className={`action-badge ${size}`} style={{ borderColor: Object.hasOwn(ACTION_COLOR, action) ? ACTION_COLOR[action] : undefined, color: Object.hasOwn(ACTION_COLOR, action) ? ACTION_COLOR[action] : undefined }}>
         {strategyName && size === 'sm' ? <i className="sk">{strategyName.slice(0, 2)}</i> : null}
         {label}{lifecycle === 'simulating' ? <b className="small"> · 模拟中</b> : null}
       </span>
@@ -23,7 +23,7 @@ export function ActionBadge({ action, strategyName, tLeg, lifecycle, size = 'sm'
 }
 
 export function ConsensusBadge({ status, actions }: { status: ConsensusStatus; actions?: Partial<Record<Action, number>> }) {
-  const parts = Object.entries(actions ?? {}).map(([a, n]) => `${ACTION_SHORT[a as Action]} ${n}`).join(' / ');
+  const parts = Object.entries(actions ?? {}).map(([a, n]) => `${Object.hasOwn(ACTION_SHORT, a) ? ACTION_SHORT[a as Action] : '未知动作'} ${n}`).join(' / ');
   if (status === 'divergent')
     return (
       <Tooltip title={`存在分歧${parts ? '：' + parts : ''}（各策略并列，不合并为单一结论）`}>
@@ -37,7 +37,7 @@ export function ConsensusBadge({ status, actions }: { status: ConsensusStatus; a
 
 /** 数据状态的原因文字：数据时间 + 每条缺口（GAP_REASON + message） */
 function dataStatusLines(asOf?: string | null, gaps?: Gap[]): string[] {
-  return [asOf ? `数据时间 ${fmtTime(asOf)}` : null, ...(gaps ?? []).map((g) => `${g.key}：${GAP_REASON[g.reason]} — ${g.message}`)]
+  return [asOf ? `数据时间 ${fmtTime(asOf)}` : null, ...(gaps ?? []).map((g) => `${g.key}：${Object.hasOwn(GAP_REASON, g.reason) ? GAP_REASON[g.reason] : '未知原因'} — ${g.message}`)]
     .filter((x): x is string => !!x);
 }
 
@@ -48,7 +48,7 @@ function dataStatusLines(asOf?: string | null, gaps?: Gap[]): string[] {
 const NOT_APPLICABLE_TAG = { text: '不适用', color: 'var(--text-3, #8c8c8c)' };
 
 export function DataStatusTag({ status, asOf, gaps }: { status: DataStatus; asOf?: string | null; gaps?: Gap[] }) {
-  const d = isNotApplicable(gaps) ? NOT_APPLICABLE_TAG : DATA_STATUS[status];
+  const d = isNotApplicable(gaps) ? NOT_APPLICABLE_TAG : Object.hasOwn(DATA_STATUS, status) ? DATA_STATUS[status] : { text: '未知状态', color: undefined };
   const lines = dataStatusLines(asOf, gaps);
   const body = (
     <>
@@ -111,7 +111,7 @@ export function GapNote({ status, gaps, asOf, testId = 'gap-note' }: { status: D
       {gaps.length ? '：' : null}
       {gaps.map((g, i) => (
         <span key={`${g.key}-${i}`} data-reason={g.reason}>
-          {i ? '；' : ''}{GAP_REASON[g.reason]}（{g.message}）
+          {i ? '；' : ''}{Object.hasOwn(GAP_REASON, g.reason) ? GAP_REASON[g.reason] : '未知原因'}（{g.message}）
         </span>
       ))}
       {licence ? <> <Link to="/settings/data-licence" data-testid="gap-licence-link">去设置数据证书 ›</Link></> : null}

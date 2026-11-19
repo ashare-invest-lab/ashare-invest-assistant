@@ -5,18 +5,15 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
-from contextlib import contextmanager
-import hashlib
 import importlib.util
-import io
 import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
-import tarfile
 import uuid
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -735,54 +732,43 @@ def test_pn06_entry_history_supervisor(tmp_path, monkeypatch):
         module.run_supervised(**args)
     assert module.main(argv) == 1
 
-def test_pn06_entry_day_runner_ps1(tmp_path):
-    # 原脚本、临时包与docker替身；只核默认/显式Before，不接触真实库。
-    members = {'day_2030.csv': f'code,trade_date\n{CODE_A},{D0}\n', 'day_2031.csv': f'code,trade_date\n{CODE_A},{D2}\n', 'tb143_load_day.sql': (BACKEND / 'probes/tb143_load_day.sql').read_text(encoding='utf-8')}
-    members['SUMS'] = ''.join((hashlib.sha256(v.encode()).hexdigest() + '  ' + k + '\n' for k, v in members.items()))
-    bundles = []
-    for index in range(5):
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as bundle:
-            if index == 0:
-                for name, text in members.items():
-                    raw = text.encode(); info = tarfile.TarInfo(name); info.size = len(raw); bundle.addfile(info, io.BytesIO(raw))
-        data = buffer.getvalue(); bundles.append(data); (tmp_path / f'b{index + 1}.tgz').write_bytes(data)
-    combined = b''.join(bundles); (tmp_path / 'all.bin').write_bytes(combined); empty = hashlib.sha256(b'').hexdigest(); (tmp_path / 'PARTS').write_text(''.join(f'{empty}  p{n:02}\n' for n in range(57)))
-    for n in range(57):
-        (tmp_path / f"p{n:02}").write_bytes(b"")
-    (tmp_path / 'BUNDLES').write_text(''.join((f'{hashlib.sha256(x).hexdigest()}  b{n}.tgz\n' for n, x in enumerate(bundles, 1))))
-    fake = tmp_path / "docker.py"
-    fake.write_text(
-        "import json,os,sys\nopen(os.environ['PN06_LOG'],'a').write(json.dumps(sys.argv[1:])+'\\n')\n"
-        "if 'find' in sys.argv: print('./day_2030.csv\\n./day_2031.csv')\n"
-        "if 'psql' in sys.argv:\n"
-        "    print('1 | 1 | 0')\n"
-        "    print('blocked_bj_unconfirmed | 0')\n",
-        encoding="utf-8",
-    )
+@pytest.mark.parametrize("before", [None, str(D2)], ids=["default", "explicit"])
+def test_pn06_entry_day_runner_ps1(tmp_path, before):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    assert shell is not None, "需要 PowerShell 验证旧入口拒绝行为"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    archive = artifacts / "all.bin"
+    original = b"synthetic archive\n"
+    archive.write_bytes(original)
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    if os.name == 'nt':
-        (bindir / 'docker.cmd').write_text(f'@"{sys.executable}" "{fake}" %*\n', encoding='utf-8')
-    else:
-        command = bindir / 'docker'
-        command.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake}" "$@"\n')
-        command.chmod(0o755)
-    log = tmp_path / "calls.jsonl"
-    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ['PATH'], PN06_LOG=str(log))
-    shell = shutil.which("pwsh") or shutil.which("powershell")
-    for before in (None, str(D2)):
-        case = tmp_path / ('default' if before is None else 'explicit'); case.mkdir(); names = ['all.bin', 'PARTS', 'BUNDLES']; names += [f'b{n}.tgz' for n in range(1, 6)] + [f'p{n:02}' for n in range(57)]
-        for name in names:
-            shutil.copy2(tmp_path / name, case / name)
-        argv = [shell, '-NoProfile', '-File', str(BACKEND / 'probes/tb143_day_load_runner.ps1')]
-        argv += ["-Dir", str(case), "-AllSha", hashlib.sha256(combined).hexdigest()]
-        argv += ['-BundleSizes', ','.join(str(len(x)) for x in bundles), '-Lock', str(case / 'lock')]
-        argv += ["-Log", str(case / "run.log"), "-PauseSeconds", "0"]
-        if before:
-            argv += ["-Before", before]
-        done = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=30, env=env); assert done.returncode == 0, done.stdout + done.stderr
-    calls = [json.loads(x) for x in log.read_text().splitlines()]; psql = [x for x in calls if 'psql' in x]; assert any('before=2023-11-13' in a for x in psql for a in x); assert any('before=' + str(D2) in a for x in psql for a in x)
+    calls = tmp_path / "external-calls"
+    # 优先命中本地替身，确保旧入口回归时也不会运行真实 Docker 或 psql。
+    for name in ("docker", "psql"):
+        if os.name == "nt":
+            (bindir / f"{name}.cmd").write_text(
+                f'@echo {name}>>"%PN06_CALLS%"\n@exit /b 1\n', encoding="utf-8"
+            )
+        else:
+            command = bindir / name
+            command.write_text(f'#!/bin/sh\necho {name} >> "$PN06_CALLS"\nexit 1\n')
+            command.chmod(0o755)
+    env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ["PATH"], PN06_CALLS=str(calls))
+    lock, log = tmp_path / "lock", tmp_path / "run.log"
+    argv = [shell, "-NoProfile", "-File", str(BACKEND / "probes/tb143_day_load_runner.ps1"),
+            "-Dir", str(artifacts), "-AllSha", "a" * 64, "-BundleSizes", "1",
+            "-Lock", str(lock), "-Log", str(log), "-PauseSeconds", "0"]
+    if before is not None:
+        argv += ["-Before", before]
+    done = subprocess.run(argv, check=False, capture_output=True, text=True, timeout=30, env=env)
+    output = done.stdout + done.stderr
+    assert done.returncode == 1, output
+    assert "legacy tb143 load path is disabled" in output
+    assert "app.cli.tb143_day_load" in output
+    assert not calls.exists() and not lock.exists() and not log.exists()
+    assert list(artifacts.iterdir()) == [archive]
+    assert archive.read_bytes() == original
 
 def _probe_schema(conn):
     schema = "pn06_" + uuid.uuid4().hex
@@ -804,18 +790,23 @@ def _run_sql(conn, schema, name, before="2025-01-01"):
     path = ROOT / "tests/backend/unit/test_tb143_multi_source_pg.py"; spec = importlib.util.spec_from_file_location("pn06_tb143_sql", path)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     module._load(conn, schema, meta=name == "tb143_load_meta.sql", before=before)
-    counts = conn.execute("SELECT * FROM load_counts").fetchall()
+    if name == "tb143_load_day.sql":
+        result = conn.execute("SELECT * FROM pg_temp.day_stage").fetchall()
+    else:
+        result = conn.execute("SELECT * FROM load_counts").fetchall()
     conn.execute("DROP VIEW IF EXISTS catalog_effective, mairui_count")
     conn.execute('DROP TABLE IF EXISTS gbbq_stage, catalog_stage, day_stage, load_params, load_counts, mairui_before, mairui_after')
-    return counts
+    return result
 
 def test_pn06_entry_load_day_sql(pg_conn):
     schema = _probe_schema(pg_conn)
     calendars = pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone()
-    # T-B163 在 candidates/inserted/skipped 后新增 blocked_bj 计数。
-    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == [(1, 1, 0, 0)]
-    source = pg_conn.execute(f'SELECT source FROM "{schema}".daily_bars').fetchone()
-    assert source == ("tdx_local",)
+    # SQL 仅填充临时表，目标日线写入由 Python 公共 writer 负责。
+    price = Decimal("12.34")
+    assert _run_sql(pg_conn, schema, "tb143_load_day.sql") == [
+        ("600999.SH", dt.date(2024, 1, 2), "none", price, price, price, price, 700, 8638)
+    ]
+    assert pg_conn.execute(f'SELECT count(*) FROM "{schema}".daily_bars').fetchone() == (0,)
     with (
         pytest.raises(
             psycopg.errors.RaiseException, match="日线日期必须全部小于 before"
@@ -823,7 +814,8 @@ def test_pn06_entry_load_day_sql(pg_conn):
         pg_conn.transaction(),
     ):
         _run_sql(pg_conn, schema, "tb143_load_day.sql", "2024-01-02")
-    after = pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone(); assert after == calendars
+    assert pg_conn.execute(f'SELECT count(*) FROM "{schema}".daily_bars').fetchone() == (0,)
+    assert pg_conn.execute('SELECT count(*) FROM market.trading_calendar').fetchone() == calendars
 
 def test_pn06_entry_load_meta_sql(pg_conn):
     schema = _probe_schema(pg_conn)
