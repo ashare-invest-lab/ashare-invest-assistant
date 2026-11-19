@@ -336,6 +336,41 @@ describe('枚举（验收 8；/meta/enums 由后端提供，mock 不拦截）', 
 });
 
 describe('计划页与提醒页（UI）', () => {
+  it.each(['future_level', '__proto__'])('T-F54r2：提醒列表保留未知严重度 %s 的条目与服务端顺序', async (severity) => {
+    const base = (await getJ<Alert>(`/alerts/${ALERT_PLAN_COND}`)).body;
+    const items = [
+      { ...base, id: uid(7992), title: '未知严重度提醒', severity },
+      { ...base, id: uid(7991), title: '已知严重度提醒', severity: 'important' },
+    ];
+    server.use(http.get(`${API}/alerts`, () => HttpResponse.json({ items, next_cursor: null })));
+    const router = renderAt('/alerts');
+    const link = await screen.findByTestId(`alert-link-${items[0].id}`);
+    const row = link.closest('tr')!;
+    expect(row).toHaveTextContent(items[0].title);
+    const tag = within(row).getByText('未知', { exact: true });
+    expect(tag).toHaveClass('ant-tag');
+    for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
+    expect(tag.style.color).toBe('');
+    expect(tag.style.backgroundColor).toBe('');
+    expect(screen.getAllByTestId(/^alert-link-/).map((a) => a.textContent)).toEqual(items.map((a) => a.title));
+    expect(router.state.errors).toBeNull();
+  });
+
+  it.each(['future_level', '__proto__'])('T-F54r2：提醒详情未知严重度 %s 使用中性“未知”标签', async (severity) => {
+    const base = (await getJ<Alert>(`/alerts/${ALERT_PLAN_COND}`)).body;
+    server.use(http.get(`${API}/alerts/${base.id}`, () => HttpResponse.json({ ...base, severity })));
+    const router = renderAt(`/alerts/${base.id}`);
+    await screen.findByTestId('alert-detail-status');
+    const detail = screen.getByTestId('alert-detail');
+    expect(detail).toHaveTextContent(base.title);
+    const tag = within(detail).getByText('未知', { exact: true });
+    expect(tag).toHaveClass('ant-tag');
+    for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
+    expect(tag.style.color).toBe('');
+    expect(tag.style.backgroundColor).toBe('');
+    expect(router.state.errors).toBeNull();
+  });
+
   it('/plans 列表 → 详情：待处理条件、当前版本、版本历史；关闭后显示终态说明', async () => {
     renderAt('/plans');
     fireEvent.click(await screen.findByTestId(`plan-link-${PLAN_TRIGGERED}`));

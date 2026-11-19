@@ -100,7 +100,7 @@ instrument（每个 `daily_universe` 标的一个，除非被 omitted）：
 | source 为空的旧式行 | 不入选，视同不存在 | 可能触发 `daily_bars_missing:<code>` | — |
 | 日 K 同键冲突 | 写；用库里原有的行（单 A 不覆盖） | 从运行记录带出 `daily_bar_conflict:<code>:<date>` | 照出 |
 
-`suspended` 只用 `prepare` 的 gaps 字符串空间，`schemas/enums.GapReason` 不增值（回答 §7 ⑦ 留给 B 的问题）。日报中的 `pipeline.*` 缺口 reason 仍为 no_source。
+A2b 将 `suspended` 加入公共 `gap_reason`（[API 契约 §3、§7.3](../api-contract.md)）。新构建日报只对报告交易日、本人可见证书下且报告知识截止内的合格停牌证据展示 `suspended`。该说明不计入缺数故障，已存档日报保持原样。日报中原有的 `pipeline.*` 缺口 reason 仍为 `no_source`。
 
 ## 4. 解闸条件与「不误报」
 

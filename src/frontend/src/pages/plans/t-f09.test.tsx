@@ -1,3 +1,6 @@
+import { apiFetch } from '../../test/apiFetch';
+import { uid } from '../../mocks/fixtures';
+import type { Plan } from '../../api/planAlertTypes';
 /**
  * F-09：/plans 与 /plan-drafts 两页的空态与骨架核对（对照契约 §7.7 / §7.7B）。
  *
@@ -81,4 +84,15 @@ describe('③ 有数据时的骨架（对照契约字段）', () => {
     const links = screen.queryAllByTestId(/^plan-link-/);
     expect(links.length).toBeGreaterThanOrEqual(0);
   });
+});
+
+
+it.each(['future_status', '__proto__', 'constructor'])('T-F57 计划详情：状态 %s 显示未知中性色', async (status) => {
+  const plan = await (await apiFetch(`${API}/plans/${uid(7301)}`)).json() as Plan;
+  server.use(http.get(`${API}/plans/:id`, () => HttpResponse.json({ ...plan, status })));
+  renderAt(`/plans/${plan.id}`);
+  const tag = await screen.findByTestId('plan-detail-status');
+  expect(tag).toHaveTextContent(/^未知$/);
+  expect(tag.className).not.toMatch(/ant-tag-(?:blue|red|orange|green|gold|cyan|purple)/);
+  expect(tag).not.toHaveAttribute('style');
 });

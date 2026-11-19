@@ -1,5 +1,5 @@
 import { useId, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
-import { Empty, Tag, Tooltip } from 'antd';
+import { Empty, Tag, Tooltip, type TagProps } from 'antd';
 import { Link } from 'react-router';
 import { ApiError } from '../api/client';
 import { BOOTSTRAP_REQUIRED_ISSUE, LICENCE_ERROR_CODES, ROUTE_PENDING_TEXT, errorText, isBootstrapRequired, isRoutePending, isStockSubPending, isSuperseded } from '../api/errorPolicy';
@@ -8,13 +8,20 @@ import type { Confidence, Gap } from '../api/types';
 import { ACTION_COLOR, ACTION_FULL, ACTION_SHORT, CONF_LEVEL, DATA_STATUS, GAP_REASON } from '../i18n/labels';
 import { fmtTime } from '../lib/format';
 import { isNotApplicable } from '../lib/dataGaps';
+import { ownValue, UNKNOWN_ENUM } from '../lib/enumValue';
+
+export function EnumTag({ map, value, prefix, ...props }: { map: Readonly<Record<string, { text: ReactNode; color?: string }>>; value: string; prefix?: string } & Omit<TagProps, 'color'>) {
+  const item = ownValue(map, value, UNKNOWN_ENUM);
+  return <Tag {...props} color={item.color}>{prefix}{item.text}</Tag>;
+}
 
 /** 策略 + 动作徽标。措辞为“规则信号/候选”，不是投资建议 */
 export function ActionBadge({ action, strategyName, tLeg, lifecycle, size = 'sm' }: { action: Action; strategyName?: string; tLeg?: TLeg | null; lifecycle?: Lifecycle; size?: 'sm' | 'lg' }) {
-  const label = ACTION_SHORT[action] + (tLeg ? (tLeg === 'sell_first' ? '·先卖' : '·先买') : '');
+  const label = ownValue(ACTION_SHORT, action, '未知') + (tLeg ? (tLeg === 'sell_first' ? '·先卖' : '·先买') : '');
+  const color = ownValue(ACTION_COLOR, action, undefined);
   return (
-    <Tooltip title={`${strategyName ? strategyName + '：' : ''}${ACTION_FULL[action]}`}>
-      <span className={`action-badge ${size}`} style={{ borderColor: ACTION_COLOR[action], color: ACTION_COLOR[action] }}>
+    <Tooltip title={`${strategyName ? strategyName + '：' : ''}${ownValue(ACTION_FULL, action, '未知')}`}>
+      <span className={`action-badge ${size}`} style={{ borderColor: color, color }}>
         {strategyName && size === 'sm' ? <i className="sk">{strategyName.slice(0, 2)}</i> : null}
         {label}{lifecycle === 'simulating' ? <b className="small"> · 模拟中</b> : null}
       </span>
@@ -23,7 +30,7 @@ export function ActionBadge({ action, strategyName, tLeg, lifecycle, size = 'sm'
 }
 
 export function ConsensusBadge({ status, actions }: { status: ConsensusStatus; actions?: Partial<Record<Action, number>> }) {
-  const parts = Object.entries(actions ?? {}).map(([a, n]) => `${ACTION_SHORT[a as Action]} ${n}`).join(' / ');
+  const parts = Object.entries(actions ?? {}).map(([a, n]) => `${ownValue(ACTION_SHORT, a, '未知')} ${n}`).join(' / ');
   if (status === 'divergent')
     return (
       <Tooltip title={`存在分歧${parts ? '：' + parts : ''}（各策略并列，不合并为单一结论）`}>
@@ -37,7 +44,7 @@ export function ConsensusBadge({ status, actions }: { status: ConsensusStatus; a
 
 /** 数据状态的原因文字：数据时间 + 每条缺口（GAP_REASON + message） */
 function dataStatusLines(asOf?: string | null, gaps?: Gap[]): string[] {
-  return [asOf ? `数据时间 ${fmtTime(asOf)}` : null, ...(gaps ?? []).map((g) => `${g.key}：${GAP_REASON[g.reason]} — ${g.message}`)]
+  return [asOf ? `数据时间 ${fmtTime(asOf)}` : null, ...(gaps ?? []).map((g) => `${g.key}：${ownValue(GAP_REASON, g.reason, '未知')} — ${g.message}`)]
     .filter((x): x is string => !!x);
 }
 
@@ -48,7 +55,7 @@ function dataStatusLines(asOf?: string | null, gaps?: Gap[]): string[] {
 const NOT_APPLICABLE_TAG = { text: '不适用', color: 'var(--text-3, #8c8c8c)' };
 
 export function DataStatusTag({ status, asOf, gaps }: { status: DataStatus; asOf?: string | null; gaps?: Gap[] }) {
-  const d = isNotApplicable(gaps) ? NOT_APPLICABLE_TAG : DATA_STATUS[status];
+  const d = isNotApplicable(gaps) ? NOT_APPLICABLE_TAG : ownValue(DATA_STATUS, status, UNKNOWN_ENUM);
   const lines = dataStatusLines(asOf, gaps);
   const body = (
     <>
@@ -104,14 +111,16 @@ export function GapNote({ status, gaps, asOf, testId = 'gap-note' }: { status: D
     );
   }
   const licence = gaps.some((g) => g.reason === 'data_licence_unavailable');
-  const head = status === 'unavailable' ? '数据暂不可用' : status === 'stale' ? `数据已过期${asOf ? `（截至 ${fmtTime(asOf)}）` : ''}` : status === 'partial' ? '部分数据缺失' : '数据提示';
+  const onlySuspended = gaps.length > 0 && gaps.every((g) => g.reason === 'suspended');
+  const head = onlySuspended && status !== 'stale' ? '停牌说明'
+    : status === 'unavailable' ? '数据暂不可用' : status === 'stale' ? `数据已过期${asOf ? `（截至 ${fmtTime(asOf)}）` : ''}` : status === 'partial' ? '部分数据缺失' : '数据提示';
   return (
     <div className="gap-note small" role="note" aria-label="数据状态说明" data-testid={testId} data-status={status}>
       <b>{head}</b>
       {gaps.length ? '：' : null}
       {gaps.map((g, i) => (
         <span key={`${g.key}-${i}`} data-reason={g.reason}>
-          {i ? '；' : ''}{GAP_REASON[g.reason]}（{g.message}）
+          {i ? '；' : ''}{ownValue(GAP_REASON, g.reason, '未知')}（{g.message}）
         </span>
       ))}
       {licence ? <> <Link to="/settings/data-licence" data-testid="gap-licence-link">去设置数据证书 ›</Link></> : null}
@@ -120,13 +129,19 @@ export function GapNote({ status, gaps, asOf, testId = 'gap-note' }: { status: D
 }
 
 export function ConfidenceTag({ c }: { c: Confidence }) {
-  const l = CONF_LEVEL[c.level];
   return (
     <span className="conf-tag">
-      <Tag color={l.color} variant="outlined" style={{ marginInlineEnd: 4 }}>置信度 {l.text}</Tag>
+      <EnumTag map={CONF_LEVEL} value={c.level} prefix="置信度 " variant="outlined" style={{ marginInlineEnd: 4 }} />
       <span className="num">{c.value.toFixed(2)}</span>
     </span>
   );
+}
+
+/** 成功响应为空时的统一说明；不复用错误或加载态，也不把无记录解释为零风险。 */
+export function EmptyState({ title, description }: { title: string; description: string }) {
+  return <div className="page-empty-state" role="status" aria-label={title} data-state="empty">
+    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<><strong>{title}</strong><p>{description}</p></>} />
+  </div>;
 }
 
 export function Loading({ text = '加载中…' }: { text?: string }) {
@@ -139,7 +154,7 @@ export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; p
   if (isSuperseded(error)) {
     const next = (error as ApiError).details?.superseded_by as string;
     return (
-      <div className="error-box" role="alert" data-code="SUPERSEDED">
+      <div className="error-box" role="alert" data-state="error" data-code="SUPERSEDED">
         该证券代码已停用，请改用新代码 <span className="mono">{next}</span>
       </div>
     );
@@ -151,7 +166,7 @@ export function ErrorBox({ error, prefix = '加载失败' }: { error: unknown; p
   const bootstrap = isBootstrapRequired(error);
   const fresh = e?.code === 'FRESH_DATA_REQUIRED';
   return (
-    <div className={`error-box${fresh ? ' refreshing' : ''}`} role="alert" data-code={bootstrap ? BOOTSTRAP_REQUIRED_ISSUE : e?.code}>
+    <div className={`error-box${fresh ? ' refreshing' : ''}`} role="alert" data-state="error" data-code={bootstrap ? BOOTSTRAP_REQUIRED_ISSUE : e?.code}>
       {bootstrap
         ? '证券主数据尚未完成首次导入，暂时查不到证券资料；请联系管理员完成主数据导入后再试'
         : <>{fresh ? '' : `${prefix}：`}{errorText(error)}</>}

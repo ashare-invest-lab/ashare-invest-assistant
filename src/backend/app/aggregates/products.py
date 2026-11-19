@@ -7,14 +7,17 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import Connection, Row, func, select
+from pydantic import ValidationError
+from sqlalchemy import Connection, Row, case, func, select
 
 from app.aggregates import models as m
 from app.db.tables.realtime import suggestions
 from app.db.tables.research import action_plans, alerts
 from app.db.tables.signals import candidate_signals, non_executable_reasons, plan_drafts
 from app.db.tables.strategy import risk_events, strategy_instances
+from app.plans.service import alert_body
 from app.signals.models import Evidence
+from app.strategy.reviews import lint
 
 
 def encoded(value: Any) -> str:  # noqa: ANN401
@@ -87,6 +90,57 @@ def reasons(
         if account
         else []
     )
+
+
+def today_alerts(
+    conn: Connection, owner: uuid.UUID
+) -> tuple[m.ProductBlock[m.TodayAlert], list[Evidence], bool]:
+    query = (
+        select(alerts)
+        .where(
+            alerts.c.user_id == owner,
+            alerts.c.status.in_(["new", "read"]),
+            func.coalesce(alerts.c.what_happened["origin"].astext, "plan_condition")
+            != "plan_condition",
+        )
+        .order_by(
+            case({"important": 0, "attention": 1, "info": 2}, value=alerts.c.severity),
+            alerts.c.triggered_at.desc(),
+            alerts.c.id,
+        )
+        .execution_options(yield_per=128)
+    )
+    items: list[m.TodayAlert] = []
+    evidence: list[Evidence] = []
+    skipped = False
+    # One ordered SELECT; stream past malformed evidence without issuing refill queries.
+    # Close the cursor on the 51st displayable item or on a compliance rejection.
+    with conn.execute(query) as rows:
+        for row in rows:
+            body = alert_body(row)
+            try:
+                sources = [Evidence.model_validate(item) for item in body.pop("evidence") or []]
+            except ValidationError:
+                skipped = True
+                continue
+            ids = body["evidence_ids"]
+            if not ids or not set(ids) <= {item.id for item in sources}:
+                skipped = True
+                continue
+            prefix = f"alert:{row.id}:"
+            body = {key: body[key] for key in m.TodayAlert.model_fields}
+            body["name"] = body["name"] if row.security_code is not None else None
+            body["evidence_ids"] = [prefix + identifier for identifier in ids]
+            item = m.TodayAlert.model_validate_json(encoded(body))
+            lint(item.title)
+            items.append(item)
+            if len(items) <= 50:
+                evidence.extend(
+                    item.model_copy(update={"id": prefix + item.id}) for item in sources
+                )
+            else:
+                break
+    return m.ProductBlock[m.TodayAlert](items=items[:50], more=len(items) > 50), evidence, skipped
 
 
 def blocks(
@@ -177,10 +231,13 @@ def blocks(
         )
     output["risk_flags"] = block(m.ProductBlock[m.TodayRiskFlag], flags)
     output["invalidations_today"] = block(m.ProductBlock[m.Invalidation], [])
+    output["alerts"], alert_evidence, skipped = today_alerts(conn, owner)
+    output["evidence"].extend(alert_evidence)
+    if skipped:
+        output["gaps"].append(("alerts", "存在提醒记录，但缺可解析的证据映射；未伪造展示项。"))
     # These older tables have no approved immutable event serializer/satisfaction timestamp.
     # Count actual records and disclose a gap; never infer an event from plan creation time.
     for table, key in [
-        (alerts, "alerts"),
         (action_plans, "plan_triggers"),
         (risk_events, "risk_flags"),
     ]:

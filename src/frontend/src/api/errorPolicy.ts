@@ -83,7 +83,7 @@ export function errorText(e: unknown): string {
     }
     if (e.code === 'DATA_LICENCE_UNAVAILABLE') {
       const st = e.details?.status as DataLicenceState | undefined;
-      const label = st && st in LICENCE_STATUS ? LICENCE_STATUS[st].text : null;
+      const label = st && Object.hasOwn(LICENCE_STATUS, st) ? LICENCE_STATUS[st].text : null;
       if (label) return `你的数据证书不可用（${label}），暂时无法拉取最新数据`;
     }
     if (e.code === 'INSTANCE_SCOPE_INVALID') {
@@ -100,7 +100,7 @@ export function errorText(e: unknown): string {
       const s = Number(e.details?.retry_after_s);
       if (Number.isFinite(s) && s > 0) return `操作过于频繁，请 ${fmtWait(s)}后再试`;
     }
-    const t = ERROR_TEXT[e.code];
+    const t = Object.hasOwn(ERROR_TEXT, e.code) ? ERROR_TEXT[e.code] : undefined;
     if (t) return t;
     if (e.message && e.code !== 'HTTP_ERROR') return e.message;
     if (e.status >= 500) return '服务暂时不可用，请稍后重试';
