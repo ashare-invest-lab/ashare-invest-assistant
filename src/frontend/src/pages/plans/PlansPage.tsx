@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Button, Checkbox, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { Link, useNavigate, useSearchParams } from 'react-router';
@@ -53,14 +54,14 @@ export function PlansPage() {
           placeholder="默认：进行中、条件已满足"
           value={status === 'all' ? [] : status}
           onChange={(v) => setParam('status', v.join(','))}
-          options={PLAN_STATUSES.map((s) => ({ value: s, label: PLAN_STATUS[s].text }))}
+          options={PLAN_STATUSES.map((s) => ({ value: s, label: tagOf(PLAN_STATUS, s).text }))}
           data-testid="plan-filter-status"
         />
         <Select<PlanOrigin | ''>
           style={{ width: 150 }}
           value={f.origin ?? ''}
           onChange={(v) => setParam('origin', v)}
-          options={[{ value: '', label: '全部来源' }, ...ORIGINS.map((o) => ({ value: o, label: PLAN_ORIGIN[o] }))]}
+          options={[{ value: '', label: '全部来源' }, ...ORIGINS.map((o) => ({ value: o, label: (labelOf(PLAN_ORIGIN, o) ?? '未知') }))]}
           data-testid="plan-filter-origin"
         />
         <Input.Search key={f.security_code} allowClear defaultValue={f.security_code} placeholder="证券代码，如 600000.SH" style={{ width: 220 }}
@@ -77,9 +78,9 @@ export function PlansPage() {
         data-testid="plans-table"
         columns={[
           { title: '证券', key: 'sec', width: 180, render: (_v, r) => <Link to={`/plans/${r.id}`} data-testid={`plan-link-${r.id}`}>{r.name} <span className="mono muted">{r.security_code}</span></Link> },
-          { title: '状态', dataIndex: 'status', width: 110, render: (s: PlanStatus) => <Tag color={PLAN_STATUS[s].color} data-testid="plan-status">{PLAN_STATUS[s].text}</Tag> },
-          { title: '计划动作', dataIndex: 'action', width: 90, render: (a: Action) => ACTION_SHORT[a] },
-          { title: '来源', dataIndex: 'origin', width: 120, render: (o: PlanOrigin) => PLAN_ORIGIN[o] },
+          { title: '状态', dataIndex: 'status', width: 110, render: (s: PlanStatus) => <Tag color={tagOf(PLAN_STATUS, s).color} data-testid="plan-status">{tagOf(PLAN_STATUS, s).text}</Tag> },
+          { title: '计划动作', dataIndex: 'action', width: 90, render: (a: Action) => (labelOf(ACTION_SHORT, a) ?? '未知') },
+          { title: '来源', dataIndex: 'origin', width: 120, render: (o: PlanOrigin) => (labelOf(PLAN_ORIGIN, o) ?? '未知') },
           { title: '当前版本', dataIndex: 'current_version_no', width: 90, align: 'right', render: (n: number) => <span className="mono">第 {n} 版</span> },
           { title: '条件满足时间', dataIndex: 'triggered_at', width: 140, render: (v: string | null) => (v ? <span className="mono small">{fmtTime(v).slice(5)}</span> : <span className="muted">—</span>) },
           { title: '创建时间', dataIndex: 'created_at', width: 140, render: (v: string) => <span className="mono small">{fmtTime(v).slice(5)}</span> },

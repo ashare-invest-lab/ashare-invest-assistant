@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useMemo } from 'react';
 import { Input, Segmented, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { Link, useSearchParams } from 'react-router';
@@ -64,14 +65,14 @@ function SignalsList({ sp, setParam }: { sp: URLSearchParams; setParam: (k: stri
           style={{ width: 150 }}
           value={f.state}
           onChange={(v) => setParam('state', v)}
-          options={[{ value: '', label: '全部状态' }, ...STATES.map((s) => ({ value: s, label: SIGNAL_STATE[s].text }))]}
+          options={[{ value: '', label: '全部状态' }, ...STATES.map((s) => ({ value: s, label: tagOf(SIGNAL_STATE, s).text }))]}
           data-testid="filter-state"
         />
         <Select<Horizon | ''>
           style={{ width: 120 }}
           value={f.horizon}
           onChange={(v) => setParam('horizon', v)}
-          options={[{ value: '', label: '全部周期' }, ...HORIZONS.map((h) => ({ value: h, label: HORIZON[h] }))]}
+          options={[{ value: '', label: '全部周期' }, ...HORIZONS.map((h) => ({ value: h, label: (labelOf(HORIZON, h) ?? '未知') }))]}
           data-testid="filter-horizon"
         />
         <Input.Search
@@ -103,7 +104,7 @@ function SignalsList({ sp, setParam }: { sp: URLSearchParams; setParam: (k: stri
             title: '策略', key: 'strategy',
             render: (_v, r) => <span>{r.strategy_name} <LifecycleBadge lifecycle={r.lifecycle} /></span>,
           },
-          { title: '周期', dataIndex: 'horizon', width: 80, render: (h: Horizon) => HORIZON[h] },
+          { title: '周期', dataIndex: 'horizon', width: 80, render: (h: Horizon) => (labelOf(HORIZON, h) ?? '未知') },
           {
             title: '规则信号', key: 'action', width: 130,
             render: (_v, r) => (
@@ -117,7 +118,7 @@ function SignalsList({ sp, setParam }: { sp: URLSearchParams; setParam: (k: stri
               </Space>
             ),
           },
-          { title: '状态', dataIndex: 'state', width: 110, render: (s: CandidateSignalState) => <Tag color={SIGNAL_STATE[s].color}>{SIGNAL_STATE[s].text}</Tag> },
+          { title: '状态', dataIndex: 'state', width: 110, render: (s: CandidateSignalState) => <Tag color={tagOf(SIGNAL_STATE, s).color}>{tagOf(SIGNAL_STATE, s).text}</Tag> },
           { title: '规则满足度', dataIndex: 'score', width: 90, align: 'right', render: (v: number | null) => <span className="mono">{v ?? '—'}</span> },
           { title: '置信度', key: 'conf', width: 150, render: (_v, r) => <ConfidenceTag c={r.confidence} /> },
           { title: '原因', key: 'reasons', width: 60, align: 'right', render: (_v, r) => <span className="mono">{r.reason_ids.length}</span> },
@@ -161,9 +162,9 @@ function ReleasedTab() {
               </Link>
             ),
           },
-          { title: '原因', key: 'code', render: (_v, r) => <span><Tag>{r.code}</Tag>{REASON_CODE[r.code]}</span> },
+          { title: '原因', key: 'code', render: (_v, r) => <span><Tag>{r.code}</Tag>{(labelOf(REASON_CODE, r.code) ?? '未知')}</span> },
           { title: '解除条件', key: 'rc', render: (_v, r) => r.release_condition.human_text },
-          { title: '解除方式', dataIndex: 'released_by', width: 140, render: (v: 'system' | 'user') => RELEASED_BY[v] },
+          { title: '解除方式', dataIndex: 'released_by', width: 140, render: (v: 'system' | 'user') => (labelOf(RELEASED_BY, v) ?? '未知') },
           { title: '解除时间', dataIndex: 'released_at', width: 150, render: (v: string | null) => <span className="mono small">{v ? fmtTime(v) : '—'}</span> },
         ]}
       />

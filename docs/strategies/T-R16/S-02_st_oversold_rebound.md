@@ -40,7 +40,7 @@ key `st_oversold_rebound`；category `reversal`；horizons `[short]`；risk_leve
 | X4 | exit（时间） | `ctx.holding_days >= p.max_hold` |  |
 
 ## 8–10 执行与仓位
-T 日盘后确认，T+1 开盘价模拟入场，信号有效 1 个交易日；止损价截断到涨跌停价之内；仓位按 RC2/RC3 建议。
+T 日盘后确认，T+1 开盘价模拟入场（出处：docs/plan.md:1283），信号有效 1 个交易日；止损价截断到涨跌停价之内；仓位按 RC2/RC3 建议。
 
 ## 11 验证（本轮不写 golden）
 `fixture`、`trigger_stats`、`tracking_sim`；horizon_days [1,3,5]；`min_n=30`；基准用所属行业指数或中证全指。

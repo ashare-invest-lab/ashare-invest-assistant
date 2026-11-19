@@ -39,7 +39,7 @@ key `st_broken_board`；category `momentum`；horizons `[short]`；risk_level `h
 - 原稿 E1 只看 T−1 封板、T 断板，与“次日反包”的时序不符，已改为 T−2 封板、T−1 断板、T 反包。
 
 ## 8–10 执行与仓位
-T 日盘后确认，T+1 开盘模拟入场；有效期 1 个交易日；仓位按 RC2。
+T 日盘后确认，T+1 开盘模拟入场（出处：docs/plan.md:1283）；有效期 1 个交易日；仓位按 RC2。
 
 ## 11 验证（本轮不写 golden）
 `fixture`、`trigger_stats`、`tracking_sim`；horizon_days [1,3,5]；`min_n=30`。

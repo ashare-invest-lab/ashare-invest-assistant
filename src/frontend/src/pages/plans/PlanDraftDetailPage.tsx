@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Radio, Space, Tag, type ButtonProps } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -6,7 +7,7 @@ import { ApiError } from '../../api/client';
 import { stateErrorText } from '../../lib/stateTransition';
 import { useConfirmPlanDraft, useCreatePlanDraft, useDiscardPlanDraft, usePlanDraft } from '../../api/planQueries';
 import type { ChecklistAnswerValue, PlanDraft } from '../../api/planTypes';
-import { ActionBadge, ErrorBox, Loading } from '../../components/common';
+import { ActionBadge, ErrorBox, KeyTip, Loading } from '../../components/common';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import { EPISTEMIC, PLAN_DRAFT_STATUS, RISK_CONTROL, RISK_LEVEL } from '../../i18n/labels';
 import { fmtNum, fmtTime } from '../../lib/format';
@@ -35,7 +36,7 @@ export function PlanDraftDetailPage() {
 }
 
 function DraftView({ d }: { d: PlanDraft }) {
-  const st = PLAN_DRAFT_STATUS[d.status];
+  const st = tagOf(PLAN_DRAFT_STATUS, d.status);
   return (
     <>
       <div className="sig-head" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
@@ -51,7 +52,7 @@ function DraftView({ d }: { d: PlanDraft }) {
           <section className="panel sig-panel">
             <h4>风险提示</h4>
             {d.risk_flags.length ? d.risk_flags.map((f, i) => (
-              <div key={i} className="tw"><Tag color={RISK_LEVEL[f.level].color}>{RISK_LEVEL[f.level].text}</Tag>{RISK_CONTROL[f.control]}：{f.message}</div>
+              <div key={i} className="tw"><Tag color={tagOf(RISK_LEVEL, f.level).color}>{tagOf(RISK_LEVEL, f.level).text}</Tag>{(labelOf(RISK_CONTROL, f.control) ?? '未知')}：{f.message}</div>
             )) : <span className="muted small">无</span>}
             <h4 style={{ marginTop: 8 }}>来源候选信号</h4>
             <Space wrap size={4}>
@@ -111,16 +112,23 @@ function Figures({ d }: { d: PlanDraft }) {
         <div><label>止损</label><b className="mono down">{d.stops.stop_loss ?? '—'}</b></div>
         <div><label>止盈</label><b className="mono up">{d.stops.take_profit ?? '—'}</b></div>
         <div><label>时间止损</label><b className="mono">{d.stops.time_stop_days != null ? `${d.stops.time_stop_days} 日` : '—'}</b></div>
-        <div><label>最大亏损 <Tag>估算</Tag></label><b className="mono">{fmtNum(d.max_loss_amount)}</b><span className="muted small">占总资产 {d.max_loss_pct}%</span></div>
-        <div><label>费用 <Tag color={EPISTEMIC[d.fee_estimate.epistemic_type].color}>{EPISTEMIC[d.fee_estimate.epistemic_type].text}</Tag></label><b className="mono">{fmtNum(d.fee_estimate.amount)}</b></div>
+        <div><label>最大亏损 <Tag>估算</Tag></label><b className="mono">{fmtNum(d.max_loss_amount)}</b><span className="muted small">占总资产 {d.max_loss_pct == null ? '—' : `${d.max_loss_pct}%`}</span></div>
+        <div><label>费用 <Tag color={tagOf(EPISTEMIC, d.fee_estimate.epistemic_type).color}>{tagOf(EPISTEMIC, d.fee_estimate.epistemic_type).text}</Tag></label><b className="mono">{fmtNum(d.fee_estimate.amount)}</b></div>
       </div>
       <h4 style={{ marginTop: 8 }}>生成时的持仓与资金</h4>
       <div className="sc-metrics">
         <div><label>持仓</label><b className="mono">{u.holding_qty}</b></div>
         <div><label>可卖</label><b className="mono">{u.sellable_qty}</b></div>
         <div><label>可用资金</label><b className="mono">{fmtNum(u.cash)}</b></div>
-        <div><label>所属行业占比</label><b className="mono">{u.sector_pct}%</b></div>
+        <div><label>所属行业占比</label><b className="mono">{u.sector_pct == null ? '—' : `${u.sector_pct}%`}</b></div>
       </div>
+      {d.max_loss_amount == null || d.max_loss_pct == null ? (
+        <KeyTip lines={[
+          ...(d.max_loss_amount == null ? [d.stops.stop_loss == null ? '未提供止损价，无法估算最大亏损金额。' : '未提供最大亏损金额。'] : []),
+          ...(u.gaps?.some((g) => g.reason === 'rc1_disabled') ? ['止损风控已关闭，不主动监测。'] : []),
+          ...(d.max_loss_pct == null ? [u.gaps?.some((g) => g.key === 'max_loss_pct' && g.reason === 'no_source') ? '总资产未知，无法计算最大亏损占比。' : '未提供最大亏损占比。'] : []),
+        ]} className="muted small">最大亏损数据未齐</KeyTip>
+      ) : null}
       <div className="muted small">以上为生成草案那一刻的快照；下单前请在券商端核对实时价格、可用资金与可卖数量。</div>
     </section>
   );
@@ -200,8 +208,8 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
           showIcon
           style={{ margin: '8px 0' }}
           data-testid="deviation-alert"
-          message={`${dev.map((f) => FIELD_TEXT[f]).join('、')}超出草案区间`}
-          description={<Checkbox checked={devAck} onChange={(e) => setDevAck(e.target.checked)} data-testid="deviation-ack">我确认按偏离草案区间的{dev.map((f) => FIELD_TEXT[f]).join('、')}生成计划</Checkbox>}
+          message={`${dev.map((f) => (labelOf(FIELD_TEXT, f) ?? '未知')).join('、')}超出草案区间`}
+          description={<Checkbox checked={devAck} onChange={(e) => setDevAck(e.target.checked)} data-testid="deviation-ack">我确认按偏离草案区间的{dev.map((f) => (labelOf(FIELD_TEXT, f) ?? '未知')).join('、')}生成计划</Checkbox>}
         />
       ) : null}
 
@@ -250,7 +258,7 @@ function ConfirmForm({ d }: { d: PlanDraft }) {
         <div data-testid="review-summary">
           <div>{d.name} <span className="mono">{d.security_code}</span></div>
           <div>数量 <b className="mono">{qty}</b> 股 · 价格 <b className="mono">{price}</b></div>
-          {dev.length ? <div className="warn-text small">{dev.map((f) => FIELD_TEXT[f]).join('、')}超出草案区间（已确认偏离）</div> : null}
+          {dev.length ? <div className="warn-text small">{dev.map((f) => (labelOf(FIELD_TEXT, f) ?? '未知')).join('、')}超出草案区间（已确认偏离）</div> : null}
           <div className="muted small" style={{ marginTop: 8 }}>确认后生成交易计划，本草案不能再修改。计划只是你的记录，不会自动下单。</div>
         </div>
       </Modal>
@@ -287,7 +295,7 @@ function fieldsOf(e: unknown): string {
   if (!(e instanceof ApiError)) return '';
   if (e.code === 'DEVIATION_ACK_REQUIRED') {
     const f = (e.details?.fields as string[] | undefined) ?? [];
-    return f.length ? `（${f.map((x) => FIELD_TEXT[x] ?? x).join('、')}）` : '';
+    return f.length ? `（${f.map((x) => labelOf(FIELD_TEXT, x) ?? x).join('、')}）` : '';
   }
   if (e.code === 'CHECKLIST_INCOMPLETE') {
     const m = (e.details?.missing as string[] | undefined) ?? [];

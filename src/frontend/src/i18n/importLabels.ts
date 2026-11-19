@@ -53,7 +53,7 @@ export const RESOLUTION_CHOICE: Record<string, string> = {
 };
 /** 覆盖类选择（v0.2.4 §4.1“处理选项”表第三列）：必须填写理由（1–200 字），并写审计 */
 export const OVERRIDE_CHOICES: ReadonlySet<string> = new Set(['confirm_new_holder_code', 'force_import', 'keep_import_void_manual']);
-export const choiceText = (c: string) => RESOLUTION_CHOICE[c] ?? c;
+export const choiceText = (c: string): string => Object.hasOwn(RESOLUTION_CHOICE, c) ? RESOLUTION_CHOICE[c] : '未知';
 
 /** 标准化字段（列映射的目标字段）中文名，对齐 §7.2 预览行 normalized */
 export const IMPORT_FIELDS: Record<string, string> = {

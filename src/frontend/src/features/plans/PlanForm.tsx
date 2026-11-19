@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { planConditionValueIssue } from './planFormModel';
 /**
  * T-F23 裁定跟进：操作计划表单（契约 v0.2.9 §7.7B）。新建（POST /plans）与新建版本（POST /plans/{id}/versions）共用。
@@ -57,7 +58,7 @@ export function PlanFormFields({ create, versioning }: { create?: boolean; versi
       ) : null}
       <Space wrap>
         <Form.Item name="action" label="计划动作" rules={[{ required: true }]}>
-          <Select<Action> style={{ width: 120 }} options={(ENUMS.action as readonly Action[]).map((a) => ({ value: a, label: ACTION_SHORT[a] }))} data-testid="plan-f-action" />
+          <Select<Action> style={{ width: 120 }} options={(ENUMS.action as readonly Action[]).map((a) => ({ value: a, label: (labelOf(ACTION_SHORT, a) ?? '未知') }))} data-testid="plan-f-action" />
         </Form.Item>
         <Form.Item name="qty" label="数量（股，可空）"><Input style={{ width: 120 }} data-testid="plan-f-qty" /></Form.Item>
         <Form.Item name="price" label="价格（可空）"><Input style={{ width: 120 }} data-testid="plan-f-price" /></Form.Item>
@@ -75,15 +76,15 @@ export function PlanFormFields({ create, versioning }: { create?: boolean; versi
             {rows.map((r) => (
               <Space key={r.key} align="start" wrap data-testid="plan-f-cond">
                 <Form.Item name={[r.name, 'kind']} rules={[{ required: true }]}>
-                  <Select<PlanConditionKind> style={{ width: 110 }} options={(ENUMS.plan_condition_kind as readonly PlanConditionKind[]).map((k) => ({ value: k, label: PLAN_CONDITION_KIND[k] }))} />
+                  <Select<PlanConditionKind> style={{ width: 110 }} options={(ENUMS.plan_condition_kind as readonly PlanConditionKind[]).map((k) => ({ value: k, label: (labelOf(PLAN_CONDITION_KIND, k) ?? '未知') }))} />
                 </Form.Item>
                 <Form.Item name={[r.name, 'type']} rules={[{ required: true }]}>
-                  <Select<PlanConditionType> style={{ width: 170 }} options={WRITABLE_CONDITION_TYPES.map((t) => ({ value: t, label: PLAN_CONDITION_TYPE[t] }))} />
+                  <Select<PlanConditionType> style={{ width: 170 }} options={WRITABLE_CONDITION_TYPES.map((t) => ({ value: t, label: (labelOf(PLAN_CONDITION_TYPE, t) ?? '未知') }))} />
                 </Form.Item>
                 <Form.Item noStyle shouldUpdate>
                   {(f) => {
                     const t = f.getFieldValue(['conditions', r.name, 'type']) as PlanConditionType | undefined;
-                    const lab = t ? PARAM_LABEL[t] : undefined;
+                    const lab = t ? labelOf(PARAM_LABEL, t) : undefined;
                     return lab ? (
                       <Form.Item name={[r.name, 'value']} dependencies={[["conditions", r.name, "type"]]} rules={[{ required: true, message: `请填写${lab}` }, { validator: async (_rule, value: unknown) => { const issue = planConditionValueIssue(t, value); if (issue) throw new Error(issue); } }]}>
                         <Input style={{ width: 150 }} placeholder={lab} />

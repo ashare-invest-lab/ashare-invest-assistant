@@ -1,3 +1,4 @@
+import { tagOf } from '../../lib/explanations';
 /** T-F23 研究候选表单的公共部分：成立条件编辑、请求体整理、服务端错误映射（契约 v0.2.9 §7.7A） */
 import { Button, Form, Input, Select, Space, type FormInstance } from 'antd';
 import { Link } from 'react-router';
@@ -44,7 +45,7 @@ export function ConditionsEditor({ form }: { form: FormInstance }) {
                 </Form.Item>
                 <Form.Item name={[name, 'confidence']} label="把握">
                   <Select<ConfidenceLevel> allowClear style={{ width: 90 }} placeholder="未填"
-                    options={(ENUMS.confidence_level as readonly ConfidenceLevel[]).map((c) => ({ value: c, label: CONF_LEVEL[c].text }))} />
+                    options={(ENUMS.confidence_level as readonly ConfidenceLevel[]).map((c) => ({ value: c, label: tagOf(CONF_LEVEL, c).text }))} />
                 </Form.Item>
                 <Button size="small" type="link" danger onClick={() => remove(name)} data-testid={`cond-remove-${name}`}>删除</Button>
               </Space>
@@ -83,7 +84,7 @@ export function CandidateWriteError({ error, onReload }: { error: unknown; onRel
       const from = d.from as ResearchCandidateStatus | undefined;
       return (
         <div className="error-text small" role="alert" data-testid="cand-terminal-error">
-          研究候选已{from && from in RESEARCH_STATUS ? `是“${RESEARCH_STATUS[from].text}”` : '结束'}，不能再新建版本；需要重新研究请新建候选。
+          研究候选已{from && Object.hasOwn(RESEARCH_STATUS, from) ? `是“${tagOf(RESEARCH_STATUS, from).text}”` : '结束'}，不能再新建版本；需要重新研究请新建候选。
         </div>
       );
     }

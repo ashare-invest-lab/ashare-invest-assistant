@@ -1,3 +1,5 @@
+import { http, HttpResponse } from 'msw';
+import { server } from '../mocks/server';
 /** T-F17 候选信号卡与不可执行原因（契约 v0.2.8 §7.6，列表与 released_since 见 v0.2.7） */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -177,4 +179,15 @@ describe('入口', () => {
     const links = await screen.findAllByTestId('to-signal');
     expect(links[0].getAttribute('href')).toMatch(/^\/candidate-signals\//);
   });
+});
+
+
+it.each(['future_state', '__proto__', 'constructor'])('T-F57 信号详情：状态 %s 显示未知中性色', async (state) => {
+  const signal = CANDIDATE_SIGNALS.find((s) => s.id === BUY)!;
+  server.use(http.get(`${API}/candidate-signals/:id`, () => HttpResponse.json({ ...signal, state })));
+  renderAt(`/candidate-signals/${BUY}`);
+  const tag = await screen.findByTestId('signal-state');
+  expect(tag).toHaveTextContent(/^未知$/);
+  expect(tag.className).not.toMatch(/ant-tag-(?:blue|red|orange|green|gold|cyan|purple)/);
+  expect(tag).not.toHaveAttribute('style');
 });
