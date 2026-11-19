@@ -304,7 +304,9 @@ def test_daily_report_preserves_confirmed_suspension_as_its_own_reason(
         for dimension in Dimension
     ]
     monkeypatch.setattr(
-        dimensions, "build", Mock(return_value=(uuid.UUID(int=279), facts, [], True))
+        dimensions,
+        "build_with_suspension",
+        Mock(return_value=(uuid.UUID(int=279), facts, [], True)),
     )
     report_service.build(conn, OWNER, DAY, dt.datetime.combine(DAY, dt.time(10), dt.UTC))
     body = next(

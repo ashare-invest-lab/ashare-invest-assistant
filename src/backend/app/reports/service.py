@@ -280,9 +280,9 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
             gaps.append(
                 _gap("stocks." + code, "没有可用的本人建议；正式卡运行门禁或结论装配尚待完成。")
             )
-        from app.reports.dimensions import build as build_dimensions
+        from app.reports.dimensions import build_with_suspension
 
-        snapshot, dimensions, dimension_evidence, suspended = build_dimensions(
+        snapshot, dimensions, dimension_evidence, suspended = build_with_suspension(
             conn, user_id, identifier, code, date, now
         )
         if suspended:

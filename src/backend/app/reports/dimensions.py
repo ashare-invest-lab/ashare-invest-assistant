@@ -385,7 +385,21 @@ def build(
     code: str,
     day: dt.date,
     now: dt.datetime,
+) -> tuple[uuid.UUID, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build the analysis snapshot, dimensions, and evidence."""
+    snapshot, groups, evidence, _ = build_with_suspension(conn, owner, account, code, day, now)
+    return snapshot, groups, evidence
+
+
+def build_with_suspension(
+    conn: Connection,
+    owner: uuid.UUID,
+    account: uuid.UUID | None,
+    code: str,
+    day: dt.date,
+    now: dt.datetime,
 ) -> tuple[uuid.UUID, list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Also report whether the selected owned inputs confirm suspension for the day."""
     if (
         account is not None
         and conn.execute(
