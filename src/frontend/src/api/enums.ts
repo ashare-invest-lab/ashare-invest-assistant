@@ -1,9 +1,9 @@
 /**
- * 契约 v0.2.9 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
+ * 契约 v0.2.10 §3 枚举（取值逐字照抄；中文标签见 i18n/labels.ts）。
  * 运行时以 `GET /meta/enums` 为准；这里的常量用于类型推导与 mock 校验。
  */
 /** 与 `/meta/enums.version` 对齐的契约版本 */
-export const CONTRACT_VERSION = 'v0.2.9';
+export const CONTRACT_VERSION = 'v0.2.10';
 
 export const ENUMS = {
   account_status: ['pending', 'approved', 'rejected', 'disabled'],
@@ -45,7 +45,7 @@ export const ENUMS = {
   severity: ['info', 'attention', 'important'],
   channel: ['in_app', 'email', 'wecom_app'],
   data_status: ['fresh', 'stale', 'pending', 'partial', 'unavailable'],
-  gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing', 'data_licence_unavailable', 'not_applicable'],
+  gap_reason: ['no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing', 'data_licence_unavailable', 'not_applicable', 'suspended'],
   data_provider: ['mairui', 'user_import', 'user_input', 'system', 'exchange'],
   source_kind: ['market_data', 'disclosure', 'user_input', 'system_calc'],
   trade_side: ['buy', 'sell'],

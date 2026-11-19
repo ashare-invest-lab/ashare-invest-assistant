@@ -104,7 +104,9 @@ export function GapNote({ status, gaps, asOf, testId = 'gap-note' }: { status: D
     );
   }
   const licence = gaps.some((g) => g.reason === 'data_licence_unavailable');
-  const head = status === 'unavailable' ? '数据暂不可用' : status === 'stale' ? `数据已过期${asOf ? `（截至 ${fmtTime(asOf)}）` : ''}` : status === 'partial' ? '部分数据缺失' : '数据提示';
+  const onlySuspended = gaps.length > 0 && gaps.every((g) => g.reason === 'suspended');
+  const head = onlySuspended && status !== 'stale' ? '停牌说明'
+    : status === 'unavailable' ? '数据暂不可用' : status === 'stale' ? `数据已过期${asOf ? `（截至 ${fmtTime(asOf)}）` : ''}` : status === 'partial' ? '部分数据缺失' : '数据提示';
   return (
     <div className="gap-note small" role="note" aria-label="数据状态说明" data-testid={testId} data-status={status}>
       <b>{head}</b>

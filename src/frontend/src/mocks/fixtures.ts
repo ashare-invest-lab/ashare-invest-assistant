@@ -21,6 +21,8 @@ import type {
 export const SAMPLE_LABEL = '示例数据';
 export const NOW = '2026-11-02T10:31:00+08:00';
 export const TRADE_DATE = '2026-11-02';
+// 明确同证券同日确证停牌的合成日线记录，独立于零量、平价或缺行。
+export const CONFIRMED_DAILY_SUSPENSION = { code: '601001.SH', date: TRADE_DATE } as const;
 export const REPORT_DATE = '2026-10-30';
 const DIMENSIONS = ENUMS.dimension;
 
