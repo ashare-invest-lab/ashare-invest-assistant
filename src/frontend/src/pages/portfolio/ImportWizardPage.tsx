@@ -24,15 +24,6 @@ const KIND_TEXT: Record<ImportKind, string> = { trades: '交割单 / 成交明�
 const KIND_SHORT: Record<ImportKind, string> = { trades: '交割单', positions: '持仓' };
 const toIso = (d: Dayjs) => d.format('YYYY-MM-DDTHH:mm:ss+08:00');
 
-function ownValue<T>(labels: Record<string, T>, value: string): T | undefined {
-  return Object.hasOwn(labels, value) ? labels[value] : undefined;
-}
-
-function EnumTag({ labels, value, testId }: { labels: Record<string, { text: string; color: string }>; value: string; testId?: string }) {
-  const label = ownValue(labels, value);
-  return label ? <Tag color={label.color} data-testid={testId}>{label.text}</Tag> : <Tag data-testid={testId}>未知</Tag>;
-}
-
 /** 交割单导入向导（T-F04）：上传 → 解析 → 预览着色与逐项处理 → 确认写入 → 结果（可撤销 / 下载问题清单）。 */
 export function ImportWizardPage() {
   const { batchId } = useParams();
