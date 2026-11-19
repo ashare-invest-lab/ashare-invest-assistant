@@ -94,7 +94,7 @@ T 与 P 在不同测试账户/独立 case 中跑，不能把同一持仓既从�
 
 验收入口：由非作者评审本清单与现行契约的一致性。实际执行以每次冻结的应用与测试提交为准；契约与实现差异按关联 PR 裁定。
 
-## 6. 隔离验收结果（2026-11-19 10:29 MST）
+## 6. 隔离验收结果（2026-11-19 10:52 MST）
 
 应用 API 与前端同为 `9f42ed2ba2921fd11244368cc5653ef966deceac`，使用 Chromium 151、独占 PG/Redis/API/worker 和合成数据。以下结果均绑定此应用提交。
 
@@ -105,7 +105,9 @@ T 与 P 在不同测试账户/独立 case 中跑，不能把同一持仓既从�
 | ML-05–11 | pass | import-flow positive 与独立 override |
 | ML-14–18 | pass | reports |
 | ML-20–22 | pass | access permissions、cold、warm |
-| EX-01–14 | not_run | EX-01–03 已有会话过期与 CSRF 的 HTTP 预验，完整浏览器用例尚未执行 |
+| EX-01–03 | pass | 会话失效、确认拒绝与恢复、同文档身份切换 |
+| EX-04–07 | pass | 无账户、空持仓、两个定点 500、日报 404 与完成版恢复 |
+| EX-08–14 | pass | 双时区与休市、修订和缺口、定点故障及缓存恢复 |
 
-ML-00 前置通过，ML-01–22 共 32 个浏览器节点通过。团队目录 `status/G-STAGE10-pr302/` 的 `cases-9f42ed2b-1029.csv` 逐项记录状态与证据；`checklist-results-9f42ed2b-1029.json` 登记完整测试 SHA、运行原件和清理回证，SHA256 `b82e4126be2dcb640fadfaf5f513b98db2393258a33f30ac3d36afb3b5b5cc6b`。`cases-cad32164.csv` 单列上一应用基线的结果及首败。
+ML-00 前置通过。ML-01–22 的 32 个及 EX-01–14 的 26 个浏览器节点均通过。团队目录 `status/G-STAGE10-pr302/` 的 `checklist-results-9f42ed2b-1029.json` 记录 ML 逐项结果，`exception-results-9f42ed2b-final.json` 记录 EX 逐项结果，SHA256 `faca87d74afe449d62b542310adc760421bf110097fe81d8dff3d0740ffd26fc`。两份索引均绑定测试 SHA、运行原件及清理回证。`cases-cad32164.csv` 单列上一应用基线的结果及首败。
 DeepSeek：未用，原因：主线规格取证与评审不外包。
