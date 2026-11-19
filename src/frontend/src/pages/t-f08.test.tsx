@@ -214,6 +214,81 @@ describe('T-F08 今日关注', () => {
     expect(todayPollMs(undefined)).toBe(15_000);
   });
 
+  it.each([
+    { severity: 'info', text: '提示', color: 'blue' },
+    { severity: 'attention', text: '关注', color: 'orange' },
+    { severity: 'important', text: '重要', color: 'red' },
+  ] as const)('T-F54：非空 $severity 告警沿用三档标签，顺序符合 §7.3', async ({ severity, text, color }) => {
+    const t = (await (await fetch('/api/v1/today')).json()) as TodayResponse;
+    // 独立于实现中的权重表，锁定 mock 三档齐全且按契约顺序返回。
+    expect(t.alerts.items.map((a) => a.severity)).toEqual(['important', 'attention', 'info']);
+    await renderTestRoute('/today');
+    const alerts = await screen.findByTestId('today-alerts');
+    const items = within(alerts).getAllByRole('listitem');
+    expect(items.map((li) => li.getAttribute('data-testid'))).toEqual(t.alerts.items.map((a) => `alert-${a.id}`));
+    const alert = t.alerts.items.find((a) => a.severity === severity)!;
+    const li = within(alerts).getByTestId(`alert-${alert.id}`);
+    expect(li).toHaveTextContent(alert.title);
+    expect(within(li).getByText(text, { exact: true })).toHaveClass(`ant-tag-${color}`);
+    expect(alerts.querySelector('.today-empty')).toBeNull();
+  });
+
+  it.each(['warning', 'future_level', '__proto__', 'constructor', 'toString'])(
+    'T-F54r：未知严重度 %s 显示默认标签且不进入错误边界', async (severity) => {
+      const alert = { ...FULL.alerts.items[0], severity };
+      // 故意注入契约外的网络响应，保留正式 API 的三档类型约束。
+      server.use(http.get('/api/v1/today', () => HttpResponse.json({
+        ...FULL, alerts: { items: [alert], more: false },
+      })));
+      const router = await renderTestRoute('/today');
+      const alerts = await screen.findByTestId('today-alerts');
+      expect(alerts).toBeInTheDocument();
+      const li = within(alerts).getByTestId(`alert-${alert.id}`);
+      expect(li).toHaveTextContent(alert.title);
+      const tag = within(li).getByText('未知', { exact: true });
+      expect(tag).toHaveClass('ant-tag');
+      for (const color of ['blue', 'orange', 'red', 'has-color']) expect(tag).not.toHaveClass(`ant-tag-${color}`);
+      expect(tag.style.color).toBe('');
+      expect(tag.style.backgroundColor).toBe('');
+      expect(router.state.errors).toBeNull();
+      expect(screen.queryByText(/Unexpected Application Error/)).not.toBeInTheDocument();
+    },
+  );
+
+  it('T-F54：保留服务端的严重度 → 触发时间降序 → id 顺序', async () => {
+    const base = FULL.alerts.items[0];
+    // 较低严重度有较新时间；同档既有不同时刻，也有同刻不同 id。
+    const items: TodayAlert[] = [
+      { ...base, id: uid(920), triggered_at: '2026-11-02T09:30:00+08:00' },
+      { ...base, id: uid(918), triggered_at: '2026-11-02T09:00:00+08:00' },
+      { ...base, id: uid(919), triggered_at: '2026-11-02T09:00:00+08:00' },
+      { ...base, id: uid(917), severity: 'attention', triggered_at: '2026-11-02T10:00:00+08:00' },
+      { ...base, id: uid(916), severity: 'info', triggered_at: '2026-11-02T10:30:00+08:00' },
+    ];
+    server.use(http.get('/api/v1/today', () => HttpResponse.json({
+      ...FULL, alerts: { items, more: false },
+    } satisfies TodayResponse)));
+    await renderTestRoute('/today');
+    const alerts = await screen.findByTestId('today-alerts');
+    expect(within(alerts).getAllByRole('listitem').map((li) => li.getAttribute('data-testid'))).toEqual(
+      [920, 918, 919, 917, 916].map((id) => `alert-${uid(id)}`),
+    );
+  });
+
+  it('T-F54：仅告警为空时显示“无 / 0 条”，不显示告警条目和查看全部', async () => {
+    server.use(http.get('/api/v1/today', () => HttpResponse.json({
+      ...FULL, alerts: { items: [], more: false },
+    } satisfies TodayResponse)));
+    await renderTestRoute('/today');
+    const alerts = await screen.findByTestId('today-alerts');
+    expect(alerts.querySelector('.today-empty')).toHaveTextContent(/^无$/);
+    expect(within(alerts).getByTestId('today-alerts-count')).toHaveTextContent(/^0 条$/);
+    expect(within(alerts).queryAllByRole('listitem')).toHaveLength(0);
+    expect(within(alerts).queryByTestId('alert-unread')).toBeNull();
+    expect(within(alerts).queryByTestId('today-alerts-more')).toBeNull();
+    expect(within(screen.getByTestId('today-drafts')).getAllByRole('listitem')).toHaveLength(1);
+  });
+
   it('默认 mock：不再是占位页；展示时段、大盘环境、重点关注、草案、风险、日报与对账、免责提示', async () => {
     const t = (await (await fetch('/api/v1/today')).json()) as TodayResponse;
     await renderTestRoute('/today');

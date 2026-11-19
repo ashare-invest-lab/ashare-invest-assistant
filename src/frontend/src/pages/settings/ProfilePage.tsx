@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Alert, Button, Checkbox, Form, InputNumber, Radio, Rate, Tag } from 'antd';
 import { useProfile, useSaveProfile } from '../../api/accountQueries';
@@ -51,12 +52,12 @@ export function ProfilePage() {
       {save.isError && !other.length ? <ErrorBox error={save.error} prefix="保存失败" /> : null}
       <Form<FormValues> form={form} layout="vertical" initialValues={initial} onFinish={onFinish} requiredMark={false} style={{ marginTop: 12 }}>
         <Form.Item name="horizon_pref" label="关注的周期（可多选）" rules={[{ required: true, type: 'array', min: 1, message: '至少选择一个周期' }]}>
-          <Checkbox.Group options={ENUMS.horizon.map((h) => ({ value: h, label: HORIZON[h] }))} />
+          <Checkbox.Group options={ENUMS.horizon.map((h) => ({ value: h, label: (labelOf(HORIZON, h) ?? '未知') }))} />
         </Form.Item>
         <Form.Item name="effort" label="可投入的盯盘精力">
           <Radio.Group data-testid="profile-effort">
             <Radio value={UNSET}>不填写</Radio>
-            {(Object.keys(EFFORT) as (keyof typeof EFFORT)[]).map((k) => <Radio key={k} value={k}>{EFFORT[k].text}<span className="muted">（{EFFORT[k].hint}）</span></Radio>)}
+            {(Object.keys(EFFORT) as (keyof typeof EFFORT)[]).map((k) => <Radio key={k} value={k}>{(labelOf(EFFORT, k) ?? { text: '未知', hint: '未知' }).text}<span className="muted">（{(labelOf(EFFORT, k) ?? { text: '未知', hint: '未知' }).hint}）</span></Radio>)}
           </Radio.Group>
         </Form.Item>
         <Form.Item name="risk_tolerance" label="风险承受（1 低 – 5 高，可不填；再点一次清除）">
@@ -65,11 +66,17 @@ export function ProfilePage() {
         <Form.Item name="experience" label="投资经验">
           <Radio.Group data-testid="profile-experience">
             <Radio value={UNSET}>不填写</Radio>
-            {(Object.keys(EXPERIENCE) as (keyof typeof EXPERIENCE)[]).map((k) => <Radio key={k} value={k}>{EXPERIENCE[k].text}</Radio>)}
+            {(Object.keys(EXPERIENCE) as (keyof typeof EXPERIENCE)[]).map((k) => <Radio key={k} value={k}>{(labelOf(EXPERIENCE, k) ?? { text: '未知', hint: '未知' }).text}</Radio>)}
           </Radio.Group>
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(a, b) => a.experience !== b.experience}>
-          {({ getFieldValue }) => <div className="muted form-hint">{EXPERIENCE[getFieldValue('experience') as keyof typeof EXPERIENCE]?.hint ?? ''}</div>}
+          {({ getFieldValue }) => {
+            const experience = getFieldValue('experience') as FormValues['experience'] | undefined;
+            const option = labelOf(EXPERIENCE, experience);
+            // 不填写不提示；已知选项可以没有描述，只有未知键才显示兜底。
+            const hint = experience == null || experience === UNSET ? '' : option ? option.hint ?? '' : '未知';
+            return <div className="muted form-hint">{hint}</div>;
+          }}
         </Form.Item>
         {/* v0.2.4 #7：5–50，最多 2 位小数（评审 m11） */}
         <Form.Item name="max_single_position_pct" label="单只股票最大仓位（%）" extra="用于计划条件里的仓位上限提示，范围 5–50"
