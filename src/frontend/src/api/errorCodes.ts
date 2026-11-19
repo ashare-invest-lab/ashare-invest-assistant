@@ -75,4 +75,4 @@ export type ErrorCode = keyof typeof ERROR_CODES;
 /** 客户端自造：非契约信封的 HTTP 失败、网络失败、304 但无缓存 */
 export type ClientErrorCode = 'HTTP_ERROR' | 'NETWORK_ERROR' | 'NOT_MODIFIED';
 export type AnyErrorCode = ErrorCode | ClientErrorCode;
-export const isErrorCode = (c: string): c is ErrorCode => Object.prototype.hasOwnProperty.call(ERROR_CODES, c);
+export const isErrorCode = (c: string): c is ErrorCode => Object.hasOwn(ERROR_CODES, c);

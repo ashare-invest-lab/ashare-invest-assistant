@@ -13,7 +13,7 @@ import { useNotificationSync, useStreamPolling, useStreamStatus, type StreamStat
 import { CursorPager } from '../components/CursorPager';
 import { ErrorBox } from '../components/common';
 import { CardDisclaimer } from '../components/RiskDisclosure';
-import { NOTIFY_KIND, SEVERITY, SEVERITY_TEXT, TARGET_TYPE } from '../i18n/labels';
+import { NOTIFY_KIND, severityTag, TARGET_TYPE } from '../i18n/labels';
 import { fmtTime } from '../lib/format';
 import { notificationRoute } from '../lib/notificationTarget';
 
@@ -59,7 +59,7 @@ function NotificationRow({ n }: { n: Notification }) {
         style={{ cursor: route ? 'pointer' : 'default' }}>
         <div className="nc-head">
           {!n.read_at ? <span className="nc-dot" aria-label="未读" /> : null}
-          <Tag color={SEVERITY[n.severity]}>{SEVERITY_TEXT[n.severity]}</Tag>
+          <Tag color={severityTag(n.severity).color}>{severityTag(n.severity).text}</Tag>
           <Tag>{NOTIFY_KIND[n.kind]}</Tag>
           <Tag data-testid={`nc-merged-${n.id}`}>合并 {n.merged_count} 次变化</Tag>
           {n.name ? <span>{n.name} <span className="mono muted">{n.security_code}</span></span> : null}

@@ -146,7 +146,7 @@ export function buildReportGaps(
     if (todayKeys.has(g.key)) continue;
     const p = parsePipelineKey(g.key);
     if (p) {
-      const def = GAP_CODES[p.code];
+      const def = Object.hasOwn(GAP_CODES, p.code) ? GAP_CODES[p.code] : undefined;
       if (!def) {
         // 未知 code：参数首段形如证券代码时归到该证券行（显示代码和名称），否则为通用行；均只显示兜底文案
         const sec = p.param.split(':')[0];

@@ -39,7 +39,7 @@ key `sw_main_inflow`；category `trend`；horizons `[swing]`；risk_level `norma
 - E1、X2 中的 `for p.x days` 依赖参数化时间修饰（RUL-6）；在此之前只能用常数天数。
 
 ## 8–10 执行与仓位
-T 日盘后（15:40 后资金数据可得）确认，T+1 开盘模拟入场；仓位按 RC2/RC3。
+T 日盘后（15:40 后资金数据可得）确认，T+1 开盘模拟入场（出处：docs/plan.md:1283）；仓位按 RC2/RC3。
 
 ## 11 验证（本轮不写 golden）
 `fixture`、`trigger_stats`、`tracking_sim`；horizon_days [5,10,20]；`min_n=30`；对照组为同成交额分位、无资金条件的样本。

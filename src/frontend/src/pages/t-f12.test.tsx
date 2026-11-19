@@ -1,10 +1,7 @@
 /** T-F12 候选信号卡补全（契约 §5.2、§7 /suggestions*）。示例数据，不发外网请求。 */
-import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { onTestFinished } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter } from 'react-router';
-import { TestRouterProvider as RouterProvider } from '../test/TestRouterProvider';
-import { AppProviders } from '../app/AppProviders';
-import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
 import { resetViewedOnce } from '../api/suggestionQueries';
 import { SUGGESTIONS, suggestionOf, uid } from '../mocks/fixtures';
@@ -12,32 +9,35 @@ import { server } from '../mocks/server';
 import { actionLog, REFRESH_MIN_INTERVAL_S } from '../mocks/suggestionHandlers';
 import { apiFetch } from '../test/apiFetch';
 import { preloadRoutes } from '../test/preloadRoutes';
+import { renderTestRoute } from '../test/renderTestRoute';
 import { traceRefreshTest } from '../test/refreshTrace';
 
-// 整套并行跑时页面懒加载较慢：本文件的 findBy / waitFor 默认等待 5 秒
+// 沿用本文件既有的异步等待预算；路由初始化由 renderTestRoute 显式等待。
 configure({ asyncUtilTimeout: 5000 });
 beforeAll(() => preloadRoutes(routes), 30_000);
 beforeEach(() => resetViewedOnce());
 
 vi.mock('../components/charts/KlineChart', () => ({ KlineChart: () => <div data-testid="kline" /> }));
 vi.mock('../components/charts/IntradayChart', () => ({ IntradayChart: () => <div data-testid="intraday" /> }));
+// This file asserts card actions/status/tracking, not the matrix/evidence grids.
+// Avoid mounting two AG Grid engines on every card update and navigation.
+vi.mock('../components/DataGrid', () => ({
+  DataGrid: ({ testId }: { testId?: string }) => <div data-testid={testId} />,
+}));
 
 const API = '/api/v1';
 const post = (path: string, body: unknown) => apiFetch(`${API}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
-function renderAt(path: string) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={router} /></AppProviders>);
-  return router;
-}
+// These assertions exercise detail pages and navigation, without mounting the unrelated shell.
+const detailRoutes = routes.find((r) => r.path === '/')!.children!;
+const renderAt = (path: string) => renderTestRoute(path, { routeObjects: detailRoutes });
 
 /** 记录本测试发出的请求路径 */
 function recordRequests() {
   const seen: string[] = [];
   const fn = ({ request }: { request: Request }) => { seen.push(`${request.method} ${new URL(request.url).pathname}`); };
   server.events.on('request:start', fn);
+  onTestFinished(() => server.events.removeListener('request:start', fn));
   return { seen, stop: () => server.events.removeListener('request:start', fn) };
 }
 
@@ -82,7 +82,7 @@ describe('mock 接口（契约 §7 /suggestions*）', () => {
 describe('候选信号卡详情页补全', () => {
   it('状态标记、跟踪统计（样本量 / 样本少 / 样本不足）、待契约占位，不请求 /chain；进入页面只记一次 viewed', async () => {
     const rec = recordRequests();
-    const router = renderAt(`/suggestions/${sgBank.id}`);
+    const router = await renderAt(`/suggestions/${sgBank.id}`);
     expect(await screen.findByTestId('sg-status')).toHaveTextContent('当前');
     expect(await screen.findByTestId('sg-track-t1')).toHaveTextContent('n=1');
     expect(screen.getByTestId('sg-track-t5')).toHaveTextContent('样本少');
@@ -91,8 +91,8 @@ describe('候选信号卡详情页补全', () => {
     for (const t of ['sg-chain-placeholder', 'sg-trade-link-placeholder']) expect(screen.getByTestId(t)).toHaveTextContent('待契约');
     expect(screen.getByTestId('sg-supersedes')).toHaveAttribute('href', `/suggestions/${uid(99)}`);
     await waitFor(() => expect(actionLog.filter((a) => a.kind === 'viewed' && a.suggestion_id === sgBank.id)).toHaveLength(1));
-    await router.navigate('/terminal');
-    await router.navigate(`/suggestions/${sgBank.id}`);
+    await act(async () => { await router.navigate('/reviews'); });
+    await act(async () => { await router.navigate(`/suggestions/${sgBank.id}`); });
     await screen.findByTestId('sg-status');
     expect(actionLog.filter((a) => a.kind === 'viewed')).toHaveLength(1);
     expect(rec.seen.some((s) => s.endsWith('/chain'))).toBe(false);
@@ -100,14 +100,14 @@ describe('候选信号卡详情页补全', () => {
   });
 
   it('被取代的卡：提示仅供回看并链接到取代它的卡；拟定计划草案禁用', async () => {
-    renderAt(`/suggestions/${uid(99)}`);
+    await renderAt(`/suggestions/${uid(99)}`);
     expect(await screen.findByTestId('sg-inactive')).toHaveTextContent('已被取代');
     expect(screen.getByTestId('sg-superseded-by')).toHaveAttribute('href', `/suggestions/${sgBank.id}`);
     for (const b of await screen.findAllByRole('button', { name: '拟定计划草案' })) expect(b).toBeDisabled();
   });
 
   it('拟定计划草案：可拟定的候选信号可用，生成后跳到草案；不可拟定的禁用', async () => {
-    const router = renderAt(`/suggestions/${sgDraftable.id}`);
+    const router = await renderAt(`/suggestions/${sgDraftable.id}`);
     const btn = await screen.findByTestId('sg-draft-demo_trend');
     await waitFor(() => expect(btn).toBeEnabled());
     fireEvent.click(btn);
@@ -115,20 +115,20 @@ describe('候选信号卡详情页补全', () => {
   });
 
   it('不可拟定（受阻）的候选信号：按钮禁用', async () => {
-    renderAt(`/suggestions/${sgBank.id}`);
+    await renderAt(`/suggestions/${sgBank.id}`);
     const btn = await screen.findByTestId('sg-draft-demo_trend');
     await screen.findByTestId('sg-track-t1');
     expect(btn).toBeDisabled();
   });
 
   it('规则引用可展开', async () => {
-    renderAt(`/suggestions/${sgBank.id}`);
+    await renderAt(`/suggestions/${sgBank.id}`);
     fireEvent.click(await screen.findByTestId('sg-rules-toggle-demo_trend'));
     expect(await screen.findByText(/规则引用（\d+）/)).toBeInTheDocument();
   });
 
   it('不再关注本卡：带备注记录 dismissed', async () => {
-    renderAt(`/suggestions/${sgBank.id}`);
+    await renderAt(`/suggestions/${sgBank.id}`);
     fireEvent.click(await screen.findByTestId('sg-dismiss'));
     fireEvent.change(await screen.findByTestId('sg-dismiss-note'), { target: { value: '示例：已在别处跟踪' } });
     fireEvent.click(screen.getByRole('button', { name: /记\s*录/ }));
@@ -137,9 +137,10 @@ describe('候选信号卡详情页补全', () => {
   });
 
   it('手动刷新：跳到新卡；再次刷新给出 409 等待时间', async () => {
+    const rec = recordRequests();
     const trace = traceRefreshTest('refresh-new-card-409');
     const W = { timeout: 5000 };
-    const router = renderAt(`/suggestions/${sgBank.id}`);
+    const router = await renderAt(`/suggestions/${sgBank.id}`);
     trace.watchRouter(router);
     trace.mark('waiting for initial refresh button');
     fireEvent.click(await screen.findByTestId('sg-refresh', undefined, W));
@@ -147,22 +148,37 @@ describe('候选信号卡详情页补全', () => {
     await waitFor(() => expect(router.state.location.pathname).not.toBe(`/suggestions/${sgBank.id}`), W);
     trace.mark('navigation observed; waiting for supersedes link');
     await waitFor(() => expect(screen.getByTestId('sg-supersedes')).toHaveAttribute('href', `/suggestions/${sgBank.id}`), W);
-    trace.mark('supersedes link observed; waiting for refresh enabled');
-    await waitFor(() => expect(screen.getByTestId('sg-refresh')).not.toBeDisabled(), W);
+    trace.mark('supersedes link observed; waiting for refresh loading to finish');
+    // Ant Design ignores clicks while loading, without setting the disabled attribute.
+    await waitFor(() => {
+      expect(screen.getByTestId('sg-refresh')).toBeEnabled();
+      expect(screen.getByTestId('sg-refresh')).not.toHaveClass('ant-btn-loading');
+    }, W);
     fireEvent.click(screen.getByTestId('sg-refresh'));
     trace.mark('second refresh clicked; waiting for 409 message');
     expect(await screen.findByTestId('sg-refresh-error', undefined, W)).toHaveTextContent(/刷新过于频繁，请 \d+ 秒后再试/);
+    expect(rec.seen.filter((r) => r === 'POST /api/v1/suggestions/refresh')).toHaveLength(2);
     trace.mark('409 message observed');
   });
 
   it('LLM说明：普通用户不渲染llm_call_id（T-A36）', async () => {
     const llm = { ...sgBank, explanation: { source: 'llm' as const, text: '示例：LLM 改写的说明', llm_call_id: uid(77) } };
     server.use(http.get(`${API}/suggestions/:id`, () => HttpResponse.json(llm)));
-    renderAt(`/suggestions/${sgBank.id}`);
+    await renderAt(`/suggestions/${sgBank.id}`);
     await screen.findByText('示例：LLM 改写的说明'); expect(screen.queryByTestId('sg-llm-call')).not.toBeInTheDocument(); expect(document.body.textContent).not.toContain(uid(77));
   });
 
   it('示例数据：所有卡都在 mock 列表中', () => {
     expect(SUGGESTIONS.length).toBeGreaterThan(0);
   });
+});
+
+
+it.each(['future_status', '__proto__', 'constructor'])('T-F57 建议详情：状态 %s 显示未知中性色', async (status) => {
+  server.use(http.get(`${API}/suggestions/:id`, () => HttpResponse.json({ ...sgBank, status })));
+  renderAt(`/suggestions/${sgBank.id}`);
+  const tag = await screen.findByTestId('sg-status');
+  expect(tag).toHaveTextContent(/^未知$/);
+  expect(tag.className).not.toMatch(/ant-tag-(?:blue|red|orange|green|gold|cyan|purple)/);
+  expect(tag).not.toHaveAttribute('style');
 });
