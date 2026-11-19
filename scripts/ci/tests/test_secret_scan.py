@@ -405,6 +405,9 @@ def test_check_coverage(tmp_path: Path) -> None:
     base["counts"].update(total=[195, 200], domain=[95, 100])
     frozen = tmp_path / "base.json"
     frozen.write_text(json.dumps(base))
+    # This synthetic fixture has no nondeterministic statements.
+    nondet = tmp_path / "nondet.json"
+    nondet.write_text(json.dumps({"schema": "aia-coverage-nondet-lines-v1", "files": []}))
 
     def cov(pkg_cov: int) -> Path:
         files = {
@@ -418,7 +421,8 @@ def test_check_coverage(tmp_path: Path) -> None:
 
     def run(path):
         return subprocess.run([sys.executable, str(CI_DIR / "check_coverage.py"), str(path),
-                               "--base", str(frozen), "--output", str(tmp_path / "measurement.json")],
+                               "--base", str(frozen), "--nondet-lines", str(nondet),
+                               "--output", str(tmp_path / "measurement.json")],
                               capture_output=True, check=False)
     assert run(cov(95)).returncode == 0
     assert run(cov(85)).returncode == 1

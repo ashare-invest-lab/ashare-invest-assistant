@@ -1,3 +1,4 @@
+import { tagOf, labelOf } from '../../lib/explanations';
 import { RiskFlagView } from '../../components/RiskFlagView';
 import { isUuid } from '../../lib/uuid';
 import { useState } from 'react';
@@ -46,10 +47,10 @@ export function CandidateSignalDetailPage() {
           {cs.name} <span className="mono muted">{cs.security_code}</span>
         </h2>
         <ActionBadge action={cs.proposed_action} tLeg={cs.t_leg} strategyName={cs.strategy_name} size="lg" />
-        <Tag color={SIGNAL_STATE[cs.state].color} data-testid="signal-state">{SIGNAL_STATE[cs.state].text}</Tag>
+        <Tag color={tagOf(SIGNAL_STATE, cs.state).color} data-testid="signal-state">{tagOf(SIGNAL_STATE, cs.state).text}</Tag>
         <span>{cs.strategy_name}</span>
         <LifecycleBadge lifecycle={cs.lifecycle} />
-        <span className="muted small">{HORIZON[cs.horizon]}</span>
+        <span className="muted small">{(labelOf(HORIZON, cs.horizon) ?? '未知')}</span>
         <span className="spacer" />
         <DataStatusTag status={cs.data_status} asOf={cs.data_as_of} gaps={cs.gaps} />
       </div>
@@ -130,7 +131,7 @@ function Conflicts({ cs }: { cs: CandidateSignal }) {
               <b>{s.strategy_name}</b>
               <LifecycleBadge lifecycle={s.lifecycle} />
             </Space>
-            <div className="small">{HORIZON[s.horizon]} · 规则满足度 <span className="mono">{s.score ?? '—'}</span> · <Tag color={SIGNAL_STATE[s.state].color}>{SIGNAL_STATE[s.state].text}</Tag></div>
+            <div className="small">{(labelOf(HORIZON, s.horizon) ?? '未知')} · 规则满足度 <span className="mono">{s.score ?? '—'}</span> · <Tag color={tagOf(SIGNAL_STATE, s.state).color}>{tagOf(SIGNAL_STATE, s.state).text}</Tag></div>
             <div className="small muted">失效条件：{s.invalidation[0]?.text ?? '—'}</div>
             {s.id === cs.id ? <span className="muted small">（当前）</span> : <Link to={`/candidate-signals/${s.id}`}>查看</Link>}
           </div>
@@ -154,7 +155,7 @@ function Reasons({ cs }: { cs: CandidateSignal }) {
   const [note, setNote] = useState('');
   const items = q.data?.items ?? [];
   const order = { active: 0, released: 1, obsolete: 2 } as const;
-  const sorted = [...items].sort((a, b) => order[a.status] - order[b.status] || b.detected_at.localeCompare(a.detected_at));
+  const sorted = [...items].sort((a, b) => (labelOf(order, a.status) ?? 3) - (labelOf(order, b.status) ?? 3) || b.detected_at.localeCompare(a.detected_at));
   const open = (r: NonExecutableReason) => {
     release.reset();
     setNote('');
@@ -166,7 +167,7 @@ function Reasons({ cs }: { cs: CandidateSignal }) {
       {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : sorted.length ? sorted.map((r) => <ReasonCard key={r.id} r={r} onRelease={isTerminal(cs.state) ? undefined : open} />) : <span className="muted small">没有不可执行原因</span>}
       <Modal
         open={!!target}
-        title={target ? `手动解除：${REASON_CODE[target.code]}` : ''}
+        title={target ? `手动解除：${(labelOf(REASON_CODE, target.code) ?? '未知')}` : ''}
         okText="确认解除"
         okButtonProps={{ loading: release.isPending, 'data-testid': 'release-ok' } as ButtonProps}
         onOk={() => target && release.mutate({ id: target.id, note: note.trim() || null }, { onSuccess: () => setTarget(null) })}
@@ -197,8 +198,8 @@ export function RuleRefs({ refs, evidence }: { refs: RuleRef[]; evidence: Eviden
         locale={{ emptyText: '无规则引用' }}
         columns={[
           { title: '规则', dataIndex: 'rule_id', render: (v: string) => <span className="mono">{v}</span> },
-          { title: '作用', dataIndex: 'role', width: 80, render: (v: RuleRef['role']) => RULE_ROLE[v] },
-          { title: '维度', dataIndex: 'dimension', width: 90, render: (v: RuleRef['dimension']) => DIMENSION[v] },
+          { title: '作用', dataIndex: 'role', width: 80, render: (v: RuleRef['role']) => (labelOf(RULE_ROLE, v) ?? '未知') },
+          { title: '维度', dataIndex: 'dimension', width: 90, render: (v: RuleRef['dimension']) => (labelOf(DIMENSION, v) ?? '未知') },
           { title: '结果', dataIndex: 'passed', width: 90, render: (v: boolean | null) => <PassedTag passed={v} /> },
           { title: '值 / 阈值', key: 'vt', width: 120, render: (_v, r) => <span className="mono small">{r.value ?? '—'} / {r.threshold ?? '—'}</span> },
           { title: '证据', key: 'ev', render: (_v, r) => <EvidenceChips ids={r.evidence_ids} evidence={evidence} /> },
@@ -298,10 +299,10 @@ function Events({ id }: { id: string }) {
         <Timeline
           items={q.items.map((e) => ({
             key: e.id,
-            color: SIGNAL_STATE[e.to]?.color === 'default' ? 'gray' : 'blue',
+            color: labelOf(SIGNAL_STATE, e.to) && labelOf(SIGNAL_STATE, e.to)?.color !== 'default' ? 'blue' : 'gray',
             content: (
               <div className="small">
-                <span className="mono">{fmtTime(e.at)}</span>　{e.from ? `${SIGNAL_STATE[e.from]?.text ?? e.from} → ` : ''}<b>{SIGNAL_STATE[e.to]?.text ?? e.to}</b>
+                <span className="mono">{fmtTime(e.at)}</span>　{e.from ? `${labelOf(SIGNAL_STATE, e.from)?.text ?? e.from} → ` : ''}<b>{labelOf(SIGNAL_STATE, e.to)?.text ?? e.to}</b>
                 <div className="muted">{causeText(e.cause)}</div>
               </div>
             ),

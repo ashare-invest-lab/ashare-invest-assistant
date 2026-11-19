@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.v1.trades import normalize_code
 from app.auth.abuse import RateLimiter, Window
 from app.auth.deps import AuthContext, AuthDep, EngineDep, RedisDep, SettingsDep
+from app.auth.service import now_utc
 from app.common import idempotency
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
@@ -247,6 +248,7 @@ def _new_version(
     auth: AuthContext,
     candidate_id: uuid.UUID,
     version_no: int,
+    as_of: dt.datetime,
     code: str,
     sec: Row[Any] | None,
     suggestion: Row[Any] | None,
@@ -257,7 +259,13 @@ def _new_version(
 ) -> uuid.UUID:
     sec_row = sec if sec is not None else _security_row_or_stub(conn, code)
     body = rc.generate(
-        conn, settings, user_id=auth.user_id, code=code, sec=sec_row, suggestion=suggestion
+        conn,
+        settings,
+        user_id=auth.user_id,
+        code=code,
+        sec=sec_row,
+        suggestion=suggestion,
+        as_of=as_of,
     )
     items = body.items()
     snap = rc.write_snapshot(conn, auth.user_id, items)
@@ -417,6 +425,7 @@ def create_candidate(
     rds: RedisDep,
     idempotency_key: idempotency.KeyHeader = None,
 ) -> object:
+    as_of = now_utc()
     # ① 请求体
     iss = _Issues()
     origin = body.origin
@@ -483,6 +492,7 @@ def create_candidate(
                     auth=auth,
                     candidate_id=new_id,
                     version_no=1,
+                    as_of=as_of,
                     code=code,
                     sec=sec,
                     suggestion=sug,
@@ -594,6 +604,7 @@ def create_version(
     rds: RedisDep,
     idempotency_key: idempotency.KeyHeader = None,
 ) -> object:
+    as_of = now_utc()
     # ① 请求体
     iss = _Issues()
     if body.decision is None:
@@ -634,6 +645,7 @@ def create_version(
                 auth=auth,
                 candidate_id=c.id,
                 version_no=cur_no + 1,
+                as_of=as_of,
                 code=c.security_code,
                 sec=None,
                 suggestion=sug,

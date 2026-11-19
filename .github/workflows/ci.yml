@@ -37,10 +37,49 @@ env:
   REDIS_IMAGE: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
 
 jobs:
+  # Only PRs need a diff; every other event keeps full CI.
+  changes:
+    name: classify docs-only PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Classify PR paths
+        id: classify
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # pull_request 工作流文件本身来自 PR；改 .github/ 会被分类为非文档。
+        # 分类程序只取事件给定的可信 base 版本，在 PR 工作树外保存并隔离执行。
+        run: |
+          set -euo pipefail
+          classifier_dir=$(mktemp -d "$RUNNER_TEMP/docs-only.XXXXXX")
+          trap 'rm -rf "$classifier_dir"' EXIT
+          docs_only=false
+          if ! git show "$BASE_SHA:scripts/ci/docs_only_paths.py" > "$classifier_dir/classifier.py"; then
+            echo '::notice::Base classifier unavailable; running full CI.'
+          elif ! python3 -I "$classifier_dir/classifier.py" "$BASE_SHA" "$HEAD_SHA" > "$classifier_dir/output"; then
+            echo '::warning::Base classifier failed; running full CI.'
+          elif cmp -s "$classifier_dir/output" <(printf 'docs_only=true\n'); then
+            docs_only=true
+          elif ! cmp -s "$classifier_dir/output" <(printf 'docs_only=false\n'); then
+            echo '::warning::Invalid classifier output; running full CI.'
+          fi
+          printf 'docs_only=%s\n' "$docs_only" >> "$GITHUB_OUTPUT"
+
   # Wait only for an already-running exact-main push, in parallel with backend.
   # Retain this required readiness check; never run another measurement.
   # PR and merge_group both require their exact main base, without fallback.
   coverage-base:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: trusted main coverage readiness
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -55,10 +94,12 @@ jobs:
       - name: 等待原 main push 的精确测量归档
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json"
+        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json" --coverage-output "${RUNNER_TEMP}/coverage-base-ready-coverage.json"
 
   # ------------------------------------------------------------------ 后端：ruff / mypy strict / pytest + 覆盖率
   backend:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: backend (ruff, mypy, pytest+coverage)
     runs-on: ubuntu-24.04
     permissions:
@@ -215,7 +256,7 @@ jobs:
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json"
+        run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" --coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"
       - name: 精确覆盖率棘轮（可信 base，不下降）
         id: coverage_ratchet
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
@@ -223,10 +264,12 @@ jobs:
           test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
           python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json" \
             --base "${RUNNER_TEMP}/coverage-base.json" \
+            --base-coverage "${RUNNER_TEMP}/coverage-base-coverage.json" \
+            --nondet-lines scripts/ci/coverage-nondet-lines.json \
             --policy scripts/ci/coverage-baseline.json \
             --output "${RUNNER_TEMP}/coverage-ratchet-measurement.json"
       - name: 归档可信覆盖率测量与原始 JSON/JUnit
-        if: ${{ !cancelled() && steps.coverage_ratchet.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.coverage_ratchet.outcome != 'skipped' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-ratchet-${{ github.run_id }}-${{ github.run_attempt }}
@@ -256,6 +299,8 @@ jobs:
 
   # ------------------------------------------------------------------ 前端：eslint / tsc / vitest / pnpm audit
   frontend:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: frontend (eslint, tsc, vitest, pnpm audit)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -314,7 +359,14 @@ jobs:
       - name: pnpm audit
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: src/frontend
-        run: pnpm audit --audit-level high
+        shell: bash
+        # 审计完整开发/生产依赖的 high/critical；不做公告、版本或路径豁免。
+        run: |
+          set +e
+          pnpm audit --audit-level high --json > "$RUNNER_TEMP/frontend-audit.json"
+          audit_status=$?
+          set -e
+          python3 ../../scripts/ci/frontend_audit.py --report "$RUNNER_TEMP/frontend-audit.json" --audit-exit "$audit_status"
       - name: AG Grid Enterprise（已安装依赖）
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python3 scripts/ci/check_licenses.py --node-modules src/frontend/node_modules
@@ -329,6 +381,8 @@ jobs:
 
   # ------------------------------------------------------------------ 契约：文档对照脚本 + 三类码不得重名 + schemathesis
   contract:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: contract (doc check, code namespaces, schemathesis)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -406,6 +460,8 @@ jobs:
 
   # ------------------------------------------------------------------ Alembic 迁移可升可降（plan §8.0）
   migrations:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: migrations (alembic up/down/up)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -465,6 +521,8 @@ jobs:
 
   # ------------------------------------------------------------------ 镜像构建（只构建不推送）
   image:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: image (backend.Dockerfile, no push)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -499,6 +557,8 @@ jobs:
 
   # ------------------------------------------------------------------ 前端镜像（只构建不推送；dist 在镜像内，网关配置仍用仓库 nginx.conf）
   frontend-image:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: frontend-image (frontend.Dockerfile, no push)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -524,6 +584,8 @@ jobs:
 
   # ------------------------------------------------------------------ 依赖审计
   pip-audit:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: pip-audit
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -548,6 +610,8 @@ jobs:
 
   # ------------------------------------------------------------------ 依赖许可
   licenses:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: licenses (no ag-grid-enterprise, no GPL/AGPL/NC)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -587,6 +651,8 @@ jobs:
   # 冒烟 upstream 模式：路由/前缀/头不变，桩上游换 IP 后网关不重启即恢复。
   # 正反例在 scripts/ci/tests/test_gateway_limits.py（secret-scan.yml selftest job 运行）。
   gateway-limits:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -641,3 +707,98 @@ jobs:
           persist-credentials: false
       - name: check_ignored_sources.py
         run: python3 scripts/ci/check_ignored_sources.py
+
+  # 惰性文档 PR：轻检查真跑；以下空跑仅覆盖已审计的不相关输入。
+  # 安全：只验证 main 覆盖率制品；惰性文档不改变可执行代码或测量输入。
+  coverage-base-docs:
+    name: trusted main coverage readiness
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：测试读取的契约/策略等 docs 已列入 CONSUMED_DOCS；其余惰性文档不参与测试。
+  backend-docs:
+    name: backend (ruff, mypy, pytest+coverage)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：测试读取的契约、plan 和免责策略已排除；构建/依赖输入均在 src/frontend。
+  frontend-docs:
+    name: frontend (eslint, tsc, vitest, pnpm audit)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  contract-docs:
+    name: contract (doc check, code namespaces, schemathesis)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          python3 scripts/ci/check_contract.py
+          python3 scripts/ci/check_code_namespaces.py
+
+  # 安全：输入为 src/backend 迁移、deploy/db 和配置；不读取惰性文档。
+  migrations-docs:
+    name: migrations (alembic up/down/up)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：构建上下文 src/backend，仅 COPY 应用/依赖/迁移；不 COPY docs 或根 Markdown。
+  image-docs:
+    name: image (backend.Dockerfile, no push)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：构建上下文 src/frontend；不 COPY docs 或根 Markdown，冒烟只读部署配置。
+  frontend-image-docs:
+    name: frontend-image (frontend.Dockerfile, no push)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：仅审计 uv.lock、pyproject 和 tests/requirements.txt；不读取惰性文档。
+  pip-audit-docs:
+    name: pip-audit
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：仅检查依赖许可元数据与前端依赖清单；不读取惰性文档。
+  licenses-docs:
+    name: licenses (no ag-grid-enterprise, no GPL/AGPL/NC)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：只读取 nginx/compose/config 与冒烟脚本；不读取惰性文档。
+  gateway-limits-docs:
+    name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0

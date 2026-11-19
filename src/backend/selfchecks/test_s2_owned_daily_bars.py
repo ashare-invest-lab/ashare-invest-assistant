@@ -232,7 +232,6 @@ def test_suspension_incomplete_future_and_calendar_gap(world: Any) -> None:
     result = world.reader.read(OWNER, CODE, query())
     assert result["items"] == []
     assert {gap["reason"] for gap in result["gaps"]} == {
-        "suspended",
         "no_source",
     }
     with world.engine.begin() as conn:
@@ -267,7 +266,8 @@ def test_gap_only_response_has_no_timestamp(world: Any, suspended: bool) -> None
     assert result["items"] == []
     assert result["data_as_of"] is None
     assert result["data_status"] == "unavailable"
-    assert result["gaps"][0]["reason"] == ("suspended" if suspended else "no_source")
+    assert result["gaps"][0]["reason"] == "no_source"
+    assert result["gaps"][0]["message"] == ("当日停牌" if suspended else "日线缓存字段不完整")
 
 
 def test_registered_http_uses_default_owned_reader(

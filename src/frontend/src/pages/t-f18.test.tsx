@@ -134,6 +134,7 @@ describe('mock 与契约 §7.7 一致', () => {
 describe('页面', () => {
   it('/plan-drafts?status=pending,stale 由真实页面接住，保留参数', async () => {
     const router = renderAt('/plan-drafts?status=pending,stale');
+    await screen.findByTestId('plan-drafts-page');
     await waitFor(() => expect(screen.getAllByTestId(/^draft-link-/)).toHaveLength(3));
     expect(screen.queryByTestId('placeholder')).toBeNull();
     expect(router.state.location.search).toBe('?status=pending,stale');
