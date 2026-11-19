@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Protocol
 
 from fastapi import Depends
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 from sqlalchemy import Engine, select
 from starlette.datastructures import QueryParams
 
@@ -46,6 +46,16 @@ class BarsGap(BaseModel):
     key: str
     reason: GapReason
     message: str
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def contract_reason(cls, value: object) -> GapReason:
+        if not isinstance(value, str):
+            return GapReason.NO_SOURCE
+        try:
+            return GapReason(value)
+        except (ValueError, TypeError):
+            return GapReason.NO_SOURCE
 
 
 class BarsResponse(BaseModel):

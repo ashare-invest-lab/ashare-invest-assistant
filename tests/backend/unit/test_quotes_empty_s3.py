@@ -77,7 +77,11 @@ class Result:
 def world(monkeypatch: pytest.MonkeyPatch) -> Any:
     state = SimpleNamespace(
         reads=[], fail=False, approved=True, active={OWNER}, revoked=[], bars=[],
-        now=NOW, latest_close_date=dt.date(2041, 5, 6)
+        now=NOW, latest_close_date=dt.date(2041, 5, 6),
+        calendar={
+            dt.date(2041, 5, day): dt.date(2041, 5, day).weekday() < 5
+            for day in range(1, 32)
+        },
     )
 
     def execute(statement: Any) -> Result:
@@ -141,12 +145,30 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             for row in sorted(eligible, key=lambda row: row.trade_date, reverse=True):
                 latest.setdefault(row.code, row)
             return Result(list(latest.values()))
-        assert "app.user_data_licence_status" in rendered
-        assert rendered.startswith("SELECT app.user_data_licence_status.id \nFROM ")
-        assert "app.user_data_licence_holds" in rendered
-        assert "deleted_at IS NULL" in rendered and "paused_until" in rendered
-        assert "expires_on" in rendered and "held" not in params
-        return Result([LICENCE] if params["user_id_1"] in state.active else [])
+        if "market.trading_calendar" in rendered:
+            assert params["date_1"] == state.now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+            if rendered.startswith("SELECT market.trading_calendar.is_open \nFROM "):
+                assert "market.trading_calendar.date = " in rendered
+                assert "ORDER BY" not in rendered and "LIMIT" not in rendered
+                is_open = state.calendar.get(params["date_1"])
+                return Result([] if is_open is None else [is_open])
+            assert rendered.startswith("SELECT market.trading_calendar.date \nFROM ")
+            assert "market.trading_calendar.is_open IS true" in rendered
+            assert "market.trading_calendar.date <= " in rendered
+            assert "ORDER BY market.trading_calendar.date DESC" in rendered
+            assert "LIMIT" in rendered and params["param_1"] == 1
+            open_dates = [
+                day for day, is_open in state.calendar.items()
+                if is_open is True and day <= params["date_1"]
+            ]
+            return Result([max(open_dates)] if open_dates else [])
+        if "app.user_data_licence_status" in rendered:
+            assert rendered.startswith("SELECT app.user_data_licence_status.id \nFROM ")
+            assert "app.user_data_licence_holds" in rendered
+            assert "deleted_at IS NULL" in rendered and "paused_until" in rendered
+            assert "expires_on" in rendered and "held" not in params
+            return Result([LICENCE] if params["user_id_1"] in state.active else [])
+        raise AssertionError(f"unexpected SQL: {rendered}")
 
     engine = SimpleNamespace(
         connect=lambda: nullcontext(SimpleNamespace(execute=execute))
@@ -334,7 +356,7 @@ def test_bound_daily_close_is_stale_with_real_timestamps_and_stable_etag(world: 
     assert item["data_as_of"] == "2041-05-05T17:05:00+08:00"
     for field in ("t", "data_as_of"):
         assert dt.datetime.fromisoformat(item[field]) < NOW
-    assert item["volume"] is None and item["amount"] is None
+    assert item["volume"] == "123" and item["amount"] == "456"
     cached = world.client.get(
         "/api/v1/quotes", params={"codes": CODE}, headers={"If-None-Match": response.headers["etag"]}
     )
@@ -367,7 +389,9 @@ def test_only_latest_eligible_bound_mairui_bar_is_used(world: Any) -> None:
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["price"] == "7.8750"
     assert item["t"] == "2041-05-05T15:00:00+08:00"
-    assert len(world.state.reads) == 3
+    assert sum("market.daily_bars" in sql for sql in world.state.reads) == 1
+    assert sum("market.trading_calendar" in sql for sql in world.state.reads) == 1
+    assert len(world.state.reads) == 4
 
 
 @pytest.mark.parametrize(
@@ -392,6 +416,7 @@ def test_incomplete_latest_bar_falls_back_or_reports_no_source(world: Any, inval
     ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "stale" and item["price"] == "7.8750"
+    world.state.reads.clear()
     world.state.bars.pop()
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "unavailable"
@@ -401,6 +426,8 @@ def test_incomplete_latest_bar_falls_back_or_reports_no_source(world: Any, inval
         item[key] is None
         for key in ("price", "change_pct", "volume", "amount", "t", "data_as_of")
     )
+    assert len(world.state.reads) == 3
+    assert all("market.trading_calendar" not in sql for sql in world.state.reads)
 
 
 def test_no_active_licence_skips_even_existing_daily_bars(world: Any) -> None:
@@ -431,7 +458,8 @@ def test_mixed_codes_keep_deduplicated_request_order_with_one_daily_select(
         assert Decimal(items[0]["change_pct"]) == Decimal(5)
     assert items[1]["price"] == "7.8750"
     assert sum("market.daily_bars" in sql for sql in world.state.reads) == 1
-    assert len(world.state.reads) == 3
+    assert sum("market.trading_calendar" in sql for sql in world.state.reads) == 1
+    assert len(world.state.reads) == 4
 
 
 @pytest.mark.parametrize(
@@ -465,11 +493,15 @@ def test_intraday_complete_bar_falls_back_to_closed_day(
     assert item["t"] == "2041-05-06T15:00:00+08:00"
     assert item["data_as_of"] == "2041-05-07T09:00:00+08:00"
     assert dt.datetime.fromisoformat(item["t"]) <= world.state.now
+    world.state.reads.clear()
     world.state.bars.remove(historical)
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "unavailable"
     assert item["gaps"][0]["reason"] == "no_source"
     assert item["price"] is None and item["t"] is None
+    assert all(item[key] is None for key in ("change_pct", "volume", "amount", "data_as_of"))
+    assert len(world.state.reads) == 3
+    assert all("market.trading_calendar" not in sql for sql in world.state.reads)
 
 
 @pytest.mark.parametrize("hour,minute,second", [(1, 0, 0), (6, 59, 59)])
@@ -494,11 +526,15 @@ def test_intraday_fetch_is_not_a_close_even_after_beijing_1500(
     assert item["data_status"] == "stale" and item["price"] == "7.8750"
     assert item["t"] == "2041-05-06T15:00:00+08:00"
     assert item["data_as_of"] == "2041-05-06T17:05:00+08:00"
+    world.state.reads.clear()
     world.state.bars.remove(previous)
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "unavailable"
     assert item["gaps"][0]["reason"] == "no_source"
     assert all(item[key] is None for key in ("price", "t", "data_as_of"))
+    assert all(item[key] is None for key in ("change_pct", "volume", "amount"))
+    assert len(world.state.reads) == 3
+    assert all("market.trading_calendar" not in sql for sql in world.state.reads)
 
 
 @pytest.mark.parametrize("minute,fetch_minute", [(0, 0), (1, 0), (1, 1)])
@@ -516,7 +552,114 @@ def test_today_close_is_eligible_at_or_after_beijing_1500(
         ),
     ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
-    assert item["data_status"] == "stale" and item["price"] == "8.1250"
+    assert item["data_status"] == "fresh" and item["price"] == "8.1250"
     assert item["t"] == "2041-05-07T15:00:00+08:00"
     assert item["data_as_of"] == f"2041-05-07T15:{fetch_minute:02d}:00+08:00"
     assert dt.datetime.fromisoformat(item["t"]) <= world.state.now
+
+
+@pytest.mark.parametrize(
+    "hour,minute,trade_day,status,price,calendar_reads",
+    [(6, 59, 6, "stale", "7.8750", 1), (7, 1, 7, "fresh", "8.1250", 2)],
+)
+def test_open_day_close_freshness_before_and_after_beijing_1500(
+    world: Any, hour: int, minute: int, trade_day: int,
+    status: str, price: str, calendar_reads: int,
+) -> None:
+    world.state.now = dt.datetime(2041, 5, 7, hour, minute, tzinfo=dt.UTC)
+    world.state.latest_close_date = dt.date(2041, 5, trade_day)
+    world.state.calendar = {dt.date(2041, 5, 6): True, dt.date(2041, 5, 7): True}
+    # Before 15:00 today's bar is excluded by latest_close_date (and is future-fetched).
+    world.state.bars = [
+        bar(
+            trade_date=dt.date(2041, 5, day),
+            fetched_at=dt.datetime(2041, 5, day, 7, 1, tzinfo=dt.UTC),
+            close=Decimal(close), volume=Decimal("123.00"), amount=Decimal("456.000"),
+        )
+        for day, close in [(6, "7.8750"), (7, "8.1250")]
+    ]
+    response = world.client.get("/api/v1/quotes", params={"codes": CODE})
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["data_status"] == status and item["gaps"] == []
+    assert item["price"] == price
+    assert item["t"] == f"2041-05-{trade_day:02d}T15:00:00+08:00"
+    assert item["data_as_of"] == f"2041-05-{trade_day:02d}T15:01:00+08:00"
+    assert item["volume"] == "123.00" and item["amount"] == "456.000"
+    assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
+    calendar_sql = [sql for sql in world.state.reads if "market.trading_calendar" in sql]
+    assert len(calendar_sql) == calendar_reads
+    assert calendar_sql[0].startswith("SELECT market.trading_calendar.is_open ")
+    if calendar_reads == 2:
+        assert calendar_sql[1].startswith("SELECT market.trading_calendar.date ")
+
+
+@pytest.mark.parametrize(
+    "scenario,status,calendar_reads",
+    [
+        ("same_day_fetch", "fresh", 2),
+        ("missing_calendar", "stale", 1),
+        ("cross_day_fetch", "stale", 2),
+        ("older_close", "stale", 2),
+        ("no_open_day", "stale", 2),
+    ],
+)
+def test_nontrading_day_close_requires_calendar_and_same_day_fetch(
+    world: Any, scenario: str, status: str, calendar_reads: int,
+) -> None:
+    world.state.now = dt.datetime(2041, 5, 11, 4, tzinfo=dt.UTC)
+    world.state.latest_close_date = dt.date(2041, 5, 10)
+    world.state.calendar = {
+        dt.date(2041, 5, 9): True,
+        dt.date(2041, 5, 10): True,
+        dt.date(2041, 5, 11): False,
+        dt.date(2041, 5, 12): True,  # Future open dates must not be selected.
+    }
+    trade_day = 9 if scenario == "older_close" else 10
+    fetch_day = 11 if scenario == "cross_day_fetch" else trade_day
+    fetch_hour = 1 if scenario == "cross_day_fetch" else 9
+    if scenario == "missing_calendar":
+        del world.state.calendar[dt.date(2041, 5, 11)]
+    elif scenario == "no_open_day":
+        world.state.calendar = {dt.date(2041, 5, 11): False, dt.date(2041, 5, 12): True}
+    world.state.bars = [
+        bar(
+            trade_date=dt.date(2041, 5, trade_day),
+            fetched_at=dt.datetime(2041, 5, fetch_day, fetch_hour, 5, tzinfo=dt.UTC),
+        )
+    ]
+    response = world.client.get("/api/v1/quotes", params={"codes": CODE})
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["data_status"] == status and item["gaps"] == []
+    assert item["price"] == "7.8750" and Decimal(item["change_pct"]) == Decimal("5")
+    assert item["volume"] == "123" and item["amount"] == "456"
+    assert item["t"] == f"2041-05-{trade_day:02d}T15:00:00+08:00"
+    assert item["data_as_of"] == f"2041-05-{fetch_day:02d}T{fetch_hour + 8:02d}:05:00+08:00"
+    assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
+    calendar_sql = [sql for sql in world.state.reads if "market.trading_calendar" in sql]
+    assert len(calendar_sql) == calendar_reads
+    assert calendar_sql[0].startswith("SELECT market.trading_calendar.is_open ")
+    if calendar_reads == 2:
+        assert calendar_sql[1].startswith("SELECT market.trading_calendar.date ")
+
+
+@pytest.mark.parametrize(
+    "volume,amount,expected_volume,expected_amount",
+    [
+        (None, None, None, None),
+        (None, Decimal("456.00"), None, "456.00"),
+        (Decimal("123.00"), None, "123.00", None),
+    ],
+)
+def test_daily_close_preserves_null_volume_and_amount(
+    world: Any, volume: Decimal | None, amount: Decimal | None,
+    expected_volume: str | None, expected_amount: str | None,
+) -> None:
+    world.state.bars = [bar(volume=volume, amount=amount)]
+    response = world.client.get("/api/v1/quotes", params={"codes": CODE})
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["data_status"] == "stale" and item["gaps"] == []
+    assert item["price"] == "7.8750"
+    assert item["volume"] == expected_volume and item["amount"] == expected_amount

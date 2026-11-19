@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { Empty, Segmented, Table, Tag } from 'antd';
@@ -20,9 +21,9 @@ function CurrentVersion({ template }: { template: StrategyTemplate }) {
     <>
       <h2 className="page-title">{template.name} {isHighRisk(detail?.risk_level ?? template.risk_level) ? <Tag color="red">高风险</Tag> : null}</h2>
       <p className="mono muted">{template.key}</p>
-      <p>周期：{template.horizons.length ? template.horizons.map((h) => HORIZON[h]).join('、') : '未声明适用周期'}</p>
+      <p>周期：{template.horizons.length ? template.horizons.map((h) => (labelOf(HORIZON, h) ?? '未知')).join('、') : '未声明适用周期'}</p>
       <p>健康度：{template.health ? `${template.health.state} · n=${template.health.n} · 权重 ${template.health.weight}` : '暂无健康度'}</p>
-      <p>当前版本：v{template.current_version.version_no} · {(detail?.lifecycle ?? template.current_version.lifecycle) === 'simulating' ? '模拟中' : LIFECYCLE[detail?.lifecycle ?? template.current_version.lifecycle]}</p>
+      <p>当前版本：v{template.current_version.version_no} · {(detail?.lifecycle ?? template.current_version.lifecycle) === 'simulating' ? '模拟中' : (labelOf(LIFECYCLE, detail?.lifecycle ?? template.current_version.lifecycle) ?? '未知')}</p>
       {version.isPending ? <Loading /> : version.isError ? <ErrorBox error={version.error} prefix="策略版本加载失败" /> : detail ? (
         <section className="panel">
           <h3>版本配置</h3>
@@ -38,8 +39,8 @@ function CurrentVersion({ template }: { template: StrategyTemplate }) {
                 locale={{ emptyText: '暂无规则' }}
                 columns={[
                   { title: 'ID', dataIndex: 'id', render: (value) => value ?? '—' },
-                  { title: '维度', key: 'dimension', render: (_, rule) => rule.dimension ? DIMENSION[rule.dimension] ?? rule.dimension : '—' },
-                  { title: '角色', key: 'role', render: (_, rule) => rule.role ? RULE_ROLE[rule.role] ?? rule.role : '—' },
+                  { title: '维度', key: 'dimension', render: (_, rule) => rule.dimension ? labelOf(DIMENSION, rule.dimension) ?? rule.dimension : '—' },
+                  { title: '角色', key: 'role', render: (_, rule) => rule.role ? labelOf(RULE_ROLE, rule.role) ?? rule.role : '—' },
                   { title: '表达式', dataIndex: 'expr', render: (value) => <span style={{ overflowWrap: 'anywhere' }}>{value ?? '—'}</span> },
                 ]}
               />

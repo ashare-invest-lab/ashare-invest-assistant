@@ -2,13 +2,11 @@
  * T-F26：证券搜索显示曾用名命中与 quote_missing（契约 v0.2.9 内 T-A04 #33 ②，SecurityHit；§9 v0.2.9 验收 3、5、7），
  * 以及 #41：搜索不缓存（staleTime 0、不写本地存储）、429 按 retry_after_s 暂停、输入防抖 250 ms；网关 414。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { createMemoryRouter, RouterProvider } from 'react-router';
-import { AppProviders } from '../app/AppProviders';
-import { makeQueryClient } from '../app/queryClient';
 import { routes } from '../app/routes';
 import { preloadRoutes } from '../test/preloadRoutes';
+import { renderTestRoute } from '../test/renderTestRoute';
 import type { SecurityHit } from '../api/marketTypes';
 import { uid } from '../mocks/fixtures';
 import { deleteLicence, resetLicences, setMockLicence } from '../mocks/licenceStore';
@@ -35,13 +33,15 @@ const search = async (qs: string) => {
   return { status: r.status, body: (await r.json()) as Res };
 };
 const hitOf = (b: Res, code: string) => b.items.find((h) => h.security_code === code);
-function renderAt(path: string) {
-  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1440 });
-  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 900 });
-  const router = createMemoryRouter(routes, { initialEntries: [path] });
-  render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={router} /></AppProviders>);
-  return router;
+
+async function type(v: string) {
+  const input = screen.getByRole('combobox', { name: '证券搜索' });
+  act(() => { input.focus(); });
+  fireEvent.change(input, { target: { value: v } });
+  // Drive the actual debounce; network/DOM assertions start after it has fired.
+  await advance(250);
 }
+
 const DEMO = uid(2);
 
 describe('mock：/securities/search 曾用名（验收 3）', () => {
@@ -110,14 +110,13 @@ describe('mock：quote_missing 按本人证书（验收 7）', () => {
 });
 
 describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
-  beforeEach(() => mockLoginAs('demo_user'));
-  const type = async (v: string) => {
-    await screen.findByTestId('terminal');
-    fireEvent.change(screen.getByLabelText('证券搜索'), { target: { value: v } });
-  };
+  beforeEach(() => {
+    mockLoginAs('demo_user');
+    fakeClock(false);
+  });
 
   it('SLFZ → 显示“曾用名：示例发展”，选中进 600000.SH', async () => {
-    const router = renderAt('/terminal');
+    const router = await renderTestRoute('/reviews');
     await type('SLFZ');
     const m = await screen.findByTestId('search-matched-600000.SH', {}, { timeout: 3000 });
     expect(m).toHaveTextContent('曾用名：示例发展');
@@ -126,17 +125,17 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/stocks/600000.SH'));
   });
   it('quote_missing=true 显示徽标；false/null 不显示', async () => {
-    renderAt('/terminal');
+    await renderTestRoute('/reviews');
     await type('830001');
     expect(await screen.findByTestId('search-quote-missing-830001.BJ', {}, { timeout: 3000 })).toHaveTextContent(QUOTE_MISSING_TEXT);
-    fireEvent.change(screen.getByLabelText('证券搜索'), { target: { value: '510300' } });
+    await type('510300');
     await screen.findByTestId('search-hit-510300.SH', {}, { timeout: 3000 });
     expect(screen.queryByTestId('search-quote-missing-510300.SH')).toBeNull();
   });
   it('超过 20 个字符：前端提示，不发请求', async () => {
     let calls = 0;
     server.use(http.get(`${API}/securities/search`, () => { calls += 1; return HttpResponse.json({ items: [], master_as_of: '2026-10-30' }); }));
-    renderAt('/terminal');
+    await renderTestRoute('/reviews');
     await type('一二三四五六七八九十一二三四五六七八九十一');
     expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('最多 20 个字符');
     expect(calls).toBe(0);
@@ -144,13 +143,13 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
   it('400 显示“搜索词不符合要求”', async () => {
     server.use(http.get(`${API}/securities/search`, () => HttpResponse.json(
       { error: { code: 'VALIDATION_ERROR', message: 'q 归一化后为空', details: { fields: [{ field: 'q', issue: 'invalid' }] }, request_id: null } }, { status: 400 })));
-    renderAt('/terminal');
+    await renderTestRoute('/reviews');
     await type('600000');
     expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('搜索词不符合要求');
   });
   it('网关 414（非 JSON，兜底）显示“请求地址过长”', async () => {
     server.use(http.get(`${API}/securities/search`, () => new HttpResponse('Request-URI Too Large', { status: 414, headers: { 'Content-Type': 'text/html' } })));
-    renderAt('/terminal');
+    await renderTestRoute('/reviews');
     await type('600000');
     expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('请求地址过长');
   });
@@ -166,8 +165,7 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
         risk_flag: null, match_kind: 'code_exact', matched_text: null, quote_missing: false }], master_as_of: '2026-10-30' });
     }));
     // 暂停 30 秒由假时钟显式推进，真实耗时不会让暂停提前结束
-    fakeClock(false);
-    renderAt('/terminal');
+    await renderTestRoute('/reviews');
     await type('600000');
     expect(await screen.findByTestId('search-status', {}, { timeout: 3000 })).toHaveTextContent('请 30 秒后再试');
     fireEvent.change(screen.getByLabelText('证券搜索'), { target: { value: '60000' } });
@@ -185,9 +183,9 @@ describe('顶栏搜索 UI', { timeout: 15_000 }, () => {
 describe('#41：不写本地存储；工具函数', { timeout: 15_000 }, () => {
   it('搜索后 localStorage / sessionStorage 不出现 securities 数据', async () => {
     mockLoginAs('demo_user');
-    renderAt('/terminal');
-    await screen.findByTestId('terminal');
-    fireEvent.change(screen.getByLabelText('证券搜索'), { target: { value: 'SLFZ' } });
+    fakeClock(false);
+    await renderTestRoute('/reviews');
+    await type('SLFZ');
     await screen.findByTestId('search-matched-600000.SH', {}, { timeout: 3000 });
     const dump = JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage });
     expect(dump).not.toMatch(/示例发展|600000\.SH|master_as_of/);

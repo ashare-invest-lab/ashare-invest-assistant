@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 /** T-F23 新建研究候选（契约 v0.2.9 §7.7A POST /candidates）：手工、个股页、候选信号卡三种来源 */
 import { useState } from 'react';
 import { Form, Input, Modal, type ButtonProps } from 'antd';
@@ -54,7 +55,7 @@ export function CreateCandidateModal({ open, onClose, origin, securityCode = nul
     >
       <div data-testid="cand-create-modal">
         <div className="muted small" style={{ marginBottom: 8 }}>
-          来源：{RESEARCH_ORIGIN[origin]}{securityCode && origin !== 'manual' ? ` · ${securityCode}` : ''}。
+          来源：{(labelOf(RESEARCH_ORIGIN, origin) ?? '未知')}{securityCode && origin !== 'manual' ? ` · ${securityCode}` : ''}。
           创建后系统按当时数据生成理由、反证与适配提示并写入快照；研究候选是你的研究记录，不能直接生成计划草案。
         </div>
         <Form<Values> form={form} layout="vertical" onFinish={submit} initialValues={{ conditions_to_hold: [] }}>

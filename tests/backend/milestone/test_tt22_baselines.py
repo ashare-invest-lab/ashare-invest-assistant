@@ -3,15 +3,18 @@
 来源为T-T21固定e6eaeb2的同名selfchecks；当前图经conftest接原tt21真实夹具，不安装全局替换hook。
 不执行正式卡/共享库；T-B88已交付，按固定9635f12运行这4例。
 """
+# ruff: noqa: F811 -- pytest fixtures intentionally share their imported names.
 from __future__ import annotations
 
 from selfchecks import test_ta16_policy_confidence as _policy
 from selfchecks import test_tb76_assembly as _assembly
-from selfchecks import test_tb77_aggregates as _aggregates
 from selfchecks import test_tb76_daily as _daily
+from selfchecks import test_tb77_aggregates as _aggregates
 from selfchecks.test_tb70_replay import no_network  # noqa: F401
 from selfchecks.test_tb74_candidates import setup  # noqa: F401
-from .enqueue_diagnostics import enqueue_observer as enqueue_observer
+
+from .enqueue_diagnostics import enqueue_observer as enqueue_observer  # noqa: PLC0414
+
 
 def test_actual_isolated_seed_idempotence_and_same_version_conflict(integration: _policy.Any) -> None:
     engine, *_ = integration
@@ -65,7 +68,7 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _a
     report = client.get('/api/v1/daily-reports/2026-10-30').json()
     assert report['stocks'][0]['suggestion_id'] == sid
     assert report['evidence']
-    assert all((e['id'].startswith('688018.SH:') for e in report['evidence']))
+    assert all(e['id'].startswith('688018.SH:') for e in report['evidence'])
     from app.engine_policies import EnginePolicyReference
     from app.suggestions.models import SuggestionInput
     from app.suggestions.service import archive, snapshot_items
@@ -85,7 +88,10 @@ def test_real_worker_policy_bound_candidate_suggestion_and_idempotence(setup: _a
             archive(conn, user_id=owner, content=content)
         transaction.rollback()
 
-def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggregates.Any, no_network: _aggregates.Any) -> None:
+def test_routes_real_ownership_unread_and_imported_holdings(
+    integration: _aggregates.Any, no_network: _aggregates.Any,
+    fixed_aggregate_clock: _aggregates.dt.datetime,
+) -> None:
     engine, client, stranger, user_id, other_id = integration
     account = client.post('/api/v1/accounts', json={'broker_name': '合成券商', 'alias': '合成'})
     assert account.status_code == 201
@@ -102,6 +108,8 @@ def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggreg
         response = client.get('/api/v1' + path)
         assert response.status_code == 200, response.status_code
         value = response.json()
+        assert value['trade_date'] == fixed_aggregate_clock.date().isoformat()
+        assert value['session'] == 'morning'
         assert value['data_status'] in {'partial', 'unavailable'}
         assert value['gaps']
         cached = client.get('/api/v1' + path, headers={'If-None-Match': response.headers['etag']})
@@ -122,7 +130,7 @@ def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggreg
     assert confirmed.status_code == 200
     terminal = client.get('/api/v1/terminal').json()
     assert {row['security_code'] for row in terminal['rows']} == {'688018.SH', '688073.SH', '300364.SZ', '301218.SZ'}
-    assert all((row['holding'] and row['quote'] is None and (row['suggestion'] is None) for row in terminal['rows']))
+    assert all(row['holding'] and row['quote'] is None and (row['suggestion'] is None) for row in terminal['rows'])
     assert terminal['account']['pnl_day'] is None
     assert client.get('/api/v1/terminal', params={'scope': 'invalid'}).status_code == 400
     second = client.post('/api/v1/accounts', json={'broker_name': '合成券商', 'alias': '另一个合成'})
@@ -142,7 +150,7 @@ def test_routes_real_ownership_unread_and_imported_holdings(integration: _aggreg
     assert actual['data_status'] in {'partial', 'unavailable'}
     assert actual['gaps']
     assert {row['security_code'] for row in actual['rows']} == {'688018.SH', '688073.SH', '300364.SZ', '301218.SZ'}
-    assert all((row['holding'] for row in actual['rows']))
+    assert all(row['holding'] for row in actual['rows'])
     assert actual['unread_notifications'] == 1
     from fastapi.testclient import TestClient
     with TestClient(client.app) as anonymous:
@@ -182,8 +190,9 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
     spec['dimension_view_thresholds'] = prepared_spec['dimension_view_thresholds']
     spec['valid_until'] = prepared_spec['valid_until']
     spec['rules'].extend([{'id': 'fictional_counter', 'dimension': 'technical', 'role': 'counter', 'expr': 'f.close_qfq < 0', 'eval_time': 'daily_close', 'weight': 1}, {'id': 'fictional_invalidation', 'dimension': 'technical', 'role': 'invalidation', 'expr': 'f.close_qfq < 0', 'eval_time': 'daily_close', 'weight': 1}])
-    from app.engine_policies import load as load_reference_policy, seed as seed_reference_policy
     from app.db.tables.realtime import suggestions as generated_suggestions
+    from app.engine_policies import load as load_reference_policy
+    from app.engine_policies import seed as seed_reference_policy
     with engine.begin() as conn:
         seed_reference_policy(conn, load_reference_policy(_assembly.ROOT / 'config'))
         conn.execute(_daily.insert(_daily.strategy_cards).values(id=card, key='tb76_fiction_' + card.hex, title='明确虚构非正式卡', source_kind='user', owner_user_id=owner))
@@ -199,10 +208,10 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
         assert outcome['evaluations'][0]['rule_refs']
         assert outcome['evaluations'][0]['simulation'] is True
         assert 'evaluated_input_gaps:688018.SH' in outcome['issues']
-        assert not any(('p1_conclusion_assembler_missing' in issue for issue in outcome['issues']))
+        assert not any('p1_conclusion_assembler_missing' in issue for issue in outcome['issues'])
         refs = outcome['evaluations'][0]['rule_refs']
         assert {r['role'] for r in refs} == {'entry', 'counter', 'invalidation'}
-        assert all((r['passed'] is False for r in refs if r['role'] != 'entry'))
+        assert all(r['passed'] is False for r in refs if r['role'] != 'entry')
         generated = conn.execute(_daily.select(generated_suggestions).where(generated_suggestions.c.user_id == owner, generated_suggestions.c.security_code == '688018.SH')).one()
         assert str(generated.id) in outcome['suggestion_ids']
         assert outcome['evaluations'][0]['rule_refs'][0]['passed'] is None
@@ -210,7 +219,7 @@ def test_true_evaluator_path_records_unassembled_p1_not_fake_suggestions(setup: 
     response = client.get('/api/v1/daily-reports/2026-10-30')
     assert response.status_code == 200
     report = response.json()
-    assert not any(('p1_conclusion_assembler_missing' in g['key'] for g in report['gaps']))
+    assert not any('p1_conclusion_assembler_missing' in g['key'] for g in report['gaps'])
     assert report['gaps']
-    stock = next((row for row in report['stocks'] if row['security_code'] == '688018.SH'))
+    stock = next(row for row in report['stocks'] if row['security_code'] == '688018.SH')
     assert stock['suggestion_id'] == str(generated.id)
