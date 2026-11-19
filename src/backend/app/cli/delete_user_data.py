@@ -283,6 +283,10 @@ STEPS: Final[tuple[Step, ...]] = (
     _d("app.accounts"),
     _d("app.watchlist_items"),
     _d("app.daily_bars_outbox"),
+    _d(
+        "app.horizon_completion_evidence",
+        "bar_version_id IN (SELECT id FROM app.horizon_input_versions WHERE user_id = :uid)",
+    ),
     _d("app.horizon_input_versions"),
     _d("app.user_profiles"),
     _d("app.user_realtime_prefs"),
@@ -476,6 +480,21 @@ TRIGGER_ALLOWLIST: Final[frozenset[tuple[str, str, str]]] = frozenset(
         ("app.daily_reports", "trg_daily_reports_guard", "app.guard_daily_reports"),
         ("app.data_snapshots", "trg_data_snapshots_immutable", "app.reject_mutation"),
         (
+            "app.horizon_completion_evidence",
+            "trg_horizon_completion_evidence_validate",
+            "app.validate_horizon_completion_version",
+        ),
+        (
+            "app.horizon_completion_evidence",
+            "trg_horizon_completion_evidence_no_update",
+            "app.reject_horizon_completion_update",
+        ),
+        (
+            "app.horizon_completion_evidence",
+            "trg_horizon_completion_evidence_no_delete",
+            "app.reject_horizon_completion_delete",
+        ),
+        (
             "app.horizon_input_versions",
             "trg_horizon_input_versions_no_update",
             "app.reject_horizon_input_update",
@@ -598,10 +617,6 @@ def unknown_triggers(conn: Connection, tables: list[str]) -> list[str]:
     return [
         f"{r.tbl} / {r.trg} → {r.fn}" for r in rows if (r.tbl, r.trg, r.fn) not in TRIGGER_ALLOWLIST
     ]
-
-
-def _params(plan_or_uid: Any, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
-    return extra | {"uid": plan_or_uid}
 
 
 def _count(conn: Connection, table: str, where: str, params: dict[str, Any]) -> int:

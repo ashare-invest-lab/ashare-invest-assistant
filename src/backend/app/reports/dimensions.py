@@ -27,7 +27,7 @@ from app.db.tables.strategy import feature_catalog
 from app.features.pipeline import FEATURE_SET_VERSION, instant, prepare
 from app.replay.baseline import VERSION
 from app.reports.models import DailyDimensionAnalysis
-from app.schemas.enums import DataProvider, EpistemicType, MarketRegime
+from app.schemas.enums import DataProvider, EpistemicType, GapReason, MarketRegime
 from app.signals.models import Evidence
 
 BEIJING = ZoneInfo("Asia/Shanghai")
@@ -88,6 +88,7 @@ def load_inputs(
     from app.marketdata.daily_snapshot import FINAL_AFTER, OWNED_VERSION
 
     sources = []
+    suspended_today = False
     raw, factors, scalars, sessions = None, [], [], []
     accepted = (VERSION, OWNED_VERSION)
     for row in conn.execute(
@@ -110,6 +111,11 @@ def load_inputs(
             raise ValueError("owned_source_hash_conflict")
         raw = next((i for i in body["instruments"] if i["security_code"] == code), None)
         if raw is not None:
+            suspended_today = schema == OWNED_VERSION and any(
+                gap.get("trade_date") == day.isoformat()
+                and gap.get("reason") == GapReason.SUSPENDED.value
+                for gap in raw.get("gaps", [])
+            )
             factors, scalars, sessions = (
                 raw.get("factors", []),
                 raw.get("scalars", []),
@@ -152,6 +158,7 @@ def load_inputs(
         frame_error = True
     return {
         "cutoff": cutoff,
+        "suspended_today": suspended_today,
         "registry": registry,
         "raw": raw,
         "frame": frame,
@@ -379,6 +386,20 @@ def build(
     day: dt.date,
     now: dt.datetime,
 ) -> tuple[uuid.UUID, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build the analysis snapshot, dimensions, and evidence."""
+    snapshot, groups, evidence, _ = build_with_suspension(conn, owner, account, code, day, now)
+    return snapshot, groups, evidence
+
+
+def build_with_suspension(
+    conn: Connection,
+    owner: uuid.UUID,
+    account: uuid.UUID | None,
+    code: str,
+    day: dt.date,
+    now: dt.datetime,
+) -> tuple[uuid.UUID, list[dict[str, Any]], list[dict[str, Any]], bool]:
+    """Also report whether the selected owned inputs confirm suspension for the day."""
     if (
         account is not None
         and conn.execute(
@@ -492,4 +513,4 @@ def build(
         or digest(prior._mapping["items"]) != fingerprint
     ):
         raise ValueError("analysis_snapshot_hash_or_owner_conflict")
-    return identifier, dimensions, evidence
+    return identifier, dimensions, evidence, data.get("suspended_today") is True

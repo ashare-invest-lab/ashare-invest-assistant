@@ -12,7 +12,9 @@ from collections.abc import Sequence
 # Runtime/test inputs: keep directory prefixes terminated by '/'.
 CONSUMED_DOCS = (
     "docs/api-contract.md", "docs/plan.md", "docs/contracts/", "docs/strategies/",
+    "docs/threat-model.md",
     "docs/handover/team/reports/T-B46-47-rulings.md",
+    "docs/handover/team/tasks/T-R88.md",
 )
 
 

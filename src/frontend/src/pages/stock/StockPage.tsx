@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { Button, Result, Tabs, Tag, Tooltip } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -10,7 +11,7 @@ import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, QUOTE_CLOSE_PRICE, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
-import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { fmtAmount, fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { StockErrorBoundary } from './StockErrorBoundary';
 import { PriceChartPanel } from './PriceChartPanel';
 import { AnnouncementsTab, FactorsTab, FinancialsTab, FundFlowTab } from './StockTabs';
@@ -142,15 +143,18 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   const suspended = profile.suspended === true;
   const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
-  // v0.2.8：ETF 价格保留 3 位小数（价格字段是字符串，原样显示即保留；涨跌额也按 3 位）
+  // v0.2.8：ETF 涨跌额按 3 位
   const pd = profile.type === 'etf' ? 3 : 2;
-  const stats: [string, React.ReactNode][] = [
-    ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{tb.open}</span> : '—'],
-    ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{tb.high}</span> : '—'],
-    ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{tb.low}</span> : '—'],
-    ['昨收', preClose ?? '—'],
-    ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—'],
-    ['成交额', q ? fmtAmount(q.amount) : '—'],
+  // 与现有收盘价标签使用相同的 stale + 有价/时点判断；两项都缺失时提示回退。
+  const turnoverHint = q?.data_status === 'stale' && q.price != null && q.t && q.volume == null && q.amount == null
+    ? '收盘价回退，无成交量/额' : '暂无数据';
+  const stats: [string, React.ReactNode, string?][] = [
+    ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{fmtPrice(tb.open)}</span> : '—'],
+    ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{fmtPrice(tb.high)}</span> : '—'],
+    ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{fmtPrice(tb.low)}</span> : '—'],
+    ['昨收', fmtPrice(preClose)],
+    ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—', q && q.volume == null ? turnoverHint : undefined],
+    ['成交额', q ? fmtAmount(q.amount) : '—', q && q.amount == null ? turnoverHint : undefined],
     ['换手率', q?.volume != null && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
     ['总市值', q?.price != null && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
     ['流通市值', q?.price != null && float ? fmtAmount(capOf(q.price, float)) : '—'],
@@ -160,17 +164,17 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       <div className="sh-id">
         <span className="q-name">{profile.name}</span>
         <span className="mono muted">{code}</span>
-        {profile.type !== 'stock' ? <Tag color="blue" data-testid="security-type-tag">{SECURITY_TYPE[profile.type]}</Tag> : null}
-        {profile.board ? <Tag variant="outlined">{BOARD[profile.board]}</Tag> : null}
-        {profile.risk_flag ? <Tag color="orange" data-testid="risk-flag-tag" data-flag={profile.risk_flag} title={SECURITY_RISK_FLAG_TIP[profile.risk_flag]}>{SECURITY_RISK_FLAG[profile.risk_flag]}</Tag> : null}
+        {profile.type !== 'stock' ? <Tag color={labelOf(SECURITY_TYPE, profile.type) ? 'blue' : undefined} data-testid="security-type-tag">{(labelOf(SECURITY_TYPE, profile.type) ?? '未知')}</Tag> : null}
+        {profile.board ? <Tag variant="outlined">{(labelOf(BOARD, profile.board) ?? '未知')}</Tag> : null}
+        {profile.risk_flag ? <Tag color={labelOf(SECURITY_RISK_FLAG, profile.risk_flag) ? 'orange' : undefined} data-testid="risk-flag-tag" data-flag={profile.risk_flag} title={(labelOf(SECURITY_RISK_FLAG_TIP, profile.risk_flag) ?? '未知')}>{(labelOf(SECURITY_RISK_FLAG, profile.risk_flag) ?? '未知')}</Tag> : null}
         {suspended ? <Tag color="default" data-testid="suspended-tag">停牌</Tag> : null}
-        {profile.listing_status !== 'listed' ? <Tag color="default" data-testid="listing-status-tag">{LISTING_STATUS[profile.listing_status]}</Tag> : null}
+        {profile.listing_status !== 'listed' ? <Tag data-testid="listing-status-tag">{(labelOf(LISTING_STATUS, profile.listing_status) ?? '未知')}</Tag> : null}
         <AddToResearch origin="from_stock" securityCode={code} securityType={profile.type} />
         <WatchlistToggle code={code} securityType={profile.type} testId="watchlist-stock" />
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{q.price ?? '—'}</span>
+          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price)}</span>
           {q.data_status === 'stale' && q.t ? <Tag data-testid="quote-stale-tag">{QUOTE_CLOSE_PRICE}·{fmtTime(q.t).slice(5, 10)}</Tag> : null}
           <span className={`mono ${pctClass(q.change_pct)}`}>
             {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
@@ -181,10 +185,10 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       ) : <span className="muted">无行情缓存</span>}
       {q ? <GapNote status={q.data_status} gaps={q.gaps} asOf={q.data_as_of} testId="quote-gap-note" /> : null}
       <div className="sh-stats">
-        {stats.map(([k, v]) => (
+        {stats.map(([k, v, hint]) => (
           <div key={k}>
             <label>{k}</label>
-            <b className="mono">{v}</b>
+            {hint ? <KeyTip lines={[hint]}><b className="mono">{v}</b></KeyTip> : <b className="mono">{v}</b>}
           </div>
         ))}
       </div>
@@ -197,8 +201,8 @@ function ProfilePanel({ profile }: { profile: SecurityProfile }) {
   const etf = profile.type === 'etf';
   const none = etf ? '不适用' : '—';
   const rows: [string, React.ReactNode][] = [
-    ['类型', SECURITY_TYPE[profile.type]],
-    ['所属行业', profile.industry ? `${profile.industry.name}（${INDUSTRY_TAXONOMY[profile.industry.taxonomy]}）` : none],
+    ['类型', (labelOf(SECURITY_TYPE, profile.type) ?? '未知')],
+    ['所属行业', profile.industry ? `${profile.industry.name}（${(labelOf(INDUSTRY_TAXONOMY, profile.industry.taxonomy) ?? '未知')}）` : none],
     ['概念', profile.concepts.length ? profile.concepts.map((c) => c.name).join('、') : none],
     ['上市日期', profile.list_date ? `${profile.list_date}${profile.list_date_basis === 'neeq_select' ? '（精选层挂牌日）' : ''}` : '—'],
     ...(profile.delist_date ? [['退市日期', profile.delist_date] as [string, React.ReactNode]] : []),
@@ -226,7 +230,7 @@ function ProfilePanel({ profile }: { profile: SecurityProfile }) {
       {/* v0.2.7：attribution 原样展示；sources 说明各字段来源 */}
       <div className="muted small profile-attr" data-testid="profile-attribution">
         {profile.attribution}（主数据截至 {profile.master_as_of}）
-        {profile.sources.length ? ` · 来源：${[...new Set(profile.sources.map((x) => PROVIDER[x.provider]))].join('、')}` : ''}
+        {profile.sources.length ? ` · 来源：${[...new Set(profile.sources.map((x) => (labelOf(PROVIDER, x.provider) ?? '未知')))].join('、')}` : ''}
       </div>
     </section>
   );
@@ -257,7 +261,7 @@ function HorizonPanel({ code }: { code: string }) {
             const ok = q.data.suitable.includes(h);
             return (
               <div key={h} className={`hz-line${ok ? ' ok' : ''}`} data-testid={`hz-${h}`}>
-                <span className="hz-name">{HORIZON[h]}</span>
+                <span className="hz-name">{(labelOf(HORIZON, h) ?? '未知')}</span>
                 <span className="track"><span className="fill" style={{ width: `${score}%` }} /></span>
                 <span className="mono hz-score">{score}</span>
                 {ok ? <Tag color="blue" variant="outlined">适合</Tag>
@@ -265,7 +269,7 @@ function HorizonPanel({ code }: { code: string }) {
                     : <span className="hz-tag-gap" />}
                 {/* 评审 T-F22a m10：封顶/提示可 Tab 聚焦、Enter/Space 打开，读屏读到全文 */}
                 {caps.length ? (
-                  <KeyTip lines={caps.map((c) => `封顶 ${c.cap}（${CAP_KIND_TEXT[c.kind]}）：${capExplanation(c)}`)} className="warn small" testId={`cap-${h}`}>封顶</KeyTip>
+                  <KeyTip lines={caps.map((c) => `封顶 ${c.cap}（${(labelOf(CAP_KIND_TEXT, c.kind) ?? '未知')}）：${capExplanation(c)}`)} className="warn small" testId={`cap-${h}`}>封顶</KeyTip>
                 ) : null}
                 {hints.length ? (
                   <KeyTip lines={hints.map((x) => x.text)} className="muted small" testId={`hint-${h}`}>提示</KeyTip>

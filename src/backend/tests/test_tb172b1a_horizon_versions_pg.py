@@ -100,7 +100,9 @@ def seed(conn: Connection) -> dict[str, Any]:
 def test_a192_a1a_single_head_empty_upgrade_guarded_downgrade(world: SimpleNamespace) -> None:
     from app.db.tables.horizon import horizon_input_versions as table
 
-    assert ScriptDirectory.from_config(world.config).get_heads() == ["0037"]
+    assert ScriptDirectory.from_config(world.config).get_revision("0037").down_revision == "0036"
+    command.downgrade(world.config, "0037")
+    command.upgrade(world.config, "0037")
     with world.engine.connect() as conn:
         assert conn.scalar(text("SELECT version_num FROM public.alembic_version")) == "0037"
         assert conn.scalar(select(func.count()).select_from(table)) == 0

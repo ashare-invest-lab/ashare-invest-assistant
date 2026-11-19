@@ -38,7 +38,7 @@ key `sw_ind_rotation`；category `momentum`；horizons `[swing]`；risk_level `n
 | X4 | exit（时间） | `ctx.holding_days >= p.max_hold` |  |
 
 ## 8–10 执行与仓位
-T 日盘后确认，T+1 开盘模拟入场；同一行业持仓上限属于组合层（ENG-3）。
+T 日盘后确认，T+1 开盘模拟入场（出处：docs/plan.md:1283）；同一行业持仓上限属于组合层（ENG-3）。
 
 ## 11 验证（本轮不写 golden）
 `fixture`、`trigger_stats`、`tracking_sim`；horizon_days [5,10,20]；`min_n=30`；行业分类用 PIT 版本。

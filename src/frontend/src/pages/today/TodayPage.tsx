@@ -9,7 +9,7 @@ import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import {
   ACTION_SHORT, ALERT_STATUS, DATA_GAP_SCOPE, EXECUTABILITY, GAP_REASON, PLAN_CONDITION_KIND, PLAN_DRAFT_STATUS, REASON_CODE, RECONCILIATION, REGIME,
-  RISK_CONTROL, RISK_LEVEL, SESSION, SEVERITY, SEVERITY_TEXT,
+  RISK_CONTROL, RISK_LEVEL, SESSION, severityTag,
 } from '../../i18n/labels';
 import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
@@ -59,14 +59,14 @@ const focusColumns = (nonTradingDay: boolean): ColumnsType<TodayFocusRow> => [
       <Link to={`/suggestions/${r.suggestion.id}`} className="today-sg">
         <ConsensusBadge status={r.suggestion.consensus} />
         {r.suggestion.actions.map((a) => <ActionBadge key={a.strategy_key} action={a.action} strategyName={a.strategy_name} tLeg={a.t_leg} lifecycle={a.lifecycle} />)}
-        <Tag color={EXECUTABILITY[r.suggestion.executability_status].color}>{EXECUTABILITY[r.suggestion.executability_status].text}</Tag>
+        <Tag color={Object.hasOwn(EXECUTABILITY, r.suggestion.executability_status) ? EXECUTABILITY[r.suggestion.executability_status].color : undefined}>{Object.hasOwn(EXECUTABILITY, r.suggestion.executability_status) ? EXECUTABILITY[r.suggestion.executability_status].text : '未知状态'}</Tag>
       </Link>
     ) : <span className="muted">无</span>),
   },
   // T-F36：做 T 视图（只对持仓行；只展示指标，不给动作或数量建议）
   { title: '分时（做T视图）', key: 'tv', width: 300, render: (_, r) => (r.holding ? <TViewCell code={r.security_code} t={r.t_view} nonTradingDay={nonTradingDay} /> : <span className="muted">—</span>) },
   { title: '不可执行原因', key: 'rs', width: 96, align: 'right', render: (_, r) => (r.active_reason_count ? <span className="num">{r.active_reason_count}</span> : <span className="muted">0</span>) },
-  { title: '风险', key: 'risk', width: 70, render: (_, r) => (r.max_risk_level ? <Tag color={RISK_LEVEL[r.max_risk_level].color}>{RISK_LEVEL[r.max_risk_level].text}</Tag> : <span className="muted">—</span>) },
+  { title: '风险', key: 'risk', width: 70, render: (_, r) => (r.max_risk_level ? <Tag color={Object.hasOwn(RISK_LEVEL, r.max_risk_level) ? RISK_LEVEL[r.max_risk_level].color : undefined}>{Object.hasOwn(RISK_LEVEL, r.max_risk_level) ? RISK_LEVEL[r.max_risk_level].text : '未知级别'}</Tag> : <span className="muted">—</span>) },
   { title: '数据', key: 'ds', width: 120, render: (_, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
   // T-F33：自选入口（以 GET /watchlist 为准，不用行上的 in_watchlist，写入后无需等 /today 轮询）
   { title: '自选', key: 'wl', width: 150, render: (_, r) => <WatchlistToggle code={r.security_code} testId={`watchlist-focus-${r.security_code}`} /> },
@@ -82,24 +82,26 @@ export function TodayPage() {
   if (!q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('加载失败')} /></div>;
   const t = q.data;
   const range = t.market.regime_position_range;
-  const rec = RECONCILIATION[t.reconciliation.status];
+  const rec = Object.hasOwn(RECONCILIATION, t.reconciliation.status) ? RECONCILIATION[t.reconciliation.status] : { text: '未知状态', color: undefined };
   const dr = t.daily_report;
   // T-F34 全局状态（契约 §2.1）：先看不依赖日报的 S1–S5；日报 ready 时由日报 gaps 判 S6–S8/S9；日报未取回前不判定
   const report = reportDate && rq.data ? rq.data : null;
+  const reportFaults = report?.gaps.filter((g) => g.reason !== 'suspended') ?? [];
+  const reportSuspensions = report?.gaps.filter((g) => g.reason === 'suspended') ?? [];
   const pre = preReportState(t);
   // §7 ③：S9 只能来自日报判定（ready 且读取成功）；未 ready 且前置状态都不命中（如 15:00 前）时不判定，不显示状态条与 R2
-  const state: GlobalState | null = pre ?? (report ? reportState(report) : null);
+  const state: GlobalState | null = pre ?? (report ? reportState({ gaps: reportFaults }) : null);
   const names = new Map([...(report?.stocks ?? []).map((x) => [x.security_code, x.name] as const), ...t.focus.items.map((r) => [r.security_code, r.name] as const)]);
-  const reportGaps = report ? buildReportGaps(report.gaps, state ?? 'S9', (c) => names.get(c) ?? null, new Set(t.data_gaps.items.map((g) => g.key))) : null;
+  const reportGaps = report ? buildReportGaps(reportFaults, state ?? 'S9', (c) => names.get(c) ?? null, new Set(t.data_gaps.items.map((g) => g.key))) : null;
   const reportGapCount = reportGaps ? reportGaps.securities.length + reportGaps.general.length : 0;
   return (
     <div className="page-scroll today" data-testid="today-page">
       <div className="detail-head">
         <span className="q-name">今日关注</span>
         <span className="small">交易日 <span className="mono">{t.trade_date}</span></span>
-        <Tag data-testid="today-session">{SESSION[t.session]}</Tag>
+        <Tag data-testid="today-session">{Object.hasOwn(SESSION, t.session) ? SESSION[t.session] : '未知时段'}</Tag>
         <span className="small" data-testid="today-regime">
-          大盘环境：{t.market.regime ? REGIME[t.market.regime] : '未知'}
+          大盘环境：{t.market.regime && Object.hasOwn(REGIME, t.market.regime) ? REGIME[t.market.regime] : '未知'}
           {range ? <span className="muted">（参考仓位区间 {fmtNum(range.min_pct, 0)}–{fmtNum(range.max_pct, 0)}%，模板参数，不是指令）</span> : null}
         </span>
         <DataStatusTag status={t.market.data_status} />
@@ -164,7 +166,7 @@ export function TodayPage() {
               <li key={d.id}>
                 <Link to={`/plan-drafts/${d.id}`}>{d.name} <span className="mono muted">{d.security_code}</span></Link>
                 <ActionBadge action={d.action} />
-                <Tag color={PLAN_DRAFT_STATUS[d.status].color}>{PLAN_DRAFT_STATUS[d.status].text}</Tag>
+                <Tag color={Object.hasOwn(PLAN_DRAFT_STATUS, d.status) ? PLAN_DRAFT_STATUS[d.status].color : undefined}>{Object.hasOwn(PLAN_DRAFT_STATUS, d.status) ? PLAN_DRAFT_STATUS[d.status].text : '未知状态'}</Tag>
                 <span className="muted small">{d.valid_until ? `有效至 ${fmtTime(d.valid_until)}` : '未设有效期'}</span>
               </li>
             ))}
@@ -176,11 +178,11 @@ export function TodayPage() {
             {/* 评审 m5：有 risk_event_id 时用它作 key，否则 control + security_code */}
             {t.risk_flags.items.map((f) => (
               <li key={f.risk_event_id ?? `${f.control}-${f.security_code ?? 'acct'}`}>
-                <Tag color={RISK_LEVEL[f.level].color}>{RISK_LEVEL[f.level].text}</Tag>
-                <span className="small">{RISK_CONTROL[f.control]}</span>
+                <Tag color={Object.hasOwn(RISK_LEVEL, f.level) ? RISK_LEVEL[f.level].color : undefined}>{Object.hasOwn(RISK_LEVEL, f.level) ? RISK_LEVEL[f.level].text : '未知级别'}</Tag>
+                <span className="small">{Object.hasOwn(RISK_CONTROL, f.control) ? RISK_CONTROL[f.control] : '未知风控'}</span>
                 {stockLink(f.security_code, f.name)}
                 <span>{f.message}</span>
-                {f.gated_actions.length ? <span className="muted small">受限动作：{f.gated_actions.map((a) => ACTION_SHORT[a]).join('、')}</span> : null}
+                {f.gated_actions.length ? <span className="muted small">受限动作：{f.gated_actions.map((a) => Object.hasOwn(ACTION_SHORT, a) ? ACTION_SHORT[a] : '未知动作').join('、')}</span> : null}
                 {f.quantity_cap !== null ? <span className="muted small">数量上限 <span className="num">{fmtNum(f.quantity_cap, 0)}</span></span> : null}
                 {f.risk_event_id ? (
                   <Link className="small" to={`/risk-controls?tab=events&event=${encodeURIComponent(f.risk_event_id)}`} data-testid={`risk-event-${f.risk_event_id}`}>风控事件 ›</Link>
@@ -194,7 +196,7 @@ export function TodayPage() {
           <ul className="today-list">
             {t.released_reasons.items.map((r) => (
               <li key={r.reason_id}>
-                <Tag>{REASON_CODE[r.code] ?? r.code}</Tag>
+                <Tag>{Object.hasOwn(REASON_CODE, r.code) ? REASON_CODE[r.code] : r.code}</Tag>
                 <Link to={`/candidate-signals/${r.signal_id}`}>{r.name} <span className="mono muted">{r.security_code}</span></Link>
                 <span className="muted small">解除于 {fmtTime(r.released_at)}</span>
               </li>
@@ -221,7 +223,7 @@ export function TodayPage() {
           <ul className="today-list">
             {t.alerts.items.map((a) => (
               <li key={a.id} data-testid={`alert-${a.id}`}>
-                <Tag color={SEVERITY[a.severity]}>{SEVERITY_TEXT[a.severity]}</Tag>
+                <Tag color={severityTag(a.severity).color}>{severityTag(a.severity).text}</Tag>
                 {a.status === 'new' ? <span className="today-unread-dot" data-testid="alert-unread" aria-label={ALERT_STATUS.new} title={ALERT_STATUS.new} /> : null}
                 <span>{a.title}</span>
                 {stockLink(a.security_code, a.name)}
@@ -241,7 +243,7 @@ export function TodayPage() {
           <ul className="today-list">
             {t.plan_triggers.items.map((p) => (
               <li key={`${p.plan_id}-${p.condition_id}`} data-testid={`plan-trigger-${p.condition_id}`}>
-                <Tag color={p.condition_kind === 'invalidation' ? 'red' : 'blue'} data-kind={p.condition_kind}>{PLAN_CONDITION_KIND[p.condition_kind]}</Tag>
+                <Tag color={Object.hasOwn(PLAN_CONDITION_KIND, p.condition_kind) ? (p.condition_kind === 'invalidation' ? 'red' : 'blue') : undefined} data-kind={p.condition_kind}>{Object.hasOwn(PLAN_CONDITION_KIND, p.condition_kind) ? PLAN_CONDITION_KIND[p.condition_kind] : '未知条件'}</Tag>
                 {stockLink(p.security_code, p.name)}
                 <span>{p.condition_text}</span>
                 <Link className="small" to={`/plans/${encodeURIComponent(p.plan_id)}`}>计划 v{p.plan_version_no} ›</Link>
@@ -252,9 +254,14 @@ export function TodayPage() {
           </ul>
         </Section>
 
-        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty="数据完整" extra={reportGapCount}
+        <Section title="数据缺口" k="data_gaps" data={t} testId="today-data-gaps" empty={reportSuspensions.length ? '暂无缺数故障' : '数据完整'} extra={reportGapCount}
           after={<>
             {reportGaps ? <ReportGaps view={reportGaps} /> : null}
+            {reportSuspensions.length ? (
+              <ul className="today-list" aria-label="日报停牌说明">
+                {reportSuspensions.map((g, i) => <li key={`${g.key}-${i}`}><Tag>{GAP_REASON.suspended}</Tag><span>{g.message}</span></li>)}
+              </ul>
+            ) : null}
             {reportDate && rq.isError ? <div className="muted small" data-testid="today-report-gaps-error">日报详情暂时读取失败，分析缺口稍后显示。</div> : null}
           </>}>
           <ul className="today-list">
@@ -262,8 +269,8 @@ export function TodayPage() {
               const route = safeInternalRoute(g.route);
               return (
                 <li key={g.key} data-testid={`data-gap-${g.key}`}>
-                  <Tag color={g.reason === 'data_licence_unavailable' ? 'red' : 'orange'}>{GAP_REASON[g.reason]}</Tag>
-                  <span className="muted small">{DATA_GAP_SCOPE[g.scope]}{g.dataset ? ` · ${g.dataset}` : ''}</span>
+                  <Tag color={Object.hasOwn(GAP_REASON, g.reason) ? (g.reason === 'data_licence_unavailable' ? 'red' : 'orange') : undefined}>{Object.hasOwn(GAP_REASON, g.reason) ? GAP_REASON[g.reason] : '未知原因'}</Tag>
+                  <span className="muted small">{Object.hasOwn(DATA_GAP_SCOPE, g.scope) ? DATA_GAP_SCOPE[g.scope] : '未知范围'}{g.dataset ? ` · ${g.dataset}` : ''}</span>
                   <span>{g.message}</span>
                   {g.securities.length ? (
                     <span className="small">

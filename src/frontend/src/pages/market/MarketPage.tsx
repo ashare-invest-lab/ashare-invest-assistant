@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Segmented, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -24,7 +25,7 @@ export function MarketPage() {
       <div className="mk-head">
         <span className="page-title">市场概览</span>
         <span className="mono">{m.trade_date}</span>
-        <Tag variant="outlined">{SESSION[m.session]}</Tag>
+        <Tag variant="outlined">{(labelOf(SESSION, m.session) ?? '未知')}</Tag>
         <DataStatusTag status={m.data_status} asOf={m.data_as_of} gaps={m.gaps} />
         {/* F-07 + F-13 合并口径：data_as_of 为 null（契约 T-A53/A-12）时给出明确的「数据不可用（无数据时点）」，
             既不像 F-13 那样整条隐藏丢信息，也不编造时间；缺口原因另由下方 GapNote 披露 */}
@@ -104,7 +105,7 @@ function RegimePanel({ m }: { m: MarketOverview }) {
       <div className="panel-head"><span className="panel-title">大盘状态</span></div>
       <div className="regime" style={{ paddingTop: 8 }}>
         <div>
-          市场状态 <b>{m.regime ? REGIME[m.regime] : '—'}</b>
+          市场状态 <b>{m.regime ? (labelOf(REGIME, m.regime) ?? '未知') : '—'}</b>
           <span className="muted small">　{r ? `参考仓位区间 ${fmtNum(lo, 0)}–${fmtNum(hi, 0)}%` : '参考仓位区间暂不可用'}</span>
         </div>
         {r ? (
@@ -155,7 +156,7 @@ function SectorPanel() {
         <span className="panel-title">板块资金</span>
         <Segmented size="small" value={kind} onChange={(v) => setKind(v as SectorKind)} options={[{ value: 'industry', label: '行业' }, { value: 'concept', label: '概念' }]} />
         <span className="muted small" data-testid="sector-meta">
-          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date ?? '交易日期暂不可用'}${q.data.taxonomy ? ` · ${INDUSTRY_TAXONOMY[q.data.taxonomy]}` : ''}）` : ''}
+          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date ?? '交易日期暂不可用'}${q.data.taxonomy ? ` · ${(labelOf(INDUSTRY_TAXONOMY, q.data.taxonomy) ?? '未知')}` : ''}）` : ''}
         </span>
         <span className="spacer" />
         {q.data ? <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} /> : null}
@@ -164,7 +165,7 @@ function SectorPanel() {
         <>
           <GapNote status={q.data.data_status} gaps={q.data.gaps} asOf={q.data.data_as_of} testId="sector-gap-note" />
           <Table className="dense-table static" size="small" rowKey="sector_code" pagination={false} columns={cols} dataSource={q.data.items}
-            locale={{ emptyText: q.data.gaps.length ? `暂无板块资金：${q.data.gaps.map((g) => GAP_REASON[g.reason]).join('、')}` : '暂无板块资金' }} />
+            locale={{ emptyText: q.data.gaps.length ? `暂无板块资金：${q.data.gaps.map((g) => (labelOf(GAP_REASON, g.reason) ?? '未知')).join('、')}` : '暂无板块资金' }} />
         </>
       )}
     </section>

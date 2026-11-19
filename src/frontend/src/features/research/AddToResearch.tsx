@@ -1,3 +1,4 @@
+import { tagOf } from '../../lib/explanations';
 /**
  * T-F23 研究候选入口（契约 v0.2.9 §7.7A“关联”）：
  * 候选信号卡详情 → origin=suggestion，用 ?suggestion_id= 反查；个股页、候选信号详情 → from_stock，用 ?security_code= 反查。
@@ -33,7 +34,7 @@ export function AddToResearch({ origin, securityCode, suggestionId = null, secur
     <Space size={4} wrap data-testid="add-to-research">
       {linked.map((c) => (
         <Link key={c.id} to={`/candidates/${c.id}`} data-testid={`research-link-${c.id}`}>
-          <Tag color={RESEARCH_STATUS[c.status].color}>研究候选 · {RESEARCH_STATUS[c.status].text} · 第 {c.current_version_no} 版</Tag>
+          <Tag color={tagOf(RESEARCH_STATUS, c.status).color}>研究候选 · {tagOf(RESEARCH_STATUS, c.status).text} · 第 {c.current_version_no} 版</Tag>
         </Link>
       ))}
       {active ? null : (
