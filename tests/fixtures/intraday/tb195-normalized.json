@@ -1,0 +1,75 @@
+{
+  "quotes": {
+    "unknown": {
+      "security_code": "SYNTHETIC-QUOTE",
+      "name": "合成证券",
+      "price": null,
+      "change_pct": null,
+      "volume": null,
+      "amount": null,
+      "t": null,
+      "basis": {"mode": null, "trade_date": null, "source": null},
+      "data_status": "unavailable",
+      "data_as_of": null,
+      "gaps": [{"key": "quote", "reason": "no_source", "message": "合成样例缺少报价。"}]
+    },
+    "units_unverified": {
+      "security_code": "SYNTHETIC-QUOTE",
+      "name": "合成证券",
+      "price": "12.34",
+      "change_pct": null,
+      "volume": null,
+      "amount": null,
+      "t": "2031-01-07T10:00:00+08:00",
+      "basis": {"mode": "intraday", "trade_date": "2031-01-07", "source": "synthetic:i1:quote"},
+      "data_status": "partial",
+      "data_as_of": "2031-01-07T10:00:00+08:00",
+      "gaps": [{"key": "quote.volume_amount", "reason": "no_source", "message": "合成样例量额未获证。"}]
+    },
+    "confirmed_zero_close": {
+      "security_code": "SYNTHETIC-QUOTE",
+      "name": "合成证券",
+      "price": "12.34",
+      "change_pct": "0",
+      "volume": "0",
+      "amount": "0",
+      "t": "2031-01-06T15:00:00+08:00",
+      "basis": {"mode": "close", "trade_date": "2031-01-06", "source": "synthetic:i1:close"},
+      "data_status": "stale",
+      "data_as_of": "2031-01-06T15:00:00+08:00",
+      "gaps": []
+    }
+  },
+  "minute": {
+    "freq": "1m",
+    "adjust": "none",
+    "source": "synthetic:i1:minute",
+    "fetched_at": "2031-01-07T09:31:08+08:00",
+    "item": {
+      "t": "2031-01-07T09:31:00+08:00",
+      "open": "12.32",
+      "high": "12.34",
+      "low": "12.30",
+      "close": "12.34",
+      "pre_close": null,
+      "volume": "100",
+      "amount": "1234.00",
+      "avg_price": null,
+      "is_final": true
+    },
+    "variants": {
+      "complete": {"overrides": {}, "emit": true, "gaps": []},
+      "confirmed_zero": {"overrides": {"volume": "0", "amount": "0"}, "emit": true, "gaps": []},
+      "volume_unverified": {
+        "overrides": {"volume": null},
+        "emit": false,
+        "gaps": [{"key": "bars.volume", "reason": "no_source", "message": "合成样例缺少可验证的分钟成交量。"}]
+      },
+      "amount_unverified": {
+        "overrides": {"amount": null},
+        "emit": false,
+        "gaps": [{"key": "bars.amount", "reason": "no_source", "message": "合成样例缺少可验证的分钟成交额。"}]
+      }
+    }
+  }
+}
