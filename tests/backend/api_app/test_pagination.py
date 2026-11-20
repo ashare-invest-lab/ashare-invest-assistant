@@ -79,6 +79,22 @@ def test_default_page_size(client):
     assert len(client.get("/api/v1/_test/list").json()["items"]) == 50
 
 
+def test_configured_page_limit_overrides_schema_ceiling(backend, client, setup, make_settings, monkeypatch):
+    app, _, rows = setup
+    settings = make_settings(page_limit_default=2, page_limit_max=3)
+    monkeypatch.setitem(app.dependency_overrides, backend.config.get_settings, lambda: settings)
+
+    allowed = client.get("/api/v1/_test/list", params={"limit": 3})
+    assert allowed.status_code == 200
+    assert allowed.json()["items"] == rows[:3]
+
+    rejected = client.get("/api/v1/_test/list", params={"limit": 4})
+    assert rejected.status_code == 400
+    error = rejected.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert error["details"]["fields"] == [{"field": "limit", "issue": "must be <= 3"}]
+
+
 def test_last_page_cursor_null_when_exact_multiple(backend, setup):
     _, settings, data = setup
     page = backend.pagination.build_page(data[:10], limit=10, key=lambda x: (x["id"],), scope=SCOPE, settings=settings)
