@@ -13,6 +13,7 @@
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "src/backend/tests/test_daily_snapshot_ready.py", "group": "parallel", "keywords": ["MagicMock Connection/monkeypatch", "no real PG/Redis/docker/network"], "unverified": false}
   - {"file": "src/backend/tests/test_market_read_tb185.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic database and Redis; no external IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb163r4_bj_lock.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic BJ list; no real PG", "read-only AST/SQL guards"], "unverified": false}
   - {"file": "src/backend/tests/test_tb178_today_alerts_offline.py", "group": "parallel", "keywords": ["synthetic SQL result pages", "real alert/evidence validation", "socket connections denied; no PG"], "unverified": false}
