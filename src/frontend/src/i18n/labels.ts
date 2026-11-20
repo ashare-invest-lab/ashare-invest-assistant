@@ -87,7 +87,7 @@ export const EPISTEMIC: Record<EpistemicType, { text: string; color: string }> =
   hypothesis: { text: '假设', color: 'purple' }, execution: { text: '执行', color: 'blue' },
 };
 export const GAP_REASON: Record<GapReason, string> = {
-  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用', not_applicable: '不适用',
+  no_source: '无数据源', not_yet_published: '尚未发布', upstream_error: '上游错误', quota_deferred: '配额顺延', user_input_missing: '待用户录入', data_licence_unavailable: '你的数据证书不可用', not_applicable: '不适用', suspended: '停牌',
 };
 export const ORIGIN: Record<SuggestionOrigin, string> = {
   daily_batch: '盘后批处理', intraday_event: '盘中事件', manual_refresh: '手动刷新',
@@ -103,6 +103,15 @@ export const NOTIFY_KIND: Record<NotificationKind, string> = {
   system: '系统', reason_released: '原因已解除', plan_draft_ready: '计划草案待确认', plan_triggered: '计划条件已满足', strategy_health: '策略健康度', data_licence: '数据证书',
 };
 export const SEVERITY: Record<Severity, string> = { info: 'blue', attention: 'orange', important: 'red' };
+export const SEVERITY_TEXT: Record<Severity, string> = { important: '重要', attention: '关注', info: '提示' };
+/** 只查三档自有键，契约外严重度使用中性标签。 */
+export function severityTag(severity: string): { color: string | undefined; text: string } {
+  if (Object.hasOwn(SEVERITY, severity) && Object.hasOwn(SEVERITY_TEXT, severity)) {
+    const key = severity as Severity;
+    return { color: SEVERITY[key], text: SEVERITY_TEXT[key] };
+  }
+  return { color: undefined, text: '未知' };
+}
 export const RULE_ROLE: Record<RuleRole, string> = {
   entry: '入场', hold: '持有', weakening: '转弱', exit: '离场', filter: '过滤', veto: '否决', counter: '反证', invalidation: '失效',
 };
@@ -176,4 +185,3 @@ export const FACTOR_CATEGORY_LABEL: Record<string, string> = {
   valuation: '估值', quality: '质量', growth: '成长', momentum: '动量', volatility: '波动', liquidity: '流动性',
 };
 export const factorCategoryLabel = (k: string) => FACTOR_CATEGORY_LABEL[k] ?? k;
-export const SEVERITY_TEXT: Record<Severity, string> = { important: '重要', attention: '关注', info: '提示' };

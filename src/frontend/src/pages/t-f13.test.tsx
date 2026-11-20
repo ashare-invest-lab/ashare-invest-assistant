@@ -235,3 +235,17 @@ describe('T-F13 盘后日报', () => {
     expect(screen.getByRole('link', { name: '查看最新一期日报 ›' }).getAttribute('href')).toBe('/daily-reports');
   });
 });
+
+
+it.each(['future_status', '__proto__', 'constructor'])('T-F57 日报：对账与变化类型 %s 显示未知中性色', async (value) => {
+  const report = structuredClone(cur);
+  server.use(http.get(`${API}/daily-reports/:date`, () => HttpResponse.json({
+    ...report, reconciliation: { ...report.reconciliation, status: value },
+    stocks: report.stocks.map((stock) => ({ ...stock, change_from_previous: value })),
+  })));
+  renderAt(`/daily-reports/${REPORT_DATE}`);
+  const tag = await screen.findByTestId('report-rec');
+  expect(tag).toHaveTextContent(/^未知/);
+  expect(tag.className).not.toMatch(/ant-tag-(?:blue|red|orange|green|gold|cyan|purple)/);
+  expect(within(await screen.findByTestId(`stc-${cur.stocks[0].security_code}`)).getByText('未知')).toBeInTheDocument();
+});

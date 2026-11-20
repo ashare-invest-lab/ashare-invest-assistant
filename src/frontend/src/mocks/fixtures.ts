@@ -26,6 +26,8 @@ const DIMENSIONS = ENUMS.dimension;
 
 /** 契约约定的虚构 ID 格式 00000000-0000-4000-8000-0000000000xx */
 export const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+// 本人同证券同日确证停牌的合成记录，不从零量、平价或缺行推断。
+export const CONFIRMED_DAILY_SUSPENSION = { code: '601001.SH', date: TRADE_DATE, owner: uid(2) } as const;
 export const ACCOUNT_ID = uid(1);
 const f2 = (n: number) => n.toFixed(2);
 
@@ -572,7 +574,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     const maxLevel = sg.risk_flags.reduce<RiskLevel | null>((m, f) => (m === null || LEVEL_RANK[f.level] > LEVEL_RANK[m] ? f.level : m), null);
     return {
       security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus,
-      quote: s.data_status === 'unavailable' || q.price == null || q.change_pct == null || q.amount == null || q.t == null ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
+      quote: s.data_status === 'unavailable' || q.price == null || q.t == null ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
       holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct, security_type: pos.security_type, estimated: pos.estimated } : null,
       suggestion: summarize(sg),
       active_reason_count: REASONS.filter((r) => r.status === 'active' && sg.candidate_signal_ids.includes(r.signal_id)).length,
@@ -592,6 +594,13 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
 })();
 
 // ---------------- K 线 / 分时 ----------------
+/** T-F48：有价格/时点但无前收和成交额的合成终端行情，保留整行。 */
+export const TERMINAL_NULL_QUOTE_EXAMPLE: TerminalRow = {
+  ...TERMINAL_ROWS.find((r) => r.security_code === STALE_QUOTE_EXAMPLE.item.security_code)!,
+  quote: { price: STALE_QUOTE_EXAMPLE.item.price, change_pct: null, amount: null, t: STALE_QUOTE_EXAMPLE.item.t },
+  data_status: 'stale', data_as_of: STALE_QUOTE_EXAMPLE.item.data_as_of,
+};
+
 export function tradingDays(end: string, n: number): string[] {
   const out: string[] = [];
   const d = new Date(`${end}T00:00:00Z`);

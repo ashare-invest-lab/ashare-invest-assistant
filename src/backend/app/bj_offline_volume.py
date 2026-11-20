@@ -1,12 +1,15 @@
 """BJ 离线量确认与身份、日期校验；只依赖标准库，不读取外部凭据。"""
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable, Mapping
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+_BJ_ISOLATED_CONFIRMATIONS: frozenset[str] = frozenset()
 _bj_offline_volume_codes: frozenset[str] = frozenset()
+_bj_confirmation_pid: int | None = None
 
 # 公开交易所代码段 + 本批 codes_ashare.txt 实际前缀。
 _SH = ("600", "601", "603", "605", "688", "689")
@@ -77,10 +80,12 @@ def confirm_bj_offline_volume_units(
     """用调用方提供的本地对照确认 BJ 量单位；纯计算，不读取文件、出网或连库。
 
     同一共同交易日至少 20 个合法 BJ 码，两侧均非停牌且量为正，手×100 精确等于股。
-    每次先撤销旧确认；成功后进程内允许 BJ（不限样本码），确认不从产物恢复。
+    每次先撤销旧确认；返回匹配码仅表示对算通过，不构成生产许可。
+    只有显式注入的隔离测试清单与匹配码的交集可写；生产清单恒为空。
     """
-    global _bj_offline_volume_codes
+    global _bj_offline_volume_codes, _bj_confirmation_pid
     _bj_offline_volume_codes = frozenset()
+    _bj_confirmation_pid = None
     by_day: dict[date, set[str]] = {}
     for pair in pairs:
         if not isinstance(pair, Mapping):
@@ -118,12 +123,17 @@ def confirm_bj_offline_volume_units(
     matched = max(by_day.values(), key=len, default=set())
     if len(matched) < 20:
         raise RowReject("bj_offline_requires_20_distinct_codes")
-    _bj_offline_volume_codes = frozenset(matched)
-    return _bj_offline_volume_codes
+    _bj_confirmation_pid = os.getpid()
+    _bj_offline_volume_codes = frozenset(matched) & _BJ_ISOLATED_CONFIRMATIONS
+    return frozenset(matched)
 
 
 def _bj_write_unconfirmed(row: Mapping[str, object]) -> bool:
-    return not _bj_offline_volume_codes and str(row.get("code", "")).endswith(".BJ")
+    return (
+        _bj_confirmation_pid != os.getpid()
+        or row.get("code") not in _BJ_ISOLATED_CONFIRMATIONS
+        or row.get("code") not in _bj_offline_volume_codes
+    ) and str(row.get("code", "")).endswith(".BJ")
 
 
 def _is_suspended(value: object) -> bool:

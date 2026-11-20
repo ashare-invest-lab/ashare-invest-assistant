@@ -27,7 +27,7 @@ import { LICENCE_UNAVAILABLE } from '../i18n/licenceLabels';
 import type { DataStatus } from '../api/enums';
 import type { Gap } from '../api/types';
 import {
-  ACCOUNT_ID, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOW, PORTFOLIO, QUOTES,
+  ACCOUNT_ID, CONFIRMED_DAILY_SUSPENSION, DAILY_REPORTS, HORIZON_ASSESSMENTS, noviceAssessment, DAILY_REPORT_LIST, HEALTH_READY, NOW, PORTFOLIO, QUOTES,
   SIGNAL_EVENTS, TERMINAL_ACCOUNT, TERMINAL_ROWS, TRADE_DATE, dailyBars, intradayBars, SECURITY_CODES,
 } from './fixtures';
 import {
@@ -133,7 +133,7 @@ function todayBody(): TodayResponse {
   // 只带被引用到的 evidence（契约：alerts、plan_triggers 的 evidence_ids 都能在 evidence[] 找到）
   const used = new Set([...alerts, ...triggers].flatMap((x) => x.evidence_ids));
   return {
-    server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
+    account_id: TERMINAL_ACCOUNT.account_id, server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
     market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
     // T-F36/T-F36b：持仓行一律带 t_view，非持仓行为 null（契约 intraday-bars.md §3.7 ①）
     focus: more(TERMINAL_ROWS.filter((r) => r.focus).map((r, i) => ({ ...r, t_view: todayTView(r, i) }))),
@@ -180,7 +180,7 @@ const routeHandlers = [
     const rows = TERMINAL_ROWS.filter((r) => (scope === 'all' ? true : scope === 'holdings' ? r.holding !== null : r.in_watchlist));
     // v0.2.3 #16：trade_date 由服务端给出；弱 ETag，If-None-Match 未变时 304
     return jsonWithEtag(request, {
-      server_time: NOW, trade_date: TRADE_DATE, session: 'morning', account: TERMINAL_ACCOUNT, rows: rows.slice(0, 300), truncated: rows.length > 300,
+      account_id: TERMINAL_ACCOUNT.account_id, server_time: NOW, trade_date: TRADE_DATE, session: 'morning', account: TERMINAL_ACCOUNT, rows: rows.slice(0, 300), truncated: rows.length > 300,
       unread_notifications: notifications().filter((n) => n.read_at === null).length,
     });
   }),
@@ -260,17 +260,27 @@ const routeHandlers = [
     // from/to 为包含端点的交易日期；1m 的 t 是 +08:00 datetime，不能直接与 to 日期比较。
     if (from) pool = pool.filter((b) => b.t.slice(0, 10) >= from);
     if (to) pool = pool.filter((b) => b.t.slice(0, 10) <= to);
-    // 日期窗内没有任何数据：对齐后端 empty_bars()（200 + unavailable + no_source + data_as_of=null）
+    const rawDaily = freq === 'd' && adjust === 'none';
+    const { code: suspendedCode, date: suspendedDate, owner } = CONFIRMED_DAILY_SUSPENSION;
+    const confirmedSuspension = rawDaily && code === suspendedCode
+      && currentUser()?.id === owner && licenceState(owner) === 'active'
+      && (!from || from <= suspendedDate) && (!to || to >= suspendedDate) && (!before || suspendedDate < before);
+    const suspendedGap: Gap | undefined = confirmedSuspension
+      ? { key: `bars.${suspendedDate}`, reason: 'suspended', message: '当日停牌（示例）' }
+      : undefined;
+    // 空窗按证书状态与明确停牌证据区分，其余沿用无源说明。
     if (pool.length === 0) {
+      const gap = suspendedGap ?? (rawDaily && licenceOut() ? licenceGap('bars') :
+        { key: 'bars', reason: 'no_source', message: '行情读取源尚未接入（示例数据）' });
       return HttpResponse.json({
-        security_code: res.security_code, name: res.name, freq: res.freq, adjust: res.adjust,
+        security_code: res.security_code, name: res.name, freq: res.freq, adjust: rawDaily ? 'none' : res.adjust,
         pre_close: null, adjust_as_of: null, next_before: null, items: [],
-        data_status: 'unavailable', data_as_of: null,
-        gaps: [{ key: 'bars', reason: 'no_source', message: '行情读取源尚未接入（示例数据）' }],
+        data_status: 'unavailable', data_as_of: null, gaps: [gap],
       });
     }
     const items = pool.slice(-limit);
     const body = { ...res, items, next_before: pool.length > items.length ? items[0].t : null };
+    if (suspendedGap) return HttpResponse.json({ ...body, adjust: 'none', adjust_as_of: null, gaps: [suspendedGap] });
     // 证书不可用：分时没有可用缓存 → unavailable；日/周保留缓存 → stale
     return HttpResponse.json(degrade(body, `bars.${code}.${freq}`, freq === '1m' ? 'unavailable' : 'stale'));
   }),

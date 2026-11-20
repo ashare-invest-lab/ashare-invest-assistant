@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# 仅虚构数据；无需 Docker、TimescaleDB、业务库或 .env。
-# bash src/backend/probes/tb143_pg_selfcheck.sh
-# PG_BIN=/path/to/postgresql/17/bin bash src/backend/probes/tb143_pg_selfcheck.sh
+# 旧日线装载自检已停用；启动即报错并非零退出，保留所有产物。
+# 不启动 PostgreSQL、不调用 psql/Python，也不清理任何产物。
+# 请在 src/backend 下改用拒绝信息中的公共 Python 写入入口，仍受 BJ 确认门闩约束。
 set -euo pipefail
+# 以下旧隔离测试正文仅留待 T-T94 迁移，不代表当前可执行的验收。
+printf '%s\n' 'REFUSED: legacy tb143 load path is disabled; all artifacts are retained. Use python -m app.cli daily-bars-import-tdx（通达信日线导入）或 python -m app.cli.tb143_day_load --csv <CSV> --before <DATE>（年度 CSV 经公共 writer，仍受 BJ 确认门闩约束）。' >&2
+exit 1
 
 pgbin=${PG_BIN:-/usr/lib/postgresql/17/bin}
 probes=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -200,7 +203,7 @@ SQL
 printf 'PASS: daily_bars=6; meta=2+2; seeded mairui/tdx_local rows unchanged (all columns)\n'
 
 # 以下代码和量价均为虚构夹具。默认未建对照：沪深提交，所有 BJ 前缀/后缀跳过。
-# runner 同样仅传 csv/before；-v confirmed=1 也不能代替本会话的对照校验。
+# runner 已停用并在启动时拒绝；本历史用例的 -v confirmed=1 不能代替会话对照校验。
 cat > "$root/bj_default.csv" <<'CSV'
 code,trade_date,adj_type,open,high,low,close,volume,amount
 FAKE_SH.SH,2022-02-01,none,10,11,9,10,100,1000

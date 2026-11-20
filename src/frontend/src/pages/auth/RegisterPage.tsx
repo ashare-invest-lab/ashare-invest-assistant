@@ -7,6 +7,7 @@ import { errorText } from '../../api/errorPolicy';
 import { Loading, ErrorBox } from '../../components/common';
 import { DISCLAIMER_TEXT } from '../../components/RiskDisclosure';
 import { calibratedServerNowMs } from '../../lib/serverClock';
+import { PASSWORD_RULES } from '../../lib/passwordRules';
 import { AuthLayout } from './AuthLayout';
 
 interface FormValues {
@@ -127,7 +128,7 @@ function RegisterForm({ mode, onDone, onClosed }: { mode: 'invite' | 'open'; onD
           <Input />
         </Form.Item>
         <Form.Item name="password" label="密码" extra="10–128 位，包含字母和数字"
-          rules={[{ required: true, message: '请输入密码' }, { min: 10, message: '至少 10 位' }, { max: 128, message: '不超过 128 位' }, { pattern: /(?=.*[A-Za-z])(?=.*\d)/, message: '需同时包含字母和数字' }]}>
+          rules={[{ required: true, message: '请输入密码' }, ...PASSWORD_RULES]}>
           <Input.Password autoComplete="new-password" />
         </Form.Item>
         <Form.Item name="password2" label="确认密码" dependencies={['password']}

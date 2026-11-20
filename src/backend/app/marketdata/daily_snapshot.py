@@ -83,6 +83,12 @@ def daily_bars_ready(
     ).all()
     chosen = None
     for row in rows:
+        # Exclude history batches before choosing the latest applicable routine run.
+        if isinstance(row.stats, dict) and (
+            row.stats.get("window_trading_days") is not None
+            or row.stats.get("batch_kind") == "backfill"
+        ):
+            continue
         uid = _stats_user(row.stats)
         if uid is None or uid == str(owner):
             chosen = row

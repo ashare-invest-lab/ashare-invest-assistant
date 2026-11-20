@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { ColorType, CrosshairMode, type SeriesMarker, type Time } from 'lightweight-charts';
 import type { Action } from '../../api/enums';
 import { ACTION_COLOR, ACTION_SHORT } from '../../i18n/labels';
@@ -34,9 +35,9 @@ export function toSeriesMarker(m: ChartMarker): SeriesMarker<Time> {
   return {
     time: m.time,
     position: bull ? 'belowBar' : 'aboveBar',
-    color: ACTION_COLOR[m.action],
+    color: (labelOf(ACTION_COLOR, m.action) ?? '#7a8394'),
     shape: bull ? 'arrowUp' : flat ? 'circle' : 'arrowDown',
-    text: `${m.label}${ACTION_SHORT[m.action]}`,
+    text: `${m.label}${(labelOf(ACTION_SHORT, m.action) ?? '未知')}`,
   };
 }
 

@@ -12,6 +12,7 @@ from sqlalchemy import Connection, select
 from app.db.tables.market import daily_bars, trading_calendar
 from app.marketdata.bars_read import BarsQuery, PlaceholderBarsReader
 from app.marketdata.daily_snapshot import FINAL_AFTER, active_licence_id
+from app.schemas.enums import GapReason
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
@@ -82,15 +83,24 @@ class OwnedDailyBarsReader(PlaceholderBarsReader):
         returned_stamps: list[dt.datetime] = []
         for row in page:
             day = row.trade_date.isoformat()
-            if row.is_suspended or any(
+            if row.is_suspended is True:
+                gaps.append(
+                    {
+                        "key": "bars." + day,
+                        "reason": GapReason.SUSPENDED.value,
+                        "message": "当日停牌",
+                    }
+                )
+                continue
+            if any(
                 getattr(row, field) is None
                 for field in ("open", "high", "low", "close", "volume", "amount")
             ):
                 gaps.append(
                     {
                         "key": "bars." + day,
-                        "reason": "suspended" if row.is_suspended else "no_source",
-                        "message": "当日停牌" if row.is_suspended else "日线缓存字段不完整",
+                        "reason": GapReason.NO_SOURCE.value,
+                        "message": "日线缓存字段不完整",
                     }
                 )
                 continue
