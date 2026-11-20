@@ -544,6 +544,49 @@ def test_pn06_entry_report_build(conn):
     rows = _select(conn, daily_reports, user_id=owner).all()
     assert first == second and len(rows) == 1 and rows[0].body["gaps"]
 
+@pytest.mark.parametrize(
+    "own_issues", [None, [], ["synthetic_latest_own"]], ids=["absent", "complete", "partial"],
+)
+def test_report_build_uses_latest_analysis_for_requesting_owner(conn, own_issues):
+    # Virtual owners and run results in the isolated PG transaction.
+    owner, other = _base(conn)
+    owner_key, other_key = str(owner), str(other)
+    foreign_result = {"issues": ["synthetic_other"]}
+    rows = [
+        (10, "ok", {"users": [owner_key]}),
+        (11, "ok", {"users": {owner_key: None}}),
+        (12, "failed", {"users": {owner_key: {"issues": ["synthetic_failed"]}}}),
+        (13, "partial", {"user_id": other_key, "users": {other_key: foreign_result}}),
+    ]
+    if own_issues is not None:
+        older = {owner_key: {"issues": ["synthetic_old"]}}
+        batch = {owner_key: {"issues": own_issues}, other_key: foreign_result}
+        rows.extend([
+            (5, "ok", {"user_id": owner_key, "users": older}),
+            (6, "partial", {"user_id": None, "users": batch}),
+        ])
+    conn.execute(
+        insert(pipeline_runs),
+        [
+            {
+                "kind": "daily_batch",
+                "step": "tb76.daily_analysis",
+                "run_date": D2,
+                "finished_at": _at(D2, 17, minute),
+                "status": status,
+                "stats": stats,
+            }
+            for minute, status, stats in rows
+        ],
+    )
+
+    report_id = build(conn, owner, D2, _at(D2, 18))
+    report = _scalar(conn, daily_reports.c.body, id=report_id, user_id=owner)
+    pipeline_keys = {gap["key"] for gap in report["gaps"] if gap["key"].startswith("pipeline.")}
+    expected = {"pipeline.analysis"} if own_issues is None else {f"pipeline.{issue}" for issue in own_issues}
+    assert pipeline_keys == expected
+
+
 def test_pn06_entry_today_service(conn):
     owner = _base(conn)[0]
     account_id = uuid.uuid5(owner, "account")

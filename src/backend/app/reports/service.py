@@ -97,18 +97,20 @@ def build(conn: Connection, user_id: uuid.UUID, date: dt.date, now: dt.datetime)
         for row in conn.execute(select(securities).where(securities.c.code.in_(codes)))
     }
     gaps = [_gap("market", "市场环境、宽度与现金估值基准尚未接线，不作默认推断。")]
-    analysis = conn.execute(
-        select(pipeline_runs.c.stats)
+    # Both shared and per-user runs record their results under stats.users.
+    owner_result = pipeline_runs.c.stats["users"][str(user_id)]
+    own_analysis = conn.execute(
+        select(owner_result)
         .where(
             pipeline_runs.c.kind == "daily_batch",
             pipeline_runs.c.run_date == date,
             pipeline_runs.c.step == "tb76.daily_analysis",
             pipeline_runs.c.status.in_(["partial", "ok"]),
+            func.jsonb_typeof(owner_result) == "object",
         )
         .order_by(pipeline_runs.c.finished_at.desc())
         .limit(1)
     ).scalar_one_or_none()
-    own_analysis = (analysis or {}).get("users", {}).get(str(user_id))
     if own_analysis is None:
         gaps.append(_gap("pipeline.analysis", "盘后策略装配尚无本人完成记录。"))
     else:
