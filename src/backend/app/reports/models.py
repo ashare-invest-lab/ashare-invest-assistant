@@ -8,7 +8,15 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
 
-from app.schemas.enums import DataStatus, Dimension, MarketRegime, ReconciliationStatus, RiskLevel
+from app.aggregates.models import MarketBasis
+from app.schemas.enums import (
+    DataStatus,
+    Dimension,
+    GapReason,
+    MarketRegime,
+    ReconciliationStatus,
+    RiskLevel,
+)
 from app.signals.models import Evidence, Gap, Model, TextEvidence
 
 Money = Annotated[str, Field(pattern=r"^-?[0-9]+(?:\.[0-9]+)?$")]
@@ -31,6 +39,30 @@ class Market(Model):
     regime_position_range: PositionRange | None
     breadth: Breadth | None
     summary: list[TextEvidence]
+    basis: MarketBasis = Field(default_factory=MarketBasis)
+    data_status: DataStatus = DataStatus.UNAVAILABLE
+    data_as_of: dt.datetime | None = None
+    gaps: list[Gap] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def project_legacy_fields(self) -> Market:
+        supplied = self.model_fields_set.copy()
+        if "basis" in supplied:
+            return self
+        if "data_status" not in supplied and any(
+            value is not None
+            for value in (self.regime, self.regime_position_range, self.breadth, self.data_as_of)
+        ):
+            self.data_status = DataStatus.PARTIAL
+        if "gaps" not in supplied:
+            self.gaps = [
+                Gap(
+                    key="market.basis",
+                    reason=GapReason.NO_SOURCE,
+                    message="缺少可用的市场快照来源。",
+                )
+            ]
+        return self
 
 
 class Account(Model):
