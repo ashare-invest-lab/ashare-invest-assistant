@@ -75,7 +75,7 @@ function DateSwitcher({ date }: { date: string }) {
     ...(pages.hasNextPage ? [{ value: LOAD_MORE, label: pages.isFetchingNextPage ? '加载中…' : '加载更早…' }] : []),
   ];
   return (
-    <span className="report-dates">
+    <div className="report-dates">
       <Button size="small" disabled={!older && !pages.hasNextPage} aria-label="上一期"
         onClick={() => (older ? go(older) : void loadOlder())}>‹ 上一期</Button>
       <Select
@@ -83,7 +83,15 @@ function DateSwitcher({ date }: { date: string }) {
         onChange={(d) => (d === LOAD_MORE ? void pages.fetchNextPage() : go(d))}
       />
       <Button size="small" disabled={!newer} aria-label="下一期" onClick={() => newer && go(newer)}>下一期 ›</Button>
-    </span>
+      {pages.isError ? (
+        <Alert
+          type="error" role="alert" aria-label="日报日期列表错误" className="small" style={{ padding: '4px 8px' }}
+          title={pages.isFetchNextPageError ? '更早日期加载失败，已加载日期保留' : '日期列表加载失败'}
+          action={<Button size="small" aria-label="重试" loading={pages.isFetching}
+            onClick={() => void (pages.isFetchNextPageError ? pages.fetchNextPage() : pages.refetch())}>重试</Button>}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -192,18 +200,28 @@ function AccountPanel({ r }: { r: DailyReport }) {
 
 export function DailyReportPage() {
   const { date } = useParams();
-  const [sp, setSp] = useSearchParams();
   const q = useDailyReport(date);
-  if (q.isLoading) return <Loading />;
-  if (q.isError || !q.data) {
-    return (
-      <div className="page-scroll report">
+  const report = q.isError ? undefined : q.data;
+  return (
+    <div className="page-scroll report" data-testid={report ? 'daily-report' : undefined}>
+      <div className="detail-head">
+        <h1 className="q-name">盘后日报</h1>
+        {date ? <DateSwitcher date={date} /> : null}
+        {report ? <>
+          <Tag>不可变快照</Tag>
+          <DataStatusTag status={report.data_status} asOf={report.data_as_of} gaps={report.gaps} />
+        </> : null}
+      </div>
+      {q.isLoading ? <Loading /> : report ? <DailyReportBody r={report} /> : <>
         <ErrorBox error={q.error ?? new Error('未找到日报')} />
         <div className="small" style={{ marginTop: 6 }}><Link to="/daily-reports">查看最新一期日报 ›</Link></div>
-      </div>
-    );
-  }
-  const r = q.data;
+      </>}
+    </div>
+  );
+}
+
+function DailyReportBody({ r }: { r: DailyReport }) {
+  const [sp, setSp] = useSearchParams();
   const gapCount = r.gaps.filter((g) => g.reason !== 'suspended').length;
   const gapHeading = gapCount ? '数据缺口' : '停牌说明';
   const raw = sp.get('filter');
@@ -216,13 +234,7 @@ export function DailyReportPage() {
     setSp(next, { replace: true });
   };
   return (
-    <div className="page-scroll report" data-testid="daily-report">
-      <div className="detail-head">
-        <h1 className="q-name">盘后日报</h1>
-        <DateSwitcher date={r.date} />
-        <Tag>不可变快照</Tag>
-        <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} />
-      </div>
+    <>
       <div className="report-meta small" role="group" aria-label="日报快照信息">
         <p>日报日期 {r.date}</p>
         <p>生成于 {fmtTime(r.generated_at)}</p>
@@ -297,6 +309,6 @@ export function DailyReportPage() {
         <div className="stock-grid">{shown.map((s) => <StockCard key={s.security_code} s={s} r={r} />)}</div>
       ) : <div data-testid="report-empty"><EmptyState title={r.stocks.length ? '没有符合筛选条件的证券' : '本期没有持仓或自选证券'} description="可调整日期或筛选条件查看已有内容；空列表不代表数据齐全。" /></div>}
       </section>
-    </div>
+    </>
   );
 }
