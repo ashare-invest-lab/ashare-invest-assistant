@@ -29,12 +29,13 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 - 存储增量按 plan§2.1B/§3.3 与 `src/backend/app/db/tables/market.py`：热缓存键带 licence_id；`quotes_snapshot` 保存可追溯快照，分钟规范化写 `minute_bars source=mairui`，保留行情时点与 fetched_at。现有快照缺证书列、分钟主键仍(code,ts)，须先补来源/证书隔离键与迁移，再接读写，不能不同证书覆盖同一分钟；旧无归属行不冒领，缺字段不落伪值（U9）。
 - 保留按已有来源分别列出：plan§0A.3 热缓存TTL 3分钟；§3.3快照当日+近5日，`realtime_quotes` 分钟降采样10个交易日；`deploy/db/timescale/policies.conf` 对后者配21日历日、7天后压缩，分钟配1095日；但 `docs/contracts/intraday-bars.md` §2.2保守默认“不自动删除”、持仓自选推荐3年。表名映射、交易日/日历日及清理优先级未验证 U10；不混称同一保留期，不自动启用新增删除任务，先裁定再做离线清理预览。PG只接麦蕊盘中分钟，TDX/HF离线历史仍走文件目录（该契约§1.2/§3.4）。
 - 盘中快照量额与分钟bar量额不得互换；累计/单根语义先核 U8。1m使用Bar结束时间（库列注释），仅返回 ts≤观察时刻且 fetched_at≤知识截止的真实行；迟到修正不回填旧信号/日报。15:00只是时段结束，不能将最后盘中快照改标“正式日线”；矩阵§1/§2的约17:10是文档完成时间，实际定稿仍未验证 U1，日报沿 `daily_snapshot.py` 17:30截止与冻结版本规则。
-- 缺数沿共用 `gap_reason`：未接线/无可用行→no_source；真实已排程且尚待发布→not_yet_published；有配额延期→quota_deferred；有故障事实→upstream_error；证书不可用→data_licence_unavailable。缺字段null、保留真0；旧数据stale、部分缺失partial、全缺unavailable；不伪造、不插值、不前视。停牌细分枚举尚未落契约时用no_source并解释停牌事实（backlog A2b）；不新造 suspended/not_wired，不把未入队说成pending。
+- 缺数沿共用 `gap_reason`：未接线/无可用行→no_source；真实已排程且尚待发布→not_yet_published；有配额延期→quota_deferred；有故障事实→upstream_error；证书不可用→data_licence_unavailable。缺字段null、保留真0（公共Bar必需量额例外：省根留缺口，见 §0.3 量额结构）；旧数据stale、部分缺失partial、全缺unavailable；不伪造、不插值、不前视。停牌细分枚举尚未落契约时用no_source并解释停牌事实（backlog A2b）；不新造 suspended/not_wired，不把未入队说成pending。
 - 与 #185：`src/backend/app/marketdata/quotes_read.py:read_quotes` 当前只回退本人合格日线，量额null、恒stale；拟先校验证书，再优先本人可用实时缓存（过期仍标stale），无可用实时才走现有日线过滤，最后null/gap；GET不触发上游。实时与日线整项选源，不能拼实时价＋旧日量额。T-B185若先补日线量额，须标收盘口径，不能提升为实时fresh；terminal统一复用读取器，保留其他未接线gap（API§1.1 T-A173、§7.3、T-O111建议1/2）。
 
 ### 0.3 契约增量与逐入口验收
 
 草案仅在本文件：沿用 QuoteItem/Bar/DataStatusBlock，给 `/quotes` item 和 `/terminal`、`/today` 行quote追加同形 `basis:{mode:"intraday"|"close"|null,trade_date:date|null,source:string|null}`，来源为上述盘中/收盘区别与T-O111“标注收盘口径”要求；t保留行情时间，data_as_of沿API§1.1，不使用请求时刻。内部完成记录增来源端点、证书、观察/采集时间、批次与规范化版本，依据plan§3.3、owned_quotes时点校验；不暴露证书或原始载荷。U8未核字段保持null，不增加臆测单位默认值。
+量额结构（闭合治理 B2，口径同 PR 评论 7012015464）：公共 `Bar.volume/amount` 维持不可空十进制字符串（API §5.1 `Bar`）；必需量额未知的根 K 不落库、不返回，走既有 gaps 缺口结构，真零输出 `"0"`，不以 null 或 0 充当未知。`/quotes` 行（QuoteItem）量额可空（股/元，现行读取器已按 null 输出）；`TerminalQuote` 为增量追加可空 `volume`（股）并沿用既有可空 `amount`（元），`/today` 行 quote 复用同形；三入口行量额与价格整项同源同批，实时批缺量额则该行量额 null 并计缺口，不用实时价拼旧日量额。旧响应/旧归档可缺新增键，读取按缺省投影、缺值不补零。`TerminalQuote.volume` 属 API 契约增量，须在 I7/I8 实施前先修订 `docs/api-contract.md` 相应条目并入正式版本，不得先改代码后补契约；M1 与 #276 只验证市场 basis/投影，不提前实现本条。
 `src/backend/app/aggregates/t_view.py:today_bars` 当前未过滤证书/fetched_at且空量额转0，历史量缓存亦须纳入证书和知识截止；草案要求接入本人证书、时点过滤、空量额传播至指标gap。`service.py` 的scheduled=False只在确有排程凭据时替换；管理状态补既有heartbeat/freshness，不另造健康枚举（API§7.9/§7.10）。
 
 | 受影响入口 | 离线逐入口验收（不能以容器healthy替代） |
@@ -238,6 +239,20 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 | U8 | 实时/1m完整字段、单位、累计/单根量额、结束时点/修订/盘后补齐、竞价及ETF覆盖；需允许资料补入既有授权脱敏证据，缺失继续标未验证，不能自行实调 | I1/I5/I6与live；离线假数据仅证实现，不证能力 |
 | U9 | 快照/分钟来源证书键与旧数据兼容、读侧知识截止、完成记录对接；以源码及离线迁移/双证书夹具关闭，现场状态不据此宣称已修 | I2/I8/I9与live |
 | U10 | quotes_snapshot/realtime_quotes映射与保留冲突：近5日、10交易日/21日历日、分钟不自动删/1095天；须有引用依据的统一裁定及预览对账 | I10与live清理配置，未关闭不新增自动删除 |
+
+### 7.1 U1–U7 补证交接（闭合治理 B1）
+
+按 #273 评论 7012015464 落地：负责人为建议属主，接收与到期由编排者登记；证据交齐并经复核签收前，对应 U 保持“未验证”，不因指派而关闭。U8–U10 及未编号实现沿原依赖，不因本表扩权。审核人＝复核；U3/U5/U6 的定义与用途边界先经架构核再交复核。
+
+| 编号｜负责人 | 补证证据/产物 | 关闭判据（复核签收） |
+| --- | --- | --- |
+| U1｜后端M2＋运维 | 已授权脱敏快照的逐字段/单位对照表，含批次一致性与终值时点记录，15:05 与终值事实分开留证 | 字段逐项有出处、同批可重演、15:05 下限与终值可区分 |
+| U2｜研究员＋后端M2 | 时点资格池与同日源批的逐成员对账表：可见资格、成交/停牌证据、漏项与覆盖计数 | 逐成员闭合、不以当前名单补历史；覆盖不明仍 null |
+| U3｜研究员＋后端M5 | 具版号 G-02 正式参数、运行门禁与 F25 可重算历史产物 | 架构核参数来源；预热/防抖按正式参数重算一致；缺证 regime/区间仍 null |
+| U4｜研究员＋后端M2/M3 | 涨跌停源字段、市场范围、时点与特殊交易制度对照表 | 逐市场逐规则段核涨跌停与真实零；缺项旧 breadth 整体 null 不变 |
+| U5｜研究员＋后端V4 | 收益/费用/现金流/分红/未平仓/行业基准的指标定义与手算样例 | 架构审定义；样例可重算、模拟与实绩隔离 |
+| U6｜后端D2/D3＋研究员 | 策略版本支持矩阵、缓存覆盖范围与研究读链映射 | 架构审用途边界；支持/拒绝/未知与零命中各有实测 |
+| U7｜运维＋测试 | 重验输入＝锁定的 T-O111 观察版本、T-A210 原 87 条编号清单、当前 main 只读检出及运行日志；产物＝逐项旧/新归类、证据指针、未验证原因、与 T-A136 成本假设的差异清单 | 87 条逐项对账完成、原 18/69 基线可追溯、无证项仍标未验证 |
 
 ## 8. 本次验收
 
