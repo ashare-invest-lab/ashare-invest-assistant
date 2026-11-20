@@ -41,8 +41,8 @@ const PENDING = uid(1012);
 const SELL_DRAFT = uid(1022);
 
 describe('版本与枚举（/meta/enums）', () => {
-  it('当前 CONTRACT_VERSION = v0.2.10，保留 v0.2.9 新增的 4 个枚举键', () => {
-    expect(CONTRACT_VERSION).toBe('v0.2.10');
+  it('当前 CONTRACT_VERSION = v0.2.11，保留 v0.2.9 新增的 4 个枚举键', () => {
+    expect(CONTRACT_VERSION).toBe('v0.2.11');
     expect(ENUMS.candidate_signal_event_cause).toEqual(['executability_check', 'reason_released', 'user', 'expiry', 'invalidation', 'supersede']);
     for (const k of ['research_candidate_status', 'research_candidate_origin', 'candidate_decision'] as const) expect(ENUMS[k].length).toBeGreaterThan(0);
   });
@@ -71,7 +71,7 @@ describe('#1–#3 持仓：无行情行 null、estimated、security_type', () =>
     expect(await screen.findByTestId(`est-label-${stock.security_code}`, undefined, { timeout: 5000 })).toHaveTextContent(/^估算$/);
     expect(screen.queryByTestId(`est-label-${cb.security_code}`)).toBeNull();
     // 示例数据横幅的契约版本跟随 CONTRACT_VERSION
-    expect(screen.getByText(/按契约 v0\.2\.10 结构/)).toBeInTheDocument();
+    expect(screen.getByText(/按契约 v0\.2\.11 结构/)).toBeInTheDocument();
   });
 });
 

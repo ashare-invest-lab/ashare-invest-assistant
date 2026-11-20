@@ -303,7 +303,9 @@ def test_a11_01_meta_enums(app_client: Callable[..., Any]) -> None:
     if missing:
         pytest.xfail(f"{O_A11_ENUMS}；缺 {missing}，version={r.json().get('version')}")
     version = _VERSION_RE.search(_docs439())
-    expected_version = "v0.2.9" if version and version.groups() == ("0", "2", "9") else "v0.2.10"
+    expected_version = {
+        ("0", "2", "9"): "v0.2.9", ("0", "2", "11"): "v0.2.11",
+    }.get(version.groups() if version else (), "v0.2.10")
     assert r.json()["version"] == expected_version
     for name, values in A11_ENUMS.items():
         assert list(enums[name]) == values, name
