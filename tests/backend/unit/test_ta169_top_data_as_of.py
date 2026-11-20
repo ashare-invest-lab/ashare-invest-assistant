@@ -280,17 +280,17 @@ def test_today_top_data_as_of_null_when_no_focus(world: World, mode: str) -> Non
     assert_cache(world.client, "/api/v1/today", response)
 
 
-UNKNOWN_BASIS = {
-    "snapshot_id": None,
-    "observed_date": None,
-    "mode": None,
+KNOWN_BASIS = {
+    "snapshot_id": str(uuid.UUID(int=187)),
+    "observed_date": str(NOW.date()),
+    "mode": "close",
     "scope": "沪深股票口径",
-    "eligible": None,
-    "observed": None,
-    "trading": None,
-    "suspended": None,
-    "missing": None,
-    "source": None,
+    "eligible": 2,
+    "observed": 2,
+    "trading": 2,
+    "suspended": 0,
+    "missing": 0,
+    "source": "synthetic-market-snapshot",
 }
 
 
@@ -300,9 +300,22 @@ def test_market_basis_is_shared_by_public_aggregates(world: World) -> None:
     today = world.client.get("/api/v1/today")
     terminal = world.client.get("/api/v1/terminal")
     assert (overview.status_code, today.status_code, terminal.status_code) == (200, 200, 200)
-    assert overview.json()["basis"] == UNKNOWN_BASIS
-    assert today.json()["market"]["basis"] == UNKNOWN_BASIS
-    assert terminal.json()["account"]["basis"] == UNKNOWN_BASIS
+    assert overview.json()["basis"] is None
+    assert today.json()["market"]["basis"] is None
+    assert terminal.json()["account"]["basis"] is None
+    schemas = world.client.get("/openapi.json").json()["components"]["schemas"]
+    terminal_account = schemas["Terminal"]["properties"]["account"]["anyOf"]
+    account_ref = next(variant["$ref"] for variant in terminal_account if "$ref" in variant)
+    basis_refs = set()
+    for name in ("MarketOverview", "TodayMarket", account_ref.rsplit("/", 1)[1], "Market"):
+        schema = schemas[name]
+        assert "basis" in schema["required"]
+        variants = schema["properties"]["basis"]["anyOf"]
+        assert {"type": "null"} in variants
+        basis_refs.update(variant["$ref"] for variant in variants if "$ref" in variant)
+    assert len(basis_refs) == 1
+    basis_schema = schemas[basis_refs.pop().rsplit("/", 1)[1]]
+    assert set(basis_schema["required"]) == set(KNOWN_BASIS)
     cached = world.client.get(path, headers={"If-None-Match": overview.headers["etag"]})
     assert cached.status_code == 304
     legacy = overview.json()
@@ -310,7 +323,7 @@ def test_market_basis_is_shared_by_public_aggregates(world: World) -> None:
     legacy["data_as_of"] = EARLY
     assert project_market_overview(legacy).model_dump(mode="json") == {
         **legacy,
-        "basis": UNKNOWN_BASIS,
+        "basis": None,
     }
     assert "basis" not in legacy
 
@@ -329,7 +342,7 @@ def test_daily_report_market_projects_archive_without_rewriting_it(
     if stamp:
         market["data_as_of"] = stamp
     if has_basis:
-        market.update(basis=UNKNOWN_BASIS, data_status="stale", data_as_of=stamp, gaps=[])
+        market.update(basis=KNOWN_BASIS, data_status="stale", data_as_of=stamp, gaps=[])
     body = {
         "date": str(NOW.date()),
         "generated_at": NOW.isoformat(),
@@ -361,7 +374,7 @@ def test_daily_report_market_projects_archive_without_rewriting_it(
     assert response.status_code == 200
     projected = response.json()["market"]
     assert projected == project_daily_report_market(market).model_dump(mode="json")
-    assert projected["basis"] == UNKNOWN_BASIS
+    assert projected["basis"] == (KNOWN_BASIS if has_basis else None)
     assert projected["data_as_of"] == stamp
     assert projected["breadth"] == market["breadth"]
     if has_basis:

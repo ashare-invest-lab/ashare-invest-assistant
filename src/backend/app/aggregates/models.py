@@ -154,6 +154,8 @@ MarketCount = Annotated[int, Field(ge=0)]
 
 
 class MarketBasis(Model):
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
     snapshot_id: uuid.UUID | None = None
     observed_date: dt.date | None = None
     mode: Literal["intraday", "close"] | None = None
@@ -203,7 +205,9 @@ class MarketSnapshotRecord(Model):
 
 
 class MarketOverview(DataBlock):
-    basis: MarketBasis = Field(default_factory=MarketBasis)
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+    basis: MarketBasis | None = None
     trade_date: dt.date
     session: MarketSession
     indices: list[MarketIndex]
@@ -214,7 +218,9 @@ class MarketOverview(DataBlock):
 
 
 class Account(Model):
-    basis: MarketBasis = Field(default_factory=MarketBasis)
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+    basis: MarketBasis | None = None
     account_id: uuid.UUID
     total_assets: str
     cash_available: str
@@ -325,7 +331,9 @@ class Report(Model):
 
 
 class TodayMarket(Model):
-    basis: MarketBasis = Field(default_factory=MarketBasis)
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+    basis: MarketBasis | None = None
     regime: MarketRegime | None
     regime_position_range: Range | None
     data_status: DataStatus

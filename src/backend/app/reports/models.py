@@ -6,7 +6,7 @@ import datetime as dt
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import ConfigDict, Field, JsonValue, model_validator
 
 from app.aggregates.models import MarketBasis
 from app.schemas.enums import (
@@ -35,11 +35,13 @@ class Breadth(Model):
 
 
 class Market(Model):
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
     regime: MarketRegime | None
     regime_position_range: PositionRange | None
     breadth: Breadth | None
     summary: list[TextEvidence]
-    basis: MarketBasis = Field(default_factory=MarketBasis)
+    basis: MarketBasis | None = None
     data_status: DataStatus = DataStatus.UNAVAILABLE
     data_as_of: dt.datetime | None = None
     gaps: list[Gap] = Field(default_factory=list)
@@ -47,7 +49,7 @@ class Market(Model):
     @model_validator(mode="after")
     def project_legacy_fields(self) -> Market:
         supplied = self.model_fields_set.copy()
-        if "basis" in supplied:
+        if self.basis is not None:
             return self
         if "data_status" not in supplied and any(
             value is not None
