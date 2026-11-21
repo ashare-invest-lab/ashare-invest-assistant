@@ -692,6 +692,9 @@ jobs:
         run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_compose_networks.py
       - name: check_alpine_pin.py
         run: python3 scripts/ci/check_alpine_pin.py
+      # T-O123：会真调麦蕊的开关（MAIRUI_MODE、DAILY_BARS_SOURCE）默认必须关闭
+      - name: check_mairui_defaults.py
+        run: uv run --no-project --with "pyyaml==${PYYAML_VERSION}" python scripts/ci/check_mairui_defaults.py
 
   # 源码不得被 .gitignore 误伤（T-O09a）：已跟踪源码被规则命中、相对引用指向被忽略的文件、
   # 敏感词文件名探针（licence.ts 等）被宽规则命中，都失败。正反例在 scripts/ci/tests/test_ignored_sources.py。
