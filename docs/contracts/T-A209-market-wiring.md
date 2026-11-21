@@ -158,12 +158,11 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 已确认实现缺口：write_candidate读取限制时没有removed_at过滤，且只按target_id集合匹配；软删除接入必须同步修正removed_at和target_type匹配，否则删后仍拦截。名单删除只能重新检查关联原因，不能无条件解除所有同代码原因（API §6.1、§9 v0.2.9验收5）。
 缺数：限制列表真实为空=200 items[]、gaps[]；目标名称缺主数据，保留target_id、name=null、no_source；重查证据缺失时保留active原因并返回gap，不假定已恢复可执行。无行情证书不影响名单管理，不返回行情许可证gap。没有插值/前视；历史展示使用原创建/删除时间，不套用今日名单重写旧信号。
 
-**契约草案**：补全既有 GET/POST `/restrictions`、DELETE `/restrictions/{id}`，不另建第二套控制接口。
-- GET请求 `kind?、target_type?、limit、cursor`；默认未删除，按created_at desc/id desc（API §1.2）；响应 `{items:[Restriction],next_cursor,gaps}`。Restriction沿上述字段增id/created_at/removed_at/name/status（active/expired；草案派生展示，不落新状态枚举）；until=null不擅自补到期日。
-- POST请求严格沿§7.5六字段；201返回Restriction+gaps；不接收user_id。cooling_off须有未来until，否则400 VALIDATION_ERROR（本草案补齐有效性约束，以plan“冷静期结束”语义为据）；blocklist/mute保留现有until可空能力。
-- DELETE建议200 `{id,removed_at,recheck:{released_reason_ids:uuid[],remaining_reason_ids:uuid[]},gaps}`（既有契约未规定响应体，本次增量）；重复删除同一本人记录返回相同删除时间、不重复事件；仅解除已证实无其他有效限制的原因。未完成重查不能返回“已解除”。
-- 错误除共用项外：目标不可见/不存在同404；字段组合无效400。`POST /non-executable-reasons/{id}/release` 对BLOCKLISTED/USER_MUTED继续409 REASON_NOT_MANUALLY_RELEASABLE（`src/backend/app/api/v1/candidate_signals.py:release_reason`），引导名单页；cooling_off按时间条件重查，不绕过机器条件。
-- 入口验收：`/restrictions`增删筛选及过期展示；`/candidate-signals/:id`名单解除跳转、重复限制仍阻断；`/candidate-signals?tab=released`与`/today.released_reasons`只出现确实解除的事件；`/terminal`原因计数刷新一致；新候选不再命中removed记录；旧建议归档不被覆写。
+**正式契约**：本节只描述市场 wiring 的依赖与 PIT 约束。`GET/POST /restrictions`、`DELETE /restrictions/{id}` 的请求、响应、错误、幂等、目标可见性、状态派生和删除重查均以 `docs/api-contract.md §7.5` 为唯一事实来源，不另建第二套控制接口。
+- 目标校验继续复用证券主数据搜索、策略可见性和实例本人归属。未知证券、不可见策略、不存在或他人的实例统一按 `404 NOT_FOUND`，不得泄露存在性。该点以 API §7.5 为准，目标名称缺失时只通过 `gaps` 披露。
+- 生成候选的限制判定必须使用 `[restriction.created_at, restriction.removed_at)`，并将 `until` 相对候选 `content.created_at` 比较。当前时刻只用于实时接口的 `status` 展示和创建时 `cooling_off.until` 的未来校验，不能回写历史候选。
+- 删除必须在同一事务中只重查被删限制关联的原因，保留其他有效限制，写 `reason_status_events`，解除事件的 `released_by="system"`。响应结构与 `gaps` 位置以 API §7.5 为准。当前实现缺口不视为本节已验收。
+- 本节的入口验收沿用 API §7.5 及其 §9 验收条目。涉及 `/candidate-signals/:id`、`/candidate-signals?tab=released`、`/today.released_reasons`、`/terminal` 的联动，需以后端实现和测试实际通过为准，不把草案建议写成已实现。
 
 | 别名｜建议单号 | 范围/净增上限 | 依赖 | 验收 |
 | --- | --- | --- | --- |

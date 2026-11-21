@@ -12,6 +12,7 @@
 
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
+- T-A215（2026-11-21）：§7.5 将 `/restrictions` 的目标可见性、`until`、响应投影、删除重查与 PIT 口径定稿，幂等沿用 §1.3，不新增错误码或公共枚举。
 
 ### v0.2.10（2026-11-19，A2b：明确停牌的 K 线缺口与日报说明）
 
@@ -1044,10 +1045,25 @@ evidence: Evidence[]
 | GET/PATCH | `/strategy-instances/{id}` 🔒 | GET → `StrategyInstance`（§5.1，v0.2.7）；他人或不存在的 → `404 NOT_FOUND`。PATCH `{param_overrides?, budget_amount?}`；改参会生成新的派生版本；archived 实例 → `409 IMMUTABLE_RESOURCE`（v0.2.7） |
 | POST | `/strategy-instances/{id}/confirm` · `/pause` · `/resume` · `/archive` 🔒 | 见 §6.0A（v0.2.7）：→ `200 StrategyInstance`；目标态即当前态时返回 200（幂等）；非法 → `409 INVALID_STATE_TRANSITION{from, to, allowed}`；版本不可运行 → `409 STRATEGY_VERSION_NOT_RUNNABLE{lifecycle}` |
 | GET | `/strategy-instances/{id}/events` 🔒 | §1.2 分页，`at desc, id desc` → 元素 `{id, kind: instance_event_kind, from_status: instance_status \| null, to_status: instance_status \| null, actor: "user" \| "system", reason_code: reason_code \| null, note: string \| null, detail: object \| null, at: string(datetime)}`（v0.2.7）。`created` 的 `from_status` 为 `null`；`params_changed` 两个状态都为 `null`，`detail` 中给出 `{derived_strategy_version_id}` |
-| GET/POST/DELETE | `/restrictions` 🔒 · `/restrictions/{id}` 🔒 | `{kind: "blocklist"\|"cooling_off"\|"mute", target_type: "security"\|"strategy"\|"instance", target_id: string, until: string(datetime) \| null, reason: string \| null}`。删除后会触发相关原因（`BLOCKLISTED`/`USER_MUTED`）重新检查 |
+| GET | `/restrictions` 🔒 | 查询 `kind?`、`target_type?`、`limit`、`cursor`，默认只返回本人 `removed_at=null` 的记录，按 `created_at desc, id desc` 使用 §1.2 游标分页。响应为 `{items: Restriction[], next_cursor, gaps: Gap[]}`，其中 `gaps` 在响应顶层，过期记录仍在 `items` 中。 |
+| POST | `/restrictions` 🔒 | 请求体 `{kind: "blocklist"\|"cooling_off"\|"mute", target_type: "security"\|"strategy"\|"instance", target_id: string, until: string(datetime) \| null, reason: string \| null}`，不接受 `user_id`。`201` 返回 `{id, kind, target_type, target_id, name: string \| null, until, reason, created_at, removed_at: string(datetime) \| null, status: "active"\|"expired"\|"removed", gaps: Gap[]}`，`gaps` 位于响应顶层。创建类 POST 按 §1.3 接受 `Idempotency-Key`，幂等 scope=`本人+restrictions`。 |
+| DELETE | `/restrictions/{id}` 🔒 | 只允许删除本人未删除记录。`200` 返回 `{id, kind, target_type, target_id, name: string \| null, until, reason, created_at, removed_at: string(datetime), status:"removed", recheck:{released_reason_ids: uuid[], remaining_reason_ids: uuid[]}, gaps: Gap[]}`，`gaps` 位于响应顶层。删除事务内完成关联原因重查，语义见本节下文。 |
 | GET/PUT | `/risk-controls` 🔒 | `[{control: risk_control, enabled: boolean, params: object, source: "system"\|"user"}]`；可能返回 `422 RISK_CONTROL_INVALID_PARAMS` |
 | DELETE | `/risk-controls/{control}` 🔒 | **新增（v0.2.9 内，T-A52）**。清除**本人**该 control 的用户覆盖，恢复继承（`scope='user'` 行置 `override_active=false`；不是删除配置本身，六项控制恒存在）；返回 `200 list[RiskSetting]`（六项，与 PUT 同形）。幂等：无本人覆盖时重复清除 → 200、状态不变、不追加历史/审计。未知 `control` → `404 NOT_FOUND`；以任何变体形状（`?scope=`、body 目标等）试图触达 system 行 → `404`（本接口只寻址本人 user 行，不提供 403 探测面）。语义、存储、审计、负例与 T63 验收见 §7.11.2 T-A52 裁定 |
 | GET | `/risk-controls/events` 🔒 | 风控事件（v0.2.7 定义）。`?status=active\|cleared&control=&security_code=&since=`，§1.2 分页（`triggered_at desc, id desc`）→ 元素 `RiskEvent = RiskFlag & {id: uuid, security_code: string \| null, name: string \| null, status: "active" \| "cleared", triggered_at: string(datetime), cleared_at: string(datetime) \| null, suggestion_id: uuid \| null, evidence: Evidence[]}`。`/today.risk_flags` 中的每一条都对应一条 `status=active` 的风控事件（由 `risk_event_id` 关联） |
+
+`Restriction` 的字段投影与校验如下。
+
+本节的 `Gap` 沿用 §1.1 的 `{key: string, reason: gap_reason, message: string}`，只出现在响应顶层的 `gaps`。
+
+- `name` 是目标显示名。证券取证券主数据简称，策略取本人可见策略名称，实例取本人实例的显示名称。缺少名称来源时保留 `target_id`、返回 `name:null`，并在响应顶层 `gaps` 给出 `reason="no_source"`，不伪造名称。依据：`docs/contracts/T-A209-market-wiring.md §4` 的目标名称缺口约定。未验证具体 gap 的 `key` 与文案。
+- `status` 是派生字段，不落库。`removed_at` 非空时为 `removed`。否则 `until` 非空且 `until <=` 服务端当前时刻时为 `expired`，其余为 `active`。删除优先于到期。GET 默认排除 `removed`，因此列表只会出现 `active` 或 `expired`。依据：T-A209 §4 草案的派生状态约定，现已在本节定稿。
+- `target_type="security"` 要求 `target_id` 是证券主数据中的代码。未知证券、不存在的策略或不可见策略、不存在或不属于本人的实例，统一返回 `404 NOT_FOUND`，不暴露是否存在。`strategy` 的可见性沿用 `strategy_cards.visible`，`instance` 按 `user_id` 归属判断。证券的公开主数据不要求本人行情证书。`target_type` 或 `kind` 取值非法返回 `400 VALIDATION_ERROR`。依据：§4 `NOT_FOUND` 的隐私规则、T-A209 §4 的“目标不可见/不存在同 404”约定。未知证券的专门验收未验证。
+- `kind="cooling_off"` 必须提供带时区的 `until`，且严格晚于服务端当前时刻。缺失或 `until <= now` 均返回 `400 VALIDATION_ERROR`，`details.fields` 至少包含 `{field:"until", issue:"required_for_kind"}` 或 `{field:"until", issue:"must_be_future"}`。`blocklist` 与 `mute` 的 `until` 可为 `null`，非空值不因已过期而拒绝，过期状态由上述 `status` 规则派生。依据：T-A209 §4 “冷静期须未来”的草案约定与 R330 架构师裁定。错误 `issue` 文案未有既有实现依据，标记为未验证。
+- 限制对候选的判定是 PIT 规则。只有 `restriction.created_at <= content.created_at` 且 `content.created_at < removed_at`（`removed_at=null` 视为无上界）时才进入判断，并且 `until` 也与 `content.created_at` 比较，要求 `until=null` 或 `content.created_at < until`。不能用当前时刻或当前删除状态改写历史候选。依据：R330 架构师审定行、T-A209 §4 的“没有前视、历史使用原创建/删除时间”及 `src/backend/app/signals/service.py:write_candidate` 现状。主线实现尚未兑现此口径，属于既有缺陷。
+- 客户端遇到响应中的未知 `kind` 或 `status` 必须保留原值并显示“未知”，不得让列表解析失败。请求中的未知 `kind` 仍按 `400 VALIDATION_ERROR` 处理。依据：T-F68 的 `labelOf` 兜底约定和 R330“前端未知枚举兜底”要求。现有前端验收未覆盖服务端未来枚举。
+- `POST` 的幂等键按 `(auth.user_id, "restrictions")` 隔离，契约 scope=`本人+restrictions`。24 小时内同键同体返回首次 `201`（包括同一 `gaps`），同键异体返回 `409 IDEMPOTENCY_CONFLICT`，不得因重试生成第二条限制。依据：§1.3 通用幂等规则与 R330 架构师审定行。后端当前 POST 尚未接入幂等工具，属于当前待实现项。
+- DELETE 的 `recheck` 不是占位结构。服务端必须在标记 `removed_at` 的同一事务中，只重查该限制关联的原因。对 `BLOCKLISTED`/`USER_MUTED` 原因要保留仍由其他有效限制覆盖的原因，并为实际从 `active` 转为 `released` 的原因写 `reason_status_events`，`released_by="system"`。`COOLING_OFF` 原因按其时间条件和同一 PIT 规则重查。`released_reason_ids` 只列本次确实解除的原因，`remaining_reason_ids` 只列本次关联且仍为 `active` 的原因。重查证据不足时原因保持 `active`，在顶层 `gaps` 披露，不得用空数组冒充已完成重查。依据：§9 v0.2.9 验收 5、R330 架构师审定行与 T-A209 §4。当前后端返回空数组且未写事件，属于当前阻断项。
 
 ### 7.6 候选信号、不可执行原因（没有"转计划"接口）
 | 方法 | 路径 | 说明 |
