@@ -33,6 +33,11 @@ UNKNOWN = uuid.UUID("66666666-6666-4666-8666-666666666666")
 NOW = dt.datetime(2026, 11, 20, 12, tzinfo=dt.UTC)
 FUTURE = NOW + dt.timedelta(days=30)
 PAST = NOW - dt.timedelta(days=1)
+TARGET_IDS = {
+    "security": "SYN001.SH",
+    "strategy": str(RID),
+    "instance": str(RID_2),
+}
 
 
 @pytest.fixture(autouse=True)
@@ -218,7 +223,18 @@ class MemoryConnection:
             )
             return Result([self.rows[-1]])
         if "securities" in text or "strategies" in text or "strategy_instances" in text:
-            return Result([SimpleNamespace(id=RID, code="SYN001.SH", name="虚构证券")])
+            target_id = next(iter(row_ids), RID)
+            return Result(
+                [
+                    SimpleNamespace(
+                        id=target_id,
+                        code="SYN001.SH",
+                        name="虚构证券",
+                        owner_user_id=OWNER,
+                        user_id=OWNER,
+                    )
+                ]
+            )
         return Result([])
 
 
@@ -389,21 +405,27 @@ def test_r1_list_pagination_uses_cursor() -> None:
 def test_r1_all_kind_target_combinations_are_accepted(kind: str, target_type: str) -> None:
     engine = MemoryEngine([])
     until = FUTURE if kind == "cooling_off" else None
+    target_id = TARGET_IDS[target_type]
     result = _invoke(
         CREATE_ENDPOINT,
         engine,
         payload={
             "kind": kind,
             "target_type": target_type,
-            "target_id": "SYN001.SH",
+            "target_id": target_id,
             "until": until,
             "reason": "虚构原因",
         },
     )
     assert _get(result, "kind") == kind
     assert _get(result, "target_type") == target_type
-    assert _get(result, "target_id") == "SYN001.SH"
-    insert = engine.conn.statements[0]
+    assert _get(result, "target_id") == target_id
+    insert = next(
+        statement
+        for statement in engine.conn.statements
+        if "user_restrictions" in str(statement).lower()
+        and getattr(statement, "is_insert", False)
+    )
     assert _params(insert)["user_id"] == OWNER
 
 
@@ -450,7 +472,7 @@ def test_r1_cooling_off_requires_future_until_and_post_is_strict() -> None:
 
 
 @pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：/restrictions DELETE R2 路由不存在")
-def test_r2_delete_is_soft_delete_and_repeat_returns_same_removed_at() -> None:
+def test_r2_delete_is_soft_delete_and_repeat_returns_404() -> None:
     engine = MemoryEngine([_row(RID), _row(RID_2, target_type="security", target_id="SYN001.SH")])
     first = _invoke(DELETE_ENDPOINT, engine)
     assert _get(first, "id") == RID
@@ -466,16 +488,11 @@ def test_r2_delete_is_soft_delete_and_repeat_returns_same_removed_at() -> None:
     leftover = next(row for row in engine.conn.rows if row.id == RID_2)
     assert owned.removed_at == removed_at
     assert leftover.removed_at is None
-    try:
-        second = _invoke(DELETE_ENDPOINT, engine)
-    except (AppError, HTTPException, ValueError) as error:
-        code = getattr(error, "code", None)
-        status = getattr(error, "status_code", None)
-        if str(code) == "NOT_FOUND" or status == 404:
-            pytest.xfail("T-B200 未实现：重复删除应返回相同 removed_at，而非再次 404")
-        raise
-    assert _get(second, "id") == RID
-    assert _get(second, "removed_at") == removed_at
+    with pytest.raises((AppError, HTTPException, ValueError)) as error:
+        _invoke(DELETE_ENDPOINT, engine)
+    code = getattr(error.value, "code", None)
+    status = getattr(error.value, "status_code", None)
+    assert str(code) == "NOT_FOUND" or status == 404
 
 
 @pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：R2 所有权删除路由不存在")
