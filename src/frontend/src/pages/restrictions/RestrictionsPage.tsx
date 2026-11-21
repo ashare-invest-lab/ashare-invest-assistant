@@ -6,7 +6,7 @@ import { useCreateRestriction, useDeleteRestriction, useRestrictions, type Restr
 import type { Restriction } from '../../api/types';
 import { CursorPager } from '../../components/CursorPager';
 import { ErrorBox } from '../../components/common';
-import { RESTRICTION_KIND, RESTRICTION_STATUS, RESTRICTION_TARGET_TYPE } from '../../i18n/labels';
+import { GAP_REASON, RESTRICTION_KIND, RESTRICTION_STATUS, RESTRICTION_TARGET_TYPE } from '../../i18n/labels';
 import { fmtTime } from '../../lib/format';
 import { labelOf } from '../../lib/explanations';
 
@@ -20,10 +20,6 @@ function parseChoice<T extends string>(value: string | null, choices: readonly T
 
 function toApiUntil(value: string): string | null {
   return value ? `${value}:00+08:00` : null;
-}
-
-function statusFor(item: Restriction): string {
-  return item.status ?? (item.until && Date.parse(item.until) <= Date.now() ? 'expired' : 'active');
 }
 
 export function RestrictionsPage() {
@@ -57,7 +53,7 @@ export function RestrictionsPage() {
   return (
     <div className="page-scroll page" data-testid="restrictions-page">
       <h2 className="page-title">禁投 / 冷静期 / 屏蔽</h2>
-      <div className="muted small" style={{ marginBottom: 10 }}>管理会影响候选信号执行性的限制。时间均按北京时间显示，示例数据。</div>
+      <div className="muted small" style={{ marginBottom: 10 }}>管理会影响候选信号执行性的限制。时间均按北京时间显示。</div>
 
       <section className="panel" data-testid="restriction-form">
         <h4>新增限制</h4>
@@ -79,6 +75,11 @@ export function RestrictionsPage() {
       </Space>
 
       {list.isError ? <ErrorBox error={list.error} /> : null}
+      {(list.first?.gaps ?? []).length ? (
+        <div className="gap-alert small" data-testid="restriction-list-gaps">
+          {(list.first?.gaps ?? []).map((gap, index) => <p key={`${gap.key}-${index}`}>缺口 · {labelOf(GAP_REASON, gap.reason) ?? '未知'}：{gap.message}</p>)}
+        </div>
+      ) : null}
       <Table<Restriction>
         rowKey="id" size="small" loading={list.isPending} dataSource={list.items} pagination={false}
         locale={{ emptyText: '暂无限制项。你可以在上方新增禁投、冷静期或屏蔽。' }} data-testid="restrictions-table"
@@ -88,12 +89,23 @@ export function RestrictionsPage() {
           { title: '目标类型', key: 'target_type', render: (_: unknown, row) => labelOf(RESTRICTION_TARGET_TYPE, row.target_type) ?? '未知' },
           { title: '截止时间', dataIndex: 'until', render: (value: string | null) => value ? fmtTime(value) : '无截止时间' },
           { title: '原因', dataIndex: 'reason', render: (value: string | null) => value ?? '—' },
-          { title: '状态', key: 'status', render: (_: unknown, row) => { const status = statusFor(row); const tag = labelOf(RESTRICTION_STATUS, status); return <Tag color={tag?.color}>{tag?.text ?? '未知'}</Tag>; } },
+          { title: '状态', key: 'status', render: (_: unknown, row) => { const tag = labelOf(RESTRICTION_STATUS, row.status); return <Tag color={tag?.color ?? '#5a6170'}>{tag?.text ?? '未知'}</Tag>; } },
           { title: '创建时间', dataIndex: 'created_at', render: (value: string) => fmtTime(value) },
           { title: '操作', key: 'actions', render: (_: unknown, row) => <Button size="small" danger loading={remove.isPending && remove.variables === row.id} onClick={() => remove.mutate(row.id)} data-testid={`restriction-delete-${row.id}`}>删除</Button> },
         ]}
       />
       <CursorPager query={list} loaded={list.items.length} testId="restrictions-pager" />
+      {remove.isError ? <ErrorBox error={remove.error} prefix="删除失败" /> : null}
+      {remove.data ? (
+        <div className="gap-alert small" data-testid="restriction-recheck">
+          <p>删除后重查已释放 {remove.data.recheck.released_reason_ids.length} 项，仍有 {remove.data.recheck.remaining_reason_ids.length} 项。</p>
+          {remove.data.gaps.length ? (
+            <div data-testid="restriction-recheck-gaps">
+              {remove.data.gaps.map((gap, index) => <p key={`${gap.key}-${index}`}>缺口 · {labelOf(GAP_REASON, gap.reason) ?? '未知'}：{gap.message}</p>)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="muted small" style={{ marginTop: 8 }}>删除后将由系统重查不可执行原因，删除成功不等于已可交易。</div>
     </div>
   );
