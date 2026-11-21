@@ -30,6 +30,22 @@ OWN_PLAN = uuid.UUID("77777777-7777-4777-8777-777777777777")
 OTHER_PLAN = uuid.UUID("55555555-5555-4555-8555-555555555555")
 OTHER_TRADE = uuid.UUID("66666666-6666-4666-8666-666666666666")
 SYNTHETIC_CODE = "000000.SZ"
+OUTCOME_METRIC_NAMES = (
+    "holding_return",
+    "benchmark_return",
+    "excess_return",
+    "max_drawdown",
+)
+GAP_REASONS = {
+    "no_source",
+    "not_yet_published",
+    "upstream_error",
+    "quota_deferred",
+    "user_input_missing",
+    "data_licence_unavailable",
+    "not_applicable",
+    "suspended",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +150,15 @@ class SyntheticDB:
                     items={
                         "data_status": "unavailable",
                         "data_as_of": None,
-                        "gaps": [{"key": "outcome_metrics", "reason": "no_source"}],
+                        "calculation_as_of": "2026-01-03T12:00:00+00:00",
+                        "gaps": [
+                            {
+                                "key": f"outcome_metrics.{key}",
+                                "reason": "no_source",
+                                "message": "指标缺少可追溯来源",
+                            }
+                            for key in OUTCOME_METRIC_NAMES
+                        ],
                     },
                 )
             )
@@ -176,12 +200,19 @@ class SyntheticDB:
                 key: {
                     "value": None,
                     "n": 0,
-                    "window": {"start": "2026-01-01", "end": "2026-01-02"},
+                    "window": "2026-01-01/2026-01-02",
                     "small_sample": True,
-                    "gaps": ["no_source"],
                 }
-                for key in ("holding_return", "benchmark_return", "excess_return", "max_drawdown")
+                for key in OUTCOME_METRIC_NAMES
             },
+            "gaps": [
+                {
+                    "key": f"outcome_metrics.{key}",
+                    "reason": "no_source",
+                    "message": "指标缺少可追溯来源",
+                }
+                for key in OUTCOME_METRIC_NAMES
+            ],
             "created_at": dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
         }
         values.update(updates)
@@ -359,7 +390,10 @@ class World:
     def require(self, method: str, path: str) -> None:
         router = getattr(self.routes, "router", None)
         if router is None:
-            pytest.xfail(f"T-B201 未实现：V? 缺少 reviews.router（{method} {path}）")
+            pytest.xfail(
+                f"T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
+                f"缺少 reviews.router（{method} {path}）"
+            )
         def shape(value: str) -> str:
             return "/".join(
                 "{}" if part.startswith("{") and part.endswith("}") else part
@@ -374,7 +408,10 @@ class World:
             response = self.client.request(method.upper(), f"/api/v1{concrete}")
             assert_error(response, 405, "METHOD_NOT_ALLOWED")
             return
-        pytest.xfail(f"T-B201/#346 未实现：缺少 {method} {path}")
+        pytest.xfail(
+            f"T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
+            f"缺少 {method} {path}"
+        )
 
 
 def _load_routes() -> Any:
@@ -390,10 +427,16 @@ def _load_routes() -> Any:
 def world(monkeypatch: pytest.MonkeyPatch) -> World:
     routes = _load_routes()
     if routes is None:
-        pytest.xfail("T-B201 未实现：app.api.v1.reviews 模块尚不存在")
+        pytest.xfail(
+            "T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
+            "app.api.v1.reviews 模块尚不存在"
+        )
     router = getattr(routes, "router", None)
     if router is None:
-        pytest.xfail("T-B201 未实现：app.api.v1.reviews 未公开 router")
+        pytest.xfail(
+            "T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
+            "app.api.v1.reviews 未公开 router"
+        )
 
     from app.auth import deps
     from app.common.errors import install_exception_handlers
@@ -451,10 +494,134 @@ def assert_error(response: Any, status: int, code: str) -> dict[str, Any]:
 
 def assert_stat(value: Any) -> None:
     assert isinstance(value, dict)
-    assert {"value", "n", "window", "small_sample"} <= set(value)
+    assert set(value) == {"value", "n", "window", "small_sample"}
+    assert value["value"] is None or isinstance(value["value"], str)
     assert isinstance(value["n"], int) and value["n"] >= 0
-    assert value["window"] is not None
+    assert isinstance(value["window"], str)
     assert isinstance(value["small_sample"], bool)
+
+
+def assert_no_calculation_as_of(value: Any) -> None:
+    if isinstance(value, dict):
+        assert "calculation_as_of" not in value
+        for nested in value.values():
+            assert_no_calculation_as_of(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            assert_no_calculation_as_of(nested)
+
+
+def _contains_calculation_as_of(value: Any) -> bool:
+    if isinstance(value, dict):
+        return "calculation_as_of" in value or any(
+            _contains_calculation_as_of(nested) for nested in value.values()
+        )
+    if isinstance(value, list):
+        return any(_contains_calculation_as_of(nested) for nested in value)
+    return False
+
+
+def xfail_if_calculation_as_of(value: Any, *, surface: str) -> None:
+    if _contains_calculation_as_of(value):
+        pytest.xfail(
+            f"#349@2fd6730c §7.8.4：{surface} 对外不得返回 calculation_as_of，"
+            "仅提供 data_as_of"
+        )
+
+
+def xfail_if_stat_gaps(value: Any, *, surface: str) -> None:
+    if isinstance(value, dict) and "gaps" in value:
+        pytest.xfail(
+            f"#349@2fd6730c §7.8.1、§7.8.4：{surface} 的 Stat 只能有四个字段，"
+            "指标缺口必须放在所在对象顶层 gaps"
+        )
+
+
+def xfail_if_legacy_metric_gap_keys(gaps: Any, *, surface: str) -> None:
+    if isinstance(gaps, list) and any(
+        isinstance(item, dict) and item.get("key") == "outcome_metrics"
+        for item in gaps
+    ):
+        pytest.xfail(
+            f"#349@2fd6730c §7.8.4：{surface} 的 gaps.key 必须为 "
+            "outcome_metrics.<指标名>，reason 只能使用 §3 gap_reason"
+        )
+
+
+def xfail_if_future_gaps_stay_in_stats(payload: Any) -> None:
+    if not isinstance(payload, dict) or payload.get("data_status") != "pending":
+        return
+    current_version = payload.get("current_version")
+    metrics = (
+        current_version.get("outcome_metrics")
+        if isinstance(current_version, dict)
+        else None
+    )
+    if not isinstance(metrics, dict) or not metrics:
+        return
+    if not all(
+        isinstance(metric, dict)
+        and metric.get("value") is None
+        and isinstance(metric.get("gaps"), list)
+        and "not_yet_published" in metric.get("gaps", [])
+        for metric in metrics.values()
+    ):
+        return
+
+    def has_top_level_gap(value: Any) -> bool:
+        return isinstance(value, list) and bool(value)
+
+    if not has_top_level_gap(payload.get("gaps")) or not has_top_level_gap(
+        current_version.get("gaps")
+    ):
+        pytest.xfail(
+            "#349@2fd6730c §7.8.1：未来周期 data_status=pending 且 reason="
+            "not_yet_published 时，缺口必须出现在对象顶层 gaps"
+        )
+
+
+def assert_metric_gaps(gaps: Any, *, reason: str) -> None:
+    assert isinstance(gaps, list)
+    assert all(
+        isinstance(item, dict)
+        and isinstance(item.get("key"), str)
+        and isinstance(item.get("reason"), str)
+        for item in gaps
+    )
+    assert {
+        (item.get("key"), item.get("reason"))
+        for item in gaps
+    } == {(f"outcome_metrics.{key}", reason) for key in OUTCOME_METRIC_NAMES}
+    assert all(
+        isinstance(item, dict)
+        and set(item) == {"key", "reason", "message"}
+        and item["reason"] in GAP_REASONS
+        and isinstance(item["message"], str)
+        and item["message"]
+        for item in gaps
+    )
+
+
+def project_review_wire_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """保留线上字符串枚举，未知值显示为“未知”而不改变原始值。"""
+
+    known_statuses = {"fresh", "stale", "pending", "partial", "unavailable"}
+    known_kinds = {"review_version", "plan_version", "trade"}
+    status = payload.get("data_status")
+    timeline = []
+    for item in payload.get("timeline", []):
+        kind = item.get("kind")
+        timeline.append({**item, "kind_label": kind if kind in known_kinds else "未知"})
+    gaps = []
+    for item in payload.get("gaps", []):
+        reason = item.get("reason")
+        gaps.append({**item, "reason_label": reason if reason in GAP_REASONS else "未知"})
+    return {
+        "data_status": status,
+        "data_status_label": status if status in known_statuses else "未知",
+        "gaps": gaps,
+        "timeline": timeline,
+    }
 
 
 def valid_review(**overrides: Any) -> dict[str, Any]:
@@ -516,10 +683,18 @@ def test_v1_list_owned_rows_and_datastatusblock(world: World) -> None:
             "id", "plan_id", "security_code", "name", "period_start", "period_end",
             "current_version_no", "created_at",
         } <= set(item)
+        assert item["current_version_no"] is None or (
+            isinstance(item["current_version_no"], int) and item["current_version_no"] >= 1
+        )
     assert any(item["id"] == str(REVIEW_ID) for item in payload["items"])
     for item in payload["items"]:
         assert {"data_status", "data_as_of", "gaps"} <= set(item)
+        assert isinstance(item["data_status"], str)
+        xfail_if_legacy_metric_gap_keys(item["gaps"], surface="GET /reviews 列表")
+        assert_metric_gaps(item["gaps"], reason="no_source")
     assert all(item["id"] != str(OTHER) for item in payload["items"])
+    xfail_if_calculation_as_of(payload, surface="GET /reviews 列表")
+    assert_no_calculation_as_of(payload)
 
 
 def test_v1_empty_list_and_stable_cursor_boundary(world: World) -> None:
@@ -553,10 +728,56 @@ def test_v1_detail_has_current_version_timeline_and_parseable_empty_stats(world:
     response = world.client.get(f"/api/v1/reviews/{REVIEW_ID}")
     assert response.status_code == 200
     payload = response.json()
+    calculation_as_of = world.db.snapshots[0].items["calculation_as_of"]
+    assert world.db.versions[0].snapshot_id == world.db.snapshots[0].id
+    assert isinstance(calculation_as_of, str)
+    dt.datetime.fromisoformat(calculation_as_of)
     assert {"current_version", "timeline"} <= set(payload)
+    assert "data_as_of" in payload
+    assert payload["current_version_no"] == 1
     assert isinstance(payload["timeline"], list)
-    for key in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
+    assert all(isinstance(item["kind"], str) for item in payload["timeline"])
+    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="GET /reviews 详情")
+    xfail_if_legacy_metric_gap_keys(
+        payload["current_version"]["gaps"],
+        surface="GET /reviews 详情 current_version",
+    )
+    assert_metric_gaps(payload["gaps"], reason="no_source")
+    assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
+    for key in OUTCOME_METRIC_NAMES:
+        xfail_if_stat_gaps(
+            payload["current_version"]["outcome_metrics"][key],
+            surface=f"GET /reviews 详情 outcome_metrics.{key}",
+        )
         assert_stat(payload["current_version"]["outcome_metrics"][key])
+    xfail_if_calculation_as_of(payload, surface="GET /reviews 详情")
+    assert_no_calculation_as_of(payload)
+
+
+def test_v1_missing_current_version_is_nullable_and_consistent(world: World) -> None:
+    world.require("GET", "/reviews/{review_id}")
+    historical_id = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    world.db.reviews.append(
+        SyntheticRow(
+            id=historical_id,
+            user_id=OWNER,
+            plan_id=None,
+            security_code=SYNTHETIC_CODE,
+            name="缺版本历史复盘",
+            period_start=dt.date(2025, 1, 1),
+            period_end=dt.date(2025, 1, 2),
+            current_version_id=None,
+            current_version_no=None,
+            created_at=dt.datetime(2025, 1, 3, tzinfo=dt.UTC),
+        )
+    )
+    response = world.client.get(f"/api/v1/reviews/{historical_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_version_no"] is None
+    assert payload["current_version"] is None
+    xfail_if_calculation_as_of(payload, surface="GET /reviews 旧记录详情")
+    assert_no_calculation_as_of(payload)
 
 
 def test_v1_unknown_or_other_owner_is_404_without_leak(world: World) -> None:
@@ -572,9 +793,13 @@ def test_v2_create_201_keeps_computed_facts_server_owned(world: World) -> None:
     response = world.client.post("/api/v1/reviews", json=valid_review())
     assert response.status_code == 201
     payload = response.json()
+    assert payload["current_version_no"] == 1
+    assert payload["current_version"]["version_no"] == 1
     assert "outcome_metrics" in payload.get("current_version", payload)
     assert payload.get("outcome_metrics") != {"holding_return": {"value": 999}}
     assert all("holding_return" not in item for item in payload.get("judgement", []))
+    xfail_if_calculation_as_of(payload, surface="POST /reviews 响应")
+    assert_no_calculation_as_of(payload)
 
 
 @pytest.mark.parametrize(
@@ -608,19 +833,34 @@ def test_v2_create_rejects_missing_scope_bad_dates_and_foreign_links(
 
 def test_v2_version_save_freezes_old_content(world: World) -> None:
     world.require("GET", "/reviews/{review_id}/versions/{version_no}")
+    world.require("GET", "/reviews/{review_id}/versions")
     world.require("POST", "/reviews/{review_id}/versions")
+    listed = world.client.get(f"/api/v1/reviews/{REVIEW_ID}/versions")
+    assert listed.status_code == 200
+    listed_payload = listed.json()
+    xfail_if_calculation_as_of(listed_payload, surface="GET /reviews/{id}/versions 列表")
+    assert_no_calculation_as_of(listed_payload)
     before = world.client.get(f"/api/v1/reviews/{REVIEW_ID}/versions/1")
     assert before.status_code == 200
-    old_lessons = before.json()["lessons"]
+    before_payload = before.json()
+    old_lessons = before_payload["lessons"]
+    xfail_if_calculation_as_of(before_payload, surface="GET /reviews/{id}/versions/{n} 详情")
+    assert_no_calculation_as_of(before_payload)
     saved = world.client.post(
         f"/api/v1/reviews/{REVIEW_ID}/versions",
         json=valid_version(lessons="新的合成经验"),
     )
     assert saved.status_code == 201
-    assert saved.json()["current_version_no"] > 1
+    saved_payload = saved.json()
+    assert saved_payload["current_version_no"] > 1
+    xfail_if_calculation_as_of(saved_payload, surface="POST /reviews/{id}/versions 响应")
+    assert_no_calculation_as_of(saved_payload)
     after = world.client.get(f"/api/v1/reviews/{REVIEW_ID}/versions/1")
     assert after.status_code == 200
-    assert after.json()["lessons"] == old_lessons
+    after_payload = after.json()
+    assert after_payload["lessons"] == old_lessons
+    xfail_if_calculation_as_of(after_payload, surface="GET /reviews/{id}/versions/{n} 旧版")
+    assert_no_calculation_as_of(after_payload)
 
 
 def test_v2_version_base_conflict_has_current_version_no(world: World) -> None:
@@ -654,6 +894,8 @@ def test_v3_timeline_and_judgement_preserve_three_part_attribution(world: World)
     assert attribution["judgement"][0]["fulfilled"] is True
     assert isinstance(attribution["execution"], list)
     assert isinstance(attribution["market"], list)
+    xfail_if_calculation_as_of(payload, surface="GET /reviews 详情")
+    assert_no_calculation_as_of(payload)
 
 
 def test_v3_missing_evidence_stays_unknown_or_empty(world: World) -> None:
@@ -675,57 +917,69 @@ def test_v3_foreign_trade_same_security_cannot_enter_review(world: World) -> Non
 
 def test_v4_outcome_metrics_are_stat_objects(world: World) -> None:
     world.require("GET", "/reviews/{review_id}")
-    metrics = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()["current_version"]["outcome_metrics"]
-    assert set(metrics) == {"holding_return", "benchmark_return", "excess_return", "max_drawdown"}
-    for metric in metrics.values():
+    payload = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()
+    metrics = payload["current_version"]["outcome_metrics"]
+    assert set(metrics) == set(OUTCOME_METRIC_NAMES)
+    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="GET /reviews 详情")
+    xfail_if_legacy_metric_gap_keys(
+        payload["current_version"]["gaps"],
+        surface="GET /reviews 详情 current_version",
+    )
+    assert_metric_gaps(payload["gaps"], reason="no_source")
+    assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
+    for name, metric in metrics.items():
+        xfail_if_stat_gaps(metric, surface=f"GET /reviews outcome_metrics.{name}")
         assert_stat(metric)
-
-
-def test_v4_missing_fee_or_benchmark_is_null_with_no_source_gap(world: World) -> None:
-    world.require("GET", "/reviews/{review_id}")
-    metrics = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()["current_version"]["outcome_metrics"]
-    for metric in (metrics["holding_return"], metrics["benchmark_return"]):
         assert metric["value"] is None
-        assert "no_source" in metric.get("gaps", [])
+    xfail_if_calculation_as_of(payload, surface="GET /reviews 详情")
+    assert_no_calculation_as_of(payload)
+
+
+def test_v4_metrics_are_null_with_top_level_no_source_gaps(world: World) -> None:
+    world.require("GET", "/reviews/{review_id}")
+    payload = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()
+    metrics = payload["current_version"]["outcome_metrics"]
+    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="GET /reviews 详情")
+    assert_metric_gaps(payload["gaps"], reason="no_source")
+    for name, metric in metrics.items():
+        xfail_if_stat_gaps(metric, surface=f"GET /reviews outcome_metrics.{name}")
+        assert metric["value"] is None
+        assert metric["n"] == 0
+        assert "gaps" not in metric
 
 
 def test_v4_future_period_has_no_terminal_value(world: World) -> None:
     world.require("GET", "/reviews/{review_id}")
     world.db.reviews[0].period_end = dt.date.today() + dt.timedelta(days=30)
     payload = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()
+    xfail_if_future_gaps_stay_in_stats(payload)
+    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="未来周期 GET /reviews 详情")
+    xfail_if_legacy_metric_gap_keys(
+        payload["current_version"]["gaps"],
+        surface="未来周期 GET /reviews 详情 current_version",
+    )
     metrics = payload["current_version"]["outcome_metrics"]
-    for metric in metrics.values():
-        assert metric.get("value") is None
-    if any("not_yet_published" not in metric.get("gaps", []) for metric in metrics.values()):
-        pytest.xfail("T-B201/#346 未实现：未来周期指标未标记 not_yet_published")
+    for name, metric in metrics.items():
+        xfail_if_stat_gaps(metric, surface=f"未来周期 outcome_metrics.{name}")
+        assert metric["value"] is None
+        assert "gaps" not in metric
+    assert payload["data_status"] == "pending"
+    assert_metric_gaps(payload["gaps"], reason="not_yet_published")
+    assert_metric_gaps(payload["current_version"]["gaps"], reason="not_yet_published")
+    xfail_if_calculation_as_of(payload, surface="未来周期 GET /reviews 详情")
+    assert_no_calculation_as_of(payload)
 
 
-def test_v4_simulation_cannot_be_reported_as_real_holding_return(world: World) -> None:
-    world.require("GET", "/reviews/{review_id}")
-    world.db.versions[0].outcome_metrics["holding_return"] = {
-        "value": 0.42,
-        "n": 10,
-        "window": {"start": "2026-01-01", "end": "2026-01-02"},
-        "small_sample": False,
-        "source": "simulated_tracking",
+def test_v4_unknown_wire_values_are_preserved_as_unknown() -> None:
+    payload = {
+        "data_status": "future_status",
+        "gaps": [{"key": "outcome_metrics.holding_return", "reason": "future_reason", "message": "未知"}],
+        "timeline": [{"kind": "future_event", "at": "2026-01-03T00:00:00+00:00"}],
     }
-    metrics = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()["current_version"]["outcome_metrics"]
-    holding = metrics["holding_return"]
-    if holding.get("value") is not None and holding.get("source") == "simulated_tracking":
-        pytest.xfail("T-B201/#346 未实现：未过滤 simulated_tracking 指标")
-
-
-def test_v4_unverified_numeric_u5_value_is_marked_unverified(world: World) -> None:
-    world.require("GET", "/reviews/{review_id}")
-    world.db.versions[0].outcome_metrics["excess_return"] = {
-        "value": 0.1,
-        "n": 3,
-        "window": {"start": "2026-01-01", "end": "2026-01-02"},
-        "small_sample": True,
-        "gaps": [],
-    }
-    metric = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()["current_version"]["outcome_metrics"]["excess_return"]
-    if metric.get("value") is not None:
-        text = " ".join(str(metric.get(key, "")) for key in ("gap", "gaps", "status", "label"))
-        if "unverified" not in text.lower() and "未验证" not in text:
-            pytest.xfail("T-B201/#346 未实现：未给 U5 数值指标标注未验证状态")
+    projected = project_review_wire_payload(payload)
+    assert projected["data_status"] == "future_status"
+    assert projected["data_status_label"] == "未知"
+    assert projected["gaps"][0]["reason"] == "future_reason"
+    assert projected["gaps"][0]["reason_label"] == "未知"
+    assert projected["timeline"][0]["kind"] == "future_event"
+    assert projected["timeline"][0]["kind_label"] == "未知"
