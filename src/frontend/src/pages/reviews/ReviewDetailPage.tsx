@@ -1,7 +1,6 @@
 import { Button, Select, Tag } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import { Link, useNavigate, useParams } from 'react-router';
-import { useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useReview, useReviewVersions } from '../../api/reviewQueries';
 import type { ReviewOutcomeMetrics, ReviewVersion } from '../../api/types';
 import { ApiError } from '../../api/client';
@@ -30,9 +29,9 @@ function MetricBlock({ version }: { version: ReviewVersion }) {
 export function ReviewDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const review = useReview(id);
   const versions = useReviewVersions(id);
-  const [selectedNo, setSelectedNo] = useState<number | null>(null);
   if (review.isPending) return <div className="page-scroll page" data-testid="review-detail"><Loading /></div>;
   if (review.isError || !review.data) {
     const notFound = review.error instanceof ApiError && review.error.status === 404;
@@ -41,12 +40,21 @@ export function ReviewDetailPage() {
   const r = review.data;
   const allVersions = versions.items.length ? versions.items : r.versions ?? (r.current_version ? [r.current_version] : []);
   const defaultNo = r.current_version && allVersions.some((v) => v.version_no === r.current_version_no) ? r.current_version_no : allVersions[0]?.version_no ?? null;
-  const shownNo = selectedNo ?? defaultNo;
+  const requestedNo = Number(searchParams.get('version'));
+  const queryNo = Number.isInteger(requestedNo) && requestedNo > 0 ? requestedNo : null;
+  const shownNo = queryNo ?? defaultNo;
   const version = allVersions.find((v) => v.version_no === shownNo) ?? r.current_version;
+  const selectVersion = (versionNo: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('version', String(versionNo));
+    setSearchParams(next, { replace: true });
+  };
+  const planVersionId = version?.plan_version_ids[0];
+  const planHref = r.plan_id ? `/plans/${encodeURIComponent(r.plan_id)}${planVersionId ? `?plan_version_id=${encodeURIComponent(planVersionId)}` : ''}` : null;
   return (
     <div className="page-scroll page" data-testid="review-detail">
       <div className="detail-head"><Button size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/reviews')}>复盘列表</Button><h2 className="page-title" style={{ margin: 0 }}>{r.name ?? '复盘详情'}</h2><DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} /></div>
-      <div className="muted small" style={{ margin: '6px 0 10px' }}>{r.security_code ? `证券 ${r.security_code}` : '未填证券'}{r.plan_id ? <> · 计划 <span className="mono">{r.plan_id}</span></> : null} · {r.period_start} ～ {r.period_end} · 创建于 {fmtTime(r.created_at)}</div>
+      <div className="muted small" style={{ margin: '6px 0 10px' }}>{r.security_code ? `证券 ${r.security_code}` : '未填证券'}{planHref ? <> · 计划 <Link to={planHref} data-testid="review-plan-link">{r.plan_id}</Link></> : null} · {r.period_start} ～ {r.period_end} · 创建于 {fmtTime(r.created_at)}</div>
       <GapNote status={r.data_status} gaps={r.gaps} asOf={r.data_as_of} testId="review-gap" />
       {version ? <>
         <section className="panel" data-testid="review-notes">
@@ -54,11 +62,12 @@ export function ReviewDetailPage() {
           <p style={{ whiteSpace: 'pre-wrap' }}>{version.lessons || '暂无笔记。'}</p>
           <DataStatusTag status={version.data_status} asOf={version.data_as_of} gaps={version.gaps} />
           <div className="small muted" style={{ marginTop: 6 }}>版本创建于 {fmtTime(version.created_at)}</div>
+          {version.trade_ids.length ? <div className="small" style={{ marginTop: 6 }}>成交引用：{version.trade_ids.map((tradeId) => <Link key={tradeId} to={`/portfolio?tab=trades&trade_id=${encodeURIComponent(tradeId)}`} data-testid={`review-trade-link-${tradeId}`}>{tradeId}</Link>)}</div> : null}
         </section>
         <section className="panel" data-testid="review-judgement"><div className="panel-head"><span className="panel-title">判断标注</span></div>{version.attribution.judgement.length ? version.attribution.judgement.map((j, i) => <div key={`${j.condition_text}-${i}`} className="small" style={{ marginBottom: 4 }}><b>{j.condition_text}</b> · {j.fulfilled === null ? '未知' : j.fulfilled ? '已满足' : '未满足'}{j.note ? ` · ${j.note}` : ''}</div>) : <span className="muted small">暂无判断标注。</span>}</section>
         <MetricBlock version={version} />
       </> : <div className="panel">暂无版本内容。</div>}
-      <section className="panel" data-testid="review-versions"><div className="panel-head"><span className="panel-title">版本</span><Select aria-label="复盘版本" value={shownNo ?? undefined} placeholder="选择版本" loading={versions.isPending} style={{ width: 140 }} options={allVersions.map((v) => ({ value: v.version_no, label: `第 ${v.version_no} 版` }))} onChange={(v: number) => setSelectedNo(v)} /></div>{allVersions.map((v) => <Button key={v.version_no} size="small" type={v.version_no === shownNo ? 'primary' : 'default'} onClick={() => setSelectedNo(v.version_no)} data-testid={`review-version-${v.version_no}`}>第 {v.version_no} 版 · {fmtTime(v.created_at)}</Button>)}</section>
+      <section className="panel" data-testid="review-versions"><div className="panel-head"><span className="panel-title">版本</span><Select aria-label="复盘版本" value={shownNo ?? undefined} placeholder="选择版本" loading={versions.isPending} style={{ width: 140 }} options={allVersions.map((v) => ({ value: v.version_no, label: `第 ${v.version_no} 版` }))} onChange={(v: number) => selectVersion(v)} /></div>{allVersions.map((v) => <Button key={v.version_no} size="small" type={v.version_no === shownNo ? 'primary' : 'default'} onClick={() => selectVersion(v.version_no)} data-testid={`review-version-${v.version_no}`}>第 {v.version_no} 版 · {fmtTime(v.created_at)}</Button>)}</section>
       <section className="panel" data-testid="review-timeline"><div className="panel-head"><span className="panel-title">时间线</span></div>{r.timeline.length ? r.timeline.map((item, i) => <div key={`${item.at}-${i}`} className="small">{labelOf(TIMELINE_LABELS, item.kind) ?? '未知'} · {fmtTime(item.at)}{item.version_no ? ` · 第 ${item.version_no} 版` : ''}{item.evidence_ids.length ? ` · 证据 ${item.evidence_ids.join('、')}` : ''}</div>) : <span className="muted small">暂无时间线。</span>}</section>
       <div className="muted small">版本接口与复盘字段来自 T-A209 草案，尚未验证。</div>
     </div>
