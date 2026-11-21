@@ -86,6 +86,13 @@ class _Result:
     def all(self) -> list[Any]:
         return self.rows
 
+    def first(self) -> Any | None:
+        return self.rows[0] if self.rows else None
+
+    def one_or_none(self) -> Any | None:
+        assert len(self.rows) <= 1
+        return self.rows[0] if self.rows else None
+
 
 class _Connection:
     def __init__(self, scripted: list[list[Any]]) -> None:
@@ -128,3 +135,175 @@ def test_no_matching_candidate_leaves_other_reasons_untouched() -> None:
     assert gaps == []
     assert len(connection.statements) == 1
     assert connection.statements[0]._for_update_arg is not None
+
+
+class _RecheckConnection(_Connection):
+    def __init__(
+        self,
+        *,
+        candidate: Any,
+        reason: Any,
+        remaining_restrictions: list[Any],
+        signal: Any,
+    ) -> None:
+        super().__init__([])
+        self.candidate = candidate
+        self.reason = reason
+        self.remaining_restrictions = remaining_restrictions
+        self.signal = signal
+        self.select_number = 0
+
+    def execute(self, statement: Any, *_args: Any, **_kwargs: Any) -> _Result:
+        self.statements.append(statement)
+        if isinstance(statement, Select):
+            self.select_number += 1
+            if self.select_number == 1:
+                return _Result([self.candidate])
+            if self.select_number == 2:
+                return _Result([self.reason])
+            if self.select_number == 3:
+                if "removed_at IS NULL" in str(statement):
+                    rows = [
+                        item
+                        for item in self.remaining_restrictions
+                        if item.removed_at is None
+                    ]
+                else:
+                    rows = self.remaining_restrictions
+                return _Result(rows)
+            if self.select_number == 4:
+                return _Result([self.signal])
+            return _Result([])
+        return _Result([])
+
+
+def _recheck_fixture(
+    *,
+    candidate_at: dt.datetime,
+    restriction_a: Any,
+    signal_id: uuid.UUID,
+) -> tuple[Any, Any, Any]:
+    candidate = SimpleNamespace(
+        id=signal_id,
+        user_id=USER_ID,
+        security_code=restriction_a.target_id,
+        instance_id=None,
+        strategy_version_id=None,
+        created_at=candidate_at,
+    )
+    reason = SimpleNamespace(id=uuid.uuid4(), signal_id=signal_id)
+    signal = SimpleNamespace(
+        id=signal_id,
+        user_id=USER_ID,
+        state="blocked",
+        created_at=candidate_at,
+    )
+    return candidate, reason, signal
+
+
+def test_recheck_releases_after_later_restriction_was_deleted() -> None:
+    created_a = BASE - dt.timedelta(hours=2)
+    created_b = BASE - dt.timedelta(hours=1)
+    candidate_at = BASE
+    restriction_a = SimpleNamespace(
+        id=uuid.uuid4(),
+        kind="blocklist",
+        target_type="security",
+        target_id="600000.SH",
+        created_at=created_a,
+        until=None,
+        removed_at=None,
+    )
+    restriction_b = SimpleNamespace(
+        id=uuid.uuid4(),
+        kind="blocklist",
+        target_type="security",
+        target_id="600000.SH",
+        created_at=created_b,
+        until=None,
+        removed_at=None,
+    )
+    signal_id = uuid.uuid4()
+    candidate, reason, signal = _recheck_fixture(
+        candidate_at=candidate_at,
+        restriction_a=restriction_a,
+        signal_id=signal_id,
+    )
+
+    first_connection = _RecheckConnection(
+        candidate=candidate,
+        reason=reason,
+        remaining_restrictions=[restriction_a],
+        signal=signal,
+    )
+    released, remaining, gaps = service.recheck_restriction(
+        first_connection,
+        user_id=USER_ID,
+        restriction=restriction_b,
+        at=BASE + dt.timedelta(hours=1),
+    )
+    assert released == []
+    assert remaining == [reason.id]
+    assert gaps == []
+
+    restriction_b.removed_at = BASE + dt.timedelta(hours=1)
+    second_connection = _RecheckConnection(
+        candidate=candidate,
+        reason=reason,
+        remaining_restrictions=[restriction_b],
+        signal=signal,
+    )
+    released, remaining, gaps = service.recheck_restriction(
+        second_connection,
+        user_id=USER_ID,
+        restriction=restriction_a,
+        at=BASE + dt.timedelta(hours=2),
+    )
+    assert released == [reason.id]
+    assert remaining == []
+    assert gaps == []
+
+
+def test_recheck_keeps_reason_for_prior_active_restriction() -> None:
+    created_a = BASE - dt.timedelta(hours=2)
+    restriction_a = SimpleNamespace(
+        id=uuid.uuid4(),
+        kind="blocklist",
+        target_type="security",
+        target_id="600000.SH",
+        created_at=created_a,
+        until=None,
+        removed_at=None,
+    )
+    restriction_b = SimpleNamespace(
+        id=uuid.uuid4(),
+        kind="blocklist",
+        target_type="security",
+        target_id="600000.SH",
+        created_at=BASE - dt.timedelta(hours=1),
+        until=None,
+        removed_at=None,
+    )
+    signal_id = uuid.uuid4()
+    candidate, reason, signal = _recheck_fixture(
+        candidate_at=BASE,
+        restriction_a=restriction_a,
+        signal_id=signal_id,
+    )
+    connection = _RecheckConnection(
+        candidate=candidate,
+        reason=reason,
+        remaining_restrictions=[restriction_b],
+        signal=signal,
+    )
+
+    released, remaining, gaps = service.recheck_restriction(
+        connection,
+        user_id=USER_ID,
+        restriction=restriction_a,
+        at=BASE + dt.timedelta(hours=1),
+    )
+
+    assert released == []
+    assert remaining == [reason.id]
+    assert gaps == []

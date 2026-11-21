@@ -299,6 +299,7 @@ def recheck_restriction(
         .where(
             user_restrictions.c.user_id == user_id,
             user_restrictions.c.id != restriction.id,
+            user_restrictions.c.removed_at.is_(None),
         )
         .with_for_update()
     ).all()
@@ -321,8 +322,6 @@ def recheck_restriction(
             if other.kind != restriction.kind or not matches_target(candidate, other):
                 continue
             if other.created_at > candidate_created_at:
-                continue
-            if other.removed_at is not None and other.removed_at <= candidate_created_at:
                 continue
             if other.until is not None and candidate_created_at >= other.until:
                 continue
