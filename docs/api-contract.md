@@ -10,6 +10,8 @@
 
 ### v0.2.11（2026-11-20，T-B187：市场快照契约）
 
+- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。
+
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
 
@@ -1169,9 +1171,68 @@ evidence: Evidence[]
 | GET/POST/PATCH/DELETE | `/alert-rules` 🔒 | 提醒规则（结构另定，不在 v0.2.9 #30 范围；前端本版不做规则页） |
 | GET | `/alerts` 🔒 · `/alerts/{id}` 🔒 | 提醒触发记录（含 `origin=plan_condition`），结构、筛选与排序见 §7.7B（v0.2.9 #30） |
 | PATCH | `/alerts/{id}` 🔒 | `{status}` 改处理状态，状态机见 §7.7B → `200 Alert`；`POST /alerts`、`PUT`/`DELETE /alerts/{id}` → `405`（提醒由系统生成，不可删除，#30） |
-| GET/POST | `/reviews` 🔒 · `/reviews/{id}` 🔒 | 复盘 |
+| GET/POST | `/reviews` 🔒 · `/reviews/{id}` 🔒 · `/reviews/{id}/versions` 🔒 · `/reviews/{id}/versions/{n}` 🔒 | 复盘；完整字段和判定见下文 |
 | GET | `/notifications` 🔒 · `/notifications/unread-count` 🔒 · POST `/notifications/{id}/read` 🔒 · POST `/notifications/read-all` 🔒 | 通知中心：列表 `?unread=&kind=` 元素为 `Notification`；`unread-count` → `{count: int}`；`read` 与 `read-all` 均返回 `204 No Content`，幂等（已读再标不改 `read_at`，v0.2.3） |
 | GET/PUT | `/notification-preferences` 🔒 · `/channels` 🔒 | 渠道与免打扰设置 |
+
+#### 7.8.1 复盘对象、类型与状态
+
+复盘接口只返回当前登录用户自己的记录、计划版本和成交。资源不存在、版本不存在或属于他人时统一返回 `404 NOT_FOUND`。除另有说明，所有金额、价格、数量和比例均为十进制字符串，本节指标的百分数单位约定为 `"3.20"` 表示 3.20%，日期按北京时间。
+
+| 对象或字段 | 类型、可空性与单位 |
+|---|---|
+| `DataStatusBlock` | `{data_status: data_status, data_as_of: string(datetime) \| null, gaps: Gap[]}`；时间为实际使用来源的知识时点，无来源为 `null` |
+| `Gap` | `{key: string, reason: gap_reason, message: string}`；无单位；`reason` 只能使用 §3 既有枚举 |
+| `ReviewSummary.id` | `string(uuid)`，必填 |
+| `ReviewSummary.plan_id` | `string(uuid) \| null`，无单位 |
+| `ReviewSummary.security_code` | `string \| null`，证券代码；与 §1 证券代码格式一致 |
+| `ReviewSummary.name` | `string \| null`，证券简称；`security_code` 为 `null` 时为 `null`，有代码但主数据缺失时可回退为代码 |
+| `ReviewSummary.period_start`, `period_end` | `string(date)`，必填；复盘期间闭区间，`period_end` 不早于 `period_start` |
+| `ReviewSummary.current_version_no` | `int`，≥1，无单位 |
+| `ReviewSummary.created_at` | `string(datetime)`，必填 |
+| `ReviewDetail.current_version` | `ReviewVersion \| null`；新建记录必有，旧数据缺版本时为 `null` |
+| `ReviewDetail.timeline` | `ReviewTimelineItem[]`，按 `at` 升序；无事件为 `[]` |
+| `ReviewDetail.evidence` | `Evidence[]`，证据 ID 只在本详情内解析；无证据为 `[]` |
+| `ReviewVersion.id` | `string(uuid)`，必填 |
+| `ReviewVersion.version_no` | `int`，≥1，无单位；同一复盘从 1 连续递增 |
+| `ReviewVersion.plan_version_ids`, `trade_ids` | `string(uuid)[]`，必填；分别为本人计划版本和未作废本人成交，空集为 `[]` |
+| `ReviewVersion.snapshot_id` | `string(uuid) \| null`；新版本应有不可变快照，历史缺快照时保留 `null` |
+| `ReviewVersion.lessons` | `string \| null`，用户笔记，无单位 |
+| `ReviewVersion.tags` | `string[]`，用户标签，无单位；无标签为 `[]` |
+| `ReviewVersion.attribution` | `ReviewAttribution`，见下表 |
+| `ReviewVersion.outcome_metrics` | `ReviewOutcomeMetrics`，四项 `Stat` 均为百分数 |
+| `ReviewVersion.created_at` | `string(datetime)`，必填 |
+| `ReviewTimelineItem` | `{kind: string, at: string(datetime), resource_id: string(uuid) \| null, version_no: int \| null, evidence_ids: string[]}`；`kind` 当前为 `review_version`、`plan_version`、`trade`，未知值客户端显示“未知” |
+| `ReviewJudgement` | `{condition_text: string, fulfilled: boolean \| null, note: string \| null}`；`fulfilled=null` 表示未知，不得解释成否定 |
+| `ReviewAttribution` | `{judgement: ReviewJudgement[], execution: TextWithEvidence[], market: TextWithEvidence[]}`；三类均可为空数组 |
+| `ReviewOutcomeMetrics` | `{holding_return: Stat, benchmark_return: Stat, excess_return: Stat, max_drawdown: Stat}`；值为百分数，未知为 `null` |
+| `Stat.value` | `string(decimal) \| null`，百分数；未知不得写 `"0"` |
+| `Stat.n` | `int`，≥0；真实有效样本数，无单位 |
+| `Stat.window` | `string`，`YYYY-MM-DD/YYYY-MM-DD` 复盘窗口 |
+| `Stat.small_sample` | `boolean`；`n<30` 为 `true`，`n≥30` 为 `false` |
+
+`data_status` 沿用 §3 的 `fresh`、`stale`、`pending`、`partial`、`unavailable`，不新增复盘专用状态；`gap_reason` 完整取值为 `no_source`、`not_yet_published`、`upstream_error`、`quota_deferred`、`user_input_missing`、`data_licence_unavailable`、`not_applicable`、`suspended`。结果期尚未结束时，指标均为 `null`，状态为 `pending`，并带 `gap_reason=not_yet_published`。缺用户标注或实际成交时使用 `user_input_missing`，缺价格、基准或尚未定稿的计算公式时使用 `no_source`；确证停牌使用既有 `suspended`。未识别的状态或 `gaps[].reason` 仍按原字符串保留，前端统一显示“未知”，不得当作 `fresh`、无缺口或数值零。
+
+#### 7.8.2 列表、详情与创建
+
+- `GET /reviews?security_code=&plan_id=&limit=&cursor=` 返回 `{items: ReviewSummary[], next_cursor: string \| null}`。`security_code` 为可选字符串筛选，接受 §1 规范代码并将合法六位简写规范化为带市场后缀的代码；`plan_id` 为可选 UUID 筛选，`limit` 和 `cursor` 遵守 §1.2，服务端固定按 `created_at desc, id desc` 排序，游标不透明且绑定筛选条件。
+- `GET /reviews/{id}` 返回 `ReviewDetail`。详情、时间线和证据均按本人隔离，不能通过 ID 探测他人记录。
+- `POST /reviews` 请求体为 `{plan_id: string(uuid) \| null, security_code: string \| null, period_start: string(date), period_end: string(date), plan_version_ids: string(uuid)[], trade_ids: string(uuid)[], lessons: string \| null, tags: string[], judgement: ReviewJudgement[]}`。`plan_id` 与 `security_code` 至少提供一个，所有关联计划版本和成交必须属于本人且与计划、证券一致，`judgement` 只保存用户对计划条件的标注，不接受客户端提交的计算指标。
+- 创建支持 §1.3 的 `Idempotency-Key`。键的作用域为“本人 + reviews”操作，24 小时内同键同体重放首次 `201`，同键异体返回 `409 IDEMPOTENCY_CONFLICT`，不得跨用户复用。成功返回 `201 ReviewDetail`，其中 `current_version_no=1` 且 `current_version` 为第 1 版。
+
+#### 7.8.3 版本读取、创建与并发
+
+- `GET /reviews/{id}/versions?limit=&cursor=` 返回 `{items: ReviewVersion[], next_cursor: string \| null}`，遵守 §1.2，固定按 `version_no desc` 排序。`GET /reviews/{id}/versions/{n}` 返回单个 `ReviewVersion`。
+- `POST /reviews/{id}/versions` 请求体为创建体的全部字段加 `base_version_no: int`。这是整体替换式新版本，数组空集可明确清空，不省略字段继承旧值。成功返回 `201 ReviewDetail`，其 `current_version` 为新版本，旧版本仍可读且不可变。该接口同样支持按本人 + reviews 作用域的 `Idempotency-Key`。
+- `base_version_no` 必须等于当前版本号。锁定复盘后发现不相等，事务不写入新版本，返回 `409 VERSION_CONFLICT`，`details` 为 `{current_version_no: int}`。`PATCH`、`DELETE` 复盘或版本均未开放，返回既有 `405 METHOD_NOT_ALLOWED`。
+
+#### 7.8.4 指标、证据与时点
+
+四项结果指标的定义、输入、停牌和未平仓边界、样本门槛以 [T-R103 复盘与建议跟踪指标口径卡](./strategies/T-R103/review_tracking_metrics.md) §2 为准。`holding_return` 使用同一复权口径的入场与退出端点，`benchmark_return` 使用同一时点和窗口的基准端点，`excess_return = holding_return - benchmark_return`，`max_drawdown` 按窗口内逐日路径峰值计算，不对各笔回撤简单平均。费用、现金流、分红、未平仓或行业基准任一输入不可追溯时，保留可计算字段，其余 `value=null` 并记录缺口，不用模拟跟踪结果替代实际成交。
+
+每个指标只纳入 `available_at <= calculation_as_of` 且已到达窗口端点的数据，`as_of` 截断后不因当前时钟已收盘而放行旧盘中或未来修订数据。`n` 只计入有效、已结束且必需端点齐全的观测；`n<5` 时 `value=null`，`5≤n<30` 时保留十进制值并 `small_sample=true`，`n≥30` 时 `small_sample=false`。未知、缺失和不可成交不转成 0，不伪造样本数。版本快照冻结当时的计划、成交、证据和指标，后续数据只能生成新版本。
+
+错误码只复用 §4 既有表：参数或关联不一致为 `400 VALIDATION_ERROR`，不存在或非本人资源为 `404 NOT_FOUND`，未开放方法为 `405 METHOD_NOT_ALLOWED`，幂等键冲突为 `409 IDEMPOTENCY_CONFLICT`，乐观并发冲突为 `409 VERSION_CONFLICT`。本节不新增错误码。
 
 ### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |

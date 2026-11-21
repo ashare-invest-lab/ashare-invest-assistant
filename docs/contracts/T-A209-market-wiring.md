@@ -176,29 +176,9 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 ## 5. ③/reviews 复盘
 
-来源：`docs/plan.md` §2.4能力5要求计划版本→成交→后续结果、判断/执行/市场环境归因、经验标签；API §7.8只列GET/POST骨架。`src/backend/app/db/tables/reviews.py` reviews/review_versions已有period_start/end、plan_id、plan_version_ids、trade_ids、outcome_metrics、attribution、lessons、tags、snapshot_id；无需借用 `strategy/reviews.py` 的晋级审核对象。
-实际计划从 `src/backend/app/plans/service.py:owned`、`project_version`读取本人版本；成交来自本人已确认导入（plan §2.4能力5、API §7.2）。麦蕊仅作为已入本地库且本人可见的日线/基准证据，参数none、pre_close、source_licence_id/fetched_at约束沿第3节；通达信仍仅研究，不自动补本人的正式复盘收益。
-收益/基准/超额/回撤的业务目标有出处（plan能力5），但实际成交复盘的费用、现金流、分红、未平仓处理及行业基准映射尚未有本次确认的统一公式，未验证 U5；参数未定前返回null+gap，不借用模拟跟踪数充当实绩。`src/backend/app/tracking/service.py:view`可复用本人模拟结果展示；`instrument`直接查日线不构成所有者隔离证明，不能原样套用到新增复盘。
-盘中只展示记录事实和最近完成的收盘结果，开放期间标未完成；收盘按period_end及知识截止冻结。计划当时快照与事后结果快照分开：后续实际成交是复盘证据，不反写成当时预测；只在结果截止后可见的数据才能参与相应revision，不用未来修订回填旧版本。缺成交/标注为user_input_missing，缺价格/基准/公式为no_source，结果期未结束为not_yet_published；无证书只影响行情派生字段，仍返回用户笔记和计划。
+复盘接口正式契约已在 [`docs/api-contract.md` §7.8](../api-contract.md) 定稿，版本为 v0.2.11（T-A217，2026-11-21）。该节统一规定列表、详情、创建、版本读取与创建、本人隔离、幂等键、`VERSION_CONFLICT`、字段可空性、状态缺口、指标卡口径与 `as_of` 截断。
 
-**契约草案**（所有新字段/子路由均为§7.8增量）：
-- GET `/reviews?security_code=&plan_id=&limit=&cursor=` → `{items:[{id,plan_id,security_code,name,period_start,period_end,current_version_no,created_at,DataStatusBlock}],next_cursor}`；GET `/reviews/{id}`→头＋current_version＋timeline，均按本人过滤。
-- POST `/reviews`：`{plan_id:uuid|null,security_code:string|null,period_start:date,period_end:date,plan_version_ids:uuid[],trade_ids:uuid[],lessons:string|null,tags:string[],judgement:[{condition_text:string,fulfilled:boolean|null,note:string|null}]}`；judgement只存用户对计划条件的兑现标注（plan能力5），不能传计算指标为“事实”；201返回完整复盘。plan与证券至少一项，日期有序、关联版本/成交归属一致，否则400；具体数值指标由服务端计算。
-- GET `/reviews/{id}/versions?limit=&cursor=`、GET `/reviews/{id}/versions/{version_no}`；POST `/reviews/{id}/versions`同内容字段加base_version_no→201新不可变版本；并发base不符→409 VERSION_CONFLICT（API §4）。原版本不开放PATCH/DELETE，未开放的方法405。
-- version：`{id,version_no,plan_version_ids,trade_ids,snapshot_id,lessons,tags,attribution:{judgement,execution,market},outcome_metrics:{holding_return,benchmark_return,excess_return,max_drawdown},created_at,DataStatusBlock}`。各指标沿API §5.1 Stat结构；U5未定时value=null、n为真实可用样本数、window为period、small_sample沿§5.1阈值，不伪造样本量。attribution.judgement保留用户标注，execution/market为TextWithEvidence数组；timeline元素 `{kind,at,resource_id,version_no:null|int,evidence_ids}`，证据附在详情evidence[]中。
-- 受影响入口验收：浏览器 `/reviews`列表/新建、`/reviews/:id`详情及版本切换均显示空值原因；计划详情深链携带固定plan_version_id；`/portfolio`成交引用能定位实际trade_id；建议tracking入口清楚标“模拟”，不得计入实际成交；历史版本重读不随当前日线/计划变化；市场归因引用该复盘期间冻结数据，缺市场环境不阻止保存手写经验。
-
-| 别名｜建议单号 | 范围/净增上限 | 依赖 | 验收 |
-| --- | --- | --- | --- |
-| V1｜T-B待编排者编号-V1 | 后端复盘模型、列表/详情/版本读取，330行 | 已有表、契约草案 | 仅本人、稳定分页、旧版本不可变、空指标可解析。 |
-| V2｜T-B待编排者编号-V2 | 后端创建与版本保存，380行 | V1 | 关联归属、幂等、base冲突、快照冻结、手写结论区分事实。 |
-| V3｜T-B待编排者编号-V3 | 后端计划/成交时间线与三分归因证据，350行 | V2 | 不按证券粗匹配别人的成交；无证据项保持未知；双时点不混。 |
-| V4｜T-B待编排者编号-V4 | 后端结果指标适配，350行 | V3；U5 | 仅实现已定公式；费用/基准缺项null；模拟不混实际；未结束不出终值。 |
-| V5｜T-F待编排者编号-V5 | 前端列表、创建和版本入口，330行 | V1/V2 | 替换占位、复用计划/证券选择；保存返回真实版本号。 |
-| V6｜T-F待编排者编号-V6 | 前端时间线、归因、结果和差异，350行 | V3/V4/V5 | 原貌与当前对照明确、缺口可读、实际/模拟标识明确。 |
-| V7｜T-B待编排者编号-V7 | 后端隔离测试，380行 | V1–V4 | 跨用户、并发保存、迟到日线、未结束期间、真实缺费用、旧版本哈希不变。 |
-| V8｜T-F待编排者编号-V8 | 前端入口与版本测试，260行 | V5/V6 | 列表空态、深链版本、null/gap、错误保存不丢用户输入。 |
-
+本节此前的接口草案不再作为事实来源。实现与前端均以正式契约为准，未纳入正式契约的收益费用、现金流、分红、未平仓和行业基准细节继续按正式契约标记缺口，不得用模拟跟踪结果替代实际成交。
 ## 6. ④/discover 发现
 
 先交付入口：按plan §2.4将 `/discover` 跳转 `/strategies`，移出PLACEHOLDERS，不做另一套策略库。现有 `src/backend/app/api/v1/strategy_cards.py:strategy_list`支持horizon/lifecycle/risk_level、limit/cursor，响应Page含id/key/name/horizons/risk_level/current_version/health；security_code适配目前503 MAINTENANCE(applicability_evaluator_pending)，不能伪装已支持。
