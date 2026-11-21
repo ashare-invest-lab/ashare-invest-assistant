@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useMemo, useState } from 'react';
 import { Segmented } from 'antd';
 import type { BarFreq } from '../../api/enums';
@@ -9,7 +10,6 @@ import { KlineWindowInfo } from '../../components/charts/KlineWindowInfo';
 import type { ChartMarker } from '../../components/charts/chartBase';
 import { GAP_REASON } from '../../i18n/labels';
 import { dayMinutes } from '../../lib/market';
-import { ownValue } from '../../lib/enumValue';
 
 const NO_MARKERS: ChartMarker[] = [];
 /** 分时一次取全天；日 K / 周 K 是窗口大小（T-F21：向左拖到边缘再按 before 取更早一页） */
@@ -27,7 +27,7 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
   if (freq !== '1m' && freq !== klFreq) setKlFreq(freq);
   const minute = useBarsOf(code, '1m', LIMIT['1m'], { enabled: freq === '1m' });
   // T-F21 窗口加载；评审 m17：切换日/周时保留上一个周期的图，新数据到达再替换
-  const kl = useBarsWindow(code, klFreq, ownValue(LIMIT, klFreq, LIMIT.d), { keepPrevious: true, enabled: freq !== '1m' });
+  const kl = useBarsWindow(code, klFreq, (labelOf(LIMIT, klFreq) ?? LIMIT.d), { keepPrevious: true, enabled: freq !== '1m' });
 
   const curReady = freq === '1m' ? !!minute.data : !!kl.data && !kl.isPlaceholderData;
   const curRes = freq === '1m' ? minute.data : kl.first;
@@ -43,10 +43,10 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
   // 评审 M2：空图时说明原因（gaps 的原因码 + message）
   const empty = shownRes ? (
     <span>
-      {ownValue(EMPTY_TEXT, shownFreq, '未知')}
-      {shownRes.gaps.length ? `：${shownRes.gaps.map((g) => ownValue(GAP_REASON, g.reason, '未知')).join('、')}` : ''}
+      {(labelOf(EMPTY_TEXT, shownFreq) ?? '未知')}
+      {shownRes.gaps.length ? `：${shownRes.gaps.map((g) => (labelOf(GAP_REASON, g.reason) ?? '未知')).join('、')}` : ''}
     </span>
-  ) : ownValue(EMPTY_TEXT, shownFreq, '未知');
+  ) : (labelOf(EMPTY_TEXT, shownFreq) ?? '未知');
   const showWindow = shownFreq !== '1m' && freq !== '1m' && curReady;
   return (
     <section className="panel price-chart" data-testid={testId ?? 'price-chart'}>
@@ -55,7 +55,7 @@ export function PriceChartPanel({ code, initial = 'd', height = 400, testId }: {
           size="small"
           value={freq}
           onChange={(v) => setFreq(v as BarFreq)}
-          options={(['1m', 'd', 'w'] as BarFreq[]).map((f) => ({ value: f, label: ownValue(VIEW_TEXT, f, '未知') }))}
+          options={(['1m', 'd', 'w'] as BarFreq[]).map((f) => ({ value: f, label: (labelOf(VIEW_TEXT, f) ?? '未知') }))}
           aria-label="图表周期"
         />
         <span className="legend">

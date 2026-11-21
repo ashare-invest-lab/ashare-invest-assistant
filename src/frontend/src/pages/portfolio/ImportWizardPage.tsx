@@ -13,6 +13,7 @@ import { ApiError, newIdempotencyKey } from '../../api/client';
 import { ENUMS } from '../../api/enums';
 import { IMPORT_422_TEXT, IMPORT_CODES, IMPORT_CODE_MAP, IMPORT_TONE, rowTone } from '../../api/importCodes';
 import { EnumTag, ErrorBox, Loading } from '../../components/common';
+import { CursorPager } from '../../components/CursorPager';
 import { DEDUP_STATUS, ENCODINGS, IMPORT_FIELDS, IMPORT_ROW_STATUS, IMPORT_STATUS, RECON_STATUS, TRADE_SIDE } from '../../i18n/importLabels';
 import { ownValue } from '../../lib/enumValue';
 import { fmtAmount, fmtNum, fmtTime } from '../../lib/format';
@@ -80,7 +81,7 @@ function UploadStep() {
         <Form<UploadForm> form={form} layout="vertical" requiredMark={false} onFinish={submit}
           initialValues={{ account_id: sp.get('account_id') ?? sp.get('account') ?? list[0].id, kind: sp.get('kind') === 'positions' || sp.get('kind') === 'trades' ? (sp.get('kind') as ImportKind) : undefined }}>
           <Form.Item name="account_id" label="导入到账户" rules={[{ required: true }]}>
-            <Select options={list.map((a) => ({ value: a.id, label: `${a.alias} · ${a.broker_name}` }))} style={{ maxWidth: 320 }} />
+            <Select options={list.map((a) => ({ value: a.id, label: `${a.alias} · ${a.broker_name ?? '—'}` }))} style={{ maxWidth: 320 }} />
           </Form.Item>
           {/* T-F20（T-B66）：混合入口不再默认交割单，必须明确选择文件类型 */}
           <Form.Item name="kind" label="文件类型" rules={[{ required: true, message: '请选择文件类型：交割单或持仓快照' }]} data-testid="upload-kind">
@@ -212,7 +213,7 @@ function DetectPanel({ b }: { b: ImportBatch }) {
                       title: '映射到字段', key: 'f',
                       render: (_v, r) => (
                         <Select size="small" style={{ width: 240 }} value={ownValue(mapping, r.col, '') ?? ''} options={fieldOptions}
-                          labelRender={({ value, label }) => value === '' || Object.hasOwn(IMPORT_FIELDS, String(value)) ? label : '未知'}
+                          labelRender={({ value, label }) => value === '' || ownValue(IMPORT_FIELDS, String(value), undefined) !== undefined ? label : '未知'}
                           onChange={(v) => setMapping((m) => ({ ...m, [r.col]: v }))} data-testid={`map-${r.col}`} />
                       ),
                     },
@@ -242,8 +243,8 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
   const [dlErr, setDlErr] = useState<unknown>(null);
 
   const actionable = useMemo(
-    () => [...b.file_findings, ...(allRows.data?.items ?? []).flatMap((r) => r.findings)].filter((f) => f.needs_action),
-    [b.file_findings, allRows.data],
+    () => [...b.file_findings, ...allRows.items.flatMap((r) => r.findings)].filter((f) => f.needs_action),
+    [b.file_findings, allRows.items],
   );
   const fileErrors = b.file_findings.filter((f) => f.severity === 'error');
   const s = b.stats;
@@ -280,18 +281,22 @@ function PreviewStep({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Impo
               <Select allowClear showSearch placeholder="提示码" style={{ width: 260 }} value={filter.code} onChange={(v) => setFilter((f) => ({ ...f, code: v }))}
                 optionFilterProp="label" options={IMPORT_CODES.filter((c) => c.scope === 'row').map((c) => ({ value: c.code, label: `${c.title} ${c.code}` }))} />
             </Space>
-            {rows.isError ? <ErrorBox error={rows.error} /> : null}
-            <RowsTable rows={rows.data?.items ?? []} loading={rows.isPending} />
+            {rows.isError && !rows.isFetchNextPageError ? <ErrorBox error={rows.error} /> : null}
+            <RowsTable rows={rows.items} loading={rows.isPending} />
+            <CursorPager query={rows} loaded={rows.items.length} testId="import-rows-pager" unit="行" />
           </section>
 
-          {actionable.length ? (
+          {actionable.length || allRows.hasNextPage || allRows.isError ? (
             <section className="imp-section" data-testid="needs-action">
-              <h3>需处理的警告（{actionable.filter((f) => !f.resolution).length} 项未处理 / 共 {actionable.length} 项）</h3>
+              <h3>需处理的警告（已加载提示中 {actionable.filter((f) => !f.resolution).length} 项未处理 / {actionable.length} 项）</h3>
               <p className="muted">可以逐项选择处理方式；也可以在确认时勾选“接受默认处理”。选择“仍然导入”等覆盖默认处理的选项时必须填写理由。</p>
+              {allRows.hasNextPage ? <p className="muted">还有预览行未加载，后续行可能含需处理的警告。可继续加载全部预览行后检查。</p> : null}
+              {allRows.isError && !allRows.isFetchNextPageError ? <ErrorBox error={allRows.error} prefix="警告行读取失败" /> : null}
               {actionable.filter((f) => f.row_no != null).map((f) => (
                 <FindingItem key={`${f.id}-${f.resolution?.choice ?? ''}`} f={f} busy={resolve.isPending && resolve.variables?.v.finding_id === f.id}
                   onResolve={(choice, reason) => resolve.mutate({ id: b.batch_id, v: { finding_id: f.id, choice, reason } }, { onSuccess: () => void allRows.refetch() })} />
               ))}
+              <CursorPager query={allRows} loaded={allRows.items.length} testId="import-action-rows-pager" unit="行" />
             </section>
           ) : null}
 
@@ -353,6 +358,7 @@ function ConfirmPanel({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Imp
   const [key, setKey] = useState(newIdempotencyKey);
   const change = (fn: () => void) => { fn(); setKey(newIdempotencyKey()); confirm.reset(); };
   const e = confirm.error instanceof ApiError ? confirm.error : null;
+  const errorTitle = e ? ownValue(IMPORT_422_TEXT, e.code, e.status === 422 ? '未知' : undefined) : undefined;
   const codes = e?.code === 'IMPORT_WARNINGS_UNACKNOWLEDGED' ? ((e.details as { codes?: string[] } | null)?.codes ?? []) : [];
   return (
     <section className="imp-section imp-confirm" data-testid="confirm-panel">
@@ -370,8 +376,8 @@ function ConfirmPanel({ b, onCommitted }: { b: ImportBatch; onCommitted: (r: Imp
           确认写入
         </Button>
       </Space>
-      {e ? (
-        <Alert type="error" showIcon style={{ marginTop: 8 }} data-testid="confirm-error" title={ownValue(IMPORT_422_TEXT, e.code, '未知')}
+      {e && errorTitle !== undefined ? (
+        <Alert type="error" showIcon style={{ marginTop: 8 }} data-testid="confirm-error" title={errorTitle}
           description={codes.length ? <Space size={2} wrap>{codes.map((c) => {
             const spec = IMPORT_CODE_MAP.get(c);
             return <Tag key={c} color={spec ? 'orange' : undefined}>{spec ? spec.title : '未知'}</Tag>;

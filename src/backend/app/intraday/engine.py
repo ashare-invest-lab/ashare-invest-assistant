@@ -18,11 +18,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Connection, Row, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
+from app.aggregates.calendar import market_clock
 from app.api.v1.portfolio import _account
+from app.common.errors import AppError
 from app.config import Settings
+from app.config_files import MarketRulesConfig
 from app.db.tables.accounts import accounts
 from app.db.tables.licences import user_data_licences
-from app.db.tables.market import securities, trading_calendar
+from app.db.tables.market import securities
 from app.db.tables.realtime import (
     intraday_candidate_refs,
     intraday_universe,
@@ -50,6 +53,7 @@ from app.intraday.state import advance
 from app.notify.service import append
 from app.notify.transport import enqueue, flush, publish
 from app.replay.baseline import require_isolated
+from app.schemas.enums import MarketSession
 from app.strategy.runtime import runnable
 from app.workers.assembly import archive_conclusions, canonical, conclusion
 
@@ -84,19 +88,27 @@ def scope(conn: Connection, licence: uuid.UUID) -> Row[Any, Any, Any] | None:
     ).first()
 
 
-def session(conn: Connection, at: dt.datetime) -> bool:
-    local = at.astimezone(TZ)
-    t = local.time()
-    return bool(
-        conn.execute(
-            select(trading_calendar.c.is_open).where(trading_calendar.c.date == local.date())
-        ).scalar_one_or_none()
-    ) and (dt.time(9, 30) <= t < dt.time(11, 30) or dt.time(13) <= t < dt.time(15))
+def session(conn: Connection, at: dt.datetime, rules: MarketRulesConfig) -> bool:
+    try:
+        state = market_clock(conn, at, rules).session
+    except AppError:
+        return False
+    return state in {MarketSession.MORNING, MarketSession.AFTERNOON}
 
 
 def universe(
     conn: Connection, owner: uuid.UUID, licence: uuid.UUID, date: dt.date, settings: Settings
 ) -> set[str]:
+    try:
+        clock = market_clock(
+            conn,
+            dt.datetime.combine(date, dt.time(12), TZ),
+            settings.business.market_rules,
+        )
+    except AppError:
+        return set()
+    if clock.trade_date != date or clock.session == MarketSession.NON_TRADING_DAY:
+        return set()
     account_ids = (
         conn.execute(
             select(accounts.c.id).where(
@@ -257,7 +269,7 @@ def compute(settings: Settings, message: Updated) -> list[uuid.UUID]:
     with engine.begin() as conn:
         require_isolated(conn, app_env=settings.app_env)
         holder = scope(conn, message.licence_id)
-        if holder is None or not session(conn, at):
+        if holder is None or not session(conn, at, settings.business.market_rules):
             return []
         conn.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),

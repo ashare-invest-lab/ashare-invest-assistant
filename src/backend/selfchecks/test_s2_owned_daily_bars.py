@@ -231,9 +231,10 @@ def test_suspension_incomplete_future_and_calendar_gap(world: Any) -> None:
     seed(world, day=DAY - dt.timedelta(days=2), fetched_at=NOW + dt.timedelta(seconds=1))
     result = world.reader.read(OWNER, CODE, query())
     assert result["items"] == []
-    assert {gap["reason"] for gap in result["gaps"]} == {
-        "suspended",
-        "no_source",
+    assert len(result["gaps"]) == 2
+    assert {gap["key"]: gap["reason"] for gap in result["gaps"]} == {
+        f"bars.{DAY.isoformat()}": "suspended",
+        f"bars.{(DAY - dt.timedelta(days=1)).isoformat()}": "no_source",
     }
     with world.engine.begin() as conn:
         conn.execute(daily_bars.delete())
@@ -268,6 +269,7 @@ def test_gap_only_response_has_no_timestamp(world: Any, suspended: bool) -> None
     assert result["data_as_of"] is None
     assert result["data_status"] == "unavailable"
     assert result["gaps"][0]["reason"] == ("suspended" if suspended else "no_source")
+    assert result["gaps"][0]["message"] == ("当日停牌" if suspended else "日线缓存字段不完整")
 
 
 def test_registered_http_uses_default_owned_reader(

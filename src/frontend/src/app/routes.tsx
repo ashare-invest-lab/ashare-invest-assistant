@@ -15,7 +15,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 export const PLACEHOLDERS: [string, string][] = [
   ['restrictions', '禁投 / 冷静期 / 屏蔽'],
   ['reviews', '复盘'],
-  ['discover', '发现'],
 ];
 
 export const routes: RouteObject[] = [
@@ -47,6 +46,7 @@ export const routes: RouteObject[] = [
       { path: 'settings', element: <Navigate to="/settings/profile" replace /> },
       { path: 'settings/profile', lazy: lazyPage(() => import('../pages/settings/ProfilePage'), (m) => m.ProfilePage) },
       { path: 'settings/data-licence', lazy: lazyPage(() => import('../pages/settings/DataLicencePage'), (m) => m.DataLicencePage) },
+      { path: 'discover', element: <Navigate to="/strategies" replace /> },
       { path: 'strategies', lazy: lazyPage(() => import('../pages/strategies/StrategiesPage'), (m) => m.StrategiesPage) },
       { path: 'strategies/:id', lazy: lazyPage(() => import('../pages/strategies/StrategyDetailPage'), (m) => m.StrategyDetailPage) },
       { path: 'strategy-cards', lazy: lazyPage(() => import('../pages/strategies/StrategyCardsPage'), (m) => m.StrategyCardsPage) },

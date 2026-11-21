@@ -62,7 +62,7 @@ export function useLogout() {
 }
 /**
  * 改密（契约 §7.1、#25）：204 后服务端轮换 sid 与 csrf_token。内存兜底令牌作废，之后的写请求从 Cookie 重新读取。
- * 目前没有改密页面（设置页任务另排），先把调用约定固定在这里。
+ * 设置页修改密码表单复用此变更。
  */
 export const useChangePassword = () =>
   useMutation({
@@ -109,10 +109,15 @@ export function useCreateAccount() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (b: BrokerAccountCreate) => apiPost<BrokerAccount>('/accounts', b), onSuccess: () => qc.invalidateQueries({ queryKey: ak.accounts }) });
 }
-export const useTrades = (accountId: string | undefined) =>
-  useQuery({
-    queryKey: ak.trades(accountId ?? ''),
-    queryFn: ({ signal }) => apiGet<Paged<Trade>>('/trades', { account_id: accountId, limit: 200 }, signal),
+export interface TradeFilter { security_code?: string; from?: string; to?: string; include_voided?: boolean }
+const tradeId = (t: Trade) => t.id;
+export const useTrades = (accountId: string | undefined, f: TradeFilter = {}) =>
+  useCursorPages<Trade>({
+    queryKey: [...ak.trades(accountId ?? ''), f],
+    path: '/trades',
+    params: { account_id: accountId, ...f },
+    limit: 200,
+    idOf: tradeId,
     enabled: !!accountId,
   });
 /** 手工录入：Idempotency-Key 由调用方持有，重复点击或重试复用同一个，成功后再换新（评审 s1） */
@@ -140,11 +145,15 @@ export function useVoidTrade() {
 }
 
 // ---------------- §7.2 导入 ----------------
+const importBatchId = (b: ImportBatchSummary) => b.batch_id;
 export const useImports = (accountId: string | undefined) =>
-  useQuery({
+  useCursorPages<ImportBatchSummary>({
     queryKey: ak.imports(accountId ?? ''),
-    queryFn: ({ signal }) => apiGet<Paged<ImportBatchSummary>>('/imports', { account_id: accountId, limit: 50 }, signal),
+    path: '/imports',
+    params: { account_id: accountId },
+    limit: 50,
     enabled: !!accountId,
+    idOf: importBatchId,
   });
 
 export const useUploadImport = () =>
@@ -175,12 +184,15 @@ export interface RowFilter { status?: string; code?: string; dedup_status?: stri
  * 前端对这两种状态不再请求逐行预览，计数一律取批次头 stats。只有 previewed 才有可看的预览行。
  */
 export const rowsAvailable = (status: ImportBatch['status']) => status === 'previewed';
+const importRowId = (row: ImportRow) => String(row.row_no);
 export const useImportRows = (id: string | null, enabled: boolean, f: RowFilter) =>
-  useQuery({
+  useCursorPages<ImportRow>({
     queryKey: ak.rows(id ?? '', JSON.stringify(f)),
-    queryFn: ({ signal }) => apiGet<Paged<ImportRow>>(`/imports/${encodeURIComponent(id!)}/rows`, { ...f, limit: 200 }, signal),
+    path: `/imports/${encodeURIComponent(id ?? '')}/rows`,
+    params: { ...f },
+    limit: 200,
     enabled: !!id && enabled,
-    staleTime: 0,
+    idOf: importRowId,
   });
 
 function useBatchMutation<V, R>(fn: (id: string, v: V) => Promise<R>) {

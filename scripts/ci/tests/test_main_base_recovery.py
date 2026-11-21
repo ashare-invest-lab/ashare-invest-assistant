@@ -62,6 +62,17 @@ class Actions:
         if counts is not None:
             self.counts[sha] = deepcopy(counts)
 
+    def run(self, sha):
+        identifier, mode = self.states[sha]
+        return {
+            "id": identifier, "run_attempt": 1, "head_sha": sha,
+            "head_branch": "topic" if mode == "topic" else "main",
+            "event": mode if mode in {"pull_request", "workflow_dispatch"} else "push",
+            "status": "in_progress" if mode == "pending" else "completed",
+            "repository": {"full_name": "foreign/repo" if mode == "foreign" else REPO},
+            "path": ".github/workflows/ci.yml",
+        }
+
     def __call__(self, path, *, binary=False):
         self.calls.append(path)
         parsed = urllib.parse.urlsplit(path)
@@ -70,17 +81,14 @@ class Actions:
             sha = query["head_sha"][0]
             if sha not in self.states:
                 return {"workflow_runs": []}
-            identifier, mode = self.states[sha]
-            status = "in_progress" if mode == "pending" else "completed"
-            if query.get("status") == ["completed"] and status != "completed":
+            run = self.run(sha)
+            if query.get("status") == ["completed"] and run["status"] != "completed":
                 return {"workflow_runs": []}
-            event = mode if mode in {"pull_request", "workflow_dispatch"} else "push"
-            return {"workflow_runs": [{
-                "id": identifier, "run_attempt": 1, "head_sha": sha,
-                "head_branch": "topic" if mode == "topic" else "main",
-                "event": event, "status": status,
-                "repository": {"full_name": "foreign/repo" if mode == "foreign" else REPO},
-            }]}
+            return {"workflow_runs": [run]}
+        if parsed.path.startswith("/actions/runs/") and parsed.path.count("/") == 3:
+            identifier = int(parsed.path.rsplit("/", 1)[1])
+            sha = next(sha for sha, value in self.states.items() if value[0] == identifier)
+            return self.run(sha)
         identifier = int(parsed.path.split("/")[-2])
         sha, (_, mode) = next((sha, value) for sha, value in self.states.items()
                               if value[0] == identifier)
@@ -282,6 +290,7 @@ def test_cli_allows_main_pr_and_merge_group_to_recover_and_logs_reason(
     assert "first-parent fallback commit=" + case["selected"] in stdout
     reason = frozen["source"]["fallback"]["reason"]
     assert "reason=" + reason in stdout
+    assert "; skipped_heads=1" in stdout
     if mode == "failed_ratchet":
         assert "ratchet_passed is not true" in reason
     elif mode in {"invalid_zip", "wrong_identity"}:
@@ -292,8 +301,10 @@ def test_cli_allows_main_pr_and_merge_group_to_recover_and_logs_reason(
         assert "No completed exact-base main measurement run" in reason
 
 
-@pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])
-@pytest.mark.parametrize("completed_mode", ["valid", "failed_ratchet", "no_artifact"])
+@pytest.mark.parametrize("event_name", ["pull_request", "merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("completed_mode", [
+    "valid", "failed_ratchet", "no_artifact", "expired", "ambiguous", "invalid_zip", "wrong_identity",
+])
 def test_cli_waits_for_exact_main_push_before_deciding_to_recover(
     cli_recovery_case, monkeypatch, capsys, event_name, completed_mode,
 ):
@@ -301,14 +312,17 @@ def test_cli_waits_for_exact_main_push_before_deciding_to_recover(
     actions = case["actions"]
     identifier, _ = actions.states[case["requested"]]
     sleeps = []
+    now = 0
 
     def complete(seconds):
+        nonlocal now
         assert not any(case["selected"] in call for call in actions.calls)
         sleeps.append(seconds)
+        now += seconds
         actions.states[case["requested"]] = (identifier, completed_mode)
 
     monkeypatch.setattr(loader.time, "sleep", complete)
-    monkeypatch.setattr(loader.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(loader.time, "monotonic", lambda: now)
     if completed_mode == "valid":
         assert loader.main() == 0
         frozen = json.loads(case["output"].read_text(encoding="utf-8"))
@@ -317,8 +331,126 @@ def test_cli_waits_for_exact_main_push_before_deciding_to_recover(
         assert not any(case["selected"] in call for call in actions.calls)
     else:
         assert_cli_recovers(loader.main, case)
-    assert sleeps == [15]
-    assert f"Waiting for existing trusted main run {identifier}" in capsys.readouterr().out
+    assert sleeps == [15] * (9 if completed_mode == "no_artifact" else 1)
+    assert now == (135 if completed_mode == "no_artifact" else 15)
+    assert f"/actions/runs/{identifier}" in actions.calls
+    stdout = capsys.readouterr().out
+    assert f"Waiting for existing trusted main run {identifier}" in stdout
+    if completed_mode != "valid":
+        assert "first-parent fallback commit=" + case["selected"] in stdout
+        assert "; skipped_heads=1" in stdout
+
+
+@pytest.mark.parametrize("endpoint", ["/artifacts?", "/zip"])
+@pytest.mark.parametrize("pending", [False, True])
+def test_cli_artifact_404_recovers_only_after_pending_runs_settle(
+    cli_recovery_case, monkeypatch, capsys, endpoint, pending,
+):
+    case = cli_recovery_case(mode="pending" if pending else "valid", wait=1800)
+    actions = case["actions"]
+    identifier, _ = actions.states[case["requested"]]
+    now = 0
+    ancestor_times = []
+
+    def get(path, **kwargs):
+        if case["selected"] in path:
+            ancestor_times.append(now)
+        if endpoint in path and str(identifier) in path:
+            raise urllib.error.HTTPError("https://example.invalid/private", 404,
+                                         "Authorization: Bearer synthetic-private", {}, None)
+        return actions(path, **kwargs)
+
+    def advance(seconds):
+        nonlocal now
+        assert not ancestor_times
+        now += seconds
+        actions.states[case["requested"]] = (identifier, "valid")
+
+    monkeypatch.setattr(loader, "api_reader", lambda _: get)
+    monkeypatch.setattr(loader.time, "monotonic", lambda: now)
+    monkeypatch.setattr(loader.time, "sleep", advance)
+    frozen = assert_cli_recovers(loader.main, case)
+    assert now == (135 if pending else 0)
+    assert ancestor_times and set(ancestor_times) == {now}
+    stdout = capsys.readouterr().out
+    assert "first-parent fallback commit=" + case["selected"] in stdout
+    assert "; skipped_heads=1" in stdout
+    assert frozen["source"]["fallback"]["reason"].endswith("not yet visible")
+    assert all(secret not in stdout for secret in ["synthetic-private", "Authorization", "https://"])
+
+
+@pytest.mark.parametrize("mode", ["failed_ratchet", "no_artifact"])
+@pytest.mark.parametrize("stale_forever", [False, True])
+def test_recovery_pending_from_stale_list_returns_to_pinned_wait_loop(
+    cli_recovery_case, monkeypatch, capsys, mode, stale_forever,
+):
+    case = cli_recovery_case(mode="pending", wait=30)
+    actions = case["actions"]
+    identifier, _ = actions.states[case["requested"]]
+    now = 0
+    recovery_at = 135 if mode == "no_artifact" else 15
+    stale_lists = []
+    direct_times = []
+    ancestor_times = []
+
+    def get(path, **kwargs):
+        if case["selected"] in path:
+            ancestor_times.append(now)
+        if path == f"/actions/runs/{identifier}":
+            direct_times.append(now)
+        if (case["requested"] in path and "/ci.yml/runs?" in path
+                and (now <= recovery_at or stale_forever)):
+            stale_lists.append(now)
+            actions.calls.append(path)
+            run = actions.run(case["requested"]) | {"status": "in_progress"}
+            return {"workflow_runs": [] if "status=completed" in path else [run]}
+        return actions(path, **kwargs)
+
+    def advance(seconds):
+        nonlocal now
+        assert not ancestor_times
+        now += seconds
+        actions.states[case["requested"]] = (identifier, mode)
+
+    monkeypatch.setattr(loader, "api_reader", lambda _: get)
+    monkeypatch.setattr(loader.time, "monotonic", lambda: now)
+    monkeypatch.setattr(loader.time, "sleep", advance)
+    if stale_forever:
+        assert loader.main() == 1
+        assert now == 1920 == loader.MAX_WAIT_SECONDS
+        assert not ancestor_times and not case["output"].exists()
+        assert direct_times == list(range(15, 1921, 15))
+        assert "MeasurementPending: timed out after 1920 s" in capsys.readouterr().out
+        return
+    assert_cli_recovers(loader.main, case)
+    assert stale_lists == [0, 0, recovery_at, recovery_at]
+    assert direct_times == list(range(15, recovery_at + 16, 15))
+    assert now == recovery_at + 15
+    assert ancestor_times and set(ancestor_times) == {now}
+    assert "first-parent fallback commit=" + case["selected"] in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("error_type", [ValueError, KeyError, zipfile.BadZipFile])
+def test_cli_recovery_reason_never_echoes_external_archive_exception(
+    cli_recovery_case, monkeypatch, capsys, error_type,
+):
+    case = cli_recovery_case(mode="invalid_zip")
+    read = loader.read_artifact
+
+    def hostile(data, sha, *args):
+        if sha == case["requested"]:
+            raise error_type("Authorization: Bearer synthetic-private https://example.invalid/private")
+        return read(data, sha, *args)
+
+    monkeypatch.setattr(loader, "read_artifact", hostile)
+    frozen = assert_cli_recovers(loader.main, case)
+    stdout = capsys.readouterr().out
+    reason = frozen["source"]["fallback"]["reason"]
+    assert "Could not read or validate trusted base measurement data" in reason
+    assert "reason=" + reason in stdout
+    assert "first-parent fallback commit=" + case["selected"] in stdout
+    for secret in ["synthetic-private", "Authorization", "https://", "example.invalid"]:
+        assert secret not in stdout and secret not in case["output"].read_text()
 
 
 @pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])

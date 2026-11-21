@@ -166,11 +166,13 @@ def test_01_db_cause_check_equals_contract_enum() -> None:
 
 
 def test_01_meta_enums_v029(app_client: Callable[..., Any]) -> None:
-    """第 1 条（接口层）：version = v0.2.9；enums.candidate_signal_event_cause 取值与顺序逐项相等。"""
+    """第 1 条（接口层）：版本随契约同步，新旧版本都保持候选事件取值与顺序。"""
     c = app_client("open")
     body = c.get(f"{API}/meta/enums").json()
-    if body.get("version") != V029:
+    expected_version = {(0, 2, 10): "v0.2.10", (0, 2, 11): "v0.2.11"}.get(_docs().ver, V029)
+    if expected_version == V029 and body.get("version") == "v0.2.8":
         pytest.xfail(f"{O_ENUMS29}；当前 version = {body.get('version')}")
+    assert body["version"] == expected_version
     assert body["enums"]["candidate_signal_event_cause"] == EVENT_CAUSES
 
 
@@ -185,12 +187,14 @@ def _front(rel: str) -> str:
 
 
 def test_01_frontend_contract_version_v029() -> None:
-    """第 1 条（前端）：enums.ts 的 CONTRACT_VERSION = v0.2.9，并含 candidate_signal_event_cause（6 个取值同序）。"""
+    """第 1 条（前端）：版本随契约同步，新旧版本都保持候选事件取值与顺序。"""
     src = _front("api/enums.ts")
     m = re.search(r"CONTRACT_VERSION\s*=\s*'(v[0-9.]+)'", src)
     assert m, "enums.ts 没有 CONTRACT_VERSION"
-    if m.group(1) != V029:
+    expected_version = {(0, 2, 10): "v0.2.10", (0, 2, 11): "v0.2.11"}.get(_docs().ver, V029)
+    if expected_version == V029 and m.group(1) == "v0.2.8":
         pytest.xfail(f"{O_FRONT29}；当前 {m.group(1)}")
+    assert m.group(1) == expected_version
     m2 = re.search(r"candidate_signal_event_cause:\s*\[([^\]]*)\]", src)
     assert m2 and re.findall(r"'([a-z_]+)'", m2.group(1)) == EVENT_CAUSES
 

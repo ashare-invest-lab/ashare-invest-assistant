@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
+from app.aggregates.market_projection import project_daily_report_market
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import PageParams, build_page, decode_cursor, page_params
@@ -91,7 +92,9 @@ def detail(date: dt.date, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
                 *body.get("gaps", []),
                 {"key": "account", "reason": "no_source", "message": "旧快照账户估值不可计算。"},
             ]
-        return project_component_clock(body, row.generated_at)
+        body = project_component_clock(body, row.generated_at)
+        body["market"] = project_daily_report_market(body["market"])
+        return body
 
 
 def project_component_clock(body: dict[str, Any], generated_at: dt.datetime) -> dict[str, Any]:
