@@ -235,6 +235,8 @@ def test_missing_current_version_projection() -> None:
     class Conn:
         def execute(self, statement: Any) -> Any:
             return SimpleNamespace(first=lambda: row, scalar=lambda: None, all=list)
-    for result in (service.full(Conn(), U, RID), service.summary(Conn(), row)):
-        assert result["current_version"] is None and result["data_status"] == "unavailable"
-        assert result["gaps"][0]["reason"] == "no_source"
+    detail = service.full(Conn(), U, RID)
+    summary = service.summary(Conn(), row)
+    assert detail["current_version"] is None and detail["data_status"] == "unavailable"
+    assert "current_version" not in summary and summary["data_status"] == "unavailable"
+    assert detail["gaps"][0]["reason"] == "no_source"

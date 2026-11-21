@@ -1,13 +1,15 @@
 """复盘读写服务，版本内容由不可变快照投影。"""
-# ruff: noqa: E501
+# ruff: noqa: ANN401, E501
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
 import uuid
 from collections.abc import Sequence
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import Connection, Row, insert, select, update
@@ -17,18 +19,31 @@ from app.db.tables.accounts import trades
 from app.db.tables.market import securities
 from app.db.tables.research import action_plans, plan_versions
 from app.db.tables.reviews import data_snapshots, review_versions, reviews
-from app.reviews.metrics import empty_metrics, period_pending, project_metrics, status_block
+from app.reviews.metrics import (
+    METRIC_NAMES,
+    _stat,
+    empty_metrics,
+    normalise_gaps,
+    pending_message,
+    period_pending,
+    project_metrics,
+    status_block,
+)
 
 # fmt: off
+
 
 def _bad(field: str, issue: str) -> AppError:
     return AppError(ErrorCode.VALIDATION_ERROR, details={"fields": [{"field": field, "issue": issue}]})
 
+
 def _owned(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, *, lock: bool = False) -> Row[Any]:
-    row = conn.execute((select(reviews).where(reviews.c.id == identifier, reviews.c.user_id == owner)).with_for_update() if lock else select(reviews).where(reviews.c.id == identifier, reviews.c.user_id == owner)).first()
+    statement = select(reviews).where(reviews.c.id == identifier, reviews.c.user_id == owner)
+    row = conn.execute(statement.with_for_update() if lock else statement).first()
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND)
     return row
+
 
 def _code(raw: str | None) -> str | None:
     if raw is None:
@@ -39,6 +54,7 @@ def _code(raw: str | None) -> str | None:
     if len(value) != 9 or value[6] != "." or not value[:6].isdigit() or value[7:] not in {"SH", "SZ", "BJ"}:
         raise _bad("security_code", "invalid")
     return value
+
 
 def _validate_links(
     conn: Connection,
@@ -71,7 +87,10 @@ def _validate_links(
         if code is None:
             code = str(rows[0].security_code)
     if trade_ids:
-        rows = conn.execute(select(trades.c.id, trades.c.security_code, trades.c.plan_version_id).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner, trades.c.voided_at.is_(None), trades.c.source != "simulated_tracking")).all()
+        # source is deliberately not filtered here. The table's source enum has
+        # only real-import values. Simulated rows are excluded in the metric
+        # projection, where their epistemic type is visible.
+        rows = conn.execute(select(trades.c.id, trades.c.security_code, trades.c.plan_version_id).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner, trades.c.voided_at.is_(None))).all()
         if len(rows) != len(set(trade_ids)):
             raise _bad("trade_ids", "not_owned")
         if code is not None and any(r.security_code != code for r in rows):
@@ -86,6 +105,141 @@ def _validate_links(
             code = str(rows[0].security_code)
     return code, plan
 
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+def _as_datetime(value: dt.datetime | None) -> dt.datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=dt.UTC)
+
+
+def _executed_at(row: Any) -> dt.datetime | None:
+    return _as_datetime(row.traded_at)
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return number if number.is_finite() else None
+
+
+def _trade_rows(conn: Connection, owner: uuid.UUID, trade_ids: Sequence[uuid.UUID]) -> list[Any]:
+    if not trade_ids:
+        return []
+    return list(conn.execute(select(trades).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner)).all())
+
+
+def _fifo_holding(rows: Sequence[Any]) -> tuple[list[Decimal], bool]:
+    """Pair execution cash flows FIFO and report returns for closed lots."""
+    openings_by_code: dict[str, list[tuple[Decimal, Decimal]]] = {}
+    holding: list[Decimal] = []
+    for row in sorted(rows, key=lambda item: (_executed_at(item), str(item.id))):
+        quantity = _decimal(row.quantity)
+        net_amount = _decimal(row.net_amount)
+        openings = openings_by_code.setdefault(str(row.security_code), [])
+        if quantity is None or quantity <= 0 or net_amount is None:
+            continue
+        unit_cash = abs(net_amount) / quantity
+        if unit_cash <= 0:
+            continue
+        if row.side == "buy":
+            openings.append((unit_cash, quantity))
+            continue
+        if row.side != "sell":
+            continue
+        remaining = quantity
+        while remaining > 0 and openings:
+            buy_unit_cash, buy_quantity = openings[0]
+            matched = min(remaining, buy_quantity)
+            holding.append((unit_cash / buy_unit_cash - Decimal(1)) * Decimal(100))
+            remaining -= matched
+            buy_quantity -= matched
+            if buy_quantity == 0:
+                openings.pop(0)
+            else:
+                openings[0] = (buy_unit_cash, buy_quantity)
+    return holding, any(openings_by_code.values())
+
+
+def _observations(
+    rows: Sequence[Any],
+    calculation_as_of: dt.datetime,
+    period_start: dt.date,
+    period_end: dt.date,
+) -> tuple[list[Decimal], list[Decimal], list[Decimal], list[str], dt.datetime | None, bool]:
+    visible: list[Any] = []
+    evidence_ids: list[str] = []
+    data_as_of: dt.datetime | None = None
+    calculation_as_of_normalized = (
+        calculation_as_of
+        if calculation_as_of.tzinfo
+        else calculation_as_of.replace(tzinfo=dt.UTC)
+    )
+    for row in rows:
+        traded_at = _executed_at(row)
+        if row.voided_at is not None or row.epistemic_type != "execution":
+            continue
+        if traded_at is None or traded_at > calculation_as_of_normalized:
+            continue
+        if traded_at.date() < period_start or traded_at.date() > period_end:
+            continue
+        visible.append(row)
+        evidence_ids.append("trade:" + str(row.id))
+        data_as_of = max(data_as_of, traded_at) if data_as_of else traded_at
+    holding, has_open_positions = _fifo_holding(visible)
+    return holding, [], [], evidence_ids, data_as_of, has_open_positions
+
+
+def _metric(name: str, window: str, values: Sequence[Decimal], *, no_source: bool = False) -> dict[str, Any]:
+    value = sum(values, Decimal(0)) / Decimal(len(values)) if values else None
+    result = _stat(window, value=value, n=len(values))
+    if no_source or not values:
+        result["gaps"] = ["no_source"]
+    if values and len(values) < 5:
+        result["label"] = "未验证"
+    return result
+
+
+def _compute_outcome_metrics(
+    conn: Connection,
+    owner: uuid.UUID,
+    start: dt.date,
+    end: dt.date,
+    trade_ids: Sequence[uuid.UUID],
+    calculation_as_of: dt.datetime,
+) -> tuple[dict[str, Any], list[dict[str, Any]], dt.datetime | None]:
+    window = f"{start.isoformat()}/{end.isoformat()}"
+    if period_pending(end, now=calculation_as_of):
+        return {name: _stat(window) | {"gaps": ["not_yet_published"]} for name in METRIC_NAMES}, [], None
+    rows = _trade_rows(conn, owner, trade_ids)
+    holding, benchmark, drawdowns, evidence_ids, data_as_of, has_open_positions = _observations(rows, calculation_as_of, start, end)
+    metrics = {
+        "holding_return": _metric("holding_return", window, holding),
+        "benchmark_return": _metric("benchmark_return", window, benchmark),
+        "max_drawdown": _metric("max_drawdown", window, drawdowns),
+    }
+    if has_open_positions:
+        metrics["holding_return"]["gaps"] = ["user_input_missing"]
+    if holding and benchmark and len(holding) == len(benchmark):
+        metrics["excess_return"] = _metric("excess_return", window, [a - b for a, b in zip(holding, benchmark, strict=True)])
+    else:
+        metrics["excess_return"] = _metric("excess_return", window, [], no_source=True)
+        metrics["excess_return"]["gaps"] = ["no_source"]
+    evidence = [{"id": evidence_id, "key": "trade", "value": evidence_id.removeprefix("trade:"), "source": "本人成交快照"} for evidence_id in evidence_ids]
+    if not benchmark:
+        metrics["benchmark_return"]["gaps"] = ["no_source"]
+    if not drawdowns:
+        metrics["max_drawdown"]["gaps"] = ["no_source"]
+    return metrics, evidence, data_as_of
+
+
 def _snapshot_items(
     start: dt.date,
     end: dt.date,
@@ -93,14 +247,83 @@ def _snapshot_items(
     tags: list[str],
     judgement: list[dict[str, Any]],
     has_trades: bool,
+    *,
+    conn: Connection | None = None,
+    owner: uuid.UUID | None = None,
+    trade_ids: Sequence[uuid.UUID] = (),
+    plan_version_ids: Sequence[uuid.UUID] = (),
+    calculation_as_of: dt.datetime | None = None,
 ) -> dict[str, Any]:
-    return {
-        "outcome_metrics": empty_metrics(start, end),
-        "attribution": {"judgement": judgement, "execution": [], "market": []},
+    calculation_as_of = calculation_as_of or _now()
+    if conn is not None and owner is not None:
+        metrics, evidence, data_as_of = _compute_outcome_metrics(conn, owner, start, end, trade_ids, calculation_as_of)
+    else:
+        metrics, evidence, data_as_of = empty_metrics(start, end), [], None
+    if evidence:
+        block = status_block(has_observation=True)
+    else:
+        block = status_block(reason="no_source" if has_trades else "user_input_missing")
+    metric_messages = {
+        "holding_return": "未验证：以 traded_at 作可见时点；未平仓部分未计入",
+        "benchmark_return": "基准价格缺失，指标未验证（待回测）",
+        "excess_return": "基准价格缺失，超额收益未验证（待回测）",
+        "max_drawdown": "复权价格路径缺失，最大回撤未验证（待回测）",
+    }
+    metric_gaps = [
+        {"key": name, "reason": reason, "message": metric_messages[name]}
+        for name, metric in metrics.items()
+        for reason in metric.get("gaps", [])
+    ]
+    if metric_gaps:
+        block["gaps"] = metric_gaps
+    plan_snapshot = {
+        "plan_version_ids": [str(identifier) for identifier in plan_version_ids],
+        "judgement": judgement,
         "lessons": lessons,
         "tags": tags,
-        **status_block(reason="no_source" if has_trades else "user_input_missing"),
     }
+    if not evidence:
+        evidence = [
+            {
+                "id": "trade:" + str(identifier),
+                "key": "trade",
+                "value": str(identifier),
+                "source": "本人成交快照",
+            }
+            for identifier in trade_ids
+        ]
+    plan_evidence = [
+        {
+            "id": "plan:" + str(identifier),
+            "key": "plan_version",
+            "value": str(identifier),
+            "source": "本人计划版本快照",
+        }
+        for identifier in plan_version_ids
+    ]
+    evidence = plan_evidence + evidence
+    outcome_snapshot = {"trade_ids": [str(identifier) for identifier in trade_ids], "metrics": metrics, "evidence": evidence}
+    return {
+        "period_start": start.isoformat(),
+        "period_end": end.isoformat(),
+        "outcome_metrics": metrics,
+        "attribution": {
+            "judgement": judgement,
+            "execution": ([{"text": "本人实际成交已冻结", "evidence_ids": [item["id"] for item in evidence]}] if evidence else []),
+            "market": [],
+        },
+        "lessons": lessons,
+        "tags": tags,
+        "plan_snapshot": plan_snapshot,
+        "outcome_snapshot": outcome_snapshot,
+        "plan": plan_snapshot,
+        "outcome": outcome_snapshot,
+        "calculation_as_of": calculation_as_of.isoformat(),
+        "data_as_of": data_as_of.isoformat() if data_as_of else None,
+        "evidence": evidence,
+        **block,
+    }
+
 
 def _new_version(
     conn: Connection,
@@ -116,73 +339,27 @@ def _new_version(
     tags: list[str],
     judgement: list[dict[str, Any]],
 ) -> Row[Any]:
-    items = _snapshot_items(start, end, lessons, tags, judgement, bool(trade_ids))
     snapshot_id, version_id = uuid.uuid4(), uuid.uuid4()
+    calculation_as_of = _now()
+    items = _snapshot_items(start, end, lessons, tags, judgement, bool(trade_ids), conn=conn, owner=owner, trade_ids=trade_ids, plan_version_ids=plan_version_ids, calculation_as_of=calculation_as_of)
     raw = json.dumps(items, sort_keys=True, default=str, ensure_ascii=False).encode()
-    conn.execute(
-        insert(data_snapshots).values(
-            id=snapshot_id,
-            user_id=owner,
-            purpose="review",
-            items=items,
-            hash=hashlib.sha256(raw).hexdigest(),
-        )
-    )
-    conn.execute(
-        insert(review_versions).values(
-            id=version_id,
-            review_id=review_id,
-            version_no=version_no,
-            plan_version_ids=plan_version_ids,
-            trade_ids=trade_ids,
-            outcome_metrics=items["outcome_metrics"],
-            attribution=items["attribution"],
-            lessons=lessons,
-            tags=tags,
-            snapshot_id=snapshot_id,
-        )
-    )
+    conn.execute(insert(data_snapshots).values(id=snapshot_id, user_id=owner, purpose="review", items=items, hash=hashlib.sha256(raw).hexdigest()))
+    conn.execute(insert(review_versions).values(id=version_id, review_id=review_id, version_no=version_no, plan_version_ids=plan_version_ids, trade_ids=trade_ids, outcome_metrics=items["outcome_metrics"], attribution=items["attribution"], lessons=lessons, tags=tags, snapshot_id=snapshot_id))
     return conn.execute(select(review_versions).where(review_versions.c.id == version_id)).one()
 
-def create(conn: Connection, owner: uuid.UUID, body: Any) -> uuid.UUID:  # noqa: ANN401
+
+def create(conn: Connection, owner: uuid.UUID, body: Any) -> uuid.UUID:
     if body.period_end < body.period_start:
         raise _bad("period_end", "before_period_start")
-    code, _ = _validate_links(
-        conn,
-        owner,
-        plan_id=body.plan_id,
-        security_code=body.security_code,
-        plan_version_ids=body.plan_version_ids,
-        trade_ids=body.trade_ids,
-    )
+    code, _ = _validate_links(conn, owner, plan_id=body.plan_id, security_code=body.security_code, plan_version_ids=body.plan_version_ids, trade_ids=body.trade_ids)
     review_id = uuid.uuid4()
-    conn.execute(
-        insert(reviews).values(
-            id=review_id,
-            user_id=owner,
-            plan_id=body.plan_id,
-            security_code=code,
-            period_start=body.period_start,
-            period_end=body.period_end,
-        )
-    )
-    version = _new_version(
-        conn,
-        owner,
-        review_id,
-        1,
-        start=body.period_start,
-        end=body.period_end,
-        plan_version_ids=list(body.plan_version_ids),
-        trade_ids=list(body.trade_ids),
-        lessons=body.lessons,
-        tags=list(body.tags),
-        judgement=[j.model_dump(mode="json") for j in body.judgement],
-    )
+    conn.execute(insert(reviews).values(id=review_id, user_id=owner, plan_id=body.plan_id, security_code=code, period_start=body.period_start, period_end=body.period_end))
+    version = _new_version(conn, owner, review_id, 1, start=body.period_start, end=body.period_end, plan_version_ids=list(body.plan_version_ids), trade_ids=list(body.trade_ids), lessons=body.lessons, tags=list(body.tags), judgement=[j.model_dump(mode="json") for j in body.judgement])
     conn.execute(update(reviews).where(reviews.c.id == review_id).values(current_version_id=version.id))
     return review_id
 
-def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any) -> uuid.UUID:  # noqa: ANN401
+
+def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any) -> uuid.UUID:
     review = _owned(conn, owner, identifier, lock=True)
     if review.current_version_id is None:
         raise AppError(ErrorCode.NOT_FOUND)
@@ -197,31 +374,13 @@ def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any)
         raise _bad("period_end", "before_period_start")
     ids, tids = list(body.plan_version_ids), list(body.trade_ids)
     code, _ = _validate_links(conn, owner, plan_id=plan_id, security_code=code, plan_version_ids=ids, trade_ids=tids)
-    version = _new_version(
-        conn,
-        owner,
-        identifier,
-        current.version_no + 1,
-        start=start,
-        end=end,
-        plan_version_ids=ids,
-        trade_ids=tids,
-        lessons=body.lessons,
-        tags=list(body.tags),
-        judgement=[j.model_dump(mode="json") for j in body.judgement],
-    )
-    conn.execute(
-        update(reviews)
-        .where(reviews.c.id == identifier)
-        .values(
-            plan_id=plan_id,
-            security_code=code,
-            period_start=start,
-            period_end=end,
-            current_version_id=version.id,
-        )
-    )
+    _new_version(conn, owner, identifier, current.version_no + 1, start=start, end=end, plan_version_ids=ids, trade_ids=tids, lessons=body.lessons, tags=list(body.tags), judgement=[j.model_dump(mode="json") for j in body.judgement])
+    # The parent row points only to the new immutable version. Existing versions
+    # and their snapshots are never updated.
+    newest = conn.execute(select(review_versions).where(review_versions.c.review_id == identifier).order_by(review_versions.c.version_no.desc())).first()
+    conn.execute(update(reviews).where(reviews.c.id == identifier).values(plan_id=plan_id, security_code=code, period_start=start, period_end=end, current_version_id=newest.id if newest else current.id))
     return identifier
+
 
 def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None) -> dict[str, Any]:
     if snapshot_id is None:
@@ -230,11 +389,27 @@ def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None)
     items = row._mapping.get("items") if row is not None else None
     return dict(items) if items else status_block()
 
+
+def _status_for(snap: dict[str, Any], period_end: dt.date | None) -> dict[str, Any]:
+    if period_pending(period_end):
+        return status_block(reason="not_yet_published", message=pending_message())
+    gaps = normalise_gaps(snap.get("gaps"), "outcome_metrics")
+    if not gaps:
+        for name, metric in (snap.get("outcome_metrics") or {}).items():
+            for gap in normalise_gaps(metric.get("gaps"), name):
+                if gap not in gaps:
+                    gaps.append(gap)
+    return {"data_status": snap.get("data_status", "unavailable"), "data_as_of": snap.get("data_as_of"), "gaps": gaps}
+
+
 def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_end: dt.date | None = None) -> dict[str, Any]:
     snap = _snapshot(conn, owner, row.snapshot_id)
-    metrics = project_metrics(row.outcome_metrics or snap.get("outcome_metrics", {}), period_end=period_end)
-    pending = period_pending(period_end)
-    status = status_block(reason="not_yet_published") if pending else snap
+    frozen_end = period_end
+    if isinstance(snap.get("period_end"), str):
+        with contextlib.suppress(ValueError):
+            frozen_end = dt.date.fromisoformat(snap["period_end"])
+    metrics = project_metrics(row.outcome_metrics or snap.get("outcome_metrics", {}), period_end=frozen_end)
+    status = _status_for(snap, frozen_end)
     return {
         "id": str(row.id),
         "version_no": row.version_no,
@@ -245,53 +420,40 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
         "tags": list(row.tags or []),
         "attribution": row.attribution or snap.get("attribution", {"judgement": [], "execution": [], "market": []}),
         "outcome_metrics": metrics,
+        "evidence": list(snap.get("evidence", [])),
+        "calculation_as_of": snap.get("calculation_as_of"),
         "created_at": row.created_at.isoformat(),
         "data_status": status.get("data_status", "unavailable"),
         "data_as_of": status.get("data_as_of"),
         "gaps": status.get("gaps", []),
     }
 
+
 def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current: Row[Any] | None) -> list[dict[str, Any]]:
-    result = [
-        {
-            "kind": "review_version",
-            "at": r.created_at.isoformat(),
-            "resource_id": str(r.id),
-            "version_no": r.version_no,
-            "evidence_ids": [],
-        }
-        for r in conn.execute(select(review_versions).where(review_versions.c.review_id == identifier).order_by(review_versions.c.version_no.asc())).all()
-    ]
+    result: list[dict[str, Any]] = []
+    versions = conn.execute(select(review_versions).where(review_versions.c.review_id == identifier).order_by(review_versions.c.version_no.asc())).all()
+    for version in versions:
+        snap = _snapshot(conn, owner, version.snapshot_id)
+        ids = [str(item.get("id")) for item in snap.get("evidence", []) if item.get("id")]
+        result.append({"kind": "review_version", "at": version.created_at.isoformat(), "resource_id": str(version.id), "version_no": version.version_no, "evidence_ids": ids})
     if current is not None and current.plan_version_ids:
-        result.extend(
-            {
-                "kind": "plan_version",
-                "at": r.created_at.isoformat(),
-                "resource_id": str(r.id),
-                "version_no": r.version_no,
-                "evidence_ids": [],
-            }
-            for r in conn.execute(select(plan_versions).where(plan_versions.c.id.in_(current.plan_version_ids))).all()
-        )
+        plan_rows = conn.execute(select(plan_versions).where(plan_versions.c.id.in_(current.plan_version_ids))).all()
+        plan_evidence = {str(item.get("value")): str(item.get("id")) for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", []) if item.get("key") == "plan_version"}
+        result.extend({"kind": "plan_version", "at": r.created_at.isoformat(), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
     if current is not None and current.trade_ids:
-        result.extend(
-            {
-                "kind": "trade",
-                "at": r.created_at.isoformat(),
-                "resource_id": str(r.id),
-                "version_no": None,
-                "evidence_ids": [],
-            }
-            for r in conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
-        )
+        trade_rows = conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
+        evidence = {str(item.get("value")): str(item.get("id")) for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", []) if item.get("key") == "trade"}
+        result.extend({"kind": "trade", "at": (_executed_at(r) or _now()).isoformat(), "resource_id": str(r.id), "version_no": None, "evidence_ids": [evidence[str(r.id)]] if str(r.id) in evidence else []} for r in trade_rows)
     result.sort(key=lambda item: item["at"])
     return result
+
 
 def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str, Any]:
     review = _owned(conn, owner, identifier)
     current = None if review.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == review.security_code)).scalar()
     snap = _snapshot(conn, owner, current.snapshot_id) if current is not None else status_block()
+    status = _status_for(snap, review.period_end)
     return {
         "id": str(review.id),
         "plan_id": str(review.plan_id) if review.plan_id else None,
@@ -303,14 +465,16 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
         "created_at": review.created_at.isoformat(),
         "current_version": version_body(conn, owner, current, period_end=review.period_end) if current is not None else None,
         "timeline": _timeline(conn, owner, identifier, current),
-        "evidence": [],
-        **({k: (status_block(reason="not_yet_published") if period_pending(review.period_end) else snap).get(k) for k in ("data_status", "data_as_of", "gaps")}),
+        "evidence": list(snap.get("evidence", [])),
+        **status,
     }
+
 
 def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
     version = None if row.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == row.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == row.security_code)).scalar()
     snap = _snapshot(conn, row.user_id, version.snapshot_id) if version is not None else status_block()
+    status = _status_for(snap, row.period_end)
     return {
         "id": str(row.id),
         "plan_id": str(row.plan_id) if row.plan_id else None,
@@ -319,7 +483,6 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "period_start": row.period_start.isoformat(),
         "period_end": row.period_end.isoformat(),
         "current_version_no": version.version_no if version is not None else None,
-        "current_version": version_body(conn, row.user_id, version, period_end=row.period_end) if version is not None else None,
         "created_at": row.created_at.isoformat(),
-        **({k: (status_block(reason="not_yet_published") if period_pending(row.period_end) else snap).get(k, "unavailable" if k == "data_status" else [] if k == "gaps" else None) for k in ("data_status", "data_as_of", "gaps")}),
+        **status,
     }
