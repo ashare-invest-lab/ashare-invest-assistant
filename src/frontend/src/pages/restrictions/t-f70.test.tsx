@@ -70,6 +70,55 @@ describe('T-F70 /restrictions R6', () => {
     expect(screen.queryByTestId('restriction-list-gaps')).not.toBeInTheDocument();
   });
 
+  it('整页重挂载会再次请求列表并展示最新载荷', async () => {
+    let calls = 0;
+    const refreshed: Restriction = { ...restriction, id: 'restriction-refreshed', target_id: '000001.SZ', name: '刷新后证券' };
+    server.use(http.get(`${API}/restrictions`, () => {
+      calls += 1;
+      return HttpResponse.json({ items: calls === 1 ? [restriction] : [refreshed], next_cursor: null, gaps: [] });
+    }));
+    const view = render(<AppProviders client={makeQueryClient(true)}><MemoryRouter><RestrictionsPage /></MemoryRouter></AppProviders>);
+    expect(await screen.findByText('示例银行')).toBeInTheDocument();
+    expect(calls).toBe(1);
+
+    view.unmount();
+    render(<AppProviders client={makeQueryClient(true)}><MemoryRouter><RestrictionsPage /></MemoryRouter></AppProviders>);
+    expect(await screen.findByText('刷新后证券')).toBeInTheDocument();
+    expect(calls).toBe(2);
+    expect(screen.queryByText('示例银行')).not.toBeInTheDocument();
+  });
+
+  it('限制项和列表/重查缺口的未知枚举一律显示未知', async () => {
+    const unknownItems: Restriction[] = [
+      { ...restriction, id: 'restriction-unknown-proto', kind: '__proto__' as Restriction['kind'], target_type: 'constructor' as Restriction['target_type'], status: 'unfamiliar-status', target_id: 'example-unknown-proto', name: null },
+      { ...restriction, id: 'restriction-unknown-constructor', kind: 'constructor' as Restriction['kind'], target_type: 'unfamiliar-target' as Restriction['target_type'], status: '__proto__', target_id: 'example-unknown-constructor', name: null },
+      { ...restriction, id: 'restriction-unknown-unfamiliar', kind: 'unfamiliar-kind' as Restriction['kind'], target_type: '__proto__' as Restriction['target_type'], status: 'constructor', target_id: 'example-unknown-unfamiliar', name: null },
+    ];
+    const listGaps = [
+      { key: 'restriction.list.proto', reason: '__proto__', message: '列表原型键缺口' },
+      { key: 'restriction.list.constructor', reason: 'constructor', message: '列表构造键缺口' },
+      { key: 'restriction.list.unfamiliar', reason: 'unfamiliar-gap-reason', message: '列表未列缺口' },
+    ];
+    const recheckGaps = [
+      { key: 'restriction.recheck.proto', reason: '__proto__', message: '重查原型键缺口' },
+      { key: 'restriction.recheck.constructor', reason: 'constructor', message: '重查构造键缺口' },
+      { key: 'restriction.recheck.unfamiliar', reason: 'unfamiliar-gap-reason', message: '重查未列缺口' },
+    ];
+    server.use(
+      http.get(`${API}/restrictions`, () => HttpResponse.json({ items: unknownItems, next_cursor: null, gaps: listGaps })),
+      http.delete(`${API}/restrictions/:id`, () => HttpResponse.json({
+        id: unknownItems[0].id, removed_at: '2026-11-21T10:03:00+08:00',
+        recheck: { released_reason_ids: [], remaining_reason_ids: ['reason-unknown'] }, gaps: recheckGaps,
+      })),
+    );
+    renderPage();
+    expect(await screen.findAllByText('未知')).toHaveLength(9);
+    expect(screen.getByTestId('restriction-list-gaps')).toHaveTextContent('未知（列表原型键缺口）；未知（列表构造键缺口）；未知（列表未列缺口）');
+    await userEvent.setup().click(await screen.findByTestId(`restriction-delete-${unknownItems[0].id}`));
+    expect(await screen.findByTestId('restriction-recheck-gaps')).toHaveTextContent('未知（重查原型键缺口）；未知（重查构造键缺口）；未知（重查未列缺口）');
+    expect(screen.getByTestId('restriction-recheck')).toHaveTextContent('当前状态不能判定为解除');
+  });
+
   it('展示列表与删除重查 gaps，gap 时不宣称解除或可交易', async () => {
     const gap = { key: 'restriction.recheck', reason: 'no_source', message: '重查来源缺失' } as const;
     server.use(
