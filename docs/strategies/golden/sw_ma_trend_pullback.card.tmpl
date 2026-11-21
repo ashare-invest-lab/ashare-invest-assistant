@@ -1,4 +1,6 @@
 # W-01 波段·均线趋势回踩 `sw_ma_trend_pullback` — 正式卡 v4（T-R88；v2 为 T-R20；v1 为 T-R15）
+> **v4 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v3 → v4；补充可直接读取的 `min_list_days` 整数交易日字段，默认 120 个交易日。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v3 原文冻结在 `cards/history/sw_ma_trend_pullback.v3.md`。
+
 > **v3 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v2 → v3；本版除补参数出处外，还补 A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v2 原文冻结在 `cards/history/sw_ma_trend_pullback.v2.md`。新版本须重新导入并重跑 G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待 Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
 > 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card` / `strategy-spec` / `validation`），导入器只读这三块，正文存为 `narrative`。
@@ -12,6 +14,7 @@
 - **优先级**：持有中 → 只看 exit（exit > hold）；未持有 → veto > insufficient_data > entry_ok > not_triggered。G-01/N-01 由系统挂载，见 `system_components_T-R15.md`。
 
 ## 时点 / 单位 / 复权 / 预热
+- **上市年龄资格（`min_list_days`）**：字段为整数，单位是交易日；默认值 120。深圳证券信息有限公司（国证指数）英文版深证成指编制方法页规定纳入证券须在深交所上市超过 6 个月（https://www.cnindex.com.cn/sgt/sgt_en/szcz_en/szcz_zsbz_en/index.html）。本卡按约每月 20 个交易日换算为 120 个交易日，换算及 A 股有效性未验证（待复测）。
 - 日线盘后（`daily_close`）求值，只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价（出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154）；季报类特征按 plrq 次一交易日 09:30 可见；公告按 2.12.2 次日开盘生效。无未来数据。
 - **价格口径（plan 2.5.14 T-R15 裁定⓪）**：全部价格规则统一 qfq，基准日 = as_of（T）：`x_qfq(d)=x(d)×A(d)/A(T)`，A(d) 只用 T 日已可得的除权信息；T 日 qfq 值即不复权值。计划价持久化为不复权，规则只用求值器派生的 `plan.entry_price_qfq`；`ctx.last_price` 只与同为不复权的 `plan.stop_loss` 比较。用 qfq@T 算出的止损价就是 T 日不复权价。成交额 `f.amount` 单位元。ATR 为 Wilder（首值取前 14 个 TR 简单平均，warmup 15）。
 - 预热：MA60 + `trend_days`−1 = 64 根（默认），60 日最高 60 根，ATR14 15 根，RSI14 28 根 → **warmup 65 根有效日 K**（按参数上限 120+20−1=139）；停牌日不计入有效 K；不足 → `insufficient_data`。`for N days` 按有效日 K 计数。
@@ -147,8 +150,9 @@ fit: {effort: low, risk_tolerance_min: 3, experience_min: novice}
 
 ```yaml strategy-spec
 key: sw_ma_trend_pullback
-version_no: 3
+version_no: 4
 kind: rule_template
+min_list_days: 120
 horizons: [swing]
 params_schema:
   ma_fast: {type: int, default: 20, min: 10, max: 30, step: 1, desc: 快均线周期, unit: 有效日K}

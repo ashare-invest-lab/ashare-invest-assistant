@@ -1,5 +1,5 @@
 # S-01 短线·强势股回踩 `st_pullback_ma` — 正式卡 v4（T-R88；v2 为 T-R55；v1 为 T-R25 首次正式化）
-> **v4 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v3 → v4；补充可直接读取的 `min_list_days` 整数交易日字段，默认 60 个交易日。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v3 原文冻结在 `cards/history/st_pullback_ma.v3.md`（快照仅含机器块，完整原文以提交 be0bbc9e 为准）。
+> **v4 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v3 → v4；补充可直接读取的 `min_list_days` 整数交易日字段，默认 60 个交易日。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v3 原文冻结在 `cards/history/st_pullback_ma.v3.md`。
 
 > **v3 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v2 → v3；本版除补参数出处外，还补 A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`。新版本须重新导入并重跑 G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待 Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 > **v2 变更（T-R55，按编排者裁定 S-01 升 v2）**：v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`（v1 原文冻结＝提交 055105a 的卡，即 T-B100 导入库内的 v1 内容；库内 v1 审核作废，须按 v2 重新导入并重跑 G1–G6）。相对 055105a，v1 版本号下曾有两次未升号的改动，现随 v2 一并生效：① fe2afa5（T-R40）：S01-FX1–FX8 八个夹具的 desc 前缀改为「【虚构】」（原为【入场】【不满足】等场景标签），夹具数值与期望不变；② 4c00ae7（T-R43）：卡头「与草稿的差异」增 ③「v1 选股只扫持仓 ∪ 自选」说明（screen:null、全市场 DSL 暂缓，T-A83 ④）；validation 末尾新增 S01-FX9（反证 C1 正例）与 S01-FX10（反证 C2 正例）两个【虚构】夹具。规则、参数、阈值、data_needs、universe、screen、costs 均未改；本次只把 version_no 1→2（:29、:92），并改本标题与本行。

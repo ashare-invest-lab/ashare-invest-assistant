@@ -1,5 +1,5 @@
 # H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v5（T-R88；v3 为 T-R49；v2 为 T-R20，v1 为 T-R15，纯离场系统组件）
-> **v5 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v4 → v5；新增 `min_list_days` 整数交易日字段，默认 250 个交易日；**只用于 G6 历史样本资格筛选，不门控持仓风险实时求值**（新上市持仓照常体检），规则与 data_needs 不变。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v4 原文冻结在 `cards/history/hold_risk_monitor.v4.md`（快照仅含机器块，完整原文以提交 be0bbc9e 为准）。
+> **v5 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v4 → v5；新增 `min_list_days` 整数交易日字段，默认 250 个交易日；**只用于 G6 历史样本资格筛选，不门控持仓风险实时求值**（新上市持仓照常体检），规则与 data_needs 不变。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v4 原文冻结在 `cards/history/hold_risk_monitor.v4.md`。
 
 > **v4 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v3 → v4；本版除补参数出处外，还补 A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v3 原文冻结在 `cards/history/hold_risk_monitor.v3.md`。新版本须重新导入并重跑 G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待 Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
