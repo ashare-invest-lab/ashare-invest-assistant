@@ -10,7 +10,7 @@
 
 ### v0.2.11（2026-11-20，T-B187：市场快照契约）
 
-- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。
+- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。第2次修订（T-R109/R346）：`ReviewSummary.current_version_no` 缺版本时可空；`calculation_as_of` 不对外、`Stat` 不带 `gaps`，指标缺口归顶层。
 
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
@@ -1188,7 +1188,7 @@ evidence: Evidence[]
 | `ReviewSummary.security_code` | `string \| null`，证券代码；与 §1 证券代码格式一致 |
 | `ReviewSummary.name` | `string \| null`，证券简称；`security_code` 为 `null` 时为 `null`，有代码但主数据缺失时可回退为代码 |
 | `ReviewSummary.period_start`, `period_end` | `string(date)`，必填；复盘期间闭区间，`period_end` 不早于 `period_start` |
-| `ReviewSummary.current_version_no` | `int`，≥1，无单位 |
+| `ReviewSummary.current_version_no` | `int \| null`，≥1，无单位；仅历史缺版本（`current_version=null`）时为 `null` |
 | `ReviewSummary.created_at` | `string(datetime)`，必填 |
 | `ReviewDetail.current_version` | `ReviewVersion \| null`；新建记录必有，旧数据缺版本时为 `null` |
 | `ReviewDetail.timeline` | `ReviewTimelineItem[]`，按 `at` 升序；无事件为 `[]` |
@@ -1230,7 +1230,7 @@ evidence: Evidence[]
 
 四项结果指标的定义、输入、停牌和未平仓边界、样本门槛以 [T-R103 复盘与建议跟踪指标口径卡](./strategies/T-R103/review_tracking_metrics.md) §2 为准。`holding_return` 使用同一复权口径的入场与退出端点，`benchmark_return` 使用同一时点和窗口的基准端点，`excess_return = holding_return - benchmark_return`，`max_drawdown` 按窗口内逐日路径峰值计算，不对各笔回撤简单平均。费用、现金流、分红、未平仓或行业基准任一输入不可追溯时，保留可计算字段，其余 `value=null` 并记录缺口，不用模拟跟踪结果替代实际成交。
 
-每个指标只纳入 `available_at <= calculation_as_of` 且已到达窗口端点的数据，`as_of` 截断后不因当前时钟已收盘而放行旧盘中或未来修订数据。`n` 只计入有效、已结束且必需端点齐全的观测；`n<5` 时 `value=null`，`5≤n<30` 时保留十进制值并 `small_sample=true`，`n≥30` 时 `small_sample=false`。未知、缺失和不可成交不转成 0，不伪造样本数。版本快照冻结当时的计划、成交、证据和指标，后续数据只能生成新版本。
+每个指标只纳入 `available_at <= calculation_as_of` 且已到达窗口端点的数据，`as_of` 截断后不因当前时钟已收盘而放行旧盘中或未来修订数据。`n` 只计入有效、已结束且必需端点齐全的观测；`n<5` 时 `value=null`，`5≤n<30` 时保留十进制值并 `small_sample=true`，`n≥30` 时 `small_sample=false`。未知、缺失和不可成交不转成 0，不伪造样本数。版本快照冻结当时的计划、成交、证据和指标，后续数据只能生成新版本。`calculation_as_of` 由服务端在保存版本时确定并冻结在快照内，**不作为对外字段**；对外只给 `data_as_of`。`Stat` 沿用 §5 共享结构，**不带 `gaps`**；指标缺口一律进所在对象顶层 `gaps`，`key` 写 `outcome_metrics.<指标名>`，`reason` 只用 §3 `gap_reason`（T-R109 裁定）。
 
 错误码只复用 §4 既有表：参数或关联不一致为 `400 VALIDATION_ERROR`，不存在或非本人资源为 `404 NOT_FOUND`，未开放方法为 `405 METHOD_NOT_ALLOWED`，幂等键冲突为 `409 IDEMPOTENCY_CONFLICT`，乐观并发冲突为 `409 VERSION_CONFLICT`。本节不新增错误码。
 
