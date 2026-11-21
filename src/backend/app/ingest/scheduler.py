@@ -59,7 +59,6 @@ class Scheduler[T]:
         self._plan_records[plan_id] = record
         return True
 
-
     # ------------------------------------------------------------ 入队/查询
 
     def submit(self, licence_id: LicenceId, priority: Priority, item: T) -> None:
