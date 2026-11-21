@@ -14,9 +14,9 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 | 数据/频率 | 出处与实现边界 |
 | --- | --- |
-| 个股实时快照 | 矩阵§1“自选”：`/hsstock/real/time`、`/hsrl/ssjy_more`，多股≤20；仅1只/1窗口测得延迟中位约7秒，不是 SLA。字段、价量额单位、累计口径、ETF覆盖未验证 U8；不猜字段映射。 |
-| 1分钟不复权 | 矩阵§1“自选”、§5 N4：`/hsstock/pro/latest/.../1/n`，部分/未实测；分钟线不复权，5分钟传 f 曾返回503。请求参数、时间戳、单位、完整分钟判据及盘后补齐能力未验证 U8；不能据此宣称1m已可生产。 |
-| 全市场快照 | 矩阵§1“日报”提及 `/hsrl/ssjy/all` 与收盘样本；矩阵§2限1次/分钟。盘中全量覆盖/批次/终值未验证 U1/U2；只作为①市场快照的独立任务，不把本人股票池当全市场，不额外承诺备用端点。 |
+| 个股实时快照 | T003 §1、§16 已观察 `/hsstock/real/time`、`/hsrl/ssjy_more` 的字段集合；`real/time` 的 v=手、cje=元、pv=股，网络源 `ssjy` 的 v=万手、cje=元仅对抽样成立。累计重置、ETF覆盖、全字段生产覆盖仍未验证 U8；不跨源套单位。 |
+| 1分钟不复权 | 矩阵§1“自选”、§5 N4：`/hsstock/pro/latest/.../1/n`，1m 未实测；分钟线不复权，5分钟传 f 曾返回503。请求参数、字段与单位、结束时点、完成判据、修订和盘后补齐仍未验证 U8；不能据此宣称1m已可生产。 |
+| 全市场快照 | T003 §1、§16 观察 `/hsrl/ssjy/all` 有统一 t 和字段集合，但包含非股票品种；`/hsrl/real/all` 有重复和缺漏，不作主源。指数实时字段、沪深资格过滤、跨轮批次一致性及15:05终值仍未验证 U1；不把单股或单批外推为全市场能力。 |
 | 系统目标频率 | `config/realtime.yaml`：快照15秒/轮，全市场60秒，Pro Tier-1 60秒、Tier-2 300秒；stale阈值缺省为2×快照间隔。均是配置目标，非实测供应商刷新频率；股票池按 plan§0A.3 本人持仓∪自选、重点关注分层、剔除有证据的停牌/退市，不扩全市场分钟采集。 |
 | 配额与单出口 | 矩阵§2：钻石版6000次/分钟、全市场1次/分钟，同证书60秒超过2个IP报429/103；不是允许团队使用双出口。`config/ingest.yaml` 每证书默认预算3000、P0份额0.7、盘中P2为0；按实际档位/剩余额度排队，不能以文档上限许诺池容量。 |
 
@@ -24,11 +24,11 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 ### 0.2 时段、存储、口径与缺数
 
-- 时段只用 `src/backend/app/aggregates/calendar.py:market_clock` 和 `config/market_rules.yaml` 生效段（北京时间），不以工作日猜日历。09:15–09:25 开盘集合竞价按 plan§0A.3 不刷新/不改变建议，展示上一收盘并标注；这只是本系统策略，供应商竞价能力在允许资料中未验证 U8。09:25–09:30 为 pre_open；09:30–11:30、13:00–14:57 连续交易，14:57–15:00 单列 closing_auction，不能当普通分钟完整性证据；竞价分钟未核实就保留缺口。
+- 时段只用 `src/backend/app/aggregates/calendar.py:market_clock` 和 `config/market_rules.yaml` 生效段（北京时间），不以工作日猜日历。09:15–09:25 开盘集合竞价按 plan§0A.3 不刷新/不改变建议，展示上一收盘并标注；T003 §4 仅证明 `/hsstock/lup/auction` 是盘后字段，供应商盘中竞价能力仍未验证 U8。09:25–09:30 为 pre_open；09:30–11:30、13:00–14:57 连续交易，14:57–15:00 单列 closing_auction，不能当普通分钟完整性证据；竞价分钟未核实就保留缺口。
 - 午休11:30–13:00、闭市/非交易日不继续排连续交易拉取；午休保留上午最后实测时点，不能刷新时间伪装 fresh。收盘后依据上一交易时段收盘判断新鲜度（API§7.9 `/admin/ingest/status`、plan§0A.3）；日历缺覆盖或规则缺段按现有503失败关闭。停牌须有带时点的事实，剔除采集/计算候选；没有bar不等于停牌，禁止补平价零量K（矩阵§1“风控·停牌”、plan§0A.3、API§1.1）。
 - 存储增量按 plan§2.1B/§3.3 与 `src/backend/app/db/tables/market.py`：热缓存键带 licence_id；`quotes_snapshot` 保存可追溯快照，分钟规范化写 `minute_bars source=mairui`，保留行情时点与 fetched_at。现有快照缺证书列、分钟主键仍(code,ts)，须先补来源/证书隔离键与迁移，再接读写，不能不同证书覆盖同一分钟；旧无归属行不冒领，缺字段不落伪值（U9）。
 - 保留按已有来源分别列出：plan§0A.3 热缓存TTL 3分钟；§3.3快照当日+近5日，`realtime_quotes` 分钟降采样10个交易日；`deploy/db/timescale/policies.conf` 对后者配21日历日、7天后压缩，分钟配1095日；但 `docs/contracts/intraday-bars.md` §2.2保守默认“不自动删除”、持仓自选推荐3年。表名映射、交易日/日历日及清理优先级未验证 U10；不混称同一保留期，不自动启用新增删除任务，先裁定再做离线清理预览。PG只接麦蕊盘中分钟，TDX/HF离线历史仍走文件目录（该契约§1.2/§3.4）。
-- 盘中快照量额与分钟bar量额不得互换；累计/单根语义先核 U8。1m使用Bar结束时间（库列注释），仅返回 ts≤观察时刻且 fetched_at≤知识截止的真实行；迟到修正不回填旧信号/日报。15:00只是时段结束，不能将最后盘中快照改标“正式日线”；矩阵§1/§2的约17:10是文档完成时间，实际定稿仍未验证 U1，日报沿 `daily_snapshot.py` 17:30截止与冻结版本规则。
+- 盘中快照量额与分钟bar量额不得互换；快照累计/分钟单根语义仍核 U8。1m使用Bar结束时间（库列注释），仅返回 ts≤观察时刻且 fetched_at≤知识截止的真实行；迟到修正不回填旧信号/日报。15:00只是时段结束，不能将最后盘中快照改标“正式日线”；15:05只可作为 F24 的可得下限，来源完成事实和终值仍未验证 U1，日报沿 `daily_snapshot.py` 17:30截止与冻结版本规则。
 - 缺数沿共用 `gap_reason`：未接线/无可用行→no_source；真实已排程且尚待发布→not_yet_published；有配额延期→quota_deferred；有故障事实→upstream_error；证书不可用→data_licence_unavailable。缺字段null、保留真0（公共Bar必需量额例外：省根留缺口，见 §0.3 量额结构）；旧数据stale、部分缺失partial、全缺unavailable；不伪造、不插值、不前视。停牌细分枚举尚未落契约时用no_source并解释停牌事实（backlog A2b）；不新造 suspended/not_wired，不把未入队说成pending。
 - 与 #185：`src/backend/app/marketdata/quotes_read.py:read_quotes` 当前只回退本人合格日线，量额null、恒stale；拟先校验证书，再优先本人可用实时缓存（过期仍标stale），无可用实时才走现有日线过滤，最后null/gap；GET不触发上游。实时与日线整项选源，不能拼实时价＋旧日量额。T-B185若先补日线量额，须标收盘口径，不能提升为实时fresh；terminal统一复用读取器，保留其他未接线gap（API§1.1 T-A173、§7.3、T-O111建议1/2）。
 
@@ -102,10 +102,10 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 | 输入/参数 | 候选来源与出处 | 使用边界 |
 | --- | --- | --- |
-| 指数清单；price/change_pct/amount/t | 清单由后端配置（API §7.3 `/market/overview`）；矩阵§1只支持指数日线候选 `/hsindex/history/000300.SH/d`；指数实时端点在两份允许资料中未验证 U1 | 不把指数清单写死为本报告样例；实时字段映射、单位、指数实际覆盖未验证 U1；缺哪只就保留该只 null/gap。 |
-| 沪深股票涨跌家数、上涨占比 | `/hsrl/ssjy/all`见矩阵§1；字段映射未验证 U1；计算规则来自 `docs/strategies/feature_spec.md` F24：d 日沪深 stock、有成交、剔除北交所与非股票；上涨用快照 pc>0、平盘不算上涨、停牌不进分母 | 快照pc/日线pc语义须逐字段核验（U1），不能同名直连。盘中数为暂态；收盘 F24 在15:05后，4位小数 ratio；单位与实际定版仍未验证 U1。 |
-| 跌/平、成交额 | 同一批已验证快照中 pc<0/pc=0；两市成交额按上述股票范围累加 cje（页面需求见MarketPage；cje映射/单位在允许资料中未验证 U1） | 本方案按 F24 统一沪深范围，不称沪深北全 A；主数据在观察时点的资格和快照覆盖未验证 U2；不得使用固定5577作分母。 |
-| 涨停/跌停家数 | 矩阵§5 N6提及涨停股池约30天回溯；实时涨跌停端点/字段在允许资料中未验证 U4；计算规则见plan§2.13与feature_spec | 只采用同日同范围已验证封板事实；盘中当前封板与盘后收盘封板分开；不以统一±10%猜涨跌停。具体缓存字段/覆盖未验证 U4。 |
+| 指数清单；price/change_pct/amount/t | 清单由后端配置（API §7.3 `/market/overview`）；T003 §7 只列 `/hsindex/real/time`，未提供返回字段或覆盖实测 | 实时字段映射、单位和指数实际覆盖仍未验证 U1；缺哪只就保留该只 null/gap，不把股票快照字段外推到指数。 |
+| 沪深股票涨跌家数、上涨占比 | T003 §1、§16 观察 `/hsrl/ssjy/all` 字段含 pc、cje，且券商全市场批次 t 统一；接口含非股票品种，网络源有缺漏/重复 | 仅在沪深 stock 资格池、同一批次且字段语义核实后计算；pc>0/0/<0 规则可沿 F24，盘中为暂态；15:05 后终值与覆盖仍未验证 U1。 |
+| 跌/平、成交额 | T003 §16：`real/time`/日线金额为元，网络 `ssjy` cje 为元；`multi-source-ingest.md` §2.4 记 `ssjy/all` cje 取整到百元 | 本方案按 F24 统一沪深范围，不称沪深北全 A；不把全市场行数当资格池，不在单位或覆盖未核实前输出总额。 |
+| 涨停/跌停家数 | T003 §4 仅有文档字段：`/hslt/{ztgc|dtgc}` 股池、`/hsstock/lup/limit` 个股盘后字段；没有实测 | 只采用同日同范围、带来源时点的封板事实；盘中当前封板与盘后封板分开；特殊制度、字段覆盖和沪深范围未验证 U4，不以统一±10%猜。 |
 | regime、参考仓位区间 | F25（feature_spec）：指数 MA20/MA60＋20日宽度、连续2日防抖；有效指数不足45根或宽度不足15值→null；正式阈值由 G-02 定；区间取 RC3 `regime_ranges`（API §5.3、plan §6.1） | F25正式参数/可运行产物未验证 U3；不套用示例阈值，不用仅指数的 F50替代；缺 F25时区间也为null，RC3仍按缺失处理。 |
 | 本地日线库 | `src/backend/app/marketdata/daily_bars.py:upsert_daily_bars`、`daily_universe`；`src/backend/app/marketdata/daily_snapshot.py:build_owned_snapshot` | 可复用本人合格指数/日线读取条件，不能用持仓∪自选当市场样本；全市场回算宽度须另行变更源契约§9.6，本轮主方案采用独立市场快照，不全库扫描。 |
 | 通达信本地 | `docs/contracts/daily-bars-tdx.md` §2–§4：none、tdx_local、pre_close/is_suspended=null，股票价÷100、量=股、额=float32元 | 仅离线研究/核对；不能作为本方案日报市场环境的自动回退。无前收不能用昨收冒充除权参考价，无行不推断停牌。本次不读实际文件。 |
@@ -229,14 +229,14 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 | 编号 | 未验证内容与关闭条件 | 影响 |
 | --- | --- | --- |
-| U1 | 麦蕊指数/全市场快照字段、pc/cje单位、批次一致性及15:05终值；需已有授权采集的脱敏证据逐字段核验，本次不实调 | M2/M3/M4实源接入；离线适配器可先做 |
+| U1 | **部分关闭**：T003 §1、§16 已核实单股/`ssjy_more` 字段集合、pc 为涨跌幅、cje 为元、两种 v 单位差异；`ssjy/all` 单批 t 统一。指数返回字段、沪深资格过滤、跨批一致性及15:05终值仍需核验 | M2/M3/M4 实源接入仍受剩余缺口约束；不把一次批次视为终值证据 |
 | U2 | 历史时点资格池、成交/停牌事实和全量覆盖；需冻结主数据及源批次对账，不能用当前名单补历史 | 市场覆盖、历史筛选 |
 | U3 | F25正式G-02参数、运行门禁及可用历史产物；feature_spec明说示例阈值非正式，须按卡版本核对 | regime/区间保持null；不阻塞指数展示 |
-| U4 | 涨跌停来源字段、时点、沪深范围与特殊交易制度覆盖；需与规则和源缓存核对 | 旧breadth整体可用性 |
+| U4 | **未关闭**：仅有 T003 §4 的公开字段/路径摘录；没有允许证据证明来源行、时点、沪深范围和 ST/新股/板块制度覆盖 | `breadth.limit_up/limit_down` 保持 null+gap，不能以规则阈值替代源字段 |
 | U5 | 实际复盘收益/费用/现金流/分红/未平仓、行业基准及样本口径；需形成有依据的指标定义和手算样例 | V4结果指标；不阻塞笔记与时间线 |
 | U6 | 策略筛选支持矩阵、完整截面缓存生产、研究日线读取范围；需版本级字段与已有生产读链映射 | D2/D3；不阻塞discover跳转 |
 | U7 | T-O111只证明其观察窗口，当前运行数据未复查；backlog末项给出87项分类18未做/69未验证，未逐项重验；T-A136成本是旧估算 | 不承诺上线消除所有缺口或容量 |
-| U8 | 实时/1m完整字段、单位、累计/单根量额、结束时点/修订/盘后补齐、竞价及ETF覆盖；需允许资料补入既有授权脱敏证据，缺失继续标未验证，不能自行实调 | I1/I5/I6与live；离线假数据仅证实现，不证能力 |
+| U8 | **部分关闭**：T003 §1、§16 已核实抽样快照字段与 Q1/Q2 单位，T003 §4 证明竞价接口为盘后字段；1m 字段/单位/结束时点、累计与单根语义、修订/盘后补齐、盘中竞价和 ETF 覆盖仍未验证 | I1/I5/I6 与 live；离线夹具和 TDX 实测只证明内部目标，不证麦蕊 1m 能力 |
 | U9 | 快照/分钟来源证书键与旧数据兼容、读侧知识截止、完成记录对接；以源码及离线迁移/双证书夹具关闭，现场状态不据此宣称已修 | I2/I8/I9与live |
 | U10 | quotes_snapshot/realtime_quotes映射与保留冲突：近5日、10交易日/21日历日、分钟不自动删/1095天；须有引用依据的统一裁定及预览对账 | I10与live清理配置，未关闭不新增自动删除 |
 
@@ -259,7 +259,7 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 ## 8. 本次验收
 
-本次静态文档验收已通过：不导入应用、不启动服务/pytest、不连数据库、不加载.env/密钥；只改本文件，代码只读，不联网、不真调、不提交、不push。执行下列命令核对全文≤300行、五项排序、16+31=47单/步骤、每单≤400行含测试、10组未验证、引用函数与允许修改范围；stdout仅3行计数。
+本次静态文档验收已通过：不导入应用、不启动服务/pytest、不连数据库、不加载.env/密钥；只改允许的三份盘中契约，代码只读，不联网、不真调、不提交、不push。执行下列命令核对全文≤300行、五项排序、16+31=47单/步骤、每单≤400行含测试、10组未验证、引用函数与允许修改范围；stdout仅3行计数。
 ```bash
 python3 -B - <<'PY'
 from pathlib import Path
@@ -278,7 +278,9 @@ for name in set(re.findall(r'(?:docs|src|config|deploy)/[A-Za-z0-9_./-]+\.(?:md|
     assert Path(name).is_file(), name
 for name in ('/workspace/team/reports/T-O111.md', '/workspace/team/tasks/BACKLOG-1116-gaps.md'):
     assert Path(name).is_file()
-assert subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines() == [str(p)]
+assert subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines() == sorted([
+    str(p), 'docs/contracts/T-B195-intraday-field-evidence.md', 'docs/contracts/intraday-bars.md'
+])
 assert not subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).strip()
 assert not subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], text=True).strip()
 subprocess.run(['git', 'diff', '--check'], check=True)
