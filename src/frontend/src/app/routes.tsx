@@ -24,6 +24,7 @@ export const routes: RouteObject[] = [
   {
     path: '/',
     element: <AppShell />,
+    hydrateFallbackElement: <AppShell />,
     children: [
       // 评审 T-F08 m1：首页落在“今日关注”
       { index: true, element: <Navigate to="/today" replace /> },
