@@ -5,13 +5,14 @@ document: review_tracking_metrics
 task: T-R103
 lifecycle: draft
 scope: 候选信号的模拟跟踪、实际成交复盘及实盘与样本外回测对比
+G7: ☐
 ```
 
 ## 1. 边界与共同规则
 
 本卡只描述候选信号的记录与复盘口径，不构成荐股、买卖指令或收益承诺。模拟跟踪、实际成交和样本外回测必须分开保存，不能用模拟结果代替用户实际收益，也不能用实际成交结果回填历史候选信号。
 
-一条观测的去重键为 `suggestion_id`、`strategy_version_id`、`horizon_days`。`horizon_days` 只取 1、5、20 个交易日，统计窗口以交易所交易日历计数。字段沿用现有结果模型，包括 `action`、`state`、`entry_at`、`entry_price`、`exit_at`、`exit_price`、`return_pct`、`benchmark_code`、`benchmark_return_pct`、`excess_pct`、`max_drawdown_pct`、`direction_correct`、`invalidation_triggered_at`、`cost_applied`、`gaps`、`n` 和 `small_sample`。字段存在不等于数据链路已验收。
+一条观测的去重键为 `suggestion_id`、`strategy_version_id`、`horizon_days`。`horizon_days` 只取 1、5、20 个交易日，统计窗口以交易所交易日历计数。复盘接口对外字段以 #349 §7.8 定稿为准，四项指标为 `holding_return`、`benchmark_return`、`excess_return`、`max_drawdown`，每项均为 `Stat`。`entry_price`、`exit_price`、`benchmark_code`、`price_basis` 等只属于计算输入或证据，不替代接口字段。字段存在不等于数据链路已验收。
 
 计算时固定 `generated_at`、`data_as_of`、`available_at`、交易日历版本、行情版本、复权因子版本、基准代码和成本表。只使用在本次计算时点已经可见且业务日期不晚于到期日的数据。迟到、修订或后来复牌的数据不能改写已经冻结的历史观测。缺字段输出 `null` 并记录 `gaps`，不以零、邻日价格或当前时钟补值。
 
@@ -27,9 +28,9 @@ scope: 候选信号的模拟跟踪、实际成交复盘及实盘与样本外回�
 
 ```text
 hit_rate = 命中观测数 / 有效观测数
-buy/add       命中 ⇔ excess_pct > 0
-sell/reduce   命中 ⇔ excess_pct < 0
-hold          命中 ⇔ |excess_pct| ≤ θ_h
+buy/add       命中 ⇔ excess_return.value > 0
+sell/reduce   命中 ⇔ excess_return.value < 0
+hold          命中 ⇔ |excess_return.value| ≤ θ_h
 θ_1=1.0%，θ_5=2.0%，θ_20=5.0%
 ```
 
@@ -45,12 +46,12 @@ hold          命中 ⇔ |excess_pct| ≤ θ_h
 
 ### 2.2 持有期收益
 
-**定义。** 持有期收益按实际模拟入场与到期退出的同一复权口径计算。现有字段 `return_pct` 以百分比保存。价格比值收益与绩效评价中的区间收益定义一致，风险指标和收益口径的公开方法见 [CFA Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation)。
+**定义。** 持有期收益按实际模拟入场与到期退出的同一复权口径计算，接口字段为 `holding_return.value`，单位为百分数。价格比值收益与绩效评价中的区间收益定义一致，风险指标和收益口径的公开方法见 [CFA Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation)。
 
 **公式。**
 
 ```text
-return_pct = 100 × (exit_price / entry_price − 1)
+holding_return.value = 100 × (exit_price / entry_price − 1)
 ```
 
 `entry_price` 是候选信号发出后下一可成交价，`exit_price` 是 T+h 到期时可成交的退出价或预先登记的退出规则首次成交价。`entry_at`、`exit_at`、`horizon_days`、`price_basis`、`cost_applied` 和成交状态必须同时保存。若展示扣费结果，费用、滑点、冲击成本逐笔记录，不能把未知费用当成零。显式佣金可按适用日期的公开规则建模，[证监会关于调整证券交易佣金收取标准的通知](https://www.csrc.gov.cn/csrc/c100024/c1492350/1492350/files/928bdd362fa24b79bdadb0072d67acee.pdf)规定 A 股佣金上限 3‰ 且单笔不足 5 元按 5 元收取。历史税费必须按成交日期规则取值，[国家税务总局等关于减半征收证券交易印花税的公告汇编](https://www.chinatax.gov.cn/chinatax/c102414/c5216997/5216997/files/%E5%BB%B6%E7%BB%AD%E4%BC%98%E5%8C%96%E5%AE%8C%E5%96%84%E7%9A%84%E7%A8%8E%E8%B4%B9%E4%BC%98%E6%83%A0%E6%94%BF%E7%AD%96%E6%B1%87%E7%BC%96%EF%BC%882023%E5%B9%B4%E7%89%88%EF%BC%89-20231124113552902.pdf)给出 2023-08-28 起的历史税率变化。费用和滑点压力档位尚无 A 股普适验证，标记未验证（待回测）。
@@ -67,18 +68,18 @@ return_pct = 100 × (exit_price / entry_price − 1)
 
 **基准。** 默认 `benchmark_code=000300.SH`，即沪深300。中证指数公开资料称其由 300 只规模大、流动性好的 A 股组成，目标是反映中国 A 股市场整体表现，适合作为大盘候选信号的共同对照。[CSI 300 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300factsheeten.pdf)；[CSI 300 编制方法](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300_Index_Methodology_en.pdf)。对小盘或全市场范围另做稳健性对照时使用 `000985.SH` 中证全指，其官方资料说明其覆盖沪深北市场并反映上市公司整体表现。[中证全指 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000985factsheet.pdf)；[中证全指编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20231208175438-000985_Index_Methodology_cn.pdf)。
 
-行业基准只有在历史成分、指数价格和可见时点均齐备时才启用。缺少任一端点或版本证据时，保留个股收益，`benchmark_return_pct` 和 `excess_pct` 为 `null` 并记录缺口。行业超额不能用大盘超额替代，标记未验证。
+行业基准只有在历史成分、指数价格和可见时点均齐备时才启用。缺少任一端点或版本证据时，保留个股收益，`benchmark_return.value` 和 `excess_return.value` 为 `null` 并记录顶层缺口。行业超额不能用大盘超额替代，标记未验证。
 
 **公式。**
 
 ```text
-benchmark_return_pct = 100 × (benchmark_exit_price / benchmark_entry_price − 1)
-excess_pct = return_pct − benchmark_return_pct
+benchmark_return.value = 100 × (benchmark_exit_price / benchmark_entry_price − 1)
+excess_return.value = holding_return.value − benchmark_return.value
 ```
 
 个股和基准必须使用相同的入场时点、到期日、复权或总收益定义和可见性截止点。基准只有一个端点、停牌或定稿状态不合格时不补邻日价格。相对基准的收益分解属于公开投资绩效评价常用做法，但本项目基准覆盖、历史版本和 A 股有效性未验证（待回测）。
 
-**最少样本量。** 只有 `return_pct` 和 `benchmark_return_pct` 同时非空的观测进入超额统计。`n<5` 返回空值，`5≤n<30` 标记样本少，`n≥30` 才进入正常汇总。
+**最少样本量。** 只有 `holding_return.value` 和 `benchmark_return.value` 同时非空的观测进入超额统计。`n<5` 返回空值，`5≤n<30` 标记样本少，`n≥30` 才进入正常汇总。
 
 ### 2.4 期间最大回撤
 
@@ -89,7 +90,7 @@ excess_pct = return_pct − benchmark_return_pct
 ```text
 peak_t = max(P_0, ..., P_t)
 drawdown_t = 100 × (P_t / peak_t − 1)
-max_drawdown_pct = min_t(drawdown_t)
+max_drawdown.value = min_t(drawdown_t)
 ```
 
 结果应小于或等于 0。聚合净值回撤以同一窗口的逐日净值曲线计算，不能把各条观测的回撤简单平均。最大回撤是公开绩效评价中的风险字段，方法资料见 [CFA Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation) 和 [Pardo《The Evaluation and Optimization of Trading Strategies》](https://www.wiley.com/en-ca/the-evaluation-and-optimization-of-trading-strategies-2nd-edition-p-9780470128015)。
@@ -120,7 +121,7 @@ weight_deviation_ratio = (actual_weight − suggested_weight) / suggested_weight
 
 ### 2.6 盈亏比与盈亏因子
 
-**盈亏比。** 对有效完成观测中 `action ∈ {buy, add, hold}` 的非零收益计算，盈利样本为 `return_pct > 0`，亏损样本为 `< 0`。
+**盈亏比。** 对有效完成观测中 `action ∈ {buy, add, hold}` 的非零 `holding_return.value` 计算，盈利样本为 `holding_return.value > 0`，亏损样本为 `< 0`。
 
 ```text
 payoff_ratio = 平均盈利 / |平均亏损|
@@ -187,7 +188,7 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 
 ## 5. 公开出处与访问核验
 
-以下链接均为公开出处。它们用于支持交易约束、指数定义、绩效指标方法或选择偏差方法，不把公开论文当作 A 股有效性证明。本文写入前用 `curl -I -L` 核验，记录日期为 2026-11-21，状态均为 HTTP 200。
+以下链接均为公开出处。它们用于支持交易约束、指数定义、绩效指标方法或选择偏差方法，不把公开论文当作 A 股有效性证明。基准与回撤直接相关的链接在写入前用 `curl -I -L` 核验，记录日期为 2026-11-21。
 
 | 出处 | 用途 | 状态 |
 |---|---|---|
@@ -206,7 +207,18 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 | Bailey PBO/CSCV | 样本外与过拟合概率方法 | 方法公开，固定门槛未验证 |
 | Pardo 交易策略评价 | 滚动样本外、成本和回撤评价 | 方法公开，固定门槛未验证 |
 
-### 5.1 阈值状态汇总
+### 5.1 基准、复权与区间来源登记
+
+| 来源或能力 | 支持内容 | URL | curl 状态 | enabled | 说明 |
+|---|---|---|---:|---:|---|
+| 沪深300 factsheet | 基准指数为 000300，300 只规模大且流动性高的 A 股，目标为反映中国 A 股整体表现 | [CSI 300 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300factsheeten.pdf) | 200 | true | 内部代码 `000300.SH` 的后缀映射仍需数据层验收 |
+| 沪深300编制方法 | 价格指数、总收益指数和净总收益指数的计算，以及现金分红导致的参考开盘价调整 | [CSI 300 methodology](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300_Index_Methodology_en.pdf) | 200 | true | 公开方法区分价格、总收益和净总收益，不能证明本项目已接入因子链 |
+| 绩效评价方法 | 同一评价区间比较、超额收益和最大回撤作为绩效风险指标 | [CFA Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation) | 200 | true | 支持方法口径，不证明 A 股数据覆盖 |
+| 基准历史价格数据源 | `benchmark_return` 的入场和退出端点 | — | 未找到 | false | #356 没有接入基准价格来源，标记未验证 |
+| 个股与基准复权因子版本链 | `holding_return`、`benchmark_return`、`max_drawdown` 的同口径复权 | — | 未找到 | false | #356 没有价格路径或因子版本输入，标记未验证 |
+| 交易日历端点服务 | 区间端点、T+1/T+5/T+20 与 `not_yet_published` 判定 | — | 未找到 | false | #356 仅按工作日近似，标记未验证 |
+
+### 5.2 阈值状态汇总
 
 本表明确列出 7 项数值或工程规则，均标记为未验证（待回测）。其余数据覆盖、复权链、退市清算和队列成交缺口在相应指标和边界表中单独标记，不能视为通过。
 
@@ -221,3 +233,62 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 | 目标/止损同柱按最坏顺序 | 工程保守规则，未验证（待回测） |
 
 本卡不声明任何策略已通过 G6、已进入 `published` 或已完成实盘验证。所有无 A 股实证的数值保留“未验证”或“待回测”状态。
+
+## 6. §7.8 字段对齐与实现边界
+
+### 6.1 定稿字段
+
+| 字段 | 定稿类型、单位与空值语义 |
+|---|---|
+| `data_status` | `fresh`、`stale`、`pending`、`partial`、`unavailable`；无单位；不得把未知当作 `fresh` |
+| `data_as_of` | `string(datetime)` 或 `null`；实际使用来源的知识时点，无来源为 `null` |
+| `gaps` | `Gap[]`；`{key:string, reason:gap_reason, message:string}`；无单位；reason 为 `no_source`、`not_yet_published`、`upstream_error`、`quota_deferred`、`user_input_missing`、`data_licence_unavailable`、`not_applicable` 或 `suspended`，未知 reason 原样保留 |
+| `ReviewSummary.id`、`ReviewVersion.id` | `string(uuid)`，必填 |
+| `plan_id` | `string(uuid)` 或 `null`；无单位 |
+| `security_code` | `string` 或 `null`；证券代码 |
+| `name` | `string` 或 `null`；代码为空时必须为 `null`，代码存在但主数据缺失可回退为代码 |
+| `period_start`、`period_end` | `string(date)`，必填；闭区间，结束日不早于开始日 |
+| `current_version_no`、`version_no` | `int`；前者至少 1，后者从 1 连续递增；无单位 |
+| `current_version` | `ReviewVersion` 或 `null`；新建记录必有，旧数据缺版本时为 `null` |
+| `plan_version_ids`、`trade_ids` | `string(uuid)[]`，必填；空集为 `[]` |
+| `snapshot_id` | `string(uuid)` 或 `null`；历史缺快照保留 `null` |
+| `lessons` | `string` 或 `null`；无单位 |
+| `tags` | `string[]`；无标签为 `[]` |
+| `attribution` | `{judgement: ReviewJudgement[], execution: TextWithEvidence[], market: TextWithEvidence[]}`；三类均可为空数组 |
+| `outcome_metrics` | 四项 `Stat`：`holding_return`、`benchmark_return`、`excess_return`、`max_drawdown`；百分数单位，未知 `value=null` |
+| `Stat.value` | `string(decimal)` 或 `null`；百分数，未知不得写 `"0"` |
+| `Stat.n` | `int` 且 ≥0；真实有效样本数，无单位 |
+| `Stat.window` | `string`，`YYYY-MM-DD/YYYY-MM-DD`；复盘窗口 |
+| `Stat.small_sample` | `boolean`；`n<30` 为 `true`，`n≥30` 为 `false` |
+| `timeline` | `ReviewTimelineItem[]`，按 `at` 升序；无事件为 `[]` |
+| `ReviewTimelineItem` | `{kind: "review_version"|"plan_version"|"trade", at:string(datetime), resource_id:string(uuid)|null, version_no:int|null, evidence_ids:string[]}`；kind 为闭集枚举，数组无证据时为空 |
+| `ReviewJudgement` | `{condition_text:string, fulfilled:boolean|null, note:string|null}`；`fulfilled=null` 表示未知 |
+| `evidence` | `Evidence[]`；无证据为 `[]`，ID 只在本详情内解析 |
+
+指标缺口只通过版本顶层 `DataStatusBlock.gaps` 对外表达。`Stat` 不新增 `gaps`、`source` 或 `label` 字段，除非先修订 §7.8。
+
+### 6.2 `not_yet_published` 与模拟跟踪
+
+`not_yet_published` 只表示结果期尚未结束或尚未到达契约规定的可发布时点，不表示收益为零，也不表示策略失败。此时四项指标的 `value` 均为 `null`，顶层 `data_status` 为 `pending`，顶层缺口使用该 reason；周期结束后仍缺来源则改用 `no_source` 或其他适用 reason。
+
+模拟跟踪与实际成交复盘必须有独立的来源标签和存储边界。模拟结果只能标为“模拟跟踪”，实际成交结果只能标为“实盘成交复盘”；任何模拟结果进入复盘投影时均清空指标值并记录 `no_source`。对外叙述统一使用“候选信号”，不承诺收益，不把模拟跟踪写成实盘绩效。
+
+### 6.3 实现参照
+
+本卡对照 `eccb3d25` 的实现行号。该提交不是本卡的验收证明，缺失来源仍保持未验证。
+
+| 实现位置 | 结论 |
+|---|---|
+| `src/backend/app/reviews/metrics.py:18-24` | `Stat` 的百分数字符串、`n<5` 空值、`n<30` 小样本与定稿一致 |
+| `src/backend/app/reviews/metrics.py:14,51-60` | reason 只保留三项且会丢弃未知值，与 §7.8 完整枚举和原样保留要求不一致 |
+| `src/backend/app/reviews/metrics.py:81-97` | `not_yet_published` 用工作日近似，未接交易日历，待后端改 |
+| `src/backend/app/reviews/metrics.py:117-127` | 模拟来源被清空并改为 `no_source`，需保留用户可见的“模拟跟踪”标签边界 |
+| `src/backend/app/reviews/service.py:171-197,210-240` | 仅从真实 execution 成交计算 holding，benchmark 与 drawdown 暂无来源，均为 `no_source` |
+| `src/backend/app/reviews/service.py:185-191` | 以 `traded_at` 作为可见时点，未满足 `available_at` 约束，待后端改 |
+| `src/backend/app/reviews/service.py:393-402,405-428` | 顶层状态、时间点与版本字段基本对齐，但状态读取再次按当前时钟判断，需冻结计算时点 |
+| `src/backend/app/reviews/service.py:432-448` | 时间线三种闭集 kind、升序和证据 ID 与定稿一致 |
+| `src/backend/app/reviews/service.py:457-488` | summary/detail 字段齐全；旧数据无当前版本时 summary 仍可能输出 `current_version_no=null`，与定稿 `≥1` 有差异 |
+
+## 7. 收口状态
+
+本卡仍为 `draft`，G7 保持 `☐`。#349 §7.8 是定稿字段依据，#356 仅作为实现对照。基准历史价格、复权因子链、交易日历和最大回撤价格路径未接入前，相关指标保持 `value=null`、缺口和“未验证”，不得据此宣称策略有效或产生收益承诺。
