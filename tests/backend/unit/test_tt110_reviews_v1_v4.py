@@ -475,6 +475,10 @@ def valid_review(**overrides: Any) -> dict[str, Any]:
 
 def valid_version(**overrides: Any) -> dict[str, Any]:
     body = {
+        "plan_id": str(OWN_PLAN),
+        "security_code": SYNTHETIC_CODE,
+        "period_start": "2026-01-01",
+        "period_end": "2026-01-02",
         "plan_version_ids": [str(VERSION_ID)],
         "trade_ids": [],
         "lessons": "合成经验",
