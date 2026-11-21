@@ -573,7 +573,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     const pos = PORTFOLIO.positions.find((p) => p.security_code === s.code);
     const maxLevel = sg.risk_flags.reduce<RiskLevel | null>((m, f) => (m === null || LEVEL_RANK[f.level] > LEVEL_RANK[m] ? f.level : m), null);
     return {
-      security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus,
+      security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus, security_type: s.code === '830001.BJ' ? null : 'stock',
       quote: s.data_status === 'unavailable' || q.price == null || q.t == null ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
       holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct, security_type: pos.security_type, estimated: pos.estimated } : null,
       suggestion: summarize(sg),
@@ -589,6 +589,12 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     if (ga !== gb) return ga - gb;
     if (ga === 0) return b._w - a._w;
     return a._added - b._added;
+  });
+  rows.push({
+    security_code: '510001.SH', name: '示例沪深300ETF', in_watchlist: true, focus: true, security_type: 'etf',
+    quote: { price: '3.94', change_pct: null, amount: null, t: NOW }, holding: null, suggestion: null,
+    active_reason_count: 0, max_risk_level: null, data_status: 'fresh', data_as_of: NOW,
+    _w: -1, _added: rows.length,
   });
   return rows.map(({ _w, _added, ...row }) => { void _w; void _added; return row; });
 })();

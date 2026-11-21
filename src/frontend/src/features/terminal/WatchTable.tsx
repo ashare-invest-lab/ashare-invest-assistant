@@ -2,7 +2,7 @@ import { labelOf, tagOf } from '../../lib/explanations';
 import { useMemo } from 'react';
 import { Segmented, Tooltip } from 'antd';
 import { StarFilled } from '@ant-design/icons';
-import type { TerminalAccount, TerminalRow, TerminalScope } from '../../api/types';
+import { securityTypeOf, type TerminalAccount, type TerminalRow, type TerminalScope } from '../../api/types';
 import { DataGrid, type DataColumn } from '../../components/DataGrid';
 import { ActionBadge, ConsensusBadge, DataStatusTag } from '../../components/common';
 import { EXECUTABILITY, REGIME, RISK_LEVEL } from '../../i18n/labels';
@@ -58,7 +58,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
     },
     {
       key: 'price', header: '现价', width: 64, numeric: true, value: (r) => (r.quote ? Number(r.quote.price) : null),
-      render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{fmtPrice(r.quote.price, r.holding?.security_type)}</span> : <span className="muted">—</span>),
+      render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{fmtPrice(r.quote.price, securityTypeOf(r))}</span> : <span className="muted">—</span>),
     },
     {
       key: 'chg', header: '涨跌%', width: 66, numeric: true, value: (r) => (r.quote?.change_pct != null ? Number(r.quote.change_pct) : null),

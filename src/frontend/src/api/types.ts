@@ -202,6 +202,8 @@ export interface TerminalRow {
   name: string;
   in_watchlist: boolean;
   focus: boolean;
+  /** 证券主数据类型；主数据缺失时为 null。旧响应缺字段按 null 处理。 */
+  security_type: SecurityType | null;
   quote: TerminalQuote | null;
   holding: TerminalHolding | null;
   suggestion: SuggestionSummary | null;
@@ -211,6 +213,9 @@ export interface TerminalRow {
   /** v0.2.3：该行行情与建议中较旧者的数据时点；完全无数据为 null */
   data_as_of: DateTime | null;
 }
+
+export const securityTypeOf = (row: Pick<TerminalRow, 'holding'> & { security_type?: SecurityType | null }) =>
+  row.security_type ?? row.holding?.security_type ?? null;
 
 // ---------- §5.2 ----------
 export interface DimensionViewEntry { dimension: Dimension; view: DimensionView; score: number | null; rules: RuleRef[] }
@@ -563,7 +568,8 @@ export interface TView {
   as_of: DateTime | null;
   gaps: Gap[];
 }
-export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
+/** 旧 /today 响应可能缺少行级字段，读取时按 null 处理。 */
+export type TodayFocusRow = Omit<TerminalRow, 'security_type'> & { security_type?: SecurityType | null; t_view?: TView | null };
 
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }
