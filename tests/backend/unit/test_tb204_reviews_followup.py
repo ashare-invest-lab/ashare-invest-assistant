@@ -24,6 +24,40 @@ def test_a_weekend_does_not_reopen_friday_period() -> None:
     assert projected["holding_return"]["gaps"] == ["not_yet_published"]
 
 
+def test_a_missing_calendar_cannot_release_period() -> None:
+    class Connection:
+        def execute(self, _statement: object) -> SimpleNamespace:
+            return SimpleNamespace(first=lambda: None)
+
+    assert period_pending(
+        dt.date(2026, 1, 9),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+        conn=Connection(),
+    )
+
+
+def test_a_gap_reason_and_simulation_source_are_preserved() -> None:
+    projected = project_metrics(
+        {
+            "holding_return": {
+                "value": "12.5",
+                "n": 5,
+                "window": "2026-01-01/2026-01-05",
+                "small_sample": True,
+                "source": "simulated_tracking",
+                "gaps": ["future_reason"],
+            }
+        },
+        period_end=dt.date(2026, 1, 5),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    holding = projected["holding_return"]
+    assert holding["source"] == "simulated_tracking"
+    assert holding["label"] == "模拟跟踪"
+    assert holding["value"] is None
+    assert holding["gaps"] == ["future_reason", "no_source"]
+
+
 def test_b_frozen_as_of_is_kept_in_snapshot() -> None:
     fixed = dt.datetime(2026, 1, 6, 8, tzinfo=dt.UTC)
     snapshot = service._snapshot_items(

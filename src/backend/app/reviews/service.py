@@ -8,24 +8,25 @@ import datetime as dt
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import Connection, Row, insert, select, update
 
 from app.common.errors import AppError, ErrorCode
-from app.db.tables.accounts import trades
-from app.db.tables.market import securities
+from app.db.tables.accounts import import_batches, trades
+from app.db.tables.market import daily_bars, securities
 from app.db.tables.research import action_plans, plan_versions
 from app.db.tables.reviews import data_snapshots, review_versions, reviews
 from app.reviews.metrics import (
     METRIC_NAMES,
+    SHANGHAI,
     _stat,
     empty_metrics,
     normalise_gaps,
     pending_message,
-    period_pending,
+    period_pending_state,
     project_metrics,
     status_block,
 )
@@ -136,6 +137,91 @@ def _trade_rows(conn: Connection, owner: uuid.UUID, trade_ids: Sequence[uuid.UUI
     return list(conn.execute(select(trades).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner)).all())
 
 
+def _row_value(row: Any, name: str) -> Any:
+    """Read one of the explicitly selected real columns from a result row."""
+    try:
+        return row._mapping.get(name)
+    except AttributeError:
+        try:
+            return vars(row).get(name)
+        except TypeError:
+            return None
+
+
+def _trade_date(row: Any) -> dt.date | None:
+    value = _row_value(row, "trade_date")
+    if isinstance(value, dt.date):
+        return value
+    traded_at = _executed_at(row)
+    return traded_at.date() if traded_at is not None else None
+
+
+def _knowledge_times(conn: Connection, rows: Sequence[Any]) -> dict[uuid.UUID, dt.datetime]:
+    batch_ids = {
+        batch_id
+        for row in rows
+        if (batch_id := _row_value(row, "import_batch_id")) is not None
+    }
+    if not batch_ids:
+        return {}
+    result = conn.execute(
+        select(
+            import_batches.c.id,
+            import_batches.c.created_at,
+            import_batches.c.committed_at,
+            import_batches.c.snapshot_as_of,
+        ).where(import_batches.c.id.in_(batch_ids))
+    )
+    knowledge: dict[uuid.UUID, dt.datetime] = {}
+    for row in result.all():
+        batch_id = _row_value(row, "id")
+        if batch_id is None:
+            continue
+        candidates = [
+            _as_datetime(_row_value(row, "created_at")),
+            _as_datetime(_row_value(row, "committed_at")),
+            _as_datetime(_row_value(row, "snapshot_as_of")),
+        ]
+        available = [item for item in candidates if item is not None]
+        if available:
+            knowledge[batch_id] = max(available)
+    return knowledge
+
+
+def _visible_trade_rows(
+    rows: Sequence[Any],
+    calculation_as_of: dt.datetime,
+    period_start: dt.date,
+    period_end: dt.date,
+    knowledge: Mapping[uuid.UUID, dt.datetime] | None = None,
+) -> tuple[list[Any], dt.datetime | None]:
+    visible: list[Any] = []
+    data_as_of: dt.datetime | None = None
+    calculation_as_of_normalized = (
+        calculation_as_of
+        if calculation_as_of.tzinfo
+        else calculation_as_of.replace(tzinfo=dt.UTC)
+    )
+    for row in rows:
+        traded_at = _executed_at(row)
+        if row.voided_at is not None or row.epistemic_type != "execution":
+            continue
+        row_date = _trade_date(row)
+        if traded_at is None or row_date is None:
+            continue
+        knowledge_at = traded_at
+        batch_id = _row_value(row, "import_batch_id")
+        if knowledge and batch_id in knowledge:
+            knowledge_at = max(knowledge_at, knowledge[batch_id])
+        if knowledge_at > calculation_as_of_normalized:
+            continue
+        if row_date < period_start or row_date > period_end:
+            continue
+        visible.append(row)
+        data_as_of = max(data_as_of, knowledge_at) if data_as_of else knowledge_at
+    return visible, data_as_of
+
+
 def _fifo_holding(rows: Sequence[Any]) -> tuple[list[Decimal], bool]:
     """Pair execution cash flows FIFO and report returns for closed lots."""
     openings_by_code: dict[str, list[tuple[Decimal, Decimal]]] = {}
@@ -168,31 +254,175 @@ def _fifo_holding(rows: Sequence[Any]) -> tuple[list[Decimal], bool]:
     return holding, any(openings_by_code.values())
 
 
+def _closed_trade_observations(rows: Sequence[Any]) -> list[tuple[str, dt.date, dt.date, Decimal]]:
+    """Return closed FIFO lots with their exact trade-date interval."""
+    openings_by_code: dict[str, list[tuple[Decimal, Decimal, dt.date]]] = {}
+    result: list[tuple[str, dt.date, dt.date, Decimal]] = []
+    for row in sorted(rows, key=lambda item: (_executed_at(item), str(item.id))):
+        quantity = _decimal(row.quantity)
+        net_amount = _decimal(row.net_amount)
+        row_date = _trade_date(row)
+        if quantity is None or quantity <= 0 or net_amount is None or row_date is None:
+            continue
+        unit_cash = abs(net_amount) / quantity
+        if unit_cash <= 0:
+            continue
+        code = str(row.security_code)
+        openings = openings_by_code.setdefault(code, [])
+        if row.side == "buy":
+            openings.append((unit_cash, quantity, row_date))
+            continue
+        if row.side != "sell":
+            continue
+        remaining = quantity
+        while remaining > 0 and openings:
+            buy_unit_cash, buy_quantity, buy_date = openings[0]
+            matched = min(remaining, buy_quantity)
+            result.append(
+                (
+                    code,
+                    buy_date,
+                    row_date,
+                    (unit_cash / buy_unit_cash - Decimal(1)) * Decimal(100),
+                )
+            )
+            remaining -= matched
+            buy_quantity -= matched
+            if buy_quantity == 0:
+                openings.pop(0)
+            else:
+                openings[0] = (buy_unit_cash, buy_quantity, buy_date)
+    return result
+
+
+def _close_time(trade_date: dt.date) -> dt.datetime:
+    return dt.datetime.combine(trade_date, dt.time(15), tzinfo=SHANGHAI).astimezone(dt.UTC)
+
+
+def _market_rows(
+    conn: Connection,
+    code: str,
+    start: dt.date,
+    end: dt.date,
+    adj_type: str,
+    calculation_as_of: dt.datetime,
+) -> list[Any]:
+    result = conn.execute(
+        select(
+            daily_bars.c.code,
+            daily_bars.c.trade_date,
+            daily_bars.c.adj_type,
+            daily_bars.c.close,
+            daily_bars.c.fetched_at,
+            daily_bars.c.is_suspended,
+        ).where(
+            daily_bars.c.code == code,
+            daily_bars.c.trade_date >= start,
+            daily_bars.c.trade_date <= end,
+            daily_bars.c.adj_type == adj_type,
+            daily_bars.c.fetched_at <= calculation_as_of,
+        )
+    )
+    visible: list[Any] = []
+    for row in result.all():
+        if _row_value(row, "code") != code or _row_value(row, "adj_type") != adj_type:
+            continue
+        trade_date = _row_value(row, "trade_date")
+        fetched_at = _as_datetime(_row_value(row, "fetched_at"))
+        close = _decimal(_row_value(row, "close"))
+        suspended = _row_value(row, "is_suspended")
+        if not isinstance(trade_date, dt.date) or fetched_at is None or close is None or close <= 0:
+            continue
+        if fetched_at > calculation_as_of or fetched_at < _close_time(trade_date):
+            continue
+        if suspended is True:
+            continue
+        visible.append(row)
+    return visible
+
+
+def _market_as_of(rows: Sequence[Any]) -> dt.datetime | None:
+    values: list[dt.datetime] = []
+    for row in rows:
+        fetched_at = _as_datetime(_row_value(row, "fetched_at"))
+        if fetched_at is not None:
+            values.append(fetched_at)
+    return max(values) if values else None
+
+
+def _benchmark_and_drawdowns(
+    conn: Connection,
+    pairs: Sequence[tuple[str, dt.date, dt.date, Decimal]],
+    calculation_as_of: dt.datetime,
+) -> tuple[list[Decimal], list[Decimal], list[Decimal], dt.datetime | None]:
+    if not pairs:
+        return [], [], [], None
+    first = min(item[1] for item in pairs)
+    last = max(item[2] for item in pairs)
+    benchmark_rows = _market_rows(conn, "000300.SH", first, last, "none", calculation_as_of)
+    benchmark = {
+        _row_value(row, "trade_date"): _decimal(_row_value(row, "close"))
+        for row in benchmark_rows
+    }
+    market_as_of = _market_as_of(benchmark_rows)
+    by_code: dict[str, list[Any]] = {}
+    ranges: dict[str, tuple[dt.date, dt.date]] = {}
+    for code, entry, expiry, _ in pairs:
+        previous = ranges.get(code)
+        if previous is None or entry < previous[0] or expiry > previous[1]:
+            first_date = entry if previous is None else min(previous[0], entry)
+            last_date = expiry if previous is None else max(previous[1], expiry)
+            by_code[code] = _market_rows(
+                conn, code, first_date, last_date, "qfq", calculation_as_of
+            )
+            ranges[code] = first_date, last_date
+    benchmark_values: list[Decimal] = []
+    drawdowns: list[Decimal] = []
+    excess_values: list[Decimal] = []
+    for code, entry, expiry, holding_return in pairs:
+        start_value = benchmark.get(entry)
+        end_value = benchmark.get(expiry)
+        if start_value is not None and end_value is not None and start_value > 0:
+            benchmark_return = (end_value / start_value - Decimal(1)) * Decimal(100)
+            benchmark_values.append(benchmark_return)
+            excess_values.append(holding_return - benchmark_return)
+        path = [
+            (_row_value(row, "trade_date"), _decimal(_row_value(row, "close")))
+            for row in by_code[code]
+            if entry <= _row_value(row, "trade_date") <= expiry
+        ]
+        path.sort(key=lambda item: item[0])
+        if path and path[0][0] == entry and path[-1][0] == expiry:
+            peak: Decimal | None = None
+            drawdown: Decimal | None = None
+            for _, value in path:
+                if value is None or value <= 0:
+                    continue
+                peak = value if peak is None else max(peak, value)
+                current = (value / peak - Decimal(1)) * Decimal(100)
+                drawdown = current if drawdown is None else min(drawdown, current)
+            if drawdown is not None:
+                drawdowns.append(drawdown)
+        stock_as_of = _market_as_of(by_code[code])
+        if stock_as_of is not None:
+            market_as_of = max(market_as_of, stock_as_of) if market_as_of else stock_as_of
+    return benchmark_values, drawdowns, excess_values, market_as_of
+
+
 def _observations(
     rows: Sequence[Any],
     calculation_as_of: dt.datetime,
     period_start: dt.date,
     period_end: dt.date,
+    knowledge: Mapping[uuid.UUID, dt.datetime] | None = None,
 ) -> tuple[list[Decimal], list[Decimal], list[Decimal], list[str], dt.datetime | None, bool]:
-    visible: list[Any] = []
-    evidence_ids: list[str] = []
-    data_as_of: dt.datetime | None = None
-    calculation_as_of_normalized = (
-        calculation_as_of
-        if calculation_as_of.tzinfo
-        else calculation_as_of.replace(tzinfo=dt.UTC)
+    visible, data_as_of = _visible_trade_rows(
+        rows, calculation_as_of, period_start, period_end, knowledge
     )
+    evidence_ids: list[str] = []
     for row in rows:
-        traded_at = _executed_at(row)
-        if row.voided_at is not None or row.epistemic_type != "execution":
-            continue
-        if traded_at is None or traded_at > calculation_as_of_normalized:
-            continue
-        if traded_at.date() < period_start or traded_at.date() > period_end:
-            continue
-        visible.append(row)
-        evidence_ids.append("trade:" + str(row.id))
-        data_as_of = max(data_as_of, traded_at) if data_as_of else traded_at
+        if row in visible:
+            evidence_ids.append("trade:" + str(row.id))
     holding, has_open_positions = _fifo_holding(visible)
     return holding, [], [], evidence_ids, data_as_of, has_open_positions
 
@@ -216,19 +446,42 @@ def _compute_outcome_metrics(
     calculation_as_of: dt.datetime,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dt.datetime | None]:
     window = f"{start.isoformat()}/{end.isoformat()}"
-    if period_pending(end, now=calculation_as_of):
-        return {name: _stat(window) | {"gaps": ["not_yet_published"]} for name in METRIC_NAMES}, [], None
+    pending, calendar_available = period_pending_state(end, now=calculation_as_of, conn=conn)
+    if pending:
+        pending_gaps = ["not_yet_published"]
+        if not calendar_available:
+            pending_gaps.append("no_source")
+        return {
+            name: _stat(window) | {"gaps": pending_gaps}
+            for name in METRIC_NAMES
+        }, [], None
     rows = _trade_rows(conn, owner, trade_ids)
-    holding, benchmark, drawdowns, evidence_ids, data_as_of, has_open_positions = _observations(rows, calculation_as_of, start, end)
+    knowledge = _knowledge_times(conn, rows)
+    holding, _, _, evidence_ids, data_as_of, has_open_positions = _observations(
+        rows, calculation_as_of, start, end, knowledge
+    )
+    visible_rows, _ = _visible_trade_rows(rows, calculation_as_of, start, end, knowledge)
+    pairs = _closed_trade_observations(visible_rows)
+    benchmark, drawdowns, excess, market_as_of = _benchmark_and_drawdowns(
+        conn, pairs, calculation_as_of
+    )
+    if market_as_of is not None:
+        data_as_of = max(data_as_of, market_as_of) if data_as_of else market_as_of
     metrics = {
         "holding_return": _metric("holding_return", window, holding),
         "benchmark_return": _metric("benchmark_return", window, benchmark),
         "max_drawdown": _metric("max_drawdown", window, drawdowns),
     }
+    if any(
+        _row_value(row, "import_batch_id") is None
+        or _row_value(row, "import_batch_id") not in knowledge
+        for row in visible_rows
+    ):
+        metrics["holding_return"]["gaps"] = ["no_source"]
     if has_open_positions:
         metrics["holding_return"]["gaps"] = ["user_input_missing"]
-    if holding and benchmark and len(holding) == len(benchmark):
-        metrics["excess_return"] = _metric("excess_return", window, [a - b for a, b in zip(holding, benchmark, strict=True)])
+    if excess:
+        metrics["excess_return"] = _metric("excess_return", window, excess)
     else:
         metrics["excess_return"] = _metric("excess_return", window, [], no_source=True)
         metrics["excess_return"]["gaps"] = ["no_source"]
@@ -259,21 +512,40 @@ def _snapshot_items(
         metrics, evidence, data_as_of = _compute_outcome_metrics(conn, owner, start, end, trade_ids, calculation_as_of)
     else:
         metrics, evidence, data_as_of = empty_metrics(start, end), [], None
+    pending_metrics = any(
+        "not_yet_published" in metric.get("gaps", []) for metric in metrics.values()
+    )
     if evidence:
         block = status_block(has_observation=True)
     else:
-        block = status_block(reason="no_source" if has_trades else "user_input_missing")
+        block = status_block(
+            reason=(
+                "not_yet_published"
+                if pending_metrics
+                else "no_source"
+                if has_trades
+                else "user_input_missing"
+            )
+        )
     metric_messages = {
         "holding_return": "未验证：以 traded_at 作可见时点；未平仓部分未计入",
         "benchmark_return": "基准价格缺失，指标未验证（待回测）",
         "excess_return": "基准价格缺失，超额收益未验证（待回测）",
         "max_drawdown": "复权价格路径缺失，最大回撤未验证（待回测）",
     }
-    metric_gaps = [
-        {"key": name, "reason": reason, "message": metric_messages[name]}
-        for name, metric in metrics.items()
-        for reason in metric.get("gaps", [])
-    ]
+    metric_gaps = []
+    for name, metric in metrics.items():
+        for reason in metric.get("gaps", []):
+            message = metric_messages[name]
+            if reason == "no_source" and "not_yet_published" in metric.get("gaps", []):
+                message = "交易日历缺失，发布时点未验证"
+            metric_gaps.append(
+                {
+                    "key": f"outcome_metrics.{name}",
+                    "reason": reason,
+                    "message": message,
+                }
+            )
     if metric_gaps:
         block["gaps"] = metric_gaps
     plan_snapshot = {
@@ -390,15 +662,29 @@ def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None)
     return dict(items) if items else status_block()
 
 
-def _status_for(snap: dict[str, Any], period_end: dt.date | None) -> dict[str, Any]:
-    if period_pending(period_end):
-        return status_block(reason="not_yet_published", message=pending_message())
+def _status_for(
+    snap: dict[str, Any], period_end: dt.date | None, conn: Connection | None = None
+) -> dict[str, Any]:
+    pending, calendar_available = period_pending_state(period_end, conn=conn)
+    if pending and (snap.get("period_end") is not None or snap.get("outcome_metrics")):
+        message = pending_message()
+        if not calendar_available:
+            message = "复盘周期尚未结束；交易日历缺失，未验证"
+        block = status_block(reason="not_yet_published", message=message)
+        if not calendar_available:
+            block["gaps"].append(
+                {
+                    "key": "outcome_metrics",
+                    "reason": "no_source",
+                    "message": "交易日历缺失，发布时点未验证",
+                }
+            )
+        return block
     gaps = normalise_gaps(snap.get("gaps"), "outcome_metrics")
-    if not gaps:
-        for name, metric in (snap.get("outcome_metrics") or {}).items():
-            for gap in normalise_gaps(metric.get("gaps"), name):
-                if gap not in gaps:
-                    gaps.append(gap)
+    for name, metric in (snap.get("outcome_metrics") or {}).items():
+        for gap in normalise_gaps(metric.get("gaps"), f"outcome_metrics.{name}"):
+            if gap not in gaps:
+                gaps.append(gap)
     return {"data_status": snap.get("data_status", "unavailable"), "data_as_of": snap.get("data_as_of"), "gaps": gaps}
 
 
@@ -408,8 +694,12 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
     if isinstance(snap.get("period_end"), str):
         with contextlib.suppress(ValueError):
             frozen_end = dt.date.fromisoformat(snap["period_end"])
-    metrics = project_metrics(row.outcome_metrics or snap.get("outcome_metrics", {}), period_end=frozen_end)
-    status = _status_for(snap, frozen_end)
+    metrics = project_metrics(
+        row.outcome_metrics or snap.get("outcome_metrics", {}),
+        period_end=frozen_end,
+        conn=conn,
+    )
+    status = _status_for(snap, frozen_end, conn)
     return {
         "id": str(row.id),
         "version_no": row.version_no,
@@ -453,7 +743,7 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
     current = None if review.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == review.security_code)).scalar()
     snap = _snapshot(conn, owner, current.snapshot_id) if current is not None else status_block()
-    status = _status_for(snap, review.period_end)
+    status = _status_for(snap, review.period_end, conn)
     return {
         "id": str(review.id),
         "plan_id": str(review.plan_id) if review.plan_id else None,
@@ -474,7 +764,7 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
     version = None if row.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == row.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == row.security_code)).scalar()
     snap = _snapshot(conn, row.user_id, version.snapshot_id) if version is not None else status_block()
-    status = _status_for(snap, row.period_end)
+    status = _status_for(snap, row.period_end, conn)
     return {
         "id": str(row.id),
         "plan_id": str(row.plan_id) if row.plan_id else None,
