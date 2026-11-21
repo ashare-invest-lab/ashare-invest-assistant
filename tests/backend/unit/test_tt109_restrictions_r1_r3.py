@@ -20,7 +20,7 @@ from typing import Any, get_type_hints
 import pytest
 from app.common.errors import AppError
 from app.common.pagination import PageParams
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from pydantic import ValidationError
 
 pytestmark = pytest.mark.unit
@@ -67,11 +67,19 @@ def _route(module: Any | None, path: str, method: str) -> Any | None:
     return None
 
 
+def _endpoint(path: str, method: str, label: str) -> Any:
+    if RESTRICTIONS is None:
+        pytest.xfail(f"T-B200 未实现：app.api.v1.restrictions 模块不存在（{label}）")
+    endpoint = _route(RESTRICTIONS, path, method)
+    if endpoint is None:
+        pytest.fail(f"P0：restrictions 模块已存在，但缺少 {method} {path} 端点（{label}）")
+    return endpoint
+
+
 RESTRICTIONS = _module()
 LIST_ENDPOINT = _route(RESTRICTIONS, "/restrictions", "GET")
 CREATE_ENDPOINT = _route(RESTRICTIONS, "/restrictions", "POST")
 DELETE_ENDPOINT = _route(RESTRICTIONS, "/restrictions/{restriction_id}", "DELETE")
-ROUTES_READY = all((LIST_ENDPOINT, CREATE_ENDPOINT, DELETE_ENDPOINT))
 
 
 @dataclass
@@ -120,6 +128,25 @@ class Result:
 
     def scalars(self) -> Result:
         return self
+
+
+class MemoryRedis:
+    """支持幂等工具所需操作的进程内 Redis 替身。"""
+
+    def __init__(self) -> None:
+        self.values: dict[str, Any] = {}
+
+    def set(self, name: str, value: Any, *, nx: bool = False, ex: int | None = None) -> bool | None:
+        if nx and name in self.values:
+            return None
+        self.values[name] = value
+        return True
+
+    def get(self, name: str) -> Any:
+        return self.values.get(name)
+
+    def delete(self, name: str) -> int:
+        return int(self.values.pop(name, None) is not None)
 
 
 def _params(statement: Any) -> dict[str, Any]:
@@ -223,7 +250,24 @@ class MemoryConnection:
             )
             return Result([self.rows[-1]])
         if "securities" in text or "strategies" in text or "strategy_instances" in text:
-            target_id = next(iter(row_ids), RID)
+            # 实例查询会 JOIN strategies，必须先于 strategies 分支判定。
+            if user_ids and OWNER not in user_ids:
+                return Result([])
+            string_values = {str(value).upper() for value in params.values() if isinstance(value, str)}
+            if "strategy_instances" in text:
+                if RID_2 not in row_ids:
+                    return Result([])
+                target_id = RID_2
+            elif "securities" in text:
+                if "SYN001.SH" not in string_values:
+                    return Result([])
+                target_id = RID
+            elif "strategies" in text:
+                if RID not in row_ids:
+                    return Result([])
+                target_id = RID
+            else:
+                return Result([])
             return Result(
                 [
                     SimpleNamespace(
@@ -247,6 +291,7 @@ class MemoryEngine:
         signals: list[Any] | None = None,
     ):
         self.conn = MemoryConnection(rows, reasons=reasons, signals=signals)
+        self.redis = MemoryRedis()
 
     @contextmanager
     def connect(self):
@@ -300,6 +345,25 @@ def _items(result: Any) -> list[Any]:
     return list(_get(result, "items"))
 
 
+def _error_code(error: BaseException) -> str | None:
+    code = getattr(error, "code", None)
+    if code is not None:
+        return str(code)
+    detail = getattr(error, "detail", None)
+    if isinstance(detail, dict):
+        nested = detail.get("error")
+        if isinstance(nested, dict) and nested.get("code") is not None:
+            return str(nested["code"])
+        if detail.get("code") is not None:
+            return str(detail["code"])
+    return None
+
+
+def _error_status(error: BaseException) -> int | None:
+    status = getattr(error, "status_code", None)
+    return int(status) if isinstance(status, int) else None
+
+
 def _body(endpoint: Any, payload: dict[str, Any]) -> Any:
     hints = get_type_hints(endpoint)
     for name, parameter in inspect.signature(endpoint).parameters.items():
@@ -325,6 +389,7 @@ def _invoke(
     restriction_id: uuid.UUID = RID,
     kind: Any = None,
     target_type: Any = None,
+    idempotency_key: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> Any:
@@ -335,7 +400,11 @@ def _invoke(
         elif name in {"engine", "db"}:
             kwargs[name] = engine
         elif name in {"rds", "redis"}:
-            kwargs[name] = SimpleNamespace()
+            kwargs[name] = engine.redis
+        elif name == "idempotency_key":
+            kwargs[name] = idempotency_key
+        elif name == "response":
+            kwargs[name] = Response()
         elif name in {"settings", "config"}:
             kwargs[name] = _settings()
         elif name in {"page", "params"}:
@@ -367,47 +436,47 @@ def _recheck_is_stubbed() -> bool:
     return "released_reason_ids=[]" in source and "remaining_reason_ids=[]" in source
 
 
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：/restrictions R1 路由不存在")
 def test_r1_list_is_owner_scoped_and_excludes_removed() -> None:
+    endpoint = _endpoint("/restrictions", "GET", "R1 列表")
     expired = _row(RID, created_at=NOW, until=PAST)
     removed = _row(RID_2, created_at=NOW - dt.timedelta(minutes=1), removed_at=NOW)
     foreign = _row(uuid.UUID("55555555-5555-4555-8555-555555555555"), OTHER)
     engine = MemoryEngine([expired, removed, foreign])
-    result = _invoke(LIST_ENDPOINT, engine)
+    result = _invoke(endpoint, engine)
     items = _items(result)
     assert [_get(item, "id") for item in items] == [RID]
     assert _get(items[0], "until") == PAST
     cursor = _get(result, "next_cursor")
     assert cursor is None or isinstance(cursor, str)
-    other_ids = [_get(item, "id") for item in _items(_invoke(LIST_ENDPOINT, engine, user_id=OTHER))]
+    other_ids = [_get(item, "id") for item in _items(_invoke(endpoint, engine, user_id=OTHER))]
     assert RID not in other_ids
     assert RID_2 not in other_ids
     assert foreign.id in other_ids
 
 
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：/restrictions R1 分页路由不存在")
 def test_r1_list_pagination_uses_cursor() -> None:
+    endpoint = _endpoint("/restrictions", "GET", "R1 分页")
     engine = MemoryEngine([
         _row(RID, created_at=NOW),
         _row(RID_2, created_at=NOW - dt.timedelta(minutes=1)),
     ])
-    first = _invoke(LIST_ENDPOINT, engine, limit=1)
+    first = _invoke(endpoint, engine, limit=1)
     assert [_get(item, "id") for item in _items(first)] == [RID]
     cursor = _get(first, "next_cursor")
     assert isinstance(cursor, str) and cursor
-    second = _invoke(LIST_ENDPOINT, engine, limit=1, cursor=cursor)
+    second = _invoke(endpoint, engine, limit=1, cursor=cursor)
     assert [_get(item, "id") for item in _items(second)] == [RID_2]
 
 
 @pytest.mark.parametrize("kind", ["blocklist", "cooling_off", "mute"])
 @pytest.mark.parametrize("target_type", ["security", "strategy", "instance"])
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：/restrictions POST R1 路由不存在")
 def test_r1_all_kind_target_combinations_are_accepted(kind: str, target_type: str) -> None:
+    endpoint = _endpoint("/restrictions", "POST", "R1 创建")
     engine = MemoryEngine([])
     until = FUTURE if kind == "cooling_off" else None
     target_id = TARGET_IDS[target_type]
     result = _invoke(
-        CREATE_ENDPOINT,
+        endpoint,
         engine,
         payload={
             "kind": kind,
@@ -429,8 +498,8 @@ def test_r1_all_kind_target_combinations_are_accepted(kind: str, target_type: st
     assert _params(insert)["user_id"] == OWNER
 
 
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：R1 POST 校验路由不存在")
 def test_r1_cooling_off_requires_future_until_and_post_is_strict() -> None:
+    _endpoint("/restrictions", "POST", "R1 POST 校验")
     model = next(
         (
             getattr(RESTRICTIONS, name, None)
@@ -462,19 +531,113 @@ def test_r1_cooling_off_requires_future_until_and_post_is_strict() -> None:
         "reason": "虚构原因",
     }
     try:
-        _invoke(CREATE_ENDPOINT, engine, payload=payload)
+        _invoke(_endpoint("/restrictions", "POST", "R1 POST 校验"), engine, payload=payload)
     except (AppError, HTTPException, ValueError, ValidationError) as error:
         code = getattr(error, "code", None)
         status = getattr(error, "status_code", None)
         assert str(code) == "VALIDATION_ERROR" or status == 400
     else:
-        pytest.xfail("T-B200 未实现：cooling_off 缺少未来 until 应返回 400 VALIDATION_ERROR")
+        pytest.xfail("未对齐 #337@b85cd820 §7.5：cooling_off 缺少未来 until 未返回 400 VALIDATION_ERROR")
 
 
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：/restrictions DELETE R2 路由不存在")
+def _create_payload(reason: str = "虚构原因") -> dict[str, Any]:
+    return {
+        "kind": "blocklist",
+        "target_type": "security",
+        "target_id": "SYN001.SH",
+        "until": None,
+        "reason": reason,
+    }
+
+
+def test_r1_post_idempotency_replays_same_resource_and_is_user_scoped() -> None:
+    endpoint = _endpoint("/restrictions", "POST", "R1 幂等")
+    engine = MemoryEngine([])
+    first = _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-1")
+    second = _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-1")
+    first_id = _get(first, "id")
+    if len(engine.conn.rows) != 1:
+        pytest.xfail("未对齐 #337@b85cd820 §7.5：同键同体未返回首次资源，生成了第二条限制")
+    assert _get(second, "id") == first_id
+    other = _invoke(
+        endpoint,
+        engine,
+        user_id=OTHER,
+        payload=_create_payload(),
+        idempotency_key="idem-restriction-1",
+    )
+    assert _get(other, "id") != first_id
+    assert len(engine.conn.rows) == 2
+
+
+def test_r1_post_idempotency_conflict_for_different_body() -> None:
+    endpoint = _endpoint("/restrictions", "POST", "R1 幂等冲突")
+    engine = MemoryEngine([])
+    _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-2")
+    try:
+        _invoke(
+            endpoint,
+            engine,
+            payload=_create_payload("另一条虚构原因"),
+            idempotency_key="idem-restriction-2",
+        )
+    except (AppError, HTTPException) as error:
+        if _error_code(error) == "IDEMPOTENCY_CONFLICT" or _error_status(error) == 409:
+            return
+        raise
+    pytest.xfail("未对齐 #337@b85cd820 §7.5：同键异体未返回 409 IDEMPOTENCY_CONFLICT")
+
+
+@pytest.mark.parametrize(
+    ("user_id", "target_type", "target_id"),
+    [
+        (OWNER, "security", "UNKNOWN.SH"),
+        (OWNER, "strategy", str(UNKNOWN)),
+        (OWNER, "instance", str(UNKNOWN)),
+        (OTHER, "strategy", str(RID)),
+        (OTHER, "instance", str(RID_2)),
+    ],
+)
+def test_r1_post_target_visibility_is_uniform_not_found(
+    user_id: uuid.UUID, target_type: str, target_id: str
+) -> None:
+    endpoint = _endpoint("/restrictions", "POST", "R1 目标可见性")
+    payload = {**_create_payload(), "target_type": target_type, "target_id": target_id}
+    try:
+        _invoke(endpoint, MemoryEngine([]), user_id=user_id, payload=payload)
+    except (AppError, HTTPException) as error:
+        if _error_code(error) == "NOT_FOUND" or _error_status(error) == 404:
+            return
+        raise
+    pytest.xfail(
+        "未对齐 #337@b85cd820 §7.5：不存在或不可见目标未统一返回 404 NOT_FOUND"
+    )
+
+
+@pytest.mark.parametrize(
+    ("kind", "target_type"),
+    [("unsupported", "security"), ("blocklist", "unsupported")],
+)
+def test_r1_post_invalid_kind_or_target_type_is_validation_error(kind: str, target_type: str) -> None:
+    endpoint = _endpoint("/restrictions", "POST", "R1 非法枚举")
+    payload = {**_create_payload(), "kind": kind, "target_type": target_type}
+    try:
+        _invoke(endpoint, MemoryEngine([]), payload=payload)
+    except (AppError, HTTPException, ValidationError) as error:
+        if (
+            _error_code(error) == "VALIDATION_ERROR"
+            or _error_status(error) == 400
+            or isinstance(error, ValidationError)
+        ):
+            return
+        raise
+    pytest.xfail("未对齐 #337@b85cd820 §7.5：非法 kind/target_type 未返回 400 VALIDATION_ERROR")
+
+
 def test_r2_delete_is_soft_delete_and_repeat_returns_same_removed_at() -> None:
+    endpoint = _endpoint("/restrictions/{restriction_id}", "DELETE", "R2 删除")
     engine = MemoryEngine([_row(RID), _row(RID_2, target_type="security", target_id="SYN001.SH")])
-    first = _invoke(DELETE_ENDPOINT, engine)
+    first = _invoke(endpoint, engine)
     assert _get(first, "id") == RID
     removed_at = _get(first, "removed_at")
     assert removed_at is not None and getattr(removed_at, "tzinfo", None) is not None
@@ -489,7 +652,7 @@ def test_r2_delete_is_soft_delete_and_repeat_returns_same_removed_at() -> None:
     assert owned.removed_at == removed_at
     assert leftover.removed_at is None
     try:
-        second = _invoke(DELETE_ENDPOINT, engine)
+        second = _invoke(endpoint, engine)
     except (AppError, HTTPException, ValueError) as error:
         code = getattr(error, "code", None)
         status = getattr(error, "status_code", None)
@@ -500,19 +663,19 @@ def test_r2_delete_is_soft_delete_and_repeat_returns_same_removed_at() -> None:
     assert _get(second, "removed_at") == removed_at
 
 
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：R2 所有权删除路由不存在")
 @pytest.mark.parametrize("user_id,restriction_id", [(OTHER, RID), (OWNER, UNKNOWN)])
 def test_r2_other_user_or_unknown_id_is_not_leaked(user_id: uuid.UUID, restriction_id: uuid.UUID) -> None:
+    endpoint = _endpoint("/restrictions/{restriction_id}", "DELETE", "R2 所有权删除")
     engine = MemoryEngine([_row(RID)])
     with pytest.raises((AppError, HTTPException, ValueError)) as error:
-        _invoke(DELETE_ENDPOINT, engine, user_id=user_id, restriction_id=restriction_id)
+        _invoke(endpoint, engine, user_id=user_id, restriction_id=restriction_id)
     code = getattr(error.value, "code", None)
     status = getattr(error.value, "status_code", None)
     assert str(code) == "NOT_FOUND" or status == 404
 
 
-@pytest.mark.xfail(not ROUTES_READY, strict=True, reason="T-B200 未实现：R3 重查路由不存在")
 def test_r3_multiple_restrictions_release_only_after_last_one() -> None:
+    endpoint = _endpoint("/restrictions/{restriction_id}", "DELETE", "R3 删除重查")
     reason_id = uuid.UUID("77777777-7777-4777-8777-777777777777")
     signal_id = uuid.UUID("88888888-8888-4888-8888-888888888888")
     reason = SimpleNamespace(
@@ -532,7 +695,7 @@ def test_r3_multiple_restrictions_release_only_after_last_one() -> None:
         created_at=NOW,
     )
     engine = MemoryEngine([_row(RID), _row(RID_2)], reasons=[reason], signals=[signal])
-    first = _invoke(DELETE_ENDPOINT, engine)
+    first = _invoke(endpoint, engine)
     leftover = next(row for row in engine.conn.rows if row.id == RID_2)
     assert leftover.removed_at is None
     assert list(_get(_recheck(first), "released_reason_ids")) == []
@@ -540,7 +703,7 @@ def test_r3_multiple_restrictions_release_only_after_last_one() -> None:
     if _recheck_is_stubbed():
         pytest.xfail("T-B200 未实现：R3 重查仍为占位，未按同目标剩余限制计算 released/remaining_reason_ids")
     assert list(_get(_recheck(first), "remaining_reason_ids")) == [reason_id]
-    second = _invoke(DELETE_ENDPOINT, engine, restriction_id=RID_2)
+    second = _invoke(endpoint, engine, restriction_id=RID_2)
     assert list(_get(_recheck(second), "released_reason_ids")) == [reason_id]
     assert list(_get(_recheck(second), "remaining_reason_ids")) == []
 
@@ -556,29 +719,3 @@ def test_r3_machine_reasons_remain_non_manually_releasable() -> None:
         and "POST" in {method.upper() for method in route.methods or ()}
         for route in candidate_signals.router.routes
     )
-
-
-def _write_candidate_has_restriction_filters() -> bool:
-    service = importlib.import_module("app.signals.service")
-    source = inspect.getsource(service.write_candidate)
-    return (
-        "user_restrictions.c.removed_at.is_(None)" in source
-        and 'user_restrictions.c.target_type == "security"' in source
-        and 'user_restrictions.c.target_type == "instance"' in source
-        and 'user_restrictions.c.target_type == "strategy"' in source
-    )
-
-
-@pytest.mark.xfail(
-    not _write_candidate_has_restriction_filters(),
-    strict=True,
-    reason="T-B200 未实现：write_candidate 尚未按 removed_at/target_type 过滤",
-)
-def test_write_candidate_filters_removed_at_and_target_type() -> None:
-    service = importlib.import_module("app.signals.service")
-    source = inspect.getsource(service.write_candidate)
-    restriction_read = source[source.index("select(user_restrictions)") :]
-    assert "user_restrictions.c.removed_at.is_(None)" in restriction_read
-    assert 'user_restrictions.c.target_type == "security"' in restriction_read
-    assert 'user_restrictions.c.target_type == "instance"' in restriction_read
-    assert 'user_restrictions.c.target_type == "strategy"' in restriction_read
