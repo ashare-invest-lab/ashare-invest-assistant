@@ -38,7 +38,7 @@ const cases: [string, MarketCaseBody, string, boolean, boolean, boolean][] = [
   ['部分缺失', { ...base, basis: { ...basis, observed: null, suspended: null, missing: null } }, '覆盖率：—', false, false, false],
   ['旧收盘', { ...base, data_status: 'stale', basis: { ...basis, observed_date: '2026-10-30', mode: 'close' } }, 'observed_date：2026-10-30', false, true, false],
   ['旧且部分', { ...base, data_status: 'partial', basis: { ...basis, observed_date: '2026-10-30', missing: 2, observed: 8 } }, 'missing：2', true, true, false],
-  ['真实零', { ...base, breadth: { up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0 }, basis: { ...basis, eligible: 0, observed: 0, trading: 0, suspended: 0 } }, '覆盖率：—', false, false, false],
+  ['真实零', { ...base, breadth: { up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0, up_ratio: null, down_ratio: null, flat_ratio: null }, basis: { ...basis, eligible: 0, observed: 0, trading: 0, suspended: 0 } }, '覆盖率：—', false, false, false],
   ['未知资格池', { ...base, basis: { ...basis, eligible: null, observed: null, trading: null, suspended: null, missing: null } }, 'eligible：—', false, false, false],
   ['旧响应缺失 basis', withoutBasis(base), 'basis：—', false, false, true],
   ['无市场快照', { ...base, basis: null, breadth: null, turnover_total: null, data_status: 'unavailable', data_as_of: null, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：无市场批次' }] }, 'basis：—', false, false, true],
@@ -82,6 +82,48 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     expect(screen.getByTestId('market-page')).toHaveTextContent('未知');
     expect(await screen.findByText('暂无板块资金：未知')).toBeInTheDocument();
     expect(screen.getByTestId('sector-meta')).toHaveTextContent('未知');
+  });
+
+  it('涨跌停或计数为 null 时显示破折号并保留缺口说明', async () => {
+    mount(path, {
+      ...base,
+      breadth: { ...base.breadth!, limit_up: null, limit_down: null, up: null, down: null, flat: null },
+      gaps: [
+        { key: 'market.breadth.limit_counts', reason: 'no_source', message: '合成：无涨跌停来源' },
+        { key: 'market.breadth', reason: 'no_source', message: '合成：缺少涨跌家数' },
+      ],
+    });
+    const panel = await screen.findByTestId('breadth-panel');
+    expect(panel).toHaveTextContent('涨停—');
+    expect(panel).toHaveTextContent('跌停—');
+    expect(panel).toHaveTextContent(/上涨\s*—/);
+    expect(panel).toHaveTextContent(/平盘\s*—/);
+    expect(panel).toHaveTextContent(/下跌\s*—/);
+    expect(screen.getByTestId('market-gap-note')).toHaveTextContent('合成：无涨跌停来源');
+    expect(panel.querySelector('.breadth-bar')).not.toBeNull();
+  });
+
+  it('上涨占比直接采用后端比例，不按计数自算', async () => {
+    mount(path, { ...base, breadth: { ...base.breadth!, up: 9000, down: 500, flat: 500, up_ratio: '0.2500' } });
+    const panel = await screen.findByTestId('breadth-panel');
+    expect(panel).toHaveTextContent('上涨占比25.0%');
+  });
+
+  it('计数部分缺失时仍按完整比例绘制条形', async () => {
+    mount(path, { ...base, breadth: { ...base.breadth!, up: null } });
+    const panel = await screen.findByTestId('breadth-panel');
+    expect(panel).toHaveTextContent(/上涨\s*—/);
+    expect(panel).toHaveTextContent('平盘 213');
+    expect(panel).toHaveTextContent('下跌 2104');
+    expect(panel).toHaveTextContent('上涨占比55.3%');
+    expect(panel.querySelector('.breadth-bar')).not.toBeNull();
+  });
+
+  it('比例缺失时不显示上涨占比或条形', async () => {
+    mount(path, { ...base, breadth: { ...base.breadth!, up_ratio: null } });
+    const panel = await screen.findByTestId('breadth-panel');
+    expect(panel).toHaveTextContent('上涨占比—');
+    expect(panel.querySelector('.breadth-bar')).toBeNull();
   });
 
   it('稀疏 1m 原样传图，不插值或补零', async () => {

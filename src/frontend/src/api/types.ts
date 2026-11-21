@@ -546,7 +546,16 @@ export interface MarketOverview extends DataStatusBlock {
   trade_date: DateStr;
   session: MarketSession;
   indices: MarketIndexQuote[];
-  breadth: { up: number; down: number; flat: number; limit_up: number; limit_down: number } | null;
+  breadth: {
+    up: number | null;
+    down: number | null;
+    flat: number | null;
+    limit_up: number | null;
+    limit_down: number | null;
+    up_ratio: Decimal | null;
+    down_ratio: Decimal | null;
+    flat_ratio: Decimal | null;
+  } | null;
   regime: MarketRegime | null;
   regime_position_range: RegimePositionRange | null;
   turnover_total: Decimal | null;

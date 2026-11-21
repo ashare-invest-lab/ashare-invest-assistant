@@ -70,27 +70,30 @@ export function MarketPage() {
 
 function BreadthPanel({ m }: { m: MarketOverview }) {
   const b = m.breadth;
-  const total = b ? b.up + b.down + b.flat : 0;
+  const hasRatios = b?.up_ratio !== null && b?.up_ratio !== undefined
+    && b.down_ratio !== null && b.down_ratio !== undefined
+    && b.flat_ratio !== null && b.flat_ratio !== undefined;
+  const countText = (value: number | null) => value === null ? '—' : String(value);
   return (
     <section className="panel side-panel" data-testid="breadth-panel">
       <div className="panel-head"><span className="panel-title">涨跌分布</span></div>
       {!b ? <div className="muted small hz-empty">涨跌家数暂不可用</div> : (
         <div className="breadth">
-          {total > 0 ? <div className="breadth-bar" aria-label={`上涨 ${b.up} 家，平盘 ${b.flat} 家，下跌 ${b.down} 家`}>
-            <span className="seg up-bg" style={{ width: `${(b.up / total) * 100}%` }} />
-            <span className="seg flat-bg" style={{ width: `${(b.flat / total) * 100}%` }} />
-            <span className="seg down-bg" style={{ width: `${(b.down / total) * 100}%` }} />
+          {hasRatios ? <div className="breadth-bar" aria-label={`上涨 ${countText(b.up)} 家，平盘 ${countText(b.flat)} 家，下跌 ${countText(b.down)} 家`}>
+            <span className="seg up-bg" style={{ width: `${Number(b.up_ratio) * 100}%` }} />
+            <span className="seg flat-bg" style={{ width: `${Number(b.flat_ratio) * 100}%` }} />
+            <span className="seg down-bg" style={{ width: `${Number(b.down_ratio) * 100}%` }} />
           </div> : null}
           <div className="breadth-nums">
-            <span className="up">上涨 <b className="mono">{b.up}</b></span>
-            <span className="muted">平盘 <b className="mono">{b.flat}</b></span>
-            <span className="down">下跌 <b className="mono">{b.down}</b></span>
+            <span className="up">上涨 <b className="mono">{countText(b.up)}</b></span>
+            <span className="muted">平盘 <b className="mono">{countText(b.flat)}</b></span>
+            <span className="down">下跌 <b className="mono">{countText(b.down)}</b></span>
           </div>
           <div className="stat-grid two">
-            <div><label>涨停</label><b className="mono up">{b.limit_up}</b></div>
-            <div><label>跌停</label><b className="mono down">{b.limit_down}</b></div>
+            <div><label>涨停</label><b className="mono up">{countText(b.limit_up)}</b></div>
+            <div><label>跌停</label><b className="mono down">{countText(b.limit_down)}</b></div>
             <div><label>两市成交额</label><b className="mono">{fmtAmount(m.turnover_total)}</b></div>
-            <div><label>上涨占比</label><b className="mono">{total > 0 ? `${fmtNum((b.up / total) * 100, 1)}%` : '—'}</b></div>
+            <div><label>上涨占比</label><b className="mono">{b.up_ratio === null ? '—' : `${fmtNum(Number(b.up_ratio) * 100, 1)}%`}</b></div>
           </div>
         </div>
       )}
