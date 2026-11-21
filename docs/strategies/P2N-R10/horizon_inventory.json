@@ -1098,6 +1098,16 @@
       "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
       "scope_role": "enumerated_identity_source",
       "note": "T-R88b：st_pullback_ma v2 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/T-R99/f22_disclosure_pair.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R99 F22 披露配对研究文档；非策略身份，不可导入"
+    },
+    {
+      "path": "docs/strategies/T-R101/no_trade_cooldown_card.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R101 禁投与冷静期 draft 知识卡；非正式策略身份，不可导入"
     }
   ],
   "records": [
