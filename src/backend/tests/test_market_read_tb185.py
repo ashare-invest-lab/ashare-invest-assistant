@@ -223,7 +223,7 @@ def test_meta_enums_exposes_versioned_suspension_and_refreshes_cache() -> None:
     updated = asyncio.run(meta.meta_enums(old_etag))
     assert updated.status_code == 200
     payload = json.loads(updated.body)
-    assert payload["version"] == "v0.2.10"
+    assert payload["version"] == "v0.2.11"
     assert payload["enums"]["gap_reason"] == [*old_payload["enums"]["gap_reason"], "suspended"]
     etag = updated.headers["etag"]
     assert etag != old_etag

@@ -169,7 +169,7 @@ def test_01_meta_enums_v029(app_client: Callable[..., Any]) -> None:
     """第 1 条（接口层）：版本随契约同步，新旧版本都保持候选事件取值与顺序。"""
     c = app_client("open")
     body = c.get(f"{API}/meta/enums").json()
-    expected_version = "v0.2.10" if _docs().ver == (0, 2, 10) else V029
+    expected_version = {(0, 2, 10): "v0.2.10", (0, 2, 11): "v0.2.11"}.get(_docs().ver, V029)
     if expected_version == V029 and body.get("version") == "v0.2.8":
         pytest.xfail(f"{O_ENUMS29}；当前 version = {body.get('version')}")
     assert body["version"] == expected_version
@@ -191,7 +191,7 @@ def test_01_frontend_contract_version_v029() -> None:
     src = _front("api/enums.ts")
     m = re.search(r"CONTRACT_VERSION\s*=\s*'(v[0-9.]+)'", src)
     assert m, "enums.ts 没有 CONTRACT_VERSION"
-    expected_version = "v0.2.10" if _docs().ver == (0, 2, 10) else V029
+    expected_version = {(0, 2, 10): "v0.2.10", (0, 2, 11): "v0.2.11"}.get(_docs().ver, V029)
     if expected_version == V029 and m.group(1) == "v0.2.8":
         pytest.xfail(f"{O_FRONT29}；当前 {m.group(1)}")
     assert m.group(1) == expected_version

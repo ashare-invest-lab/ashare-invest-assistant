@@ -6,6 +6,7 @@ import datetime as dt
 import socket
 import uuid
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal
 from types import SimpleNamespace
@@ -15,13 +16,17 @@ from unittest.mock import MagicMock
 import pytest
 from app.aggregates import models as m
 from app.aggregates import products, service
+from app.aggregates.market_projection import project_daily_report_market, project_market_overview
 from app.api.v1 import aggregates as routes
+from app.api.v1 import daily_reports as report_routes
 from app.auth import deps
 from app.marketdata import quotes_read
+from app.reports import service as report_service
 from app.schemas.enums import DataStatus, MarketSession
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import Response
+from pydantic import ValidationError
 from sqlalchemy import Connection
 from sqlalchemy.sql.selectable import Join
 
@@ -54,6 +59,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
     conn = MagicMock(spec=Connection)
     app = FastAPI()
     app.include_router(routes.router, prefix="/api/v1")
+    app.include_router(report_routes.router, prefix="/api/v1")
     state = World(client=TestClient(app), conn=conn)
 
     def execute(statement: Any) -> MagicMock:
@@ -272,3 +278,128 @@ def test_today_top_data_as_of_null_when_no_focus(world: World, mode: str) -> Non
     assert len(payload["focus"]["items"]) == (2 if mode == "all_null" else 0)
     assert payload["data_as_of"] is None
     assert_cache(world.client, "/api/v1/today", response)
+
+
+KNOWN_BASIS = {
+    "snapshot_id": str(uuid.UUID(int=187)),
+    "observed_date": str(NOW.date()),
+    "mode": "close",
+    "scope": "沪深股票口径",
+    "eligible": 2,
+    "observed": 2,
+    "trading": 2,
+    "suspended": 0,
+    "missing": 0,
+    "source": "synthetic-market-snapshot",
+}
+
+
+def test_market_basis_is_shared_by_public_aggregates(world: World) -> None:
+    path = "/api/v1/market/overview"
+    overview = world.client.get(path)
+    today = world.client.get("/api/v1/today")
+    terminal = world.client.get("/api/v1/terminal")
+    assert (overview.status_code, today.status_code, terminal.status_code) == (200, 200, 200)
+    assert overview.json()["basis"] is None
+    assert today.json()["market"]["basis"] is None
+    assert terminal.json()["account"]["basis"] is None
+    schemas = world.client.get("/openapi.json").json()["components"]["schemas"]
+    terminal_account = schemas["Terminal"]["properties"]["account"]["anyOf"]
+    account_ref = next(variant["$ref"] for variant in terminal_account if "$ref" in variant)
+    basis_refs = set()
+    for name in ("MarketOverview", "TodayMarket", account_ref.rsplit("/", 1)[1], "Market"):
+        schema = schemas[name]
+        assert "basis" in schema["required"]
+        variants = schema["properties"]["basis"]["anyOf"]
+        assert {"type": "null"} in variants
+        basis_refs.update(variant["$ref"] for variant in variants if "$ref" in variant)
+    assert len(basis_refs) == 1
+    basis_schema = schemas[basis_refs.pop().rsplit("/", 1)[1]]
+    assert set(basis_schema["required"]) == set(KNOWN_BASIS)
+    cached = world.client.get(path, headers={"If-None-Match": overview.headers["etag"]})
+    assert cached.status_code == 304
+    legacy = overview.json()
+    legacy.pop("basis")
+    legacy["data_as_of"] = EARLY
+    assert project_market_overview(legacy).model_dump(mode="json") == {
+        **legacy,
+        "basis": None,
+    }
+    assert "basis" not in legacy
+
+
+@pytest.mark.parametrize("stamp", [None, EARLY])
+@pytest.mark.parametrize("has_basis", [False, True])
+def test_daily_report_market_projects_archive_without_rewriting_it(
+    world: World, monkeypatch: pytest.MonkeyPatch, stamp: str | None, has_basis: bool
+) -> None:
+    market = {
+        "regime": None,
+        "regime_position_range": None,
+        "breadth": {"up": 2, "down": 1, "limit_up": 0, "limit_down": 0} if stamp else None,
+        "summary": [],
+    }
+    if stamp:
+        market["data_as_of"] = stamp
+    if has_basis:
+        market.update(basis=KNOWN_BASIS, data_status="stale", data_as_of=stamp, gaps=[])
+    body = {
+        "date": str(NOW.date()),
+        "generated_at": NOW.isoformat(),
+        "account_id": None,
+        "market": market,
+        "account": None,
+        "reconciliation": {
+            "status": "not_imported",
+            "as_of": None,
+            "diff_count": 0,
+            "important_count": 0,
+        },
+        "stocks": [],
+        "pending": {"plan_drafts": 0, "active_reasons": 0},
+        "explanation": {"source": "template", "text": "合成旧日报", "llm_call_id": None},
+        "evidence": [],
+        "data_status": "unavailable",
+        "data_as_of": None,
+        "gaps": [],
+    }
+    before = deepcopy(body)
+
+    def latest(conn: Connection, owner: uuid.UUID, date: dt.date) -> SimpleNamespace:
+        assert conn is world.conn and owner == OWNER and date == NOW.date()
+        return SimpleNamespace(body=body, generated_at=NOW)
+
+    monkeypatch.setattr(report_service, "latest", latest)
+    response = world.client.get(f"/api/v1/daily-reports/{NOW.date()}")
+    assert response.status_code == 200
+    projected = response.json()["market"]
+    assert projected == project_daily_report_market(market).model_dump(mode="json")
+    assert projected["basis"] == (KNOWN_BASIS if has_basis else None)
+    assert projected["data_as_of"] == stamp
+    assert projected["breadth"] == market["breadth"]
+    if has_basis:
+        assert projected == market
+    else:
+        assert projected["data_status"] == ("partial" if stamp else "unavailable")
+        assert [(gap["key"], gap["reason"]) for gap in projected["gaps"]] == [
+            ("market.basis", "no_source")
+        ]
+    assert body == before
+    world.conn.execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("counts", "error"),
+    [
+        ({"observed": 0}, "market_counts_without_eligibility"),
+        ({"eligible": 3, "observed": 1, "missing": 1}, "market_missing_count_mismatch"),
+        ({"eligible": 3, "observed": 4}, "market_count_exceeds_eligibility"),
+        (
+            {"eligible": 3, "observed": 1, "trading": 1, "suspended": 1},
+            "market_count_exceeds_observed",
+        ),
+    ],
+)
+def test_market_basis_rejects_inconsistent_counts(counts: dict[str, int], error: str) -> None:
+    with pytest.raises(ValidationError, match=error):
+        m.MarketBasis(**counts)

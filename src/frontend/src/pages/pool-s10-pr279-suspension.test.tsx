@@ -42,8 +42,8 @@ function mockReport(gaps: Gap[]) {
 
 beforeEach(() => mockLoginAs('demo_user'));
 
-it('版本和理由枚举对齐 v0.2.10，原七值顺序保留', () => {
-  expect(CONTRACT_VERSION).toBe('v0.2.10');
+it('版本和理由枚举对齐 v0.2.11，原七值顺序保留', () => {
+  expect(CONTRACT_VERSION).toBe('v0.2.11');
   expect(ENUMS.gap_reason).toEqual([
     'no_source', 'not_yet_published', 'upstream_error', 'quota_deferred', 'user_input_missing',
     'data_licence_unavailable', 'not_applicable', 'suspended',
