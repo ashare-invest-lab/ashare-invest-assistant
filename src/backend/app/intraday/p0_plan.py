@@ -66,8 +66,8 @@ class P0PlanResult:
         return tuple(r for r in self.records if r.dispatchable)
 
     @property
-    def deferred(self) -> tuple[P0PlanRecord, ...]:
-        return tuple(r for r in self.records if r.status == "deferred")
+    def skipped(self) -> tuple[P0PlanRecord, ...]:
+        return tuple(r for r in self.records if r.status == "skipped")
 
 
 ClockInput = Any | Callable[[dt.datetime], Any]
@@ -171,7 +171,7 @@ class P0Planner:
                 if entry.code in stopped:
                     status, reason, cost = "skipped", "suspended", 0
                 elif cap is not None and used.get(cert.licence_id, 0) >= cap:
-                    status, reason, cost = "deferred", "budget_exhausted", 0
+                    status, reason, cost = "skipped", "budget_exhausted", 0
                 elif cap is not None:
                     used[cert.licence_id] = used.get(cert.licence_id, 0) + 1
                 record = P0PlanRecord(
@@ -191,6 +191,14 @@ class P0Planner:
                 if reason:
                     reasons.append(f"{cert.licence_id}:{entry.code}:{reason}")
         return P0PlanResult(tuple(records), tuple(reasons), used, duplicates)
+
+    def manual_replan(self, plan_id: str) -> bool:
+        """Allow one explicitly requested retry of a budget-skipped plan."""
+        record = self._seen.get(plan_id)
+        if record is None or record.status != "skipped" or record.reason != "budget_exhausted":
+            return False
+        del self._seen[plan_id]
+        return True
 
     @staticmethod
     def _certificates(

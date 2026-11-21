@@ -62,7 +62,7 @@ def test_layers_suspension_budget_and_replay() -> None:
         ("SYN001", "holding", 1, "planned"),
         ("SYN002", "holding", 1, "skipped"),
         ("SYN003", "focus", 2, "planned"),
-        ("SYN004", "watchlist", 2, "deferred"),
+        ("SYN004", "watchlist", 2, "skipped"),
     ]
     assert first.budget_used == {"licence-a": 2}
     replay = p.plan(
@@ -70,6 +70,42 @@ def test_layers_suspension_budget_and_replay() -> None:
     )
     assert replay.records == () and replay.duplicate_count == 4
     assert len(p.records) == 4
+
+
+def test_budget_skip_is_not_automatically_replanned() -> None:
+    p = planner()
+    cert = CertificateUniverse("licence-a", holdings=["SYN001", "SYN002"], budget=1)
+    first = p.plan(
+        NOW, [cert], clock=MarketClock(trade_date=DAY, session=MarketSession.MORNING)
+    )
+    assert [r.status for r in first.records] == ["planned", "skipped"]
+    replay = p.plan(
+        NOW, [cert], clock=MarketClock(trade_date=DAY, session=MarketSession.MORNING)
+    )
+    assert replay.records == ()
+
+
+def test_manual_replan_releases_only_budget_skip() -> None:
+    p = planner()
+    cert = CertificateUniverse(
+        "licence-a",
+        holdings=["SYN001", "SYN002", "SYN003"],
+        suspended=["SYN003"],
+        budget=1,
+    )
+    first = p.plan(
+        NOW, [cert], clock=MarketClock(trade_date=DAY, session=MarketSession.MORNING)
+    )
+    budget_skip = next(r for r in first.records if r.reason == "budget_exhausted")
+    suspended = next(r for r in first.records if r.reason == "suspended")
+    assert p.manual_replan(suspended.plan_id) is False
+    assert p.manual_replan(budget_skip.plan_id) is True
+    second = p.plan(
+        NOW, [cert], clock=MarketClock(trade_date=DAY, session=MarketSession.MORNING)
+    )
+    assert [r.code for r in second.records] == [budget_skip.code]
+    assert [r.budget_cost for r in second.records] == [1]
+    assert second.budget_used == {"licence-a": 1}
 
 
 def test_scheduler_receives_records_idempotently_without_io(
