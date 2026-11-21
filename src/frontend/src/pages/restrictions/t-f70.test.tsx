@@ -14,7 +14,7 @@ import { TodayPage } from '../today/TodayPage';
 const API = '/api/v1';
 const restriction: Restriction = {
   id: 'restriction-t-f70', kind: 'blocklist', target_type: 'security', target_id: '600000.SH', name: '示例银行',
-  until: null, reason: '示例原因', created_at: '2026-11-21T09:00:00+08:00', removed_at: null,
+  until: null, reason: '示例原因', status: 'active', created_at: '2026-11-21T09:00:00+08:00', removed_at: null,
 };
 
 function renderPage() {

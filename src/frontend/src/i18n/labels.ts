@@ -184,8 +184,8 @@ export const RESTRICTION_KIND: Record<RestrictionKind, string> = {
 export const RESTRICTION_TARGET_TYPE: Record<RestrictionTargetType, string> = {
   security: '证券', strategy: '策略', instance: '策略实例',
 };
-export const RESTRICTION_STATUS: Record<'active' | 'expired', { text: string; color: string }> = {
-  active: { text: '生效中', color: 'orange' }, expired: { text: '已过期', color: 'default' },
+export const RESTRICTION_STATUS: Record<'active' | 'expired' | 'removed', { text: string; color: string }> = {
+  active: { text: '生效中', color: 'orange' }, expired: { text: '已过期', color: 'default' }, removed: { text: '已删除', color: 'default' },
 };
 /**
  * factor_category 键名【待 T003 补测】：已知的示例键给中文名，未知键原样显示

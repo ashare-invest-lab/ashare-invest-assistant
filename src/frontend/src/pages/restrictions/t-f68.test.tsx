@@ -68,12 +68,29 @@ describe('T-F68 限制管理页', () => {
   it('未知枚举和值域原型键安全显示未知', async () => {
     const unknown: Restriction = {
       id: 'restriction-unknown', kind: '__proto__' as Restriction['kind'], target_type: 'constructor' as Restriction['target_type'],
-      target_id: 'example-unknown', until: null, reason: null, created_at: '2026-11-20T12:00:00+08:00', status: '__proto__', removed_at: null,
+      target_id: 'example-unknown', until: null, reason: null, created_at: '2026-11-20T12:00:00+08:00', name: null, status: '__proto__', removed_at: null,
     };
-    server.use(http.get(`${API}/restrictions`, () => HttpResponse.json({ items: [unknown], next_cursor: null })));
+    const unfamiliar: Restriction = {
+      id: 'restriction-unfamiliar', kind: 'unfamiliar-kind' as Restriction['kind'], target_type: 'unfamiliar-target' as Restriction['target_type'],
+      target_id: 'example-unfamiliar', until: null, reason: null, created_at: '2026-11-20T12:00:00+08:00', name: null, status: 'unfamiliar-status', removed_at: null,
+    };
+    server.use(http.get(`${API}/restrictions`, () => HttpResponse.json({ items: [unknown, unfamiliar], next_cursor: null, gaps: [] })));
     renderPage();
-    expect(await screen.findAllByText('未知')).toHaveLength(3);
+    expect(await screen.findAllByText('未知')).toHaveLength(6);
     expect(screen.getByText('example-unknown')).toBeInTheDocument();
+    expect(screen.getByText('example-unfamiliar')).toBeInTheDocument();
+  });
+
+  it('缺少服务端 status 时不会按已过期 until 推断状态', async () => {
+    const missingStatus = {
+      id: 'restriction-missing-status', kind: 'cooling_off', target_type: 'security', target_id: 'example-missing-status',
+      name: '示例缺失状态', until: '2020-01-01T00:00:00+08:00', reason: null, created_at: '2026-11-20T12:00:00+08:00', removed_at: null,
+    } as Omit<Restriction, 'status'>;
+    server.use(http.get(`${API}/restrictions`, () => HttpResponse.json({ items: [missingStatus], next_cursor: null, gaps: [] })));
+    renderPage();
+    expect(await screen.findByText('example-missing-status')).toBeInTheDocument();
+    expect(screen.getByText('未知')).toBeInTheDocument();
+    expect(screen.queryByText('已过期')).not.toBeInTheDocument();
   });
 
   it('名单类仍生效原因提供限制名单链接', () => {
