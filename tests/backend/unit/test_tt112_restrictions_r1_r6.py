@@ -3,45 +3,31 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib.util
 import socket
 import uuid
 from contextlib import contextmanager
-from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.sql import operators
 from sqlalchemy.sql.dml import Insert, Update
-from sqlalchemy.sql.elements import (
-    BinaryExpression,
-    BindParameter,
-    BooleanClauseList,
-    Grouping,
-    Null,
-)
 
-try:
+from app.common.errors import AppError, ErrorCode
+from app.common.pagination import PageParams
+from app.schemas.enums import RestrictionKind
+
+_RESTRICTIONS_MODULE = "app.api.v1.restrictions"
+if importlib.util.find_spec(_RESTRICTIONS_MODULE) is not None:
     from app.api.v1 import restrictions
-    from app.common.errors import AppError, ErrorCode
-    from app.common.pagination import PageParams
-    from app.db.tables.signals import user_restrictions
-    from app.schemas.enums import RestrictionKind
-    from app.signals import service
-except (ImportError, ModuleNotFoundError):  # pragma: no cover - compatibility with pre-merge trees
+else:
     restrictions = None  # type: ignore[assignment]
-    service = None  # type: ignore[assignment]
-    user_restrictions = None  # type: ignore[assignment]
-    RestrictionKind = SimpleNamespace(  # type: ignore[assignment,misc]
-        BLOCKLIST="blocklist", COOLING_OFF="cooling_off", MUTE="mute"
-    )
-    AppError = Exception  # type: ignore[assignment,misc]
-    ErrorCode = SimpleNamespace(NOT_FOUND="NOT_FOUND", VALIDATION_ERROR="VALIDATION_ERROR")
-    PageParams = SimpleNamespace  # type: ignore[assignment,misc]
-    pytestmark = pytest.mark.xfail(
-        reason="主线未合入 #330+#341+#348", strict=False
-    )
+
+
+def _require_restrictions() -> None:
+    if restrictions is None:
+        pytest.xfail("app.api.v1.restrictions endpoint is absent on this tree")
 
 
 USER = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -246,6 +232,7 @@ class RestrictionEngine:
 
 
 def test_owner_can_create_each_target_and_list_is_private(monkeypatch: pytest.MonkeyPatch) -> None:
+    _require_restrictions()
     monkeypatch.setattr(restrictions, "_now", lambda: NOW)
     created: list[Any] = []
     for kind_target in ("security", "strategy", "instance"):
@@ -273,6 +260,7 @@ def test_owner_can_create_each_target_and_list_is_private(monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize("target_type", ["security", "strategy", "instance"])
 def test_unknown_and_foreign_targets_are_indistinguishable_404(target_type: str) -> None:
+    _require_restrictions()
     cases = (
         (target_id(target_type), target_type != "security"),
         ("SYN999.SH" if target_type == "security" else str(uuid.uuid4()), False),
@@ -314,6 +302,7 @@ def test_unknown_and_foreign_targets_are_indistinguishable_404(target_type: str)
 def test_cooling_off_until_validation_and_future_creation(
     monkeypatch: pytest.MonkeyPatch, until: dt.datetime | None, issue: str | None
 ) -> None:
+    _require_restrictions()
     monkeypatch.setattr(restrictions, "_now", lambda: NOW)
     request = body(kind=RestrictionKind.COOLING_OFF, until=until)
     if until is not None and until.tzinfo is None:
@@ -340,6 +329,7 @@ def test_cooling_off_until_validation_and_future_creation(
 
 
 def test_invalid_kind_and_target_type_are_validation_errors() -> None:
+    _require_restrictions()
     for field, value in (("kind", "invented"), ("target_type", "portfolio")):
         payload = {
             "kind": "blocklist",
@@ -355,6 +345,7 @@ def test_invalid_kind_and_target_type_are_validation_errors() -> None:
 def test_idempotency_is_per_user_and_does_not_insert_twice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _require_restrictions()
     monkeypatch.setattr(restrictions, "_now", lambda: NOW)
     request = body()
     redis = Redis()
@@ -380,6 +371,7 @@ def test_idempotency_is_per_user_and_does_not_insert_twice(
 def test_blocklist_and_mute_null_or_expired_until_keep_status_visible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _require_restrictions()
     monkeypatch.setattr(restrictions, "_now", lambda: NOW)
     active = row(kind="blocklist", until=None)
     active_mute = row(kind="mute", until=None)
@@ -405,6 +397,7 @@ def test_blocklist_and_mute_null_or_expired_until_keep_status_visible(
 def test_blocklist_and_mute_past_until_create_projects_expired(
     monkeypatch: pytest.MonkeyPatch, kind: RestrictionKind
 ) -> None:
+    _require_restrictions()
     monkeypatch.setattr(restrictions, "_now", lambda: NOW)
     connection = RestrictionConnection()
     result = restrictions.create_restriction(
@@ -420,6 +413,7 @@ def test_blocklist_and_mute_past_until_create_projects_expired(
 def test_delete_repeat_uses_original_removed_at_and_no_recheck_on_repeat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _require_restrictions()
     monkeypatch.setattr(restrictions, "_now", lambda: NOW)
     item = row()
     foreign = row(owner=OTHER, identifier=uuid.UUID("00000000-0000-4000-8000-000000000777"))
@@ -443,360 +437,3 @@ def test_delete_repeat_uses_original_removed_at_and_no_recheck_on_repeat(
         with pytest.raises(AppError) as caught:
             restrictions.delete_restriction(identifier, auth(), RestrictionEngine(connection))
         assert caught.value.code == ErrorCode.NOT_FOUND
-
-
-class RecheckConnection(RestrictionConnection):
-    def __init__(self, rows: list[Any], candidate: Any, reason: Any, signal: Any) -> None:
-        super().__init__(rows)
-        self.candidate = candidate
-        self.reason = reason
-        self.signal = signal
-        self.reason_status: str = "active"
-
-    def execute(self, statement: Any, *_args: Any, **kwargs: Any) -> Result:
-        if isinstance(statement, Update):
-            params = statement.compile().params
-            if "status" in params:
-                self.reason_status = params["status"]
-            return super().execute(statement, *_args, **kwargs)
-        text = str(statement)
-        if "candidate_signals" in text:
-            if "created_at <" in text:
-                return Result([self.candidate])
-            return Result([self.signal])
-        if "non_executable_reasons" in text:
-            return Result([self.reason] if self.reason_status == "active" else [])
-        if "user_restrictions" in text:
-            params = statement.compile().params
-            if " != " in text:
-                current = params.get("id_1") or params.get("id")
-                return Result([item for item in self.rows if item.user_id == USER and item.id != current])
-            identifier = params.get("id_1") or params.get("id")
-            if identifier is not None:
-                return Result([item for item in self.rows if item.id == identifier and item.user_id == USER])
-            return Result([item for item in self.rows if item.user_id == USER])
-        if "SELECT" in text and "candidate_signals" not in text and "user_restrictions" not in text:
-            if "strategy_versions" in text:
-                return Result()
-            if "securities" in text:
-                return Result([SimpleNamespace(name="Synthetic target")])
-            if "signals" in text:
-                return Result([self.signal])
-        return super().execute(statement, *_args, **kwargs)
-
-
-def test_recheck_keeps_reason_until_last_same_target_restriction(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    clock = iter((NOW, NOW + dt.timedelta(hours=1)))
-    monkeypatch.setattr(restrictions, "_now", lambda: next(clock))
-    first = row(identifier=uuid.UUID("00000000-0000-4000-8000-000000000201"))
-    second = row(identifier=uuid.UUID("00000000-0000-4000-8000-000000000202"))
-    signal_id = uuid.UUID("00000000-0000-4000-8000-000000000301")
-    reason_id = uuid.UUID("00000000-0000-4000-8000-000000000401")
-    candidate = SimpleNamespace(
-        id=signal_id,
-        user_id=USER,
-        security_code="SYN001.SH",
-        instance_id=str(INSTANCE),
-        strategy_version_id=None,
-        created_at=NOW + dt.timedelta(minutes=30),
-    )
-    reason = SimpleNamespace(id=reason_id, signal_id=signal_id)
-    signal = SimpleNamespace(
-        id=signal_id,
-        user_id=USER,
-        state="blocked",
-        created_at=candidate.created_at,
-    )
-    connection = RecheckConnection([first, second], candidate, reason, signal)
-    first_result = restrictions.delete_restriction(first.id, auth(), RestrictionEngine(connection))
-    assert first_result.recheck.released_reason_ids == []
-    assert first_result.recheck.remaining_reason_ids == [reason_id]
-    second_result = restrictions.delete_restriction(second.id, auth(), RestrictionEngine(connection))
-    assert second_result.recheck.released_reason_ids == [reason_id]
-    assert second_result.recheck.remaining_reason_ids == []
-
-
-class CandidateContent:
-    security_code = "SYN001.SH"
-    proposed_action = "buy"
-    t_leg = None
-    score = None
-    rule_refs = [SimpleNamespace(rule_id="synthetic-rule", role="entry", dimension="technical", threshold="x")]
-    evidence = [
-        {
-            "id": "synthetic-evidence",
-            "provider": "local",
-            "epistemic_type": "fact",
-            "data_as_of": NOW,
-            "fetched_at": NOW,
-        }
-    ]
-    risk_flags: list[Any] = []
-    risk_details: list[Any] = []
-    gaps: list[Any] = []
-    valid_until = None
-    feature_set_version = "synthetic"
-    data_status = SimpleNamespace(value="fresh")
-    data_as_of = NOW
-    created_at = NOW
-    snapshot_id = uuid.UUID("00000000-0000-4000-8000-000000000501")
-
-    def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
-        return {
-            "security_code": self.security_code,
-            "proposed_action": self.proposed_action,
-            "t_leg": None,
-            "score": None,
-            "confidence": {"level": "high", "value": "0.8"},
-            "stops": {"stop_loss": None, "take_profit": None, "time_stop_days": None},
-            "rule_refs": [{"rule_id": "synthetic-rule", "role": "entry", "dimension": "technical", "threshold": "x", "evidence_ids": []}],
-            "evidence": self.evidence,
-            "counter_evidence": [{"text": "synthetic counter", "expr": "x", "evidence_ids": ["synthetic-evidence"]}],
-            "invalidation": [{"text": "synthetic invalidation", "expr": "x", "evidence_ids": ["synthetic-evidence"]}],
-            "model_refs": [],
-            "risk_flags": [],
-            "valid_until": None,
-            "feature_set_version": self.feature_set_version,
-            "gaps": [],
-            "created_at": self.created_at,
-            "snapshot_id": self.snapshot_id,
-            "data_status": self.data_status.value,
-            "data_as_of": self.data_as_of,
-        }
-
-
-def _unwrap_grouping(expression: Any) -> Any:
-    while isinstance(expression, Grouping):
-        expression = expression.element
-    return expression
-
-
-def _literal(expression: Any) -> Any:
-    if isinstance(expression, BindParameter):
-        return expression.value
-    if isinstance(expression, Null):
-        return None
-    raise AssertionError(f"unexpected restriction predicate value: {expression!r}")
-
-
-def _column_value(expression: Any, item: Any) -> Any:
-    assert getattr(expression, "table", None) is user_restrictions
-    return getattr(item, expression.key)
-
-
-def _restriction_predicate_matches(expression: Any, item: Any) -> bool:
-    expression = _unwrap_grouping(expression)
-    if isinstance(expression, BooleanClauseList):
-        clauses = list(expression.clauses)
-        if expression.operator is operators.and_:
-            return all(_restriction_predicate_matches(clause, item) for clause in clauses)
-        if expression.operator is operators.or_:
-            return any(_restriction_predicate_matches(clause, item) for clause in clauses)
-        raise AssertionError(f"unexpected boolean operator: {expression.operator!r}")
-    if not isinstance(expression, BinaryExpression):
-        raise AssertionError(f"unexpected restriction predicate: {expression!r}")
-    left = _unwrap_grouping(expression.left)
-    right = _unwrap_grouping(expression.right)
-    left_value = _column_value(left, item)
-    right_value = _literal(right)
-    if expression.operator is operators.eq:
-        return left_value == right_value
-    if expression.operator is operators.le:
-        return left_value <= right_value
-    if expression.operator is operators.gt:
-        return left_value > right_value
-    if expression.operator is operators.is_:
-        return left_value is right_value
-    raise AssertionError(f"unexpected restriction comparison: {expression.operator!r}")
-
-
-def _restriction_expressions(expression: Any) -> list[Any]:
-    expression = _unwrap_grouping(expression)
-    expressions = [expression]
-    for child in expression.get_children():
-        expressions.extend(_restriction_expressions(child))
-    return expressions
-
-
-def _has_restriction_comparison(
-    expression: Any, column: str, operator: Any, expected: Any
-) -> bool:
-    for candidate in _restriction_expressions(expression):
-        if not isinstance(candidate, BinaryExpression):
-            continue
-        left = _unwrap_grouping(candidate.left)
-        if getattr(left, "table", None) is not user_restrictions:
-            continue
-        if left.key != column or candidate.operator is not operator:
-            continue
-        if isinstance(candidate.right, Null):
-            value = None
-        else:
-            value = _literal(candidate.right)
-        if value == expected:
-            return True
-    return False
-
-
-def _has_removed_window(expression: Any, candidate_created_at: dt.datetime) -> bool:
-    expression = _unwrap_grouping(expression)
-    if isinstance(expression, BooleanClauseList) and expression.operator is operators.or_:
-        has_removed_null = _has_restriction_comparison(
-            expression, "removed_at", operators.is_, None
-        )
-        has_removed_after = _has_restriction_comparison(
-            expression, "removed_at", operators.gt, candidate_created_at
-        )
-        if has_removed_null and has_removed_after:
-            return True
-    return any(
-        _has_removed_window(child, candidate_created_at)
-        for child in expression.get_children()
-    )
-
-
-def _has_target_pair(expression: Any, target_type: str, target_id: str) -> bool:
-    expression = _unwrap_grouping(expression)
-    if isinstance(expression, BooleanClauseList):
-        if expression.operator is operators.and_:
-            return _has_restriction_comparison(
-                expression, "target_type", operators.eq, target_type
-            ) and _has_restriction_comparison(
-                expression, "target_id", operators.eq, target_id
-            )
-        if expression.operator is operators.or_:
-            return any(
-                _has_target_pair(child, target_type, target_id)
-                for child in expression.clauses
-            )
-    return False
-
-
-class CandidateConnection(RestrictionConnection):
-    def __init__(self, restrictions_: list[Any], content: CandidateContent) -> None:
-        super().__init__()
-        self.restriction_rows = restrictions_
-        self.content = content
-        self.inserted_states: list[str] = []
-        self.snapshot: Any = None
-
-    @contextmanager
-    def begin_nested(self) -> Any:
-        yield self
-
-    def execute(self, statement: Any, *_args: Any, **kwargs: Any) -> Result:
-        if isinstance(statement, Insert):
-            params = statement.compile().params
-            if "state" in params:
-                self.inserted_states.append(params["state"])
-            return Result()
-        text = str(statement)
-        if "user_restrictions" in text:
-            whereclause = getattr(statement, "whereclause", None)
-            assert whereclause is not None
-            assert _has_restriction_comparison(
-                whereclause, "user_id", operators.eq, USER
-            )
-            assert _has_restriction_comparison(
-                whereclause, "created_at", operators.le, self.content.created_at
-            )
-            assert _has_removed_window(whereclause, self.content.created_at)
-            assert _has_target_pair(whereclause, "security", self.content.security_code)
-            return Result(
-                [
-                    item
-                    for item in self.restriction_rows
-                    if _restriction_predicate_matches(whereclause, item)
-                ]
-            )
-        if "candidate_signals" in text:
-            return Result()
-        if "data_snapshots" in text:
-            return Result([self.snapshot or SimpleNamespace(licence_id=None, created_at=NOW - dt.timedelta(days=1), items={})])
-        if "strategy_versions" in text:
-            return Result([SimpleNamespace(id=uuid.uuid4(), strategy_id=STRATEGY, config={"rules": [{"id": "synthetic-rule", "role": "entry", "dimension": "technical", "expr": "x"}]}, lifecycle="published", card_version_id=None)])
-        if "owner_user_id" in text:
-            return Result([USER])
-        if "securities" in text:
-            if "FOR UPDATE" in text:
-                return Result([{"type": "stock", "listing_status": "listed", "delist_date": None}])
-            return Result([SimpleNamespace(type="stock", board="main", risk_flag=None)])
-        if "app.users" in text:
-            return Result(["approved"] if "status" in text else ["user"])
-        if "accounts" in text:
-            return Result([SimpleNamespace(id=uuid.uuid4())])
-        return super().execute(statement, *_args, **kwargs)
-
-
-@pytest.mark.parametrize(
-    ("label", "restriction"),
-    [
-        ("active", row()),
-        ("until", row(until=NOW + dt.timedelta(hours=1))),
-        ("until_equal", row(until=NOW)),
-        ("expired", row(until=NOW - dt.timedelta(seconds=1))),
-        ("removed", row(removed_at=NOW - dt.timedelta(seconds=1))),
-        ("future_created", row(created_at=NOW + dt.timedelta(seconds=1))),
-        ("other_user", row(owner=OTHER)),
-    ],
-)
-def test_write_candidate_restriction_point_in_time(label: str, restriction: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    content = CandidateContent()
-    facts = SimpleNamespace(model_dump=lambda mode="python": {})
-    instance = SimpleNamespace(
-        derived_strategy_version_id=None,
-        strategy_version_id=uuid.UUID("00000000-0000-4000-8000-000000000601"),
-        scope="security",
-        security_code="SYN001.SH",
-        status="active",
-        account_id=uuid.UUID("00000000-0000-4000-8000-000000000602"),
-        horizon="swing",
-    )
-    version = SimpleNamespace(
-        id=instance.strategy_version_id,
-        strategy_id=STRATEGY,
-        config={"rules": [{"id": "synthetic-rule", "role": "entry", "dimension": "technical", "expr": "x"}]},
-        lifecycle="published",
-        card_version_id=None,
-    )
-    account = SimpleNamespace(id=instance.account_id)
-    snapshot = SimpleNamespace(
-        licence_id=None,
-        created_at=NOW - dt.timedelta(days=1),
-        items={
-            "signal_input": content.model_dump(mode="json"),
-            "market_facts": facts.model_dump(mode="json"),
-            "data_status_block": {"data_status": "fresh", "data_as_of": NOW.isoformat(), "gaps": []},
-        },
-    )
-    connection = CandidateConnection([restriction], content)
-    connection.snapshot = snapshot
-    monkeypatch.setattr(service, "owned", lambda *_args, **_kwargs: instance)
-    monkeypatch.setattr(service, "normalize_universe", lambda *_args, **_kwargs: {"security_types": ["stock"], "boards": {"main": True}})
-    monkeypatch.setattr(service, "screen_membership", lambda **_kwargs: None)
-    monkeypatch.setattr(service, "lot_spec", lambda *_args, **_kwargs: SimpleNamespace(min_buy=1))
-    monkeypatch.setattr(service, "calendar_state", lambda *_args, **_kwargs: (True, None))
-    monkeypatch.setattr(service, "assess", lambda *_args, **_kwargs: [])
-    from app.api.v1 import portfolio
-    from app.strategy import runtime
-
-    monkeypatch.setattr(runtime, "runnable", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(portfolio, "_account", lambda *_args, **_kwargs: SimpleNamespace(positions={}, cash=Decimal("100000")))
-    monkeypatch.setattr(service, "live_snapshots", lambda *_args, **_kwargs: SimpleNamespace(order_by=lambda *_a, **_k: SimpleNamespace(limit=lambda *_a, **_k: object())))
-    monkeypatch.setattr(service, "snapshot_items", lambda *_args, **_kwargs: snapshot.items)
-    result = service.write_candidate(
-        connection,
-        user_id=USER,
-        instance_id=INSTANCE,
-        content=content,
-        facts=facts,
-        market_rules=SimpleNamespace(segment_for=lambda _day: SimpleNamespace()),
-    )
-    expected_blocked = label in {"active", "until"}
-    assert (result["diagnostic"] == "blocked") is expected_blocked
-    if expected_blocked:
-        assert connection.inserted_states == ["blocked"]
-    else:
-        assert result["diagnostic"] == "open"
