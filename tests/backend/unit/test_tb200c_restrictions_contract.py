@@ -249,6 +249,43 @@ def test_repeated_delete_replays_original_projection_without_recheck(
     assert not any(isinstance(statement, Update) for statement in connection.statements)
 
 
+def test_repeated_delete_reuses_removed_at_without_recheck_or_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(restrictions, "_now", lambda: NOW)
+    rechecks: list[Any] = []
+
+    def recheck(*args: Any, **kwargs: Any) -> tuple[list[Any], list[Any], list[Any]]:
+        rechecks.append((args, kwargs))
+        return [], [], []
+
+    monkeypatch.setattr(restrictions.signal_service, "recheck_restriction", recheck)
+    row = restriction_row()
+    engine = Engine(
+        Conn(
+            [row],
+            [SimpleNamespace(name="示例证券"), SimpleNamespace(name="示例证券")],
+        )
+    )
+
+    first = restrictions.delete_restriction(row.id, auth(), engine)  # type: ignore[arg-type]
+    second = restrictions.delete_restriction(row.id, auth(), engine)  # type: ignore[arg-type]
+
+    assert second.removed_at == first.removed_at == NOW
+    assert second.status == "removed"
+    assert second.recheck.released_reason_ids == []
+    assert second.recheck.remaining_reason_ids == []
+    assert second.gaps == []
+    assert len(rechecks) == 1
+    assert (
+        sum(isinstance(statement, Update) for statement in engine.connection.statements)
+        == 1
+    )
+    assert not any(
+        isinstance(statement, Insert) for statement in engine.connection.statements
+    )
+
+
 def test_get_has_gaps_and_excludes_removed_in_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
