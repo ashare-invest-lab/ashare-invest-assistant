@@ -6,7 +6,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import uuid
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -87,8 +87,8 @@ def _cursor_condition(
     keys = decode_cursor(cursor, scope=_scope(user_id, kind, target_type), settings=settings)
     if len(keys) != 2 or not isinstance(keys[0], str) or not isinstance(keys[1], str):
         raise AppError(ErrorCode.INVALID_CURSOR)
-    created_key = cast(str, keys[0])
-    identifier_key = cast(str, keys[1])
+    created_key = keys[0]
+    identifier_key = keys[1]
     try:
         created_at = dt.datetime.fromisoformat(created_key)
         identifier = uuid.UUID(identifier_key)
