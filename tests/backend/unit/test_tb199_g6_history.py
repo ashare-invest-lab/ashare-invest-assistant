@@ -97,7 +97,52 @@ def test_h_card_windows_use_security_and_rule_group_for_overlap() -> None:
 def test_h_event_overlap_uses_trading_days_across_weekend() -> None:
     rows = [{"security": "S", "rule_group": "r", "trading_day": day}
             for day in ("2026-01-02", "2026-01-12")]
-    assert len(_remove_overlapping_events(rows, "h5")) == 1
+    calendar = [
+        dt.date(2026, 1, 2),
+        dt.date(2026, 1, 5),
+        dt.date(2026, 1, 6),
+        dt.date(2026, 1, 7),
+        dt.date(2026, 1, 8),
+        dt.date(2026, 1, 9),
+        dt.date(2026, 1, 12),
+    ]
+    assert len(_remove_overlapping_events(rows, "h5", trading_days=calendar)) == 2
+
+
+def test_h_event_overlap_removes_events_inside_trading_day_window() -> None:
+    calendar = [
+        dt.date(2026, 1, 2),
+        dt.date(2026, 1, 5),
+        dt.date(2026, 1, 6),
+        dt.date(2026, 1, 7),
+        dt.date(2026, 1, 8),
+        dt.date(2026, 1, 9),
+        dt.date(2026, 1, 12),
+    ]
+    rows = [
+        {"security": "S", "rule_group": "r", "trading_day": "2026-01-02"},
+        {"security": "S", "rule_group": "r", "trading_day": "2026-01-05"},
+    ]
+    assert len(_remove_overlapping_events(rows, "h5", trading_days=calendar)) == 1
+
+
+def test_h_event_overlap_duplicate_date_does_not_overwrite_calendar_index() -> None:
+    calendar = [
+        dt.date(2026, 1, 2),
+        dt.date(2026, 1, 2),
+        dt.date(2026, 1, 5),
+        dt.date(2026, 1, 6),
+        dt.date(2026, 1, 7),
+        dt.date(2026, 1, 8),
+        dt.date(2026, 1, 9),
+        dt.date(2026, 1, 12),
+    ]
+    rows = [
+        {"security": "S", "rule_group": "r", "trading_day": "2026-01-02"},
+        {"security": "S", "rule_group": "r", "trading_day": "2026-01-02"},
+        {"security": "S", "rule_group": "r", "trading_day": "2026-01-12"},
+    ]
+    assert len(_remove_overlapping_events(rows, "h5", trading_days=calendar)) == 2
 
 def test_as_of_filters_future_rows_before_statistics() -> None:
     rows = [

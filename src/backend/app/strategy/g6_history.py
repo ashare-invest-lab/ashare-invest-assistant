@@ -354,12 +354,59 @@ def _deduplicate(rows: Iterable[Mapping[str, Any]], horizon: str) -> list[dict[s
     return list(unique.values())
 
 
-def _remove_overlapping_events(rows: list[dict[str, Any]], horizon: str) -> list[dict[str, Any]]:
+def _visible_trading_days(
+    rows: Iterable[Mapping[str, Any]], as_of: dt.datetime | None
+) -> dict[str, set[dt.date]]:
+    days_by_security: dict[str, set[dt.date]] = defaultdict(set)
+    for row in rows:
+        visible, _ = _as_of_visible(row, as_of)
+        if not visible:
+            continue
+        day = _date(_row_value(row, "trading_day", "date", "day"))
+        security = _text(_row_value(row, "security", "code", "symbol"))
+        if day is not None and security:
+            days_by_security[security].add(day)
+    return days_by_security
+
+
+def _normalise_trading_days(days: Iterable[object]) -> set[dt.date]:
+    return {day for value in days if (day := _date(value)) is not None}
+
+
+def _remove_overlapping_events(
+    rows: list[dict[str, Any]],
+    horizon: str,
+    *,
+    trading_days: Iterable[dt.date] | Mapping[Any, Any] | None = None,
+) -> list[dict[str, Any]]:
     accepted: list[dict[str, Any]] = []
-    trading_days = sorted(
-        day for row in rows if (day := _date(_row_value(row, "trading_day", "date", "day")))
-    )
-    day_index = {day: index for index, day in enumerate(trading_days)}
+    row_days_by_security = _visible_trading_days(rows, None)
+    calendar_by_security: dict[str, set[dt.date]]
+    if isinstance(trading_days, Mapping):
+        date_flags = {
+            day: value for key, value in trading_days.items() if (day := _date(key)) is not None
+        }
+        if date_flags:
+            shared_calendar = {day for day, is_open in date_flags.items() if bool(is_open)}
+            calendar_by_security = defaultdict(set)
+            for security in row_days_by_security:
+                calendar_by_security[security] = shared_calendar
+        else:
+            calendar_by_security = {
+                str(security): _normalise_trading_days(days)
+                for security, days in trading_days.items()
+            }
+    elif trading_days is None:
+        calendar_by_security = row_days_by_security
+    else:
+        shared_calendar = _normalise_trading_days(trading_days)
+        calendar_by_security = defaultdict(set)
+        for security in row_days_by_security:
+            calendar_by_security[security] = shared_calendar
+    day_indexes = {
+        security: {day: index for index, day in enumerate(sorted(days))}
+        for security, days in calendar_by_security.items()
+    }
     starts: dict[tuple[str, str], list[int]] = defaultdict(list)
     try:
         length = int(horizon.removeprefix("h"))
@@ -378,7 +425,7 @@ def _remove_overlapping_events(rows: list[dict[str, Any]], horizon: str) -> list
         security = _text(_row_value(row, "security", "code", "symbol")) or ""
         rule_group = _text(_row_value(row, "rule_group", "rule", "rule_id", "group")) or ""
         key = (security, rule_group)
-        index = day_index.get(start) if start is not None else None
+        index = day_indexes.get(security, {}).get(start) if start is not None else None
         if index is not None and length:
             if any(index - old_index < length for old_index in starts[key]):
                 continue
@@ -411,12 +458,19 @@ def build_report(
         query = HistoryQuery(
             card_version=card_version, card_key=card_key, horizon=horizon, as_of=as_of
         )
-        prepared, gaps = _prepare_rows(_fetch(actual_provider, query), as_of, spec or {})
+        fetched = list(_fetch(actual_provider, query))
+        prepared, gaps = _prepare_rows(fetched, as_of, spec or {})
         filter_gaps_by_horizon[horizon] = gaps
         filter_gaps.extend(gaps)
         rows = _deduplicate(prepared, horizon)
         all_rows[horizon] = (
-            _remove_overlapping_events(rows, horizon) if _is_h_card(card_key, card_id) else rows
+            _remove_overlapping_events(
+                rows,
+                horizon,
+                trading_days=_visible_trading_days(fetched, as_of),
+            )
+            if _is_h_card(card_key, card_id)
+            else rows
         )
     sections: dict[str, Any] = {}
     all_warnings: list[str] = []
