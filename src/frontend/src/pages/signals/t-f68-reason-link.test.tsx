@@ -43,11 +43,3 @@ reasonLinkSuite('T-F68 原因卡限制名单跳转', () => {
     expect(screen.getByRole('link', { name: /限制|禁投|屏蔽/ })).toHaveAttribute('href', '/restrictions');
   });
 });
-
-if (!hasRestrictionsLink) {
-  it.fails('T-F68 未实现：原因卡应动态转为 /restrictions 链接', () => {
-    render(<MemoryRouter><ReasonCard r={reason('BLOCKLISTED')} onRelease={() => undefined} /></MemoryRouter>);
-    expect(screen.queryByRole('button', { name: '手动解除' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /限制|禁投|屏蔽/ })).toHaveAttribute('href', '/restrictions');
-  });
-}

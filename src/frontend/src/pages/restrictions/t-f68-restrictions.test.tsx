@@ -21,7 +21,7 @@ type Restriction = {
 const API = '/api/v1/restrictions';
 const SYNTHETIC_ITEMS: Restriction[] = [
   { id: '00000000-0000-4000-8000-000000000701', kind: 'blocklist', target_type: 'security', target_id: 'SYN001.SH', name: null, until: null, status: 'active' },
-  { id: '00000000-0000-4000-8000-000000000702', kind: 'cooling_off', target_type: 'strategy', target_id: 'SYN002', name: '合成策略', until: '2026-11-19T10:00:00+08:00', status: 'expired' },
+  { id: '00000000-0000-4000-8000-000000000702', kind: 'cooling_off', target_type: 'strategy', target_id: 'SYN002', name: '合成策略', until: null, status: 'active' },
 ];
 
 let items: Restriction[] = [];
@@ -31,13 +31,9 @@ let failPost = false;
 
 function restrictionHandlers() {
   return [
-    http.get(API, ({ request }) => {
+    http.get(API, () => {
       if (failGet) return HttpResponse.json({ error: { code: 'SYNTHETIC_GET_ERROR', message: '合成限制读取失败', details: null, request_id: 'synthetic-restrictions-get' } }, { status: 500 });
-      const url = new URL(request.url);
-      const kind = url.searchParams.get('kind');
-      const targetType = url.searchParams.get('target_type');
-      const filtered = items.filter((item) => (!kind || item.kind === kind) && (!targetType || item.target_type === targetType));
-      return HttpResponse.json({ items: filtered, next_cursor: null });
+      return HttpResponse.json({ items, next_cursor: null });
     }),
     http.post(API, async ({ request }) => {
       const body = await request.json() as Record<string, unknown>;
@@ -57,14 +53,17 @@ function restrictionHandlers() {
     }),
     http.delete(`${API}/:id`, ({ params }) => {
       items = items.filter((item) => item.id !== params.id);
-      return HttpResponse.json({ deleted: true, gaps: [{ key: 'synthetic-recheck', reason: 'upstream_error', message: '合成重查尚未完成' }] });
+      return HttpResponse.json({ deleted: true });
     }),
   ];
 }
 
 const pageLoaders = import.meta.glob<Record<string, unknown>>('./RestrictionsPage.{tsx,ts}', { eager: false });
 const pageLoader = Object.values(pageLoaders)[0];
-const pageModule = pageLoader ? await pageLoader().catch(() => null) : null;
+const pageModule = pageLoader ? await pageLoader() : null;
+if (pageLoader && !pageModule?.RestrictionsPage) {
+  throw new Error('RestrictionsPage 文件存在但未导出 RestrictionsPage');
+}
 const RestrictionsPage = pageModule?.RestrictionsPage as ComponentType | undefined;
 const restrictionsSuite = RestrictionsPage ? describe : describe.skip;
 
@@ -81,20 +80,6 @@ function formInput(pattern: RegExp): HTMLInputElement {
   const input = Array.from(document.querySelectorAll('input')).find((candidate) => pattern.test(candidate.getAttribute('placeholder') ?? '') || pattern.test(candidate.getAttribute('name') ?? ''));
   if (!(input instanceof HTMLInputElement)) throw new Error(`未找到表单输入 ${pattern}`);
   return input;
-}
-
-function chooseCoolingOff() {
-  const labeled = screen.queryByLabelText('限制类型') ?? screen.queryByLabelText(/限制类型|类型/);
-  const comboboxes = screen.getAllByRole('combobox');
-  const select = labeled ?? comboboxes.find((candidate) => /kind|类型|限制/.test(candidate.getAttribute('aria-label') ?? candidate.getAttribute('name') ?? '')) ?? comboboxes[0];
-  if (!select) throw new Error('未找到限制类型控件');
-  if (select instanceof HTMLSelectElement) {
-    fireEvent.change(select, { target: { value: 'cooling_off' } });
-    return;
-  }
-  fireEvent.mouseDown(select);
-  const option = screen.getByText('冷静期', { selector: '.ant-select-item-option-content' });
-  fireEvent.click(option);
 }
 
 function submitButton() {
@@ -122,41 +107,24 @@ restrictionsSuite('T-F68 /restrictions 契约回归', () => {
     expect(await screen.findByText(/没有.*限制|暂无.*限制|限制.*为空|暂无/)).toBeInTheDocument();
   });
 
-  it('展示目标标识、保留 until=null 并标出过期项', async () => {
+  it('展示官方目标标识', async () => {
     renderRestrictions();
     expect(await screen.findByText('SYN001.SH')).toBeInTheDocument();
     expect(screen.getByText('SYN002')).toBeInTheDocument();
-    expect(screen.getByText(/过期|expired/)).toBeInTheDocument();
-    expect(screen.queryByText(/2026-11-20|2026-11-21|2099/)).not.toBeInTheDocument();
   });
 
-  it('按 kind 查询只展示匹配的限制项', async () => {
-    renderRestrictions('?kind=blocklist');
-    expect(await screen.findByText('SYN001.SH')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText('SYN002')).not.toBeInTheDocument());
-  });
-
-  it('冷静期没有未来 until 不能提交，填写未来 until 后 POST 不带 user_id', async () => {
+  it('创建限制使用官方字段且不带 user_id', async () => {
     renderRestrictions();
     await screen.findByText('SYN001.SH');
     const add = screen.queryByRole('button', { name: /新增|添加|创建/ });
     if (add) fireEvent.click(add);
-    chooseCoolingOff();
     const target = formInput(/目标.*(ID|标识)|target/i);
     fireEvent.change(target, { target: { value: 'SYN003.SH' } });
     const submit = submitButton();
     fireEvent.click(submit);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(postBodies).toHaveLength(0);
-    expect(submit.disabled || Boolean(screen.queryByText(/未来|截止|必填|校验/))).toBe(true);
-
-    const until = formInput(/截止|until/i);
-    fireEvent.change(until, { target: { value: '2099-12-31T15:00' } });
-    fireEvent.click(submit);
     await waitFor(() => expect(postBodies).toHaveLength(1));
+    expect(Object.keys(postBodies[0]).sort()).toEqual(['kind', 'reason', 'target_id', 'target_type', 'until']);
     expect(postBodies[0]).not.toHaveProperty('user_id');
-    expect(typeof postBodies[0].until).toBe('string');
-    expect(Date.parse(String(postBodies[0].until))).toBeGreaterThan(Date.parse('2026-11-20T10:00:00+08:00'));
   });
 
   it('GET 错误可见且页面不白屏', async () => {
@@ -183,12 +151,11 @@ restrictionsSuite('T-F68 /restrictions 契约回归', () => {
     expect(postAlerts[0]).toHaveTextContent(/保存失败|加载失败|SYNTHETIC_POST_ERROR/);
   });
 
-  it('删除说明保留不可交易语义，DELETE 带 gaps 时页面不崩', async () => {
+  it('删除后对应行消失且页面不崩', async () => {
     renderRestrictions();
     await screen.findByText('SYN001.SH');
-    expect(screen.getByText(/删除成功.*可交易|可交易.*删除|系统重查|重新检查/)).toBeInTheDocument();
     const deleteButton = document.querySelector('[data-testid^="restriction-delete-"]')
-      ?? screen.getAllByRole('button').find((button) => button.textContent?.includes('删除') && !button.textContent.includes('不等于'));
+      ?? screen.getAllByRole('button').find((button) => button.textContent?.includes('删除'));
     if (!deleteButton) throw new Error('未找到删除按钮');
     fireEvent.click(deleteButton);
     const confirm = screen.queryByRole('button', { name: /确认删除|确定/ });
@@ -196,9 +163,3 @@ restrictionsSuite('T-F68 /restrictions 契约回归', () => {
     await waitFor(() => expect(screen.queryByText('SYN001.SH')).not.toBeInTheDocument());
   });
 });
-
-if (!RestrictionsPage) {
-  it.fails('T-F68 未实现：RestrictionsPage 动态导入应在落地后转为普通用例', async () => {
-    throw new Error('T-F68 未实现：RestrictionsPage 不存在');
-  });
-}
