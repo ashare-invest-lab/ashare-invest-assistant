@@ -222,8 +222,12 @@ def test_versions_conflict_success_history_and_methods(http: Any, monkeypatch: p
     class Row:
         version_no = 1
     http[1].execute = lambda _s: SimpleNamespace(first=lambda: Row())
-    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
-    monkeypatch.setattr(api.service, "version_body", lambda *_: history[1])
+    monkeypatch.setattr(
+        api.service,
+        "_owned",
+        lambda *_: SimpleNamespace(id=RID, period_end=dt.date(2026, 1, 5)),
+    )
+    monkeypatch.setattr(api.service, "version_body", lambda *_args, **_kwargs: history[1])
     first = c.get(f"/api/v1/reviews/{RID}/versions/1")
     second = c.get(f"/api/v1/reviews/{RID}/versions/1")
     assert first.json() == second.json() == history[1]
@@ -234,6 +238,12 @@ def test_missing_current_version_projection() -> None:
     row = SimpleNamespace(id=RID, user_id=U, plan_id=None, security_code=CODE, period_start=dt.date(2026, 1, 1), period_end=dt.date(2026, 1, 5), current_version_id=None, created_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC))
     class Conn:
         def execute(self, statement: Any) -> Any:
+            if "trading_calendar" in str(statement):
+                return SimpleNamespace(
+                    first=lambda: SimpleNamespace(
+                        date=dt.date(2026, 1, 5), is_open=True
+                    )
+                )
             return SimpleNamespace(first=lambda: row, scalar=lambda: None, all=list)
     detail = service.full(Conn(), U, RID)
     summary = service.summary(Conn(), row)

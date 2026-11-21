@@ -28,14 +28,6 @@ GAP_REASONS = {
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def _first_result(result: Any) -> Any:
-    try:
-        return result.first()
-    except AttributeError:
-        rows = result.all()
-        return rows[0] if rows else None
-
-
 def _stat(window: str, *, value: Decimal | None = None, n: int = 0) -> dict[str, Any]:
     return {
         "value": format(value, "f") if value is not None and n >= 5 else None,
@@ -128,44 +120,30 @@ def period_pending_state(
     if current.tzinfo is None or current.utcoffset() is None:
         current = current.replace(tzinfo=dt.UTC)
     current = current.astimezone(SHANGHAI)
+    if period_end > current.date():
+        return True, True
     if conn is None:
         return _fallback_period_pending(period_end, current), True
 
-    endpoint_result = conn.execute(
+    endpoint = conn.execute(
         select(trading_calendar.c.date, trading_calendar.c.is_open).where(
             trading_calendar.c.date == period_end
         )
-    )
-    try:
-        endpoint = _first_result(endpoint_result)
-    except AttributeError:
-        return _fallback_period_pending(period_end, current), True
+    ).first()
     if endpoint is None:
         return True, False
-    try:
-        endpoint_date = endpoint.date
-        endpoint_open = endpoint.is_open
-    except AttributeError:
-        # Lightweight unit-test connections may not model the calendar table.
-        # A real SQLAlchemy result always has both selected columns.
-        return _fallback_period_pending(period_end, current), True
+    endpoint_date = endpoint.date
+    endpoint_open = endpoint.is_open
     if not endpoint_open:
-        prior_result = conn.execute(
+        endpoint = conn.execute(
             select(trading_calendar.c.date, trading_calendar.c.is_open)
             .where(trading_calendar.c.date < period_end, trading_calendar.c.is_open.is_(True))
             .order_by(trading_calendar.c.date.desc())
             .limit(1)
-        )
-        try:
-            endpoint = _first_result(prior_result)
-        except AttributeError:
-            return _fallback_period_pending(period_end, current), True
+        ).first()
         if endpoint is None:
             return True, False
-        try:
-            endpoint_date = endpoint.date
-        except AttributeError:
-            return _fallback_period_pending(period_end, current), True
+        endpoint_date = endpoint.date
     if endpoint_date > current.date():
         return True, True
     if endpoint_date < current.date():
@@ -199,17 +177,12 @@ def project_metrics(
     result: dict[str, Any] = {}
     for name in METRIC_NAMES:
         item = dict(source.get(name) or {})
-        item["gaps"] = normalise_metric_gaps(item.get("gaps"))
+        item.pop("gaps", None)
         if item.get("source") == "simulated_tracking":
             item["value"] = None
-            item["gaps"] = [reason for reason in item["gaps"] if reason != "no_source"]
-            item["gaps"].append("no_source")
             item["label"] = "模拟跟踪"
         if pending:
             item["value"] = None
-            item["gaps"] = ["not_yet_published"] + [
-                reason for reason in item["gaps"] if reason != "not_yet_published"
-            ]
         elif item.get("value") is not None and item.get("n", 0) < 5:
             item["value"] = None
             item["label"] = "未验证"
