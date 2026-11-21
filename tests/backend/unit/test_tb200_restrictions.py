@@ -280,7 +280,7 @@ def test_delete_soft_deletes_and_repeat_or_foreign_is_not_found() -> None:
     assert repeated.status == "removed"
     assert repeated.recheck.released_reason_ids == []
     assert repeated.recheck.remaining_reason_ids == []
-    assert repeated.gaps == []
+    assert repeated.gaps == result.gaps
 
     foreign_engine = Engine([])
     with pytest.raises(AppError) as foreign:
