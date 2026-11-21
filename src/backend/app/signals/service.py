@@ -10,7 +10,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Connection, func, insert, select, text, update
+from sqlalchemy import Connection, and_, func, insert, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.common.errors import AppError, ErrorCode
@@ -411,8 +411,20 @@ def write_candidate(
         for restriction in locked.execute(
             select(user_restrictions).where(
                 user_restrictions.c.user_id == user_id,
-                user_restrictions.c.target_id.in_(
-                    [content.security_code, str(instance_id), str(version.strategy_id)]
+                user_restrictions.c.removed_at.is_(None),
+                or_(
+                    and_(
+                        user_restrictions.c.target_type == "security",
+                        user_restrictions.c.target_id == content.security_code,
+                    ),
+                    and_(
+                        user_restrictions.c.target_type == "instance",
+                        user_restrictions.c.target_id == str(instance_id),
+                    ),
+                    and_(
+                        user_restrictions.c.target_type == "strategy",
+                        user_restrictions.c.target_id == str(version.strategy_id),
+                    ),
                 ),
             )
         ):

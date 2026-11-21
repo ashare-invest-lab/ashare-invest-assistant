@@ -23,6 +23,7 @@ from app.api.v1 import (
     portfolio,
     promotions,
     quotes,
+    restrictions,
     risk_controls,
     sector_flows,
     securities,
@@ -79,6 +80,7 @@ router.include_router(suggestions.router)
 router.include_router(daily_reports.router)
 
 router.include_router(promotions.router)
+router.include_router(restrictions.router)
 router.include_router(risk_controls.router)
 
 router.include_router(tracking_router)
