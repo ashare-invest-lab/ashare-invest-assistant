@@ -17,11 +17,9 @@ vi.mock('../../components/charts/KlineChart', () => ({ KlineChart: ({ bars }: { 
 const marketRoutes = routes.flatMap((r) => r.children ?? []).filter((r) => r.path === 'market' || r.path === 'market/overview');
 beforeAll(() => preloadRoutes(marketRoutes));
 const paths = ['/market', '/market/overview'];
-const basis: MarketBasis = {
-  snapshot_id: '00000000-0000-4000-8000-000000000061', observed_date: '2026-11-02', mode: 'intraday', scope: '沪深股票口径',
-  eligible: 10, observed: 10, trading: 8, suspended: 2, missing: 0, source: '合成夹具（未验证）',
-};
-const base: MarketOverview = { ...MARKET_OVERVIEW, basis, indices: [], trade_date: '2026-11-02' };
+const basis: MarketBasis = { ...MARKET_OVERVIEW.basis!, eligible: 3, observed: 3, trading: 3, suspended: 0, missing: 0 };
+const base: MarketOverview = { ...MARKET_OVERVIEW, basis, indices: [], trade_date: '2026-11-02', data_status: 'fresh', gaps: [] };
+const chartIndex = MARKET_OVERVIEW.indices[0];
 type MarketCaseBody = MarketOverview | Omit<MarketOverview, 'basis'>;
 function withoutBasis(body: MarketOverview): Omit<MarketOverview, 'basis'> {
   const copy = { ...body } as Partial<MarketOverview>;
@@ -113,9 +111,9 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     mount(path, { ...base, breadth: { ...base.breadth!, up: null } });
     const panel = await screen.findByTestId('breadth-panel');
     expect(panel).toHaveTextContent(/上涨\s*—/);
-    expect(panel).toHaveTextContent('平盘 213');
-    expect(panel).toHaveTextContent('下跌 2104');
-    expect(panel).toHaveTextContent('上涨占比55.3%');
+    expect(panel).toHaveTextContent('平盘 0');
+    expect(panel).toHaveTextContent('下跌 1');
+    expect(panel).toHaveTextContent('上涨占比66.7%');
     expect(panel.querySelector('.breadth-bar')).not.toBeNull();
   });
 
@@ -128,7 +126,7 @@ describe.each(paths)('%s 共用市场展示', (path) => {
 
   it('稀疏 1m 原样传图，不插值或补零', async () => {
     const bars: Bar[] = ['09:31', '09:33'].map((t) => ({ t: `2026-11-02T${t}:00+08:00`, open: '10', high: '11', low: '9', close: '10', pre_close: null, volume: '1', amount: '10', avg_price: null, is_final: true }));
-    server.use(http.get('/api/v1/securities/:code/bars', () => HttpResponse.json({ security_code: '000001.SH', name: '合成指数', freq: '1m', adjust: 'none', items: bars, pre_close: null, next_before: null, adjust_as_of: null, data_status: 'partial', data_as_of: bars[0].t, gaps: [{ key: 'bars', reason: '__proto__', message: '合成：缺 09:32' }] })));
+    server.use(http.get('/api/v1/securities/:code/bars', () => HttpResponse.json({ security_code: chartIndex.security_code, name: chartIndex.name, freq: '1m', adjust: 'none', items: bars, pre_close: null, next_before: null, adjust_as_of: null, data_status: 'partial', data_as_of: bars[0].t, gaps: [{ key: 'bars', reason: '__proto__', message: '合成：缺 09:32' }] })));
     mount(path, { ...base, indices: MARKET_OVERVIEW.indices.slice(0, 1) });
     expect(await screen.findByTestId('minute-bars')).toHaveTextContent(JSON.stringify(bars));
     expect(screen.getByTestId('chart-gap-note')).toHaveTextContent('未知（合成：缺 09:32）');
@@ -140,7 +138,7 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     server.use(http.get('/api/v1/securities/:code/bars', ({ request }) => {
       const freq = new URL(request.url).searchParams.get('freq')!;
       requested.push(freq);
-      return HttpResponse.json({ security_code: '000001.SH', name: '合成指数', freq, adjust: freq === '1m' ? 'none' : 'qfq', items: freq === '1m' ? [] : [daily], next_before: null, pre_close: null, adjust_as_of: null,
+      return HttpResponse.json({ security_code: chartIndex.security_code, name: chartIndex.name, freq, adjust: freq === '1m' ? 'none' : 'qfq', items: freq === '1m' ? [] : [daily], next_before: null, pre_close: null, adjust_as_of: null,
         data_status: freq === '1m' ? 'unavailable' : 'fresh', data_as_of: freq === '1m' ? null : '2026-10-30T15:00:00+08:00', gaps: freq === '1m' ? [{ key: 'bars', reason: 'no_source', message: '合成：缺少 1m' }] : [] });
     }));
     mount(path, { ...base, indices: MARKET_OVERVIEW.indices.slice(0, 1) });

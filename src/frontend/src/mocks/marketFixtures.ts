@@ -11,7 +11,7 @@ import type {
   ProviderRef, SecurityHit, SecurityProfile, SecuritySearchResponse, SectorFlow, SectorFlowsResponse, SectorKind,
 } from '../api/marketTypes';
 import { minuteEnds } from '../lib/market';
-import { NOW, SECURITY_CODES, TERMINAL_ACCOUNT, TRADE_DATE, specBrief, tradingDays } from './fixtures';
+import { NOW, SECURITY_CODES, TRADE_DATE, specBrief, tradingDays } from './fixtures';
 
 const f2 = (n: number) => n.toFixed(2);
 function rng(seed: number) {
@@ -54,17 +54,104 @@ export const etfNotApplicable = (code: string, key: string) => ({
 });
 const indexOf = (code: string) => INDEX_SPECS.find((s) => s.code === code) ?? ETF_SPECS.find((s) => s.code === code);
 
-/** v0.2.11 §5.1 / §7.3（示例数据；无市场快照证据） */
-export const MARKET_OVERVIEW: MarketOverview = {
-  trade_date: TRADE_DATE, session: 'morning',
-  basis: null,
-  indices: INDEX_SPECS.map((s) => ({
-    security_code: s.code, name: s.name, price: f2(s.price), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100), amount: f2(s.amount), t: NOW,
-  })),
-  breadth: { up: 2861, down: 2104, flat: 213, limit_up: 47, limit_down: 9, up_ratio: '0.5527', down_ratio: '0.4063', flat_ratio: '0.0410' },
-  regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, turnover_total: '950400000000.50',
-  data_status: 'fresh', data_as_of: NOW, gaps: [],
+const MARKET_OVERVIEW_INDEX = {
+  security_code: '000300.SH', name: '虚构宽基指数', price: '3999.12', change_pct: '0.8420', amount: '123456789.00',
+  t: '2026-11-02T10:31:00+08:00',
 };
+const MARKET_OVERVIEW_BASIS = {
+  snapshot_id: '00000000-0000-4000-8000-000000000219', observed_date: TRADE_DATE, mode: 'intraday' as const, scope: '沪深股票口径',
+  eligible: 3, observed: 3, trading: 3, suspended: 0, missing: 0, source: 'mairui',
+};
+const MARKET_OVERVIEW_GAPS: Gap[] = [
+  { key: 'market.breadth.limit_counts', reason: 'no_source', message: '涨跌停来源未验证（虚构夹具）' },
+  { key: 'market.regime', reason: 'no_source', message: 'F25/G-02 参数未批准，未生成市场环境结论（虚构夹具）' },
+];
+const MARKET_OVERVIEW_BREADTH = {
+  up: 2, down: 1, flat: 0, limit_up: null, limit_down: null,
+  up_ratio: '0.6667', down_ratio: '0.3333', flat_ratio: '0.0000',
+};
+
+/**
+ * T-A219 §9 完整盘中。query_as_of=2026-11-02T10:31:00+08:00，行情 ts 同值，fetched_at=2026-11-02T10:31:05+08:00；
+ * source=mairui，证书归属占位 UUID=00000000-0000-4000-8000-000000000901。元数据只写在注释，不进入响应体。
+ * 宽度资格池为 600000.SH「示例银行」、000001.SZ「演示电子」、688001.SH「虚构芯片」，涨跌为 2/1/0，成交额单位为元。
+ * data_status 取 partial 以披露涨跌停和 regime 未接入，具体状态未由前端自判。
+ */
+export const MARKET_OVERVIEW: MarketOverview = {
+  trade_date: TRADE_DATE, session: 'morning', basis: MARKET_OVERVIEW_BASIS, indices: [MARKET_OVERVIEW_INDEX],
+  breadth: MARKET_OVERVIEW_BREADTH, regime: null, regime_position_range: null, turnover_total: '39000000.00',
+  data_status: 'partial', data_as_of: MARKET_OVERVIEW_INDEX.t, gaps: MARKET_OVERVIEW_GAPS,
+};
+
+/** T-A219 §9 盘中缺量额。query_as_of=2026-11-02T10:31:00+08:00，行情 ts=2026-11-02T10:30:00+08:00，fetched_at=2026-11-02T10:30:05+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000902。 */
+export const MARKET_OVERVIEW_INTRADAY_MISSING_AMOUNT: MarketOverview = {
+  ...MARKET_OVERVIEW, basis: { ...MARKET_OVERVIEW_BASIS, eligible: 2, observed: 2, trading: null, missing: 0 }, breadth: null, turnover_total: null,
+  data_as_of: '2026-11-02T10:30:00+08:00', gaps: [...MARKET_OVERVIEW_GAPS, { key: 'market.breadth', reason: 'no_source', message: '盘中成交量和成交额缺失（虚构夹具）' }, { key: 'market.turnover_total', reason: 'no_source', message: '盘中成交额缺失（虚构夹具）' }],
+};
+
+/** T-A219 §9 日线收盘。600000.SH、000001.SZ 使用 adj_type=none 的 close/pre_close/volume/amount，金额单位元；query_as_of=2026-11-02T17:15:00+08:00，行情 ts=2026-11-02T15:00:00+08:00，fetched_at=2026-11-02T17:15:00+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000903。 */
+export const MARKET_OVERVIEW_CLOSE: MarketOverview = {
+  ...MARKET_OVERVIEW, session: 'closed',
+  basis: { ...MARKET_OVERVIEW_BASIS, mode: 'close', snapshot_id: '00000000-0000-4000-8000-000000000220', eligible: 2, observed: 2, trading: 2 },
+  indices: [{ ...MARKET_OVERVIEW_INDEX, price: '4001.25', change_pct: '0.8950', amount: '128000000.00', t: '2026-11-02T15:00:00+08:00' }],
+  breadth: { up: 1, down: 1, flat: 0, limit_up: null, limit_down: null, up_ratio: '0.5000', down_ratio: '0.5000', flat_ratio: '0.0000' },
+  turnover_total: '41000000.00', data_as_of: '2026-11-02T15:00:00+08:00',
+};
+
+/** T-A219 §9 涨跌停缺证。close/pre_close 虚构值存在，但 T 日 market_rule_versions 或最小价位单位缺失，禁止按 ±10% 推算；query_as_of=2026-11-02T17:15:00+08:00，行情 ts=2026-11-02T15:00:00+08:00，fetched_at=2026-11-02T17:15:00+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000904。 */
+export const MARKET_OVERVIEW_LIMIT_COUNTS_GAP: MarketOverview = { ...MARKET_OVERVIEW, gaps: [...MARKET_OVERVIEW_GAPS] };
+
+/** T-A219 §9 regime 门控。虚构 feature_bars_daily 含 uptrend，feature_catalog 分别为 declared/verified_live；两组都因 F25/G-02 未批准返回 null+no_source；query_as_of=2026-11-02T17:15:00+08:00，行情 ts=2026-11-02T15:00:00+08:00，fetched_at=2026-11-02T17:15:00+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000905。 */
+export const MARKET_OVERVIEW_REGIME_GATED: MarketOverview = { ...MARKET_OVERVIEW, regime: null, regime_position_range: null, gaps: [...MARKET_OVERVIEW_GAPS] };
+
+/** T-A219 §9 无证书。query_as_of=2026-11-02T10:31:00+08:00，无可见行情 ts/fetched_at；source=mairui，证书归属占位 UUID=00000000-0000-4000-8000-000000000906。 */
+export const MARKET_OVERVIEW_NO_CERTIFICATE: MarketOverview = {
+  ...MARKET_OVERVIEW, basis: null, indices: [{ security_code: MARKET_OVERVIEW_INDEX.security_code, name: MARKET_OVERVIEW_INDEX.name, price: null, change_pct: null, amount: null, t: null }],
+  breadth: null, regime: null, regime_position_range: null, turnover_total: null, data_status: 'unavailable', data_as_of: null,
+  gaps: [
+    { key: 'market.indices.000300.SH', reason: 'data_licence_unavailable', message: '本人数据证书不可用（虚构夹具）' },
+    { key: 'market.breadth', reason: 'no_source', message: '无本人行情来源（虚构夹具）' },
+    { key: 'market.turnover_total', reason: 'no_source', message: '无本人成交额来源（虚构夹具）' },
+    { key: 'market.regime', reason: 'no_source', message: '未生成市场环境结论（虚构夹具）' },
+  ],
+};
+
+/** T-A219 §9 全空。query_as_of=2026-11-02T10:31:00+08:00，所有虚构行 fetched_at=2026-11-02T10:32:00+08:00（行情 ts=2026-11-02T10:30:00+08:00）；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000907。 */
+export const MARKET_OVERVIEW_EMPTY: MarketOverview = {
+  ...MARKET_OVERVIEW_NO_CERTIFICATE, gaps: [
+    { key: 'market.indices.000300.SH', reason: 'no_source', message: '行情行对查询时点不可见（虚构夹具）' },
+    { key: 'market.breadth', reason: 'no_source', message: '宽度批次为空（虚构夹具）' },
+    { key: 'market.turnover_total', reason: 'no_source', message: '成交额批次为空（虚构夹具）' },
+    { key: 'market.regime', reason: 'no_source', message: '未生成市场环境结论（虚构夹具）' },
+  ],
+};
+
+/** T-A219 §9 开盘前。query_as_of=2026-11-02T09:00:00+08:00，行情 ts=2026-10-30T15:00:00+08:00，fetched_at=2026-10-30T17:15:00+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000908。 */
+export const MARKET_OVERVIEW_PRE_OPEN: MarketOverview = {
+  ...MARKET_OVERVIEW_CLOSE, trade_date: TRADE_DATE, session: 'pre_open', data_status: 'stale',
+  basis: { ...MARKET_OVERVIEW_CLOSE.basis!, observed_date: '2026-10-30' },
+  indices: [{ ...MARKET_OVERVIEW_CLOSE.indices[0], t: '2026-10-30T15:00:00+08:00' }], data_as_of: '2026-10-30T15:00:00+08:00',
+};
+
+/** T-A219 §9 非交易日。query_as_of=2026-11-01T12:00:00+08:00，行情 ts=2026-10-30T15:00:00+08:00，fetched_at=2026-10-30T17:15:00+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000909。 */
+export const MARKET_OVERVIEW_NON_TRADING: MarketOverview = {
+  ...MARKET_OVERVIEW_PRE_OPEN, trade_date: '2026-11-01', session: 'non_trading_day',
+};
+
+/** T-A219 §9 部分指数、宽度或成交额缺失。query_as_of=2026-11-02T10:31:00+08:00，行情 ts=2026-11-02T10:31:00+08:00，fetched_at=2026-11-02T10:31:05+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000910。 */
+export const MARKET_OVERVIEW_PARTIAL: MarketOverview = {
+  ...MARKET_OVERVIEW, breadth: null, turnover_total: null,
+  basis: { ...MARKET_OVERVIEW_BASIS, observed: 2, missing: 1 },
+  gaps: [...MARKET_OVERVIEW_GAPS, { key: 'market.breadth', reason: 'no_source', message: '宽度批次部分缺失（虚构夹具）' }, { key: 'market.turnover_total', reason: 'no_source', message: '成交额部分缺失（虚构夹具）' }],
+};
+
+/** T-A219 §9 停牌、零量、退市、ST 的聚合投影。query_as_of=2026-11-02T10:31:00+08:00，行情 ts=2026-11-02T10:31:00+08:00，fetched_at=2026-11-02T10:31:05+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000911。停牌、零量、退市不进分母，ST 仍可进入基础宽度。 */
+export const MARKET_OVERVIEW_QUALIFICATION_FILTERS: MarketOverview = { ...MARKET_OVERVIEW };
+
+/** T-A219 §9 ETF、指数、BJ 的聚合投影。query_as_of=2026-11-02T10:31:00+08:00，行情 ts=2026-11-02T10:31:00+08:00，fetched_at=2026-11-02T10:31:05+08:00；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000912。ETF/指数不进宽度，BJ 默认不进沪深股票口径。 */
+export const MARKET_OVERVIEW_SCOPE_FILTERS: MarketOverview = { ...MARKET_OVERVIEW };
+
+// 15:00/17:10 可见性、BJ 20 码双源门闩、PIT 交叉证书读链属于后端隔离场景，前端响应无法表达，不能伪造为概览 JSON。
 
 function indexDaily(s: IndexSpec): BarsResponse {
   const r = rng(s.seed * 31);
