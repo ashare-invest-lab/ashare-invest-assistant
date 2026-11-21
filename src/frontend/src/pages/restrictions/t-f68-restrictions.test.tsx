@@ -57,7 +57,7 @@ function restrictionHandlers() {
 const pageLoaders = import.meta.glob<Record<string, unknown>>('./RestrictionsPage.{tsx,ts}', { eager: false });
 const pageLoader = Object.values(pageLoaders)[0];
 const pageModule = pageLoader ? await pageLoader() : null;
-if (pageLoader && !pageModule?.RestrictionsPage) {
+if (pageModule && !pageModule.RestrictionsPage) {
   throw new Error('RestrictionsPage 文件存在但未导出 RestrictionsPage');
 }
 const RestrictionsPage = pageModule?.RestrictionsPage as ComponentType | undefined;
