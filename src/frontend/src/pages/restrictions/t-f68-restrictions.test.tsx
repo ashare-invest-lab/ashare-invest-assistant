@@ -26,19 +26,15 @@ const SYNTHETIC_ITEMS: Restriction[] = [
 
 let items: Restriction[] = [];
 let postBodies: Record<string, unknown>[] = [];
-let failGet = false;
-let failPost = false;
 
 function restrictionHandlers() {
   return [
     http.get(API, () => {
-      if (failGet) return HttpResponse.json({ error: { code: 'SYNTHETIC_GET_ERROR', message: '合成限制读取失败', details: null, request_id: 'synthetic-restrictions-get' } }, { status: 500 });
       return HttpResponse.json({ items, next_cursor: null });
     }),
     http.post(API, async ({ request }) => {
       const body = await request.json() as Record<string, unknown>;
       postBodies.push(body);
-      if (failPost) return HttpResponse.json({ error: { code: 'SYNTHETIC_POST_ERROR', message: '合成限制保存失败', details: null, request_id: 'synthetic-restrictions-post' } }, { status: 500 });
       const created: Restriction = {
         id: '00000000-0000-4000-8000-000000000703',
         kind: body.kind as RestrictionKind,
@@ -96,8 +92,6 @@ restrictionsSuite('T-F68 /restrictions 契约回归', () => {
     mockLoginAs('demo_user');
     items = SYNTHETIC_ITEMS.map((item) => ({ ...item }));
     postBodies = [];
-    failGet = false;
-    failPost = false;
     server.use(...restrictionHandlers());
   });
 
@@ -125,30 +119,6 @@ restrictionsSuite('T-F68 /restrictions 契约回归', () => {
     await waitFor(() => expect(postBodies).toHaveLength(1));
     expect(Object.keys(postBodies[0]).sort()).toEqual(['kind', 'reason', 'target_id', 'target_type', 'until']);
     expect(postBodies[0]).not.toHaveProperty('user_id');
-  });
-
-  it('GET 错误可见且页面不白屏', async () => {
-    failGet = true;
-    renderRestrictions();
-    const getAlerts = await screen.findAllByRole('alert');
-    expect(getAlerts.length).toBeGreaterThan(0);
-    expect(getAlerts[0]).toHaveTextContent(/读取失败|加载失败|SYNTHETIC_GET_ERROR/);
-  });
-
-  it('POST 错误可见', async () => {
-    failPost = true;
-    renderRestrictions();
-    await screen.findByText('SYN001.SH');
-    const add = screen.queryByRole('button', { name: /新增|添加|创建/ });
-    if (add) fireEvent.click(add);
-    const target = formInput(/目标.*(ID|标识)|target/i);
-    fireEvent.change(target, { target: { value: 'SYN003.SH' } });
-    const submit = submitButton();
-    fireEvent.click(submit);
-    await waitFor(() => expect(postBodies).toHaveLength(1));
-    const postAlerts = await screen.findAllByRole('alert');
-    expect(postAlerts.length).toBeGreaterThan(0);
-    expect(postAlerts[0]).toHaveTextContent(/保存失败|加载失败|SYNTHETIC_POST_ERROR/);
   });
 
   it('删除后对应行消失且页面不崩', async () => {

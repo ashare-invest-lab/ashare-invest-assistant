@@ -26,6 +26,7 @@ BEIJING = dt.timezone(dt.timedelta(hours=8))
 FIXED_NOW = dt.datetime(2026, 11, 20, 10, 15, tzinfo=BEIJING)
 TRADE_DATE = FIXED_NOW.date()
 PLANNER_MODULE = "app.intraday.p0_plan"
+LICENCE_ID = "00000000-0000-4000-8000-000000000721"
 SOCKET_ATTEMPTS: list[tuple[object, ...]] = []
 
 
@@ -55,7 +56,7 @@ def _load_planner() -> tuple[ModuleType, type[Any]]:
     module = importlib.import_module(PLANNER_MODULE)
     planner_cls = getattr(module, "P0Planner", None)
     if not isinstance(planner_cls, type):
-        pytest.xfail("T-B197 未实现：公开 P0 计划器类未提供")
+        pytest.fail("T-B197 契约未满足：公开 P0 计划器类未提供")
     return module, planner_cls
 
 
@@ -95,7 +96,7 @@ def _synthetic_inputs() -> dict[str, Any]:
         "planned": [],
         "replay_keys": set(),
         "certificate_id": "00000000-0000-4000-8000-000000000720",
-        "licence_id": "00000000-0000-4000-8000-000000000721",
+        "licence_id": LICENCE_ID,
     }
 
 
@@ -114,7 +115,7 @@ def _certificate_payload(module: ModuleType) -> Any:
     universe_cls = getattr(module, "CertificateUniverse", None)
     if not isinstance(universe_cls, type):
         pytest.fail("P0 计划器模块已存在，但缺少公开 CertificateUniverse")
-    return [universe_cls("00000000-0000-4000-8000-000000000721", **payload)]
+    return [universe_cls(LICENCE_ID, **payload)]
 
 
 def _plan(values: dict[str, Any], planner: Any | None = None) -> tuple[Any, Any]:
@@ -124,7 +125,7 @@ def _plan(values: dict[str, Any], planner: Any | None = None) -> tuple[Any, Any]
     instance = planner if planner is not None else _make_planner(planner_cls)
     method = getattr(instance, "plan", None)
     if not callable(method):
-        pytest.xfail("T-B197 未实现：计划器未提供公开 plan() 方法")
+        pytest.fail("T-B197 契约未满足：计划器未提供公开 plan() 方法")
     return instance, method(values["now"], certificates, clock=values["clock"], budgets=None)
 
 
@@ -179,7 +180,7 @@ def test_priority_suspension_and_budget_do_not_overrun() -> None:
     assert all(record.status == "skipped" for record in result.skipped)
     assert skipped["SYN004.SH"] == "suspended"
     assert skipped["SYN003.SH"] == "budget_exhausted"
-    assert result.budget_used["00000000-0000-4000-8000-000000000721"] == 2
+    assert result.budget_used == {LICENCE_ID: 2}
 
 
 def test_replay_same_certificate_date_session_is_deduplicated() -> None:
@@ -191,7 +192,7 @@ def test_replay_same_certificate_date_session_is_deduplicated() -> None:
     assert first.duplicate_count == 0
     assert second.scheduled == ()
     assert second.duplicate_count == 4
-    assert not second.budget_used or all(value == 0 for value in second.budget_used.values())
+    assert second.budget_used == {}
 
 
 def test_ingest_has_no_intraday_producer_or_timer_registration() -> None:
@@ -228,7 +229,7 @@ def test_scheduler_constructor_does_not_start_timer(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sched, "scheduler", forbidden)
     monkeypatch.setattr(asyncio, "create_task", forbidden)
     monkeypatch.setattr(asyncio, "ensure_future", forbidden)
-    scheduler = Scheduler()
+    scheduler: Scheduler = Scheduler()
     assert scheduler.inflight_total == 0
     assert calls == []
 
