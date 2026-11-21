@@ -42,6 +42,22 @@ class Scheduler[T]:
         self._rings: dict[Priority, deque[LicenceId]] = {p: deque() for p in Priority}
         self._deficit: dict[tuple[LicenceId, Priority], int] = {}
         self._inflight: dict[LicenceId, int] = {}
+        self._plan_records: dict[str, object] = {}
+
+    @property
+    def plan_records(self) -> tuple[object, ...]:
+        """Accepted offline plan records, retained without starting a dispatch."""
+        return tuple(self._plan_records.values())
+
+    def record_plan(self, record: object) -> bool:
+        """Accept one idempotent plan record.  This method never arms a timer."""
+        plan_id = getattr(record, "plan_id", None)
+        if not isinstance(plan_id, str) or not plan_id:
+            raise ValueError("plan record requires a non-empty plan_id")
+        if plan_id in self._plan_records:
+            return False
+        self._plan_records[plan_id] = record
+        return True
 
     # ------------------------------------------------------------ 入队/查询
 
