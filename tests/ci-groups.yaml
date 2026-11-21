@@ -31,6 +31,7 @@ tests:
   - {"file": "tests/backend/api_app/test_contract_v022.py", "group": "parallel", "keywords": ["contract docs read-only", "make_client ASGI in-process", "make_settings"], "unverified": false}
   - {"file": "tests/backend/api_app/test_contract_v028_t_t23.py", "group": "serial_pg", "keywords": ["_t22._auth.authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_contract_v029_t_t25.py", "group": "serial_pg", "keywords": ["_r._t23.authdb->pg_url", "redis_url", "docker"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_daily_report_legacy.py", "group": "parallel", "keywords": ["make_client ASGI in-process", "synthetic report row", "no real DB"], "unverified": false}
   - {"file": "tests/backend/api_app/test_data_licence_backend_t_t22.py", "group": "parallel", "keywords": ["subprocess config-only isolated environment", "monkeypatch.setenv", "no real DB"], "unverified": false}
   - {"file": "tests/backend/api_app/test_data_licence_t_t22.py", "group": "serial_pg", "keywords": ["_auth.authdb->pg_url", "redis_url", "docker"], "unverified": false}
   - {"file": "tests/backend/api_app/test_delete_user_data_cli_t_t24.py", "group": "serial_pg", "keywords": ["roles/cli->_t23.authdb->pg_url", "psycopg.connect", "redis_url", "docker"], "unverified": false}
