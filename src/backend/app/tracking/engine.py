@@ -248,7 +248,14 @@ def _evaluate(
             missing.append("next_minute_bar")
     else:
         sessions = [d.isoformat() for d in sorted(opened) if entry_day <= d <= due]
-        frame = prepare(instrument, sessions, as_of=cutoff, factors=factors, registry={})
+        factors_with_available_at = [factor for factor in factors if factor.get("available_at")]
+        frame = prepare(
+            instrument,
+            sessions,
+            as_of=cutoff,
+            factors=factors_with_available_at,
+            registry={},
+        )
         dates = frame["visible_dates"]
         opens, closes = frame["series"]["f.open_qfq"], frame["series"]["f.close_qfq"]
         lookup = {d: i for i, d in enumerate(dates)}
@@ -268,10 +275,17 @@ def _evaluate(
             proof(key, raw.get(date.isoformat(), {}).get(field), close_at(date), "CNY/share")
         for key, value in [("entry_qfq", result.entry_price), ("exit_qfq", result.exit_price)]:
             proof(key, value, result.exit_at, "CNY/share")
+        factor_available_at_missing = False
         for i, factor in enumerate(factors):
-            observed = dt.datetime.fromisoformat(factor["available_at"])
+            available_at = factor.get("available_at")
+            if not available_at:
+                factor_available_at_missing = True
+                continue
+            observed = dt.datetime.fromisoformat(available_at)
             if observed <= cutoff and factor["date"] <= due.isoformat():
                 proof("factor:" + str(i), factor["value"], observed)
+        if factor_available_at_missing:
+            missing.append("factor_available_at_missing")
         indices = {
             r["trade_date"]: r
             for r in benchmark["bars"]
