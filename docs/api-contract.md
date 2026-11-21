@@ -1202,7 +1202,7 @@ evidence: Evidence[]
 | `ReviewVersion.attribution` | `ReviewAttribution`，见下表 |
 | `ReviewVersion.outcome_metrics` | `ReviewOutcomeMetrics`，四项 `Stat` 均为百分数 |
 | `ReviewVersion.created_at` | `string(datetime)`，必填 |
-| `ReviewTimelineItem` | `{kind: string, at: string(datetime), resource_id: string(uuid) \| null, version_no: int \| null, evidence_ids: string[]}`；`kind` 当前为 `review_version`、`plan_version`、`trade`，未知值客户端显示“未知” |
+| `ReviewTimelineItem` | `{kind: "review_version" \| "plan_version" \| "trade", at: string(datetime), resource_id: string(uuid) \| null, version_no: int \| null, evidence_ids: string[]}`；`kind` 为闭集枚举（复盘版本保存、关联计划版本、关联成交），新增取值须先改本契约；客户端遇未知值仍显示“未知” |
 | `ReviewJudgement` | `{condition_text: string, fulfilled: boolean \| null, note: string \| null}`；`fulfilled=null` 表示未知，不得解释成否定 |
 | `ReviewAttribution` | `{judgement: ReviewJudgement[], execution: TextWithEvidence[], market: TextWithEvidence[]}`；三类均可为空数组 |
 | `ReviewOutcomeMetrics` | `{holding_return: Stat, benchmark_return: Stat, excess_return: Stat, max_drawdown: Stat}`；值为百分数，未知为 `null` |
