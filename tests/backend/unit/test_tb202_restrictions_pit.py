@@ -105,16 +105,16 @@ class _Connection:
         return _Result(self.scripted.pop(0))
 
 
-def test_missing_candidate_is_remaining_and_keeps_gap() -> None:
-    reason_id = uuid.uuid4()
+def test_no_matching_candidate_leaves_other_reasons_untouched() -> None:
     restriction = SimpleNamespace(
         id=uuid.uuid4(),
         kind="blocklist",
         target_type="security",
         target_id="600000.SH",
+        created_at=BASE - dt.timedelta(hours=1),
+        until=None,
     )
-    reason = SimpleNamespace(id=reason_id, signal_id=uuid.uuid4())
-    connection = _Connection([[reason], [], []])
+    connection = _Connection([[]])
 
     released, remaining, gaps = service.recheck_restriction(
         connection,
@@ -124,12 +124,7 @@ def test_missing_candidate_is_remaining_and_keeps_gap() -> None:
     )
 
     assert released == []
-    assert remaining == [reason_id]
-    assert gaps == [
-        {
-            "key": f"reason:{reason_id}",
-            "reason": "no_source",
-            "message": "关联候选信号缺失，无法重查",
-        }
-    ]
-    assert connection.statements[-1]._for_update_arg is not None
+    assert remaining == []
+    assert gaps == []
+    assert len(connection.statements) == 1
+    assert connection.statements[0]._for_update_arg is not None
