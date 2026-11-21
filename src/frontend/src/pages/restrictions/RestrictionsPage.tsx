@@ -40,6 +40,10 @@ export function RestrictionsPage() {
   const untilInput = form.until?.replace(/:00\+08:00$/, '').slice(0, 16) ?? '';
   const futureUntil = form.until !== null && now > 0 && !Number.isNaN(Date.parse(form.until)) && Date.parse(form.until) > now;
   const canSubmit = !!form.target_id.trim() && (form.kind !== 'cooling_off' || futureUntil);
+  const listGaps = list.first?.gaps ?? [];
+  const recheckGaps = remove.data?.gaps ?? [];
+  const hasGaps = listGaps.length > 0 || recheckGaps.length > 0;
+  const recheck = remove.data?.recheck;
 
   const setParam = (key: 'kind' | 'target_type', value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -79,6 +83,23 @@ export function RestrictionsPage() {
       </Space>
 
       {list.isError ? <ErrorBox error={list.error} /> : null}
+      {listGaps.length ? (
+        <div className="gap-note small" role="note" data-testid="restriction-list-gaps">
+          <b>重查未完成</b>，当前状态不能判定为解除：{listGaps.map((g) => `${g.key}（${g.message}）`).join('；')}
+        </div>
+      ) : null}
+      {remove.isError ? <ErrorBox error={remove.error} prefix="删除失败" /> : null}
+      {recheck ? (
+        <div className="muted small" data-testid="restriction-recheck">
+          {hasGaps ? '重查未完成，当前状态不能判定为解除。' : '重查结果：'}
+          释放记录 {recheck.released_reason_ids?.length ?? 0} 项，剩余原因 {recheck.remaining_reason_ids?.length ?? 0} 项
+        </div>
+      ) : null}
+      {recheckGaps.length ? (
+        <div className="gap-note small" role="note" data-testid="restriction-recheck-gaps">
+          <b>重查未完成</b>，当前状态不能判定为解除：{recheckGaps.map((g) => `${g.key}（${g.message}）`).join('；')}
+        </div>
+      ) : null}
       <Table<Restriction>
         rowKey="id" size="small" loading={list.isPending} dataSource={list.items} pagination={false}
         locale={{ emptyText: '暂无限制项。你可以在上方新增禁投、冷静期或屏蔽。' }} data-testid="restrictions-table"
@@ -94,7 +115,7 @@ export function RestrictionsPage() {
         ]}
       />
       <CursorPager query={list} loaded={list.items.length} testId="restrictions-pager" />
-      <div className="muted small" style={{ marginTop: 8 }}>删除后将由系统重查不可执行原因，删除成功不等于已可交易。</div>
+      <div className="muted small" style={{ marginTop: 8 }}>{hasGaps ? '删除后系统仍需完成不可执行原因重查。' : '删除后将由系统重查不可执行原因，删除成功不等于已可交易。'}</div>
     </div>
   );
 }
