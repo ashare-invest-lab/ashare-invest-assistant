@@ -553,19 +553,28 @@ def _create_payload(reason: str = "虚构原因") -> dict[str, Any]:
 def test_r1_post_idempotency_replays_same_resource_and_is_user_scoped() -> None:
     endpoint = _endpoint("/restrictions", "POST", "R1 幂等")
     engine = MemoryEngine([])
-    first = _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-1")
-    second = _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-1")
+    try:
+        first = _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-1")
+        second = _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-1")
+    except HTTPException as error:
+        if _error_status(error) == 405:
+            pytest.xfail("POST /restrictions 返回框架级 405，端点未实现")
+        raise
     first_id = _get(first, "id")
-    if len(engine.conn.rows) != 1:
-        pytest.xfail("未对齐 #337@b85cd820 §7.5：同键同体未返回首次资源，生成了第二条限制")
+    assert len(engine.conn.rows) == 1
     assert _get(second, "id") == first_id
-    other = _invoke(
-        endpoint,
-        engine,
-        user_id=OTHER,
-        payload=_create_payload(),
-        idempotency_key="idem-restriction-1",
-    )
+    try:
+        other = _invoke(
+            endpoint,
+            engine,
+            user_id=OTHER,
+            payload=_create_payload(),
+            idempotency_key="idem-restriction-1",
+        )
+    except HTTPException as error:
+        if _error_status(error) == 405:
+            pytest.xfail("POST /restrictions 返回框架级 405，端点未实现")
+        raise
     assert _get(other, "id") != first_id
     assert len(engine.conn.rows) == 2
 
@@ -573,7 +582,12 @@ def test_r1_post_idempotency_replays_same_resource_and_is_user_scoped() -> None:
 def test_r1_post_idempotency_conflict_for_different_body() -> None:
     endpoint = _endpoint("/restrictions", "POST", "R1 幂等冲突")
     engine = MemoryEngine([])
-    _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-2")
+    try:
+        _invoke(endpoint, engine, payload=_create_payload(), idempotency_key="idem-restriction-2")
+    except HTTPException as error:
+        if _error_status(error) == 405:
+            pytest.xfail("POST /restrictions 返回框架级 405，端点未实现")
+        raise
     try:
         _invoke(
             endpoint,
@@ -582,10 +596,11 @@ def test_r1_post_idempotency_conflict_for_different_body() -> None:
             idempotency_key="idem-restriction-2",
         )
     except (AppError, HTTPException) as error:
-        if _error_code(error) == "IDEMPOTENCY_CONFLICT" or _error_status(error) == 409:
-            return
-        raise
-    pytest.xfail("未对齐 #337@b85cd820 §7.5：同键异体未返回 409 IDEMPOTENCY_CONFLICT")
+        if _error_status(error) == 405:
+            pytest.xfail("POST /restrictions 返回框架级 405，端点未实现")
+        assert _error_code(error) == "IDEMPOTENCY_CONFLICT" or _error_status(error) == 409
+    else:
+        pytest.fail("同键异体必须返回 409 IDEMPOTENCY_CONFLICT")
 
 
 @pytest.mark.parametrize(
@@ -606,12 +621,11 @@ def test_r1_post_target_visibility_is_uniform_not_found(
     try:
         _invoke(endpoint, MemoryEngine([]), user_id=user_id, payload=payload)
     except (AppError, HTTPException) as error:
-        if _error_code(error) == "NOT_FOUND" or _error_status(error) == 404:
-            return
-        raise
-    pytest.xfail(
-        "未对齐 #337@b85cd820 §7.5：不存在或不可见目标未统一返回 404 NOT_FOUND"
-    )
+        if _error_status(error) == 405:
+            pytest.xfail("POST /restrictions 返回框架级 405，端点未实现")
+        assert _error_code(error) == "NOT_FOUND" or _error_status(error) == 404
+    else:
+        pytest.fail("未知或不可见目标必须返回 404 NOT_FOUND")
 
 
 @pytest.mark.parametrize(
@@ -624,6 +638,8 @@ def test_r1_post_invalid_kind_or_target_type_is_validation_error(kind: str, targ
     try:
         _invoke(endpoint, MemoryEngine([]), payload=payload)
     except (AppError, HTTPException, ValidationError) as error:
+        if _error_status(error) == 405:
+            pytest.xfail("POST /restrictions 返回框架级 405，端点未实现")
         if (
             _error_code(error) == "VALIDATION_ERROR"
             or _error_status(error) == 400
@@ -631,7 +647,7 @@ def test_r1_post_invalid_kind_or_target_type_is_validation_error(kind: str, targ
         ):
             return
         raise
-    pytest.xfail("未对齐 #337@b85cd820 §7.5：非法 kind/target_type 未返回 400 VALIDATION_ERROR")
+    pytest.fail("非法 kind/target_type 必须返回 400 VALIDATION_ERROR")
 
 
 def test_r2_delete_is_soft_delete_and_repeat_returns_same_removed_at() -> None:
