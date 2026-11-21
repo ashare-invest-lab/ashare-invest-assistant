@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from './client';
-import type { ReviewCreate, ReviewDetail, ReviewSummary, ReviewVersion } from './types';
+import { useRef } from 'react';
+import { ApiError, apiGet, apiPost, newIdempotencyKey } from './client';
+import type { ReviewCreate, ReviewDetail, ReviewSummary, ReviewVersion, ReviewVersionCreate } from './types';
 import { useCursorPages } from '../lib/cursorPaging';
 
 export interface ReviewFilter { security_code?: string; plan_id?: string }
@@ -31,10 +32,33 @@ export const useReviewVersions = (id: string) => useCursorPages<ReviewVersion>({
   idOf: (version) => String(version.version_no),
 });
 
-export const useCreateReview = () => {
+function useReviewIdemMutation<B, R>(post: (body: B, idempotencyKey: string) => Promise<R>) {
   const client = useQueryClient();
+  const key = useRef(newIdempotencyKey());
+  const lastBody = useRef<string | null>(null);
   return useMutation({
-    mutationFn: (body: ReviewCreate) => apiPost<ReviewDetail>('/reviews', body),
-    onSuccess: async () => { await client.invalidateQueries({ queryKey: ['reviews'] }); },
+    mutationFn: (body: B) => {
+      const text = JSON.stringify(body);
+      if (lastBody.current !== null && lastBody.current !== text) key.current = newIdempotencyKey();
+      lastBody.current = text;
+      return post(body, key.current);
+    },
+    onSuccess: async () => {
+      key.current = newIdempotencyKey();
+      lastBody.current = null;
+      await client.invalidateQueries({ queryKey: ['reviews'] });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.code !== 'NETWORK_ERROR') {
+        key.current = newIdempotencyKey();
+        lastBody.current = null;
+      }
+    },
   });
-};
+}
+
+export const useCreateReview = () => useReviewIdemMutation<ReviewCreate, ReviewDetail>((body, idempotencyKey) =>
+  apiPost<ReviewDetail>('/reviews', body, { idempotencyKey }));
+
+export const useCreateReviewVersion = (id: string) => useReviewIdemMutation<ReviewVersionCreate, ReviewDetail>((body, idempotencyKey) =>
+  apiPost<ReviewDetail>(`/reviews/${encodeURIComponent(id)}/versions`, body, { idempotencyKey }));

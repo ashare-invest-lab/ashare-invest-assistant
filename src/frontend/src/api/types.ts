@@ -588,8 +588,7 @@ export interface TodayResponse {
   evidence: Evidence[];
 }
 
-// T-F69：复盘页面使用的 /reviews 及 T-A209 草案版本结构。后端 V1 尚未挂载这些路由。
-/** T-A209 草案字段；正式契约 §7.8 仅有 GET/POST /reviews 骨架，以下类型均未验证。 */
+// §7.8.1–7.8.4 复盘对象。T-R103 工程接入与后端 evidence 填充仍未验证。
 export interface ReviewJudgement { condition_text: string; fulfilled: boolean | null; note: string | null }
 export interface ReviewAttribution {
   judgement: ReviewJudgement[];
@@ -604,7 +603,6 @@ export interface ReviewOutcomeMetrics {
 }
 export interface ReviewVersion extends DataStatusBlock {
   id: Uuid;
-  review_id: Uuid;
   version_no: number;
   plan_version_ids: Uuid[];
   trade_ids: Uuid[];
@@ -615,8 +613,9 @@ export interface ReviewVersion extends DataStatusBlock {
   outcome_metrics: ReviewOutcomeMetrics;
   created_at: DateTime;
 }
+export type ReviewTimelineKind = 'review_version' | 'plan_version' | 'trade';
 export interface ReviewTimelineItem {
-  kind: string;
+  kind: ReviewTimelineKind;
   at: DateTime;
   resource_id: Uuid | null;
   version_no: number | null;
@@ -634,8 +633,8 @@ export interface ReviewSummary extends DataStatusBlock {
 }
 export interface ReviewDetail extends ReviewSummary {
   current_version: ReviewVersion | null;
+  evidence: Evidence[];
   timeline: ReviewTimelineItem[];
-  versions?: ReviewVersion[];
 }
 export interface ReviewCreate {
   plan_id: Uuid | null;
