@@ -1,10 +1,10 @@
 #!/bin/sh
-# 盘中行情只读健康检查。默认 Redis 键名未验证，待 I4 定稿，可由环境变量覆盖。
+# 盘中行情只读健康检查。队列键默认不接入，待 I4 定稿，可由环境变量覆盖。
 # 时区用 POSIX 串 CST-8（=Asia/Shanghai，无夏令时）：redis alpine 镜像不带 tzdata，写地名会静默回落 UTC。
 set -eu
 
-heartbeat_key=${INTRADAY_HEARTBEAT_KEY:-intraday:heartbeat} # 未验证，待 I4 定稿
-queue_key=${INTRADAY_QUEUE_KEY:-intraday:queue} # 未验证，待 I4 定稿
+heartbeat_key=${INTRADAY_HEARTBEAT_KEY:-${INGEST_HEARTBEAT_KEY:-ingest:heartbeat}}
+queue_key=${INTRADAY_QUEUE_KEY:-}
 stale_after=${INTRADAY_STALE_AFTER_S:-120}
 queue_zero_alert=${INTRADAY_QUEUE_ZERO_ALERT_S:-900}
 health_log=${INTRADAY_HEALTH_LOG:-${AIA_RUNTIME:-/var/log/aia}/intraday-health.log}
@@ -46,6 +46,21 @@ is_uint() {
         ''|*[!0-9]*) return 1 ;;
         *) return 0 ;;
     esac
+}
+
+extract_heartbeat_ts() {
+    value=$1
+    case "$value" in
+        \{*\}) ;;
+        *) return 1 ;;
+    esac
+
+    body=$(printf '%s' "$value" | sed 's/^{//; s/}$//')
+    # 只用 POSIX BRE（镜像内是 busybox sed）：先去掉嵌套对象，再补尾逗号取顶层整数 ts
+    body=$(printf '%s' "$body" | sed -e ':strip' -e 's/"[^"]*":{[^{}]*}//' -e 't strip')
+    ts=$(printf '%s,' "$body" | sed -n 's/^\(.*,\)\{0,1\}"ts":\([0-9][0-9]*\),.*/\2/p')
+    [ -n "$ts" ] && is_uint "$ts" || return 1
+    printf '%s\n' "$ts"
 }
 
 is_enabled() {
@@ -109,42 +124,53 @@ fi
 
 heartbeat=''
 queue=''
+queue_check=false
+queue_display=未接入
 if [ -n "$from_dir" ]; then
     if [ -f "$from_dir/heartbeat" ]; then
         heartbeat=$(cat "$from_dir/heartbeat") || heartbeat=''
     fi
-    if [ -f "$from_dir/queue_len" ]; then
+    if [ -n "$queue_key" ] && [ -f "$from_dir/queue_len" ]; then
         queue=$(cat "$from_dir/queue_len") || queue=''
-    fi
-    if [ -z "$heartbeat" ] || ! is_uint "$heartbeat" || [ -z "$queue" ] || ! is_uint "$queue"; then
-        emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=心跳或队列数据缺失"
-        exit 2
+        queue_check=true
     fi
 else
     if ! heartbeat=$(redis-cli -u "$redis_url" --no-auth-warning GET "$heartbeat_key" 2>/dev/null); then
         emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=redis 不可达"
         exit 2
     fi
-    if ! queue=$(redis-cli -u "$redis_url" --no-auth-warning LLEN "$queue_key" 2>/dev/null); then
-        emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=redis 不可达"
-        exit 2
-    fi
-    heartbeat=$(printf '%s' "$heartbeat" | tr -d '\r\n')
-    queue=$(printf '%s' "$queue" | tr -d '\r\n')
-    if [ -z "$heartbeat" ] || ! is_uint "$heartbeat" || [ -z "$queue" ] || ! is_uint "$queue"; then
-        emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=redis 数据无效"
-        exit 2
+    if [ -n "$queue_key" ]; then
+        if ! queue=$(redis-cli -u "$redis_url" --no-auth-warning LLEN "$queue_key" 2>/dev/null); then
+            emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=redis 不可达"
+            exit 2
+        fi
+        queue_check=true
     fi
 fi
 
-heartbeat_age=$((now - heartbeat))
-[ "$heartbeat_age" -lt 0 ] && heartbeat_age=0
-if [ "$heartbeat_age" -gt "$stale_after" ]; then
-    emit "$(format_time) 状态=心跳过期 心跳龄=${heartbeat_age} 队列=${queue} 说明=超过${stale_after}秒未更新"
+heartbeat=$(printf '%s' "$heartbeat" | tr -d '\r\n')
+if ! heartbeat_ts=$(extract_heartbeat_ts "$heartbeat"); then
+    emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=心跳格式无效"
     exit 2
 fi
 
-if [ "$queue" -eq 0 ]; then
+if [ "$queue_check" = true ]; then
+    queue=$(printf '%s' "$queue" | tr -d '\r\n')
+    if [ -z "$queue" ] || ! is_uint "$queue"; then
+        emit "$(format_time) 状态=心跳缺失 心跳龄=- 队列=- 说明=redis 数据无效"
+        exit 2
+    fi
+    queue_display=$queue
+fi
+
+heartbeat_age=$((now - heartbeat_ts))
+[ "$heartbeat_age" -lt 0 ] && heartbeat_age=0
+if [ "$heartbeat_age" -gt "$stale_after" ]; then
+    emit "$(format_time) 状态=心跳过期 心跳龄=${heartbeat_age} 队列=${queue_display} 说明=超过${stale_after}秒未更新"
+    exit 2
+fi
+
+if [ "$queue_check" = true ] && [ "$queue" -eq 0 ]; then
     first_zero=''
     if [ -f "$health_state" ]; then
         first_zero=$(cat "$health_state" 2>/dev/null || true)
@@ -163,5 +189,9 @@ else
     rm -f "$health_state"
 fi
 
-emit "$(format_time) 状态=正常 心跳龄=${heartbeat_age} 队列=${queue} 说明=盘中心跳与队列正常"
+if [ "$queue_check" = true ]; then
+    emit "$(format_time) 状态=正常 心跳龄=${heartbeat_age} 队列=${queue_display} 说明=盘中心跳与队列正常"
+else
+    emit "$(format_time) 状态=正常 心跳龄=${heartbeat_age} 队列=未接入 说明=盘中心跳正常；队列检查未接入（待 I4 定稿）"
+fi
 exit 0
