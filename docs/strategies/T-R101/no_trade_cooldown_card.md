@@ -47,26 +47,26 @@ S5–S7 只支持“设置暂停窗口值得检验”的假设。它们没有验
 
 ### 4.1 作用域与优先级
 
-禁投规则只阻断 `buy` 和 `add`。同一证券已有持仓时，`sell` 和 `reduce` 不被禁投规则吞掉。任一禁投命中即状态为 `vetoed`。关键字段为 `null`、过期或来源冲突时状态为 `insufficient_data`，买入计划也被阻断，不能按“没有命中”放行。多个原因并列记录，解除一个原因不能解除其他原因。
+禁投规则只阻断 `buy` 和 `add`。同一证券已有持仓时，`sell` 和 `reduce` 不被禁投规则吞掉。G-01 `gate_tradability` 已有对应原因码的检查项只写入 `gate_results` 并产出不可执行原因，不把候选信号 `state` 改为 `vetoed`。本卡其他真正的策略 veto 才使用 `vetoed`。关键字段为 `null`、过期或来源冲突时状态为 `insufficient_data`，买入计划也被阻断，不能按“没有命中”放行。多个原因并列记录，解除一个原因不能解除其他原因。
 
 ### 4.2 确定性规则
 
-| ID | 触发条件（T 日可见） | 时长 | 解除条件 | 字段和边界 |
+| ID | 触发条件（T 日可见） | 时长 | 解除条件 | 状态落点、原因码和字段边界 |
 |---|---|---|---|---|
-| B1 风险警示 | `f.is_st = true`，覆盖 ST、*ST 和退市标记 | 从首次可见日起持续 | 后续已核验快照明确为 `false`，且没有 B2、B4 等其他原因 | `null` 继续阻断。简称缺失不能推导为 `false` |
-| B2 退市整理期 | `f.is_delisting_period = true` | 整个退市整理状态有效期 | `listing_status` 回到可交易的 `listed`，并有新快照证明状态解除 | 交易所规则规定整理交易期限为 15 个交易日，但本卡不以 15 日强行解除。全天停牌日不计入整理期 |
-| B3 停牌 | `f.is_suspended = true` | 停牌日 | 新的交易日快照明确 `f.is_suspended = false` 且有效 K 线可用 | 状态缺失、零量、OHLC 相等或缺 K 线均不能推断停牌，统一记 `insufficient_data` |
-| B4 风险公告或立案调查 | `f.ann_risk_count_10d >= 1`，或公告分类明确为“立案调查” | 风险公告仍在最近 10 个交易日窗口内 | 新快照中计数为 0，且立案调查记录不再处于有效窗口 | 公告只有日期时按盘后记录处理，T 日盘中不可见。标题否定语、澄清公告和更正公告需按版本号去重 |
-| B5 上市未满门槛 | `f.list_days < 30` | 直到上市交易日数达到 30 | `f.list_days >= 30` 且主数据未缺失 | 30 是待回测候选值。重新上市、转板或主数据断档时重新进入未知状态 |
-| B6 不在 A 股范围 | `security.board = bse`，或 `security.type` 不属于普通 A 股股票 | 永久不生成本卡买入候选 | 只有证券被正确归类为沪深主板、创业板或科创板普通股票后才可重新判定 | 北交所单独适用其交易规则，本卡不跨市场迁移阈值。基金、ETF、可转债、CDR 同样排除 |
-| B7 买入不可成交 | `f.limit_locked_up = true` | 当日买入候选失效 | 下一交易日形成新的、可验证的涨停状态且不再一字封板 | 涨停价字段缺失或冲突记 `insufficient_data`，不得当作未封板。`f.limit_locked_down` 不阻断卖出方向。价格比较一律用不复权值 |
+| B1 风险警示 | `f.is_st = true`，覆盖 ST、*ST 和退市标记 | 从首次可见日起持续 | 摘帽事件；且没有 B2、B4 等其他原因 | G-01 写入 `gate_results`，产出 `ST_OR_DELISTING`，不改为 `vetoed`。`null` 继续阻断。简称缺失不能推导为 `false` |
+| B2 退市整理期 | `f.is_delisting_period = true` | 整个退市整理状态有效期 | 退市整理期不可解除 | G-01 写入 `gate_results`，产出 `ST_OR_DELISTING`，不改为 `vetoed`。不以 `listing_status=listed` 自动解除。交易所规则规定整理交易期限为 15 个交易日，但本卡不以 15 日强行解除。全天停牌日不计入整理期 |
+| B3 停牌 | `f.is_suspended = true` | 停牌日 | 新的交易日快照明确 `f.is_suspended = false` 且有效 K 线可用 | G-01 写入 `gate_results`，产出 `SUSPENDED`，不改为 `vetoed`。状态缺失、零量、OHLC 相等或缺 K 线均不能推断停牌，统一记 `insufficient_data` |
+| B4 风险公告或立案调查 | `f.ann_risk_count_10d >= 1`，或公告分类明确为“立案调查” | 风险公告仍在最近 10 个交易日窗口内 | 新快照中计数为 0，且立案调查记录不再处于有效窗口 | 这是本卡的策略 veto，可用 `vetoed`。公告字段缺失或过期时记 `KEY_DATA_MISSING` 并保持 `insufficient_data`。公告只有日期时按盘后记录处理，T 日盘中不可见。标题否定语、澄清公告和更正公告需按版本号去重 |
+| B5 上市未满门槛 | `f.list_days < 30` | 直到上市交易日数达到 30 | `f.list_days >= 30` 且主数据未缺失 | G-01 写入 `gate_results`，产出 `NEW_LISTING`，不改为 `vetoed`。30 是待回测候选值。重新上市、转板或主数据断档时重新进入未知状态 |
+| B6 不在 A 股范围 | `security.board = bse`，或 `security.type` 不属于普通 A 股股票 | 永久不生成本卡买入候选 | 只有证券被正确归类为沪深主板、创业板或科创板普通股票后才可重新判定 | 范围外证券不生成本卡候选，不进入候选信号 `state`。北交所单独适用其交易规则，本卡不跨市场迁移阈值。基金、ETF、可转债、CDR 同样排除 |
+| B7 买入不可成交 | `f.limit_locked_up = true` | 当日买入候选失效 | 下一交易日形成新的、可验证的涨停状态且不再一字封板 | G-01 写入 `gate_results`，产出 `LIMIT_LOCKED`，不改为 `vetoed`。涨停价字段缺失或冲突记 `insufficient_data`，不得当作未封板。`f.limit_locked_down` 不阻断卖出方向。价格比较一律用不复权值 |
 
 ### 4.3 状态边界
 
 - T 日 18:00 后才到达的风险警示、退市整理期和上市日数修订，只能影响 T+1 09:30 及以后，不得回填 T 日盘中候选。
 - 证券从交易所列表消失、主数据缺失或字段版本冲突时，B1–B5 相关状态按未知阻断买入，不能把退市或数据缺失转成正常状态。
 - 停牌复牌首日若有效 K 线不足指标预热要求，禁投可解除，但策略本身仍可为 `insufficient_data`。
-- 解除某一原因后，必须重新计算全部 B1–B7。任何仍有效的原因都保留 `vetoed`。
+- 解除某一原因后，必须重新计算全部 B1–B7。仍有效的 G-01 原因继续保留对应 `gate_results` 和不可执行原因，B4 等策略 veto 继续使用 `vetoed`。
 
 ## 5. 冷静期规则
 
@@ -80,13 +80,13 @@ S5–S7 只支持“设置暂停窗口值得检验”的假设。它们没有验
 
 | ID | 触发条件 | 默认时长 | 解除条件 | 所用字段 |
 |---|---|---:|---|---|
-| C1 连续亏损 | 同一账户、同一策略最近已结算交易连续 `loss_streak_threshold = 3` 笔 `trade.net_return < 0` | `cooldown_after_loss_days = 3` 个交易日 | 3 个交易日完成且无新的 C1–C5 触发 | `trade.net_return`、`trade.settled_at`、`trade.strategy_key` |
+| C1 连续亏损 | 同一账户、同一策略最近已结算交易连续 `closed_loss_streak = 3` 笔 `trade.net_return < 0` | `pause_days = 5` 个交易日 | 用户确认恢复，或暂停期满且无新的 C1–C5 触发 | `trade.net_return`、`trade.settled_at`、`trade.strategy_key`；原因码 `LOSS_STREAK_PAUSE` |
 | C2 单笔大亏损 | 单笔已结算交易 `trade.net_return <= -single_trade_loss_pct`，默认 `single_trade_loss_pct = 2%` | 3 个交易日 | 同上 | `trade.net_return`、成交费用账本、结算时间 |
 | C3 单日大亏损 | 账户 T 日扣费后收益 `account.daily_net_return <= -daily_loss_pct`，默认 `daily_loss_pct = 3%` | 3 个交易日 | 同上 | `account.daily_net_return`、`account.nav_close` |
-| C4 止损后同标的再入 | 同一 `(account_id, strategy_key, security_id)` 完成原因为 `stop_loss` 的退出即创建冷静期，期间同标的再次出现候选信号时阻断 | `same_security_cooldown_days = 3` 个交易日 | 冷静期结束且新候选不再沿用旧交易计划 | `trade.exit_reason`、交易日、证券和策略键 |
+| C4 止损后同标的再入 | 同一 `(account_id, strategy_key, security_id)` 完成原因为 `stop_loss` 的退出，仅在 `executability.cooling_off_after_stop.enabled = true` 时创建冷静期，期间同标的再次出现候选信号时阻断 | 默认 `enabled = false`；启用时 `days = 3` 个交易日 | 冷静期结束且新候选不再沿用旧交易计划 | `trade.exit_reason`、交易日、证券和策略键；仓内定义见 `config/risk_controls.yaml` |
 | C5 连续涨停或跌停后 | 最近连续 `limit_streak_threshold = 2` 个交易日同一方向满足 `f.is_limit_up_close = true` 或 `f.is_limit_down_close = true` | `limit_cooldown_days = 1` 个交易日 | 下一交易日收盘后重新求值，且无 B1–B7 或其他冷静期 | `f.is_limit_up_close`、`f.is_limit_down_close`、交易日历 |
 
-C1–C5 任一命中都写入原因码 `COOLING_OFF`，并保存 D0、结束交易日、触发字段的 `data_as_of` 和版本。原因码只表示候选信号被规则阻断，不表示收益预测。
+C1 命中按仓内 RC5 定义写入原因码 `LOSS_STREAK_PAUSE`。C2–C5 命中写入原因码 `COOLING_OFF`。所有原因都保存 D0、结束交易日、触发字段的 `data_as_of` 和版本。原因码只表示候选信号被规则阻断，不表示收益预测。
 
 ### 5.3 冷静期数据边界
 
@@ -94,7 +94,7 @@ C1–C5 任一命中都写入原因码 `COOLING_OFF`，并保存 D0、结束交�
 - 现金分红、拆并股和除权不改变已结算交易的扣费后金额。收益分母使用该笔成交的原始不复权名义金额，不能把后来的复权价格代入。
 - 同一成交的部分成交合并为一笔已结算交易后再计数。撤单、未成交委托和纸面浮盈亏不计入 C1–C4。
 - C5 只看已完成日线。盘中临时封板不提前开始冷静期，T 日收盘状态最早 T+1 09:30 可用。
-- 禁投与冷静期同时存在时，展示全部原因，执行优先级为 `insufficient_data` > `vetoed` > `COOLING_OFF`。任何缺数都不放行买入。
+- 禁投与冷静期同时存在时，展示全部原因，执行优先级为 `insufficient_data` > `vetoed` > `LOSS_STREAK_PAUSE` / `COOLING_OFF`。任何缺数都不放行买入。
 
 ## 6. 参数与敏感性
 
@@ -102,10 +102,10 @@ C1–C5 任一命中都写入原因码 `COOLING_OFF`，并保存 D0、结束交�
 |---|---:|---:|---|
 | `risk_window_days` | 10 交易日 | 5 / 10 / 20 | S1–S3 说明风险警示和公告边界，但没有 10 日窗口规定。**未验证、待回测** |
 | `listing_min_days` | 30 交易日 | 20 / 30 / 60 | S2、S3 是上市规则公开出处，但没有本卡 30 日门槛。**未验证、待回测** |
-| `loss_streak_threshold` | 3 笔 | 2 / 3 / 4 | S5 支持近期亏损可能导致更激进交易，不给出 3 笔阈值。**未验证、待回测** |
+| `closed_loss_streak` | 3 笔 | 2 / 3 / 4 | 仓内定义（`config/risk_controls.yaml` 的 RC5 `closed_loss_streak: 3`）；行为效果 **未验证、待回测** |
 | `single_trade_loss_pct` | 2% | 1% / 2% / 3% | S5 是亏损行为机制证据，不给出 2% 阈值。**未验证、待回测** |
 | `daily_loss_pct` | 3% | 2% / 3% / 5% | S5 是亏损行为机制证据，不给出 3% 阈值。**未验证、待回测** |
-| `cooldown_after_loss_days` | 3 交易日 | 1 / 3 / 5 | S5、S7 支持延迟交易的研究动机，不给出 A 股 3 日值。**未验证、待回测** |
+| `pause_days` | 5 交易日 | 1 / 3 / 5 | 仓内定义（`config/risk_controls.yaml` 的 RC5 `pause_days: 5`）；行为效果 **未验证、待回测** |
 | `same_security_cooldown_days` | 3 交易日 | 1 / 3 / 5 | S5 支持避免亏损后立即加码的机制，不给出同标的 3 日值。**未验证、待回测** |
 | `limit_streak_threshold` | 2 个交易日 | 2 / 3 / 4 | S6 研究连续涨跌停与过度反应，但不验证 2 日门槛。**未验证、待回测** |
 | `limit_cooldown_days` | 1 交易日 | 1 / 2 / 3 | S6 支持连续涨跌停后重新评估的机制，不验证 1 日值。**未验证、待回测** |
