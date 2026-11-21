@@ -11,7 +11,7 @@ import {
   ACTION_SHORT, ALERT_STATUS, DATA_GAP_SCOPE, EXECUTABILITY, GAP_REASON, PLAN_CONDITION_KIND, PLAN_DRAFT_STATUS, REASON_CODE, RECONCILIATION, REGIME,
   RISK_CONTROL, RISK_LEVEL, SESSION, severityTag,
 } from '../../i18n/labels';
-import { fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
+import { fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 import { WatchlistSection } from '../../features/watchlist/WatchlistSection';
 import { TViewCell } from './tView';
@@ -51,7 +51,7 @@ const stockLink = (code: string | null, name: string | null) =>
 
 const focusColumns = (nonTradingDay: boolean): ColumnsType<TodayFocusRow> => [
   { title: '证券', key: 'sec', width: 150, render: (_, r) => stockLink(r.security_code, r.name) },
-  { title: '现价', key: 'price', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{fmtNum(r.quote?.price)}</span> },
+  { title: '现价', key: 'price', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{fmtPrice(r.quote?.price, r.holding?.security_type)}</span> },
   { title: '涨跌幅', key: 'chg', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{r.quote?.change_pct != null ? `${signed(r.quote.change_pct)}%` : '—'}</span> },
   { title: '持仓占比', key: 'w', width: 80, align: 'right', render: (_, r) => (r.holding ? <span className="num">{fmtNum(r.holding.weight_pct)}%</span> : <span className="muted">未持有</span>) },
   {
