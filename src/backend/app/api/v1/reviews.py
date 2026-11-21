@@ -46,17 +46,8 @@ class ReviewCreate(_Body):
     tags: list[str] = Field(default_factory=list, max_length=50)
     judgement: list[Judgement] = Field(default_factory=list, max_length=100)
 
-class ReviewVersionCreate(_Body):
+class ReviewVersionCreate(ReviewCreate):
     base_version_no: int = Field(ge=1, strict=True)
-    plan_id: uuid.UUID | None = None
-    security_code: Code | None = None
-    period_start: dt.date | None = None
-    period_end: dt.date | None = None
-    plan_version_ids: list[uuid.UUID] | None = None
-    trade_ids: list[uuid.UUID] | None = None
-    lessons: str | None = Field(default=None, max_length=5000)
-    tags: list[str] | None = None
-    judgement: list[Judgement] | None = None
 
 def _page_reviews(
     conn: Connection,
@@ -106,7 +97,7 @@ def _version_page(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, cfg
         query = query.where(review_versions.c.version_no < keys[0])
     rows = conn.execute(query.order_by(review_versions.c.version_no.desc()).limit(pp.limit + 1)).all()
     page = build_page(rows, limit=pp.limit, key=lambda r: [r.version_no], scope=scope, settings=cfg)
-    return Page(items=[service.version_body(conn, r) for r in page.items], next_cursor=page.next_cursor)
+    return Page(items=[service.version_body(conn, owner, r) for r in page.items], next_cursor=page.next_cursor)
 
 def _run(rds: redis.Redis, user: uuid.UUID, scope: str, key: str | None, payload: dict[str, Any], fn: Callable[[], tuple[int, Any]]) -> dict[str, Any]:
     _, result = idempotency.run(rds, user_id=user, scope=scope, key=key, payload=payload, fn=fn)
@@ -165,7 +156,7 @@ def version_detail(identifier: uuid.UUID, version_no: int, auth: AuthDep, engine
         ).first()
         if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
-        return service.version_body(conn, row)
+        return service.version_body(conn, auth.user_id, row)
 
 @router.post("/reviews/{identifier}/versions", status_code=201)
 def revise(

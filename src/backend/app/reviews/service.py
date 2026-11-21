@@ -184,17 +184,18 @@ def create(conn: Connection, owner: uuid.UUID, body: Any) -> uuid.UUID:  # noqa:
 
 def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any) -> uuid.UUID:  # noqa: ANN401
     review = _owned(conn, owner, identifier, lock=True)
-    current = conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).one()
+    if review.current_version_id is None:
+        raise AppError(ErrorCode.NOT_FOUND)
+    current = conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).first()
+    if current is None:
+        raise AppError(ErrorCode.NOT_FOUND)
     if body.base_version_no != current.version_no:
         raise AppError(ErrorCode.VERSION_CONFLICT, details={"current_version_no": current.version_no})
-    plan_id = body.plan_id if body.plan_id is not None else review.plan_id
-    code = body.security_code if body.security_code is not None else review.security_code
-    start = body.period_start if body.period_start is not None else review.period_start
-    end = body.period_end if body.period_end is not None else review.period_end
+    plan_id, code = body.plan_id, body.security_code
+    start, end = body.period_start, body.period_end
     if end < start:
         raise _bad("period_end", "before_period_start")
-    ids = list(body.plan_version_ids or current.plan_version_ids or [])
-    tids = list(body.trade_ids or current.trade_ids or [])
+    ids, tids = list(body.plan_version_ids), list(body.trade_ids)
     code, _ = _validate_links(conn, owner, plan_id=plan_id, security_code=code, plan_version_ids=ids, trade_ids=tids)
     version = _new_version(
         conn,
@@ -205,9 +206,9 @@ def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any)
         end=end,
         plan_version_ids=ids,
         trade_ids=tids,
-        lessons=body.lessons if body.lessons is not None else current.lessons,
-        tags=list(body.tags) if body.tags is not None else list(current.tags or []),
-        judgement=[j.model_dump(mode="json") for j in body.judgement] if body.judgement is not None else (current.attribution or {}).get("judgement", []),
+        lessons=body.lessons,
+        tags=list(body.tags),
+        judgement=[j.model_dump(mode="json") for j in body.judgement],
     )
     conn.execute(
         update(reviews)
@@ -222,15 +223,15 @@ def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any)
     )
     return identifier
 
-def _snapshot(conn: Connection, snapshot_id: uuid.UUID | None) -> dict[str, Any]:
+def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None) -> dict[str, Any]:
     if snapshot_id is None:
         return status_block()
-    row = conn.execute(select(data_snapshots.c["items"]).where(data_snapshots.c.id == snapshot_id)).first()
+    row = conn.execute(select(data_snapshots.c["items"]).where(data_snapshots.c.id == snapshot_id, data_snapshots.c.user_id == owner)).first()
     items = row._mapping.get("items") if row is not None else None
     return dict(items) if items else status_block()
 
-def version_body(conn: Connection, row: Row[Any]) -> dict[str, Any]:
-    snap = _snapshot(conn, row.snapshot_id)
+def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any]) -> dict[str, Any]:
+    snap = _snapshot(conn, owner, row.snapshot_id)
     return {
         "id": str(row.id),
         "version_no": row.version_no,
@@ -247,7 +248,7 @@ def version_body(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "gaps": snap.get("gaps", []),
     }
 
-def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current: Row[Any]) -> list[dict[str, Any]]:
+def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current: Row[Any] | None) -> list[dict[str, Any]]:
     result = [
         {
             "kind": "review_version",
@@ -258,7 +259,7 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
         }
         for r in conn.execute(select(review_versions).where(review_versions.c.review_id == identifier).order_by(review_versions.c.version_no.asc())).all()
     ]
-    if current.plan_version_ids:
+    if current is not None and current.plan_version_ids:
         result.extend(
             {
                 "kind": "plan_version",
@@ -269,7 +270,7 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
             }
             for r in conn.execute(select(plan_versions).where(plan_versions.c.id.in_(current.plan_version_ids))).all()
         )
-    if current.trade_ids:
+    if current is not None and current.trade_ids:
         result.extend(
             {
                 "kind": "trade",
@@ -285,9 +286,9 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
 
 def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str, Any]:
     review = _owned(conn, owner, identifier)
-    current = conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).one()
+    current = None if review.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == review.security_code)).scalar()
-    snap = _snapshot(conn, current.snapshot_id)
+    snap = _snapshot(conn, owner, current.snapshot_id) if current is not None else status_block()
     return {
         "id": str(review.id),
         "plan_id": str(review.plan_id) if review.plan_id else None,
@@ -295,18 +296,18 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
         "name": sec or review.security_code,
         "period_start": review.period_start.isoformat(),
         "period_end": review.period_end.isoformat(),
-        "current_version_no": current.version_no,
+        "current_version_no": current.version_no if current is not None else None,
         "created_at": review.created_at.isoformat(),
-        "current_version": version_body(conn, current),
+        "current_version": version_body(conn, owner, current) if current is not None else None,
         "timeline": _timeline(conn, owner, identifier, current),
         "evidence": [],
         **{k: snap.get(k) for k in ("data_status", "data_as_of", "gaps")},
     }
 
 def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
-    version = conn.execute(select(review_versions).where(review_versions.c.id == row.current_version_id)).one()
+    version = None if row.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == row.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == row.security_code)).scalar()
-    snap = _snapshot(conn, version.snapshot_id)
+    snap = _snapshot(conn, row.user_id, version.snapshot_id) if version is not None else status_block()
     return {
         "id": str(row.id),
         "plan_id": str(row.plan_id) if row.plan_id else None,
@@ -314,7 +315,8 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "name": sec or row.security_code,
         "period_start": row.period_start.isoformat(),
         "period_end": row.period_end.isoformat(),
-        "current_version_no": version.version_no,
+        "current_version_no": version.version_no if version is not None else None,
+        "current_version": version_body(conn, row.user_id, version) if version is not None else None,
         "created_at": row.created_at.isoformat(),
         "data_status": snap.get("data_status", "unavailable"),
         "data_as_of": snap.get("data_as_of"),

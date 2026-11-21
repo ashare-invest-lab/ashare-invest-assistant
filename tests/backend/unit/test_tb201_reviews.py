@@ -205,19 +205,20 @@ def test_versions_conflict_success_history_and_methods(http: Any, monkeypatch: p
     def revise(_c: Any, _u: Any, _i: Any, value: Any) -> uuid.UUID:
         if value.base_version_no != 1:
             raise AppError(ErrorCode.VERSION_CONFLICT)
-        history[2] = {"version_no": 2, "lessons": value.lessons}
+        history[2] = {"version_no": 2, "lessons": value.lessons, "plan_version_ids": value.plan_version_ids, "trade_ids": value.trade_ids}
         return RID
     monkeypatch.setattr(api.service, "revise", revise)
     monkeypatch.setattr(api.service, "full", lambda *_: {"id": str(RID), "current_version_no": 2})
     c = http[0]
-    assert c.post(f"/api/v1/reviews/{RID}/versions", json={"base_version_no": 2}).status_code == 409
+    assert c.post(f"/api/v1/reviews/{RID}/versions", json={**body(), "base_version_no": 2}).status_code == 409
     assert (
         c.post(
             f"/api/v1/reviews/{RID}/versions",
-            json={"base_version_no": 1, "lessons": "new"},
+            json={**body(lessons="new"), "base_version_no": 1, "plan_version_ids": [], "trade_ids": []},
         ).status_code
         == 201
     )
+    assert history[2]["plan_version_ids"] == history[2]["trade_ids"] == []
     class Row:
         version_no = 1
     http[1].execute = lambda _s: SimpleNamespace(first=lambda: Row())
@@ -228,3 +229,12 @@ def test_versions_conflict_success_history_and_methods(http: Any, monkeypatch: p
     assert first.json() == second.json() == history[1]
     assert c.request("PATCH", f"/api/v1/reviews/{RID}", json={}).status_code == 405
     assert c.request("DELETE", f"/api/v1/reviews/{RID}", json={}).status_code == 405
+
+def test_missing_current_version_projection() -> None:
+    row = SimpleNamespace(id=RID, user_id=U, plan_id=None, security_code=CODE, period_start=dt.date(2026, 1, 1), period_end=dt.date(2026, 1, 5), current_version_id=None, created_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC))
+    class Conn:
+        def execute(self, statement: Any) -> Any:
+            return SimpleNamespace(first=lambda: row, scalar=lambda: None, all=list)
+    for result in (service.full(Conn(), U, RID), service.summary(Conn(), row)):
+        assert result["current_version"] is None and result["data_status"] == "unavailable"
+        assert result["gaps"][0]["reason"] == "no_source"
