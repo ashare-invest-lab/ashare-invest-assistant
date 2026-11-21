@@ -76,13 +76,7 @@ def test_intraday_health_offline_states(tmp_path: Path) -> None:
 
 def test_intraday_health_rejects_non_json_heartbeats(tmp_path: Path) -> None:
     now = _epoch()
-    invalid_values = [
-        str(now),
-        '{"ts":"123"}',
-        '{"ts":true}',
-        '{"ts":1.5}',
-        "not-json",
-    ]
+    invalid_values = [str(now), '{"ts":"123"}', '{"ts":true}', '{"ts":1.5}', "not-json"]
     for index, heartbeat in enumerate(invalid_values):
         result = _run(tmp_path / f"invalid-{index}", now=now, heartbeat=heartbeat)
         assert result.returncode == 2
@@ -92,33 +86,15 @@ def test_intraday_health_rejects_non_json_heartbeats(tmp_path: Path) -> None:
 
 def test_intraday_health_queue_zero_and_off_hours(tmp_path: Path) -> None:
     now = _epoch()
-    first = _run(
-        tmp_path,
-        now=now,
-        heartbeat=_heartbeat(now),
-        queue="0",
-        queue_key="jobs:worker",
-        queue_alert=900,
-    )
+    first = _run(tmp_path, now=now, heartbeat=_heartbeat(now), queue="0", queue_key="q", queue_alert=900)
     assert first.returncode == 0 and "状态=正常" in first.stdout
 
-    long_zero = _run(
-        tmp_path,
-        now=now + 900,
-        heartbeat=_heartbeat(now + 900),
-        queue="0",
-        queue_key="jobs:worker",
-        queue_alert=900,
-    )
+    long_zero = _run(tmp_path, now=now + 900, heartbeat=_heartbeat(now + 900), queue="0", queue_key="q",
+                     queue_alert=900)
     assert long_zero.returncode == 3
     assert "状态=队列长期为0" in long_zero.stdout
 
-    off_hours = _run(
-        tmp_path / "off-hours",
-        now=now - 60 * 60 * 4,
-        heartbeat=_heartbeat(now),
-        queue="0",
-    )
+    off_hours = _run(tmp_path / "off-hours", now=now - 60 * 60 * 4, heartbeat=_heartbeat(now), queue="0")
     assert off_hours.returncode == 0
     assert "状态=非交易时段" in off_hours.stdout
 
