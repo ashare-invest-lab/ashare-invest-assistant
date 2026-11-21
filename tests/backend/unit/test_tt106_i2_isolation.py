@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 MIGRATIONS = ROOT / "src/backend/migrations/versions"
 OWNERSHIP_COLUMNS = {"source", "source_licence_id"}
 ZERO_DEFAULT = re.compile(r"(?:^|[^0-9.])0(?:\.0+)?(?:$|[^0-9.])")
+I2_SENTINEL = "T-B196-I2-ISOLATION"
 
 
 @pytest.fixture(autouse=True)
@@ -67,34 +68,48 @@ def _licence_nullable(table: Table) -> bool:
 
 
 def _migration_is_i2(path: Path) -> bool:
-    if path.name.startswith("0034_"):
-        return False
-    text = path.read_text(encoding="utf-8")
-    lower = text.lower()
-    if "source_licence_id" not in lower and "source" not in lower:
-        return False
-    # 基线只创建旧表，不能被误认作后续 I2 迁移。
-    if "source_licence_id" not in lower and not any(
-        token in lower
-        for token in ("add_column", "drop_constraint", "create_unique_constraint", "create_primary_key", "alter_column")
-    ):
-        return False
-    if "quotes_snapshot" in lower:
-        return any(token in lower for token in ("unique", "primary key", "constraint"))
-    if "minute_bars" in lower:
-        return any(token in lower for token in ("unique", "primary key", "drop_constraint"))
-    return False
+    return I2_SENTINEL in path.read_text(encoding="utf-8")
 
 
 def i2_migration_found() -> Path | None:
-    for path in sorted(MIGRATIONS.glob("*.py")):
-        if _migration_is_i2(path):
-            return path
-    return None
+    matches = [path for path in sorted(MIGRATIONS.glob("*.py")) if _migration_is_i2(path)]
+    if len(matches) > 1:
+        raise AssertionError(f"I2 sentinel appears in multiple migrations: {matches}")
+    return matches[0] if matches else None
 
 
 READY = {table.name: i2_isolation_ready(table) for table in (quotes_snapshot, minute_bars)}
 I2_MIGRATION = i2_migration_found()
+
+
+def _revision_values(source: str) -> list[str]:
+    tree = ast.parse(source)
+    values: list[str] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(target, ast.Name) and target.id == "revision" for target in targets):
+            continue
+        value = node.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            values.append(value.value)
+    return values
+
+
+def test_migration_directory_and_revisions_are_readable() -> None:
+    assert MIGRATIONS.is_dir(), f"迁移目录不存在或不可读：{MIGRATIONS}"
+    paths = sorted(MIGRATIONS.glob("*.py"))
+    assert paths, f"迁移目录没有 Python 文件：{MIGRATIONS}"
+
+    revisions: list[str] = []
+    for path in paths:
+        source = path.read_text(encoding="utf-8")
+        found = _revision_values(source)
+        assert len(found) == 1, f"{path} 必须包含唯一可读的 revision = \"...\""
+        assert found[0], f"{path} 的 revision 不得为空"
+        revisions.append(found[0])
+    assert len(revisions) == len(set(revisions)), "迁移 revision 必须全局唯一"
 
 
 @pytest.mark.parametrize("table", [quotes_snapshot, minute_bars], ids=lambda table: table.name)
@@ -142,7 +157,7 @@ def test_old_rows_without_licence_are_not_claimed_by_a_licence() -> None:
 
 
 @pytest.mark.xfail(
-    I2_MIGRATION is None, reason="T-B196 未实现：尚无 I2 迁移，无法验证回滚保护", strict=True
+    I2_MIGRATION is None, reason="T-B196 未实现：尚无带 T-B196-I2-ISOLATION sentinel 的迁移，无法验证回滚保护", strict=True
 )
 def test_i2_downgrade_refuses_data_loss() -> None:
     assert I2_MIGRATION is not None
@@ -150,16 +165,27 @@ def test_i2_downgrade_refuses_data_loss() -> None:
     downgrade = next(
         node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
     )
-    raises_runtime_error = any(
-        isinstance(node, ast.Raise)
-        and isinstance(node.exc, ast.Call)
-        and isinstance(node.exc.func, ast.Name)
-        and node.exc.func.id in {"RuntimeError", "ValueError"}
+    function_source = ast.unparse(downgrade).lower()
+    data_checks = ("select", "exists", "count", "row", "rows", "sourced", "nonempty")
+    tables = ("quotes_snapshot", "minute_bars")
+    refusal_words = ("refus", "reject", "拒绝", "丢", "data loss")
+
+    def is_refusal(node: ast.AST) -> bool:
+        if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):
+            return False
+        if not isinstance(node.exc.func, ast.Name) or node.exc.func.id not in {"RuntimeError", "ValueError"}:
+            return False
+        return any(word in ast.unparse(node).lower() for word in refusal_words)
+
+    conditional_refusal = any(
+        isinstance(node, ast.If)
+        and any(is_refusal(child) for child in ast.walk(node))
+        and any(term in ast.unparse(node).lower() for term in data_checks)
+        and any(table in function_source for table in tables)
+        and any(term in function_source for term in ("select", "exists", "count"))
         for node in ast.walk(downgrade)
     )
-    assert raises_runtime_error
-    source = I2_MIGRATION.read_text(encoding="utf-8").lower()
-    assert any(word in source for word in ("refus", "reject", "丢", "data loss"))
+    assert conditional_refusal, "downgrade 必须在检查隔离表已有数据后条件性拒绝降级"
 
 
 def _server_default_text(column: Any) -> str:
