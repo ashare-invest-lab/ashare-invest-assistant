@@ -1,6 +1,6 @@
 """T-T107 I3：盘中 P0 计划器的离线契约测试。
 
-计划器尚未进入主线时，相关用例以 strict xfail 记录 T-B197 的待实现状态。
+#323 已合入主线；计划器模块缺失或公开 API 不符时应直接失败，不再 xfail。
 夹具只包含合成代码，测试不建立数据库、Redis、Docker 或网络连接。
 """
 
@@ -10,7 +10,6 @@ import ast
 import asyncio
 import datetime as dt
 import importlib
-import importlib.util
 import sched
 import socket
 import threading
@@ -51,8 +50,6 @@ def deny_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _load_planner() -> tuple[ModuleType, type[Any]]:
-    if importlib.util.find_spec(PLANNER_MODULE) is None:
-        pytest.xfail("T-B197 未实现：盘中 P0 计划器模块未提供")
     module = importlib.import_module(PLANNER_MODULE)
     planner_cls = getattr(module, "P0Planner", None)
     if not isinstance(planner_cls, type):
@@ -235,9 +232,6 @@ def test_scheduler_constructor_does_not_start_timer(monkeypatch: pytest.MonkeyPa
 
 
 def test_intraday_defaults_closed_and_plan_has_zero_socket_calls() -> None:
-    spec = importlib.util.find_spec(PLANNER_MODULE)
-    if spec is None:
-        pytest.xfail("T-B197 未实现：盘中 P0 计划器模块未提供")
     module, _ = _load_planner()
     assert module.INTRADAY_ENABLED is False
     values = _synthetic_inputs()
