@@ -265,6 +265,19 @@ def test_repeated_delete_reuses_removed_at_without_recheck_or_event(
     )
 
 
+def test_repeated_delete_reports_no_source_gap_when_name_unavailable() -> None:
+    removed_at = NOW - dt.timedelta(minutes=5)
+    row = restriction_row(removed_at=removed_at)
+    engine = Engine(Conn([row], [None]))
+
+    result = restrictions.delete_restriction(row.id, auth(), engine)  # type: ignore[arg-type]
+
+    assert result.removed_at == removed_at
+    assert result.recheck.released_reason_ids == []
+    assert result.recheck.remaining_reason_ids == []
+    assert result.gaps and result.gaps[0]["reason"] == "no_source"
+
+
 def test_get_has_gaps_and_excludes_removed_in_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
