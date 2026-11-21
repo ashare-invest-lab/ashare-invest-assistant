@@ -16,6 +16,7 @@ from app.common.pagination import PageParams
 from app.schemas.enums import RestrictionKind
 from app.signals import service
 from sqlalchemy.sql.dml import Delete, Insert, Update
+from sqlalchemy.sql.selectable import Select
 
 USER_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 NOW = dt.datetime(2026, 11, 21, 12, tzinfo=dt.UTC)
@@ -56,6 +57,10 @@ class Result:
         assert len(self.rows) == 1
         return self.rows[0]
 
+    def one_or_none(self) -> Any | None:
+        assert len(self.rows) <= 1
+        return self.rows[0] if self.rows else None
+
 
 class Connection:
     def __init__(self, rows: list[Any]) -> None:
@@ -83,6 +88,78 @@ class Engine:
     @contextmanager
     def begin(self):
         yield self.connection
+
+
+class RecheckConnection(Connection):
+    def __init__(
+        self,
+        restriction: Any,
+        candidates: list[Any],
+        remaining_restrictions: list[Any],
+        signal: Any,
+    ) -> None:
+        super().__init__([restriction])
+        reason_rows = [
+            SimpleNamespace(id=item.reason_id, signal_id=item.signal_id)
+            for item in candidates
+        ]
+        signal_rows = [
+            SimpleNamespace(
+                id=item.signal_row_id,
+                instance_id=item.instance_id,
+                security_code=item.security_code,
+                strategy_version_id=item.strategy_version_id,
+            )
+            for item in candidates
+            if item.signal_row_id is not None
+        ]
+        self.select_results = [
+            [restriction],
+            reason_rows,
+            signal_rows,
+            remaining_restrictions,
+            [signal],
+            [],
+        ]
+        self.reason_updates: list[dict[str, Any]] = []
+        self.reason_events: list[dict[str, Any]] = []
+
+    def execute(self, statement: Any, *_args: Any, **_kwargs: Any) -> Result:
+        self.statements.append(statement)
+        if isinstance(statement, Update):
+            params = statement.compile().params
+            if "removed_at" in params:
+                self.rows[0].removed_at = params["removed_at"]
+            elif params.get("status") == "released":
+                self.reason_updates.append(params)
+            elif params.get("state") == "released":
+                self.signal_state = "released"
+            return Result([])
+        if isinstance(statement, Insert):
+            params = statement.compile().params
+            if params.get("to_status") == "released":
+                self.reason_events.append(params)
+            return Result([])
+        if isinstance(statement, Select):
+            return Result(self.select_results.pop(0))
+        return Result([])
+
+
+class Redis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def set(self, key: str, value: str, *, nx: bool = False, ex: int) -> bool:
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    def delete(self, key: str) -> None:
+        self.values.pop(key, None)
 
 
 def auth(user_id: uuid.UUID = USER_ID) -> SimpleNamespace:
@@ -128,13 +205,46 @@ def test_post_creates_only_the_authenticated_owner_record() -> None:
         reason="synthetic",
     )
 
-    result = restrictions.create_restriction(body, auth(), engine)
+    result = restrictions.create_restriction(body, auth(), engine, None)
 
     assert result.id == created.id
     assert result.kind == RestrictionKind.BLOCKLIST
     insert_statement = engine.connection.statements[0]
     assert isinstance(insert_statement, Insert)
     assert insert_statement.compile().params["user_id"] == USER_ID
+
+
+def test_post_idempotency_replays_conflicts_and_isolates_users() -> None:
+    body = restrictions.RestrictionCreate(
+        kind=RestrictionKind.BLOCKLIST,
+        target_type="security",
+        target_id="600000.SH",
+        until=None,
+        reason="synthetic",
+    )
+    rds = Redis()
+    first_engine = Engine([row(kind="blocklist")])
+    first = restrictions.create_restriction(body, auth(), first_engine, rds, "same-key")
+    replay = restrictions.create_restriction(
+        body, auth(), first_engine, rds, "same-key"
+    )
+    assert replay == first
+    assert (
+        sum(isinstance(item, Insert) for item in first_engine.connection.statements)
+        == 1
+    )
+
+    changed = body.model_copy(update={"reason": "different"})
+    with pytest.raises(AppError) as conflict:
+        restrictions.create_restriction(changed, auth(), first_engine, rds, "same-key")
+    assert conflict.value.code == ErrorCode.IDEMPOTENCY_CONFLICT
+
+    other_user = uuid.UUID("00000000-0000-4000-8000-000000000002")
+    other_engine = Engine([row(owner=other_user, kind="blocklist")])
+    other = restrictions.create_restriction(
+        body, auth(other_user), other_engine, rds, "same-key"
+    )
+    assert other.id != first.id
 
 
 def test_delete_soft_deletes_and_repeat_or_foreign_is_not_found() -> None:
@@ -156,6 +266,73 @@ def test_delete_soft_deletes_and_repeat_or_foreign_is_not_found() -> None:
     with pytest.raises(AppError) as foreign:
         restrictions.delete_restriction(identifier, auth(), foreign_engine)
     assert foreign.value.code == ErrorCode.NOT_FOUND
+
+
+def test_delete_rechecks_only_associated_reason_and_releases_signal() -> None:
+    restriction = row(kind="blocklist")
+    reason_id = uuid.uuid4()
+    unrelated_id = uuid.uuid4()
+    signal = SimpleNamespace(
+        id=uuid.uuid4(), user_id=USER_ID, state="blocked", created_at=NOW
+    )
+    candidates = [
+        SimpleNamespace(
+            reason_id=reason_id,
+            signal_id=signal.id,
+            signal_row_id=signal.id,
+            instance_id=uuid.uuid4(),
+            security_code=restriction.target_id,
+            strategy_version_id=None,
+        ),
+        SimpleNamespace(
+            reason_id=unrelated_id,
+            signal_id=unrelated_id,
+            signal_row_id=unrelated_id,
+            instance_id=uuid.uuid4(),
+            security_code="000001.SZ",
+            strategy_version_id=None,
+        ),
+    ]
+    connection = RecheckConnection(restriction, candidates, [], signal)
+    engine = Engine([])
+    engine.connection = connection
+
+    result = restrictions.delete_restriction(restriction.id, auth(), engine)
+
+    assert result.recheck.released_reason_ids == [reason_id]
+    assert result.recheck.remaining_reason_ids == []
+    assert result.gaps == []
+    assert connection.reason_updates[0]["released_by"] == "system"
+    assert connection.reason_events[0]["to_status"] == "released"
+    assert connection.signal_state == "released"
+
+
+def test_delete_keeps_reason_when_another_valid_restriction_remains() -> None:
+    restriction = row(kind="blocklist")
+    other = row(kind="blocklist")
+    other.target_id = restriction.target_id
+    reason_id = uuid.uuid4()
+    signal = SimpleNamespace(
+        id=uuid.uuid4(), user_id=USER_ID, state="blocked", created_at=NOW
+    )
+    candidate = SimpleNamespace(
+        reason_id=reason_id,
+        signal_id=signal.id,
+        signal_row_id=signal.id,
+        instance_id=uuid.uuid4(),
+        security_code=restriction.target_id,
+        strategy_version_id=None,
+    )
+    connection = RecheckConnection(restriction, [candidate], [other], signal)
+    engine = Engine([])
+    engine.connection = connection
+
+    result = restrictions.delete_restriction(restriction.id, auth(), engine)
+
+    assert result.recheck.released_reason_ids == []
+    assert result.recheck.remaining_reason_ids == [reason_id]
+    assert connection.reason_updates == []
+    assert not hasattr(connection, "signal_state")
 
 
 def test_write_candidate_restriction_read_filters_removed_and_matches_type() -> None:

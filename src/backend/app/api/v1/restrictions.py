@@ -12,11 +12,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import and_, insert, or_, select, update
 
-from app.auth.deps import AuthDep, EngineDep, SettingsDep
+from app.auth.deps import AuthDep, EngineDep, RedisDep, SettingsDep
+from app.common import idempotency
 from app.common.errors import AppError, ErrorCode
 from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
 from app.db.tables.signals import user_restrictions
 from app.schemas.enums import RestrictionKind
+from app.signals import service as signal_service
 
 router = APIRouter(tags=["restrictions"])
 
@@ -156,27 +158,42 @@ def create_restriction(
     body: RestrictionCreate,
     auth: AuthDep,
     engine: EngineDep,
+    rds: RedisDep,
+    idempotency_key: idempotency.KeyHeader = None,
 ) -> Restriction:
-    identifier = uuid.uuid4()
-    with engine.begin() as conn:
-        conn.execute(
-            insert(user_restrictions).values(
-                id=identifier,
-                user_id=auth.user_id,
-                kind=body.kind.value,
-                target_type=body.target_type,
-                target_id=body.target_id,
-                until=body.until,
-                reason=body.reason,
+    def perform() -> tuple[int, Any]:
+        identifier = uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(
+                insert(user_restrictions).values(
+                    id=identifier,
+                    user_id=auth.user_id,
+                    kind=body.kind.value,
+                    target_type=body.target_type,
+                    target_id=body.target_id,
+                    until=body.until,
+                    reason=body.reason,
+                )
             )
-        )
-        row = conn.execute(
-            select(user_restrictions).where(
-                user_restrictions.c.id == identifier,
-                user_restrictions.c.user_id == auth.user_id,
-            )
-        ).one()
-    return Restriction.model_validate(_row_out(row))
+            row = conn.execute(
+                select(user_restrictions).where(
+                    user_restrictions.c.id == identifier,
+                    user_restrictions.c.user_id == auth.user_id,
+                )
+            ).one()
+        return 201, Restriction.model_validate(_row_out(row)).model_dump(mode="json")
+
+    if idempotency_key is None:
+        return Restriction.model_validate(perform()[1])
+    _, result = idempotency.run(
+        rds,
+        user_id=auth.user_id,
+        scope="restrictions:create",
+        key=idempotency_key,
+        payload=body.model_dump(mode="json"),
+        fn=perform,
+    )
+    return Restriction.model_validate(result)
 
 
 @router.delete("/restrictions/{restriction_id}", response_model=RestrictionDelete)
@@ -206,9 +223,18 @@ def delete_restriction(
             )
             .values(removed_at=removed_at)
         )
+        released, remaining, gaps = signal_service.recheck_restriction(
+            conn,
+            user_id=auth.user_id,
+            restriction=row,
+            at=removed_at,
+        )
     return RestrictionDelete(
         id=restriction_id,
         removed_at=removed_at,
-        recheck=RestrictionRecheck(released_reason_ids=[], remaining_reason_ids=[]),
-        gaps=[],
+        recheck=RestrictionRecheck(
+            released_reason_ids=released,
+            remaining_reason_ids=remaining,
+        ),
+        gaps=gaps,
     )
