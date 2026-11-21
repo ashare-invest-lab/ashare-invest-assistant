@@ -27,8 +27,20 @@ def seed_calendar(conn: Connection, seed: CalendarReference) -> int:
     )
     opens = set(seed.open_days)
     dates = [start + dt.timedelta(days=index) for index in range((end - start).days + 1)]
+    existing = conn.execute(
+        select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+            trading_calendar.c.date.between(start, end)
+        )
+    ).all()
+    expected = {day: day.isoformat() in opens for day in dates}
+    conflicts = sorted(
+        (row.date for row in existing if row.is_open != expected.get(row.date)),
+        key=lambda day: day,
+    )
+    if conflicts:
+        raise ValueError(f"calendar_conflict:{conflicts[0].isoformat()}")
     stmt = insert(trading_calendar).values(
-        [{"date": day, "is_open": day.isoformat() in opens} for day in dates]
+        [{"date": day, "is_open": expected[day]} for day in dates]
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=[trading_calendar.c.date],
