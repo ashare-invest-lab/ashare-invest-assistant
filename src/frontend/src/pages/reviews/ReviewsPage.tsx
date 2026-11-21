@@ -42,7 +42,7 @@ export function ReviewsPage() {
   return (
     <div className="page-scroll page" data-testid="reviews-page">
       <div className="detail-head"><h2 className="page-title" style={{ margin: 0 }}>复盘</h2><Button onClick={() => setCreating((v) => !v)} data-testid="new-review">新建复盘</Button></div>
-      <div className="muted small" style={{ marginBottom: 10 }}>记录计划与证券的复盘笔记。结果指标由可追溯数据计算，当前示例中未提供指标值。</div>
+      <div className="muted small" style={{ marginBottom: 10 }}>记录计划与证券的复盘笔记。指标缺口和数据截至时间以接口返回为准，缺失时显示“未知”。</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <Input.Search aria-label="证券代码筛选" placeholder="证券代码" value={filter.security_code} onChange={(e) => setFilter('security_code', e.target.value)} onSearch={(v) => setFilter('security_code', v)} style={{ width: 190 }} data-testid="review-filter-security" />
         <Input.Search aria-label="计划筛选" placeholder="计划 ID" value={filter.plan_id} onChange={(e) => setFilter('plan_id', e.target.value)} onSearch={(v) => setFilter('plan_id', v)} style={{ width: 240 }} data-testid="review-filter-plan" />
@@ -70,11 +70,12 @@ export function ReviewsPage() {
           { title: '复盘区间', key: 'period', render: (_: unknown, r) => <span className="mono">{r.period_start} ～ {r.period_end}</span> },
           { title: '当前版本', dataIndex: 'current_version_no', width: 95, render: (v: number) => `第 ${v} 版` },
           { title: '数据状态', key: 'status', width: 120, render: (_: unknown, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} /> },
+          { title: '数据截至', key: 'data_as_of', width: 150, render: (_: unknown, r) => <span className="mono small">{r.data_as_of ? fmtTime(r.data_as_of) : '未知'}</span> },
           { title: '创建时间', dataIndex: 'created_at', width: 150, render: (v: string) => <span className="mono small">{fmtTime(v)}</span> },
         ]}
       />
       {list.hasNextPage ? <Button onClick={() => void list.fetchNextPage()} loading={list.isFetchingNextPage} style={{ marginTop: 8 }}>加载更多</Button> : null}
-      <div className="muted small" style={{ marginTop: 8 }}>时间均为北京时间。示例数据。</div>
+      <div className="muted small" style={{ marginTop: 8 }}>时间显示为北京时间，数据截至时间缺失时显示“未知”。</div>
     </div>
   );
 }
