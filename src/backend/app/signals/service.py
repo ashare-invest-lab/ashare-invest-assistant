@@ -255,11 +255,13 @@ def recheck_restriction(
     )
     strategies_by_version = {row.id: row.strategy_id for row in strategy_rows}
     remaining_restrictions = conn.execute(
-        select(user_restrictions).where(
+        select(user_restrictions)
+        .where(
             user_restrictions.c.user_id == user_id,
             user_restrictions.c.removed_at.is_(None),
             user_restrictions.c.id != restriction.id,
         )
+        .with_for_update()
     ).all()
 
     def matches_target(candidate: Any, r: Any = restriction) -> bool:
@@ -290,6 +292,7 @@ def recheck_restriction(
         reason_id = reason.id
         candidate = signals_by_id.get(reason.signal_id)
         if candidate is None:
+            remaining.append(reason_id)
             gaps.append(
                 {
                     "key": f"reason:{reason_id}",
@@ -582,7 +585,11 @@ def write_candidate(
         for restriction in locked.execute(
             select(user_restrictions).where(
                 user_restrictions.c.user_id == user_id,
-                user_restrictions.c.removed_at.is_(None),
+                user_restrictions.c.created_at <= content.created_at,
+                or_(
+                    user_restrictions.c.removed_at.is_(None),
+                    user_restrictions.c.removed_at > content.created_at,
+                ),
                 or_(
                     and_(
                         user_restrictions.c.target_type == "security",

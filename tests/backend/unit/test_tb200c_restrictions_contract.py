@@ -63,6 +63,8 @@ class Conn:
         if isinstance(statement, Insert):
             return Result([])
         text = str(statement)
+        if "pg_advisory_xact_lock" in text:
+            return Result([])
         if "user_restrictions" in text:
             return Result(self.rows)
         if self.names:

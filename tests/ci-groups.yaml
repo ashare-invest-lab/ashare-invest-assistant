@@ -155,6 +155,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb163r_trade_date_and_decimal.py", "group": "parallel", "keywords": ["pure _trade_date and confirm precision", "synthetic fixtures", "no database connection"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb195_intraday_field_fixtures.py", "group": "parallel", "keywords": ["read-only synthetic JSON and Pydantic models", "no network, PG, Redis or Docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb200_restrictions.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb202_restrictions_pit.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb200c_restrictions_contract.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
