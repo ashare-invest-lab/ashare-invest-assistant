@@ -88,6 +88,9 @@
 
 ### 2.2 表结构（推荐：沿用 Timescale hypertable，不另做按月分区）
 
+盘中四表的归属列、双证书唯一键、旧无归属行、as-of 读取和迁移回滚以 `docs/contracts/intraday-ownership.md §1–§7` 为准。
+本节的既有 `(code, ts)` 仅记录当前基线，I2 实现须先通过该归属契约和离线验收。
+
 - 1 分钟：沿用基线已有的 `market.minute_bars`。它是 hypertable，按 ts 每 1 天一个 chunk，主键 (code, ts)。新迁移 0034（排在 `daily-bars-tdx.md` 的 0033 之后）：
   - source 的 CHECK 加入 mairui 与 tdx_local；
   - 加可空列 source_licence_id，口径同日线 0032；tdx_local 行为空；
