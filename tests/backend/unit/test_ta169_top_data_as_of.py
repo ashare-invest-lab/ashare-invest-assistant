@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import socket
 import uuid
 from contextlib import nullcontext
@@ -16,7 +17,10 @@ from unittest.mock import MagicMock
 import pytest
 from app.aggregates import models as m
 from app.aggregates import products, service
-from app.aggregates.market_projection import project_daily_report_market, project_market_overview
+from app.aggregates.market_projection import (
+    project_daily_report_market,
+    project_market_overview,
+)
 from app.api.v1 import aggregates as routes
 from app.api.v1 import daily_reports as report_routes
 from app.auth import deps
@@ -403,3 +407,117 @@ def test_daily_report_market_projects_archive_without_rewriting_it(
 def test_market_basis_rejects_inconsistent_counts(counts: dict[str, int], error: str) -> None:
     with pytest.raises(ValidationError, match=error):
         m.MarketBasis(**counts)
+
+
+MARKET_COUNT_FIELDS = ("eligible", "observed", "trading", "suspended", "missing")
+UNKNOWN_BASIS = {**dict.fromkeys(KNOWN_BASIS), "scope": KNOWN_BASIS["scope"]}
+
+
+@pytest.mark.parametrize(
+    ("value", "error_type"),
+    [
+        pytest.param(-1, "greater_than_equal", id="negative"),
+        pytest.param(0.5, "int_type", id="fraction"),
+        pytest.param(2.0, "int_type", id="integer-valued-float"),
+        pytest.param("2", "int_type", id="numeric-string"),
+        pytest.param(True, "int_type", id="boolean"),
+    ],
+)
+@pytest.mark.parametrize("field", MARKET_COUNT_FIELDS)
+def test_market_basis_json_requires_nonnegative_integers(
+    field: str, value: object, error_type: str
+) -> None:
+    payload = {**KNOWN_BASIS, field: value}
+    with pytest.raises(ValidationError) as caught:
+        m.MarketBasis.model_validate_json(json.dumps(payload))
+    assert [(error["loc"], error["type"]) for error in caught.value.errors()] == [
+        ((field,), error_type)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("snapshot_id", "not-a-uuid", id="uuid"),
+        pytest.param("observed_date", "2031-02-30", id="date"),
+        pytest.param("mode", "unsupported", id="mode"),
+        pytest.param("scope", None, id="null-scope"),
+        pytest.param("scope", "其他市场", id="foreign-scope"),
+        pytest.param("source", 123, id="numeric-source"),
+    ],
+)
+def test_market_basis_json_rejects_invalid_scalars(field: str, value: object) -> None:
+    with pytest.raises(ValidationError) as caught:
+        m.MarketBasis.model_validate_json(json.dumps({**KNOWN_BASIS, field: value}))
+    assert [error["loc"] for error in caught.value.errors()] == [(field,)]
+
+
+@pytest.mark.parametrize("mode", ["intraday", "close"])
+def test_market_basis_json_round_trips_source_label(mode: str) -> None:
+    payload = {**KNOWN_BASIS, "mode": mode}
+    basis = m.MarketBasis.model_validate_json(json.dumps(payload))
+    assert basis.snapshot_id == uuid.UUID(str(KNOWN_BASIS["snapshot_id"]))
+    assert basis.observed_date == NOW.date()
+    assert json.loads(basis.model_dump_json()) == payload
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        pytest.param(dict.fromkeys(MARKET_COUNT_FIELDS), id="unknown"),
+        pytest.param(dict.fromkeys(MARKET_COUNT_FIELDS, 0), id="confirmed-zero"),
+        pytest.param(
+            {**dict.fromkeys(MARKET_COUNT_FIELDS), "eligible": 2}, id="eligible-only"
+        ),
+    ],
+)
+def test_market_basis_json_distinguishes_zero_from_unknown(
+    counts: dict[str, int | None],
+) -> None:
+    payload = {**UNKNOWN_BASIS, **counts}
+    basis = m.MarketBasis.model_validate_json(json.dumps(payload))
+    output = json.loads(basis.model_dump_json())
+    assert output == payload
+    for name, count in counts.items():
+        if count is not None:
+            assert type(output[name]) is int
+
+
+@pytest.mark.parametrize(
+    ("user_id", "licence_id"),
+    [
+        pytest.param(None, None, id="unknown-identity"),
+        pytest.param(str(OWNER), None, id="owner-only"),
+        pytest.param(str(OWNER), str(uuid.UUID(int=188)), id="owner-and-licence"),
+    ],
+)
+@pytest.mark.parametrize("timed", [False, True], ids=["unknown-times", "with-times"])
+def test_market_snapshot_record_json_round_trips_internal_metadata(
+    user_id: str | None, licence_id: str | None, timed: bool
+) -> None:
+    payload = {
+        "snapshot_id": KNOWN_BASIS["snapshot_id"],
+        "purpose": "report",
+        "user_id": user_id,
+        "licence_id": licence_id,
+        "batch_id": str(uuid.UUID(int=189)) if timed else None,
+        "source_as_of": EARLY if timed else None,
+        "fetched_at": "2026-11-13T09:31:00+08:00" if timed else None,
+        "basis": KNOWN_BASIS if timed else UNKNOWN_BASIS,
+        "eligibility_evidence": [{"counts": [0, 2]}] if timed else [],
+        "f25_evidence": [{"threshold": None}] if timed else [],
+    }
+    record = m.MarketSnapshotRecord.model_validate_json(json.dumps(payload))
+    output = record.model_dump_json()
+    assert json.loads(output) == payload
+    assert m.MarketSnapshotRecord.model_validate_json(output) == record
+
+
+@pytest.mark.parametrize("field", ["source_as_of", "fetched_at"])
+def test_market_snapshot_record_json_requires_aware_timestamps(field: str) -> None:
+    payload = {"snapshot_id": KNOWN_BASIS["snapshot_id"], field: "2026-11-13T09:30:00"}
+    with pytest.raises(ValidationError) as caught:
+        m.MarketSnapshotRecord.model_validate_json(json.dumps(payload))
+    assert [(error["loc"], error["type"]) for error in caught.value.errors()] == [
+        ((field,), "timezone_aware")
+    ]
