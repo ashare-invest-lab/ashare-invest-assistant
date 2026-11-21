@@ -587,3 +587,65 @@ export interface TodayResponse {
   data_gaps: MoreList<TodayDataGap>;
   evidence: Evidence[];
 }
+
+// T-F69：复盘页面使用的 /reviews 及 T-A209 草案版本结构。后端 V1 尚未挂载这些路由。
+/** T-A209 草案字段；正式契约 §7.8 仅有 GET/POST /reviews 骨架，以下类型均未验证。 */
+export interface ReviewJudgement { condition_text: string; fulfilled: boolean | null; note: string | null }
+export interface ReviewAttribution {
+  judgement: ReviewJudgement[];
+  execution: TextWithEvidence[];
+  market: TextWithEvidence[];
+}
+export interface ReviewOutcomeMetrics {
+  holding_return: Stat;
+  benchmark_return: Stat;
+  excess_return: Stat;
+  max_drawdown: Stat;
+}
+export interface ReviewVersion extends DataStatusBlock {
+  id: Uuid;
+  review_id: Uuid;
+  version_no: number;
+  plan_version_ids: Uuid[];
+  trade_ids: Uuid[];
+  snapshot_id: Uuid | null;
+  lessons: string | null;
+  tags: string[];
+  attribution: ReviewAttribution;
+  outcome_metrics: ReviewOutcomeMetrics;
+  created_at: DateTime;
+}
+export interface ReviewTimelineItem {
+  kind: string;
+  at: DateTime;
+  resource_id: Uuid | null;
+  version_no: number | null;
+  evidence_ids: string[];
+}
+export interface ReviewSummary extends DataStatusBlock {
+  id: Uuid;
+  plan_id: Uuid | null;
+  security_code: string | null;
+  name: string | null;
+  period_start: DateStr;
+  period_end: DateStr;
+  current_version_no: number;
+  created_at: DateTime;
+}
+export interface ReviewDetail extends ReviewSummary {
+  current_version: ReviewVersion | null;
+  timeline: ReviewTimelineItem[];
+  versions?: ReviewVersion[];
+}
+export interface ReviewCreate {
+  plan_id: Uuid | null;
+  security_code: string | null;
+  period_start: DateStr;
+  period_end: DateStr;
+  plan_version_ids: Uuid[];
+  trade_ids: Uuid[];
+  lessons: string | null;
+  tags: string[];
+  judgement: ReviewJudgement[];
+}
+export interface ReviewVersionCreate extends ReviewCreate { base_version_no: number }
