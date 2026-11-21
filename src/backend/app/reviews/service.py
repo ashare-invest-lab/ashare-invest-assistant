@@ -17,7 +17,7 @@ from app.db.tables.accounts import trades
 from app.db.tables.market import securities
 from app.db.tables.research import action_plans, plan_versions
 from app.db.tables.reviews import data_snapshots, review_versions, reviews
-from app.reviews.metrics import empty_metrics, status_block
+from app.reviews.metrics import empty_metrics, period_pending, project_metrics, status_block
 
 # fmt: off
 
@@ -71,7 +71,7 @@ def _validate_links(
         if code is None:
             code = str(rows[0].security_code)
     if trade_ids:
-        rows = conn.execute(select(trades.c.id, trades.c.security_code, trades.c.plan_version_id).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner, trades.c.voided_at.is_(None))).all()
+        rows = conn.execute(select(trades.c.id, trades.c.security_code, trades.c.plan_version_id).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner, trades.c.voided_at.is_(None), trades.c.source != "simulated_tracking")).all()
         if len(rows) != len(set(trade_ids)):
             raise _bad("trade_ids", "not_owned")
         if code is not None and any(r.security_code != code for r in rows):
@@ -230,8 +230,11 @@ def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None)
     items = row._mapping.get("items") if row is not None else None
     return dict(items) if items else status_block()
 
-def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any]) -> dict[str, Any]:
+def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_end: dt.date | None = None) -> dict[str, Any]:
     snap = _snapshot(conn, owner, row.snapshot_id)
+    metrics = project_metrics(row.outcome_metrics or snap.get("outcome_metrics", {}), period_end=period_end)
+    pending = period_pending(period_end)
+    status = status_block(reason="not_yet_published") if pending else snap
     return {
         "id": str(row.id),
         "version_no": row.version_no,
@@ -241,11 +244,11 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any]) -> dict[str,
         "lessons": row.lessons,
         "tags": list(row.tags or []),
         "attribution": row.attribution or snap.get("attribution", {"judgement": [], "execution": [], "market": []}),
-        "outcome_metrics": row.outcome_metrics or snap.get("outcome_metrics", {}),
+        "outcome_metrics": metrics,
         "created_at": row.created_at.isoformat(),
-        "data_status": snap.get("data_status", "unavailable"),
-        "data_as_of": snap.get("data_as_of"),
-        "gaps": snap.get("gaps", []),
+        "data_status": status.get("data_status", "unavailable"),
+        "data_as_of": status.get("data_as_of"),
+        "gaps": status.get("gaps", []),
     }
 
 def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current: Row[Any] | None) -> list[dict[str, Any]]:
@@ -298,10 +301,10 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
         "period_end": review.period_end.isoformat(),
         "current_version_no": current.version_no if current is not None else None,
         "created_at": review.created_at.isoformat(),
-        "current_version": version_body(conn, owner, current) if current is not None else None,
+        "current_version": version_body(conn, owner, current, period_end=review.period_end) if current is not None else None,
         "timeline": _timeline(conn, owner, identifier, current),
         "evidence": [],
-        **{k: snap.get(k) for k in ("data_status", "data_as_of", "gaps")},
+        **({k: (status_block(reason="not_yet_published") if period_pending(review.period_end) else snap).get(k) for k in ("data_status", "data_as_of", "gaps")}),
     }
 
 def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
@@ -316,9 +319,7 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "period_start": row.period_start.isoformat(),
         "period_end": row.period_end.isoformat(),
         "current_version_no": version.version_no if version is not None else None,
-        "current_version": version_body(conn, row.user_id, version) if version is not None else None,
+        "current_version": version_body(conn, row.user_id, version, period_end=row.period_end) if version is not None else None,
         "created_at": row.created_at.isoformat(),
-        "data_status": snap.get("data_status", "unavailable"),
-        "data_as_of": snap.get("data_as_of"),
-        "gaps": snap.get("gaps", []),
+        **({k: (status_block(reason="not_yet_published") if period_pending(row.period_end) else snap).get(k, "unavailable" if k == "data_status" else [] if k == "gaps" else None) for k in ("data_status", "data_as_of", "gaps")}),
     }
