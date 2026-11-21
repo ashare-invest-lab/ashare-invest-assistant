@@ -13,7 +13,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
-  ['restrictions', '禁投 / 冷静期 / 屏蔽'],
   ['reviews', '复盘'],
 ];
 
@@ -64,6 +63,7 @@ export const routes: RouteObject[] = [
       { path: 'alerts/:id', lazy: lazyPage(() => import('../pages/alerts/AlertDetailPage'), (m) => m.AlertDetailPage) },
       { path: 'plan-drafts/:id', lazy: lazyPage(() => import('../pages/plans/PlanDraftDetailPage'), (m) => m.PlanDraftDetailPage) },
       { path: 'notifications', lazy: lazyPage(() => import('../pages/NotificationsPage'), (m) => m.NotificationsPage) },
+      { path: 'restrictions', lazy: lazyPage(() => import('../pages/restrictions/RestrictionsPage'), (m) => m.RestrictionsPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
       { path: 'admin', element: <AdminGate><Navigate to="/admin/users" replace /></AdminGate> },
       {

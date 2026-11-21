@@ -11,6 +11,7 @@ import type {
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
   DataGapScope, SecurityType,
+  RestrictionKind, RestrictionTargetType,
 } from './enums';
 import type { DailyDimensionAnalysis } from './phase2Types';
 
@@ -400,6 +401,25 @@ export interface NonExecutableReason {
   released_at: DateTime | null;
   release_evidence: Record<string, unknown> | null;
   released_by: 'system' | 'user';
+}
+
+/** /restrictions 资源。name/status/removed_at 为 T-A209 草案字段，未验证。 */
+export interface Restriction {
+  /** 表与路径 /restrictions/{id} 需要；正式 §7.5 字段表未列，T-A209 草案（未验证）。 */
+  id: Uuid;
+  kind: RestrictionKind;
+  target_type: RestrictionTargetType;
+  target_id: string;
+  until: DateTime | null;
+  reason: string | null;
+  /** 表字段；正式 §7.5 字段表未列，T-A209 草案（未验证）。 */
+  created_at: DateTime;
+  /** T-A209 草案字段，未验证。目标缺主数据时为 null。 */
+  name?: string | null;
+  /** T-A209 草案字段，未验证。由 until 派生，仅用于展示。 */
+  status?: 'active' | 'expired' | string;
+  /** T-A209 草案字段，未验证。默认列表不返回已删除记录。 */
+  removed_at?: DateTime | null;
 }
 
 // ---------- §7.1 / 7.2 / 7.3 / 7.10 ----------
