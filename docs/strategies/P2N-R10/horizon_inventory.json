@@ -1100,6 +1100,11 @@
       "note": "T-R88b：st_pullback_ma v2 升版前原文冻结；历史身份，不晋级"
     },
     {
+      "path": "docs/strategies/T-R99/f22_disclosure_pair.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R99 F22 更正前后复算记录；非策略身份"
+    },
+    {
       "path": "docs/strategies/T-R102/market_overview_metrics.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R102 市场概览指标口径卡 draft；候选信号研究输入，不是策略身份"
