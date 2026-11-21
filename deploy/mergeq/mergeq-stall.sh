@@ -11,15 +11,32 @@ hb="$RT/mergeq.heartbeat"
 stall_log="$RT/mergeq.log"
 
 is_timeout_rc(){ [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
-run_timed(){
-  local stage="$1"; shift
-  timeout -k 10 "$GH_TIMEOUT" "$@" 2>/dev/null
-  local rc=$?
+log_gh_result(){
+  local stage="$1" rc="$2" errf="$3" errline suffix=""
   if is_timeout_rc "$rc"; then
     printf '%s GH-TIMEOUT %s rc=%s\n' "$(date '+%F %T')" "$stage" "$rc" >>"$stall_log"
+  elif [ "$rc" -ne 0 ]; then
+    errline=$(sed -n '1p' "$errf" 2>/dev/null | tr -d '\r\n' | cut -c1-200)
+    [ -n "$errline" ] && suffix=" $errline"
+    printf '%s GH-FAIL %s rc=%s%s\n' "$(date '+%F %T')" "$stage" "$rc" "$suffix" >>"$stall_log"
   fi
+}
+run_timed(){
+  local stage="$1"; shift
+  local errf rc
+  errf=$(mktemp "${TMPDIR:-/tmp}/mergeq-gh.XXXXXX")
+  timeout -k 10 "$GH_TIMEOUT" "$@" 2>"$errf"
+  rc=$?
+  log_gh_result "$stage" "$rc" "$errf"
+  rm -f "$errf"
   return "$rc"
 }
+
+# T-O119：box inode 使用率 >${MQ_INODE_WARN:-90}% 报警（11-21 曾到 98% 报 No space）
+inode_pct=$(df -Pi "${MQ_INODE_PATH:-/}" 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+if [ -n "$inode_pct" ] && [ "$inode_pct" -gt "${MQ_INODE_WARN:-90}" ] 2>/dev/null; then
+  echo "BOX-INODE-HIGH ${inode_pct}%（阈值 ${MQ_INODE_WARN:-90}%）：报运维清理"
+fi
 
 hb_line=""
 phase="未知"
@@ -31,6 +48,9 @@ if [ -f "$hb" ]; then
   hb_desc=$(printf '%s\n' "$hb_line" | sed -n 's/.*说明=\(.*\)/\1/p')
   hb_since=$(printf '%s\n' "$hb_line" | sed -n 's/.*开始于=\([0-9][0-9]*\).*/\1/p')
   [ -n "$hb_since" ] || hb_since=0
+fi
+if [[ "$hb_desc" == *GH-FAIL* ]]; then
+  echo "MERGEQ-GH-FAIL 队列上一轮：$hb_desc"
 fi
 
 hb_age=999999
@@ -65,6 +85,12 @@ if ! is_timeout_rc "$main_rc"; then
 else
   run_rc=$main_rc
 fi
+if [ "$main_rc" -ne 0 ] && ! is_timeout_rc "$main_rc"; then
+  echo "MERGEQ-GH-FAIL 取 main rc=$main_rc"
+fi
+if [ "$run_rc" -ne 0 ] && ! is_timeout_rc "$run_rc"; then
+  echo "MERGEQ-GH-FAIL 取 run rc=$run_rc"
+fi
 
 if [ "$hb_age" -le 600 ] && [ "$phase" = "等 main CI" ] && [ "$run" = "$main_sha completed success" ] && [ "$hb_since" -gt 0 ] && [ $((now - hb_since)) -gt 600 ]; then
   current_short=${main_sha:0:7}
@@ -76,6 +102,10 @@ fi
 list_json=$(run_timed "列 PR" gh pr list -R "$R" --state open --base main --limit 50 --json number,isDraft,mergeable,comments,statusCheckRollup,files)
 list_rc=$?
 if is_timeout_rc "$list_rc"; then
+  exit 0
+fi
+if [ "$list_rc" -ne 0 ]; then
+  echo "MERGEQ-GH-FAIL 列 PR rc=$list_rc"
   exit 0
 fi
 printf '%s\n' "$list_json" | jq -r --argjson now "$now" --arg mainok "$([ "$run" = "$main_sha completed success" ] && echo 1 || echo 0)" '

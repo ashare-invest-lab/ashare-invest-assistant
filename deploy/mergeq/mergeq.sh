@@ -32,23 +32,38 @@ BAD='(\.env|secret|cred|\.key$|\.pem$|\.p12$|\.csv$|\.xlsx?$|broker_statement|ho
 
 is_timeout_rc(){ [ "$1" -eq 124 ] || [ "$1" -eq 137 ]; }
 
-run_timed(){
-  local stage="$1"; shift
-  timeout -k 10 "$GH_TIMEOUT" "$@" 2>/dev/null
-  local rc=$?
+log_gh_result(){
+  local stage="$1" rc="$2" errf="$3" errline suffix=""
   if is_timeout_rc "$rc"; then
     printf '%s GH-TIMEOUT %s rc=%s\n' "$(date '+%F %T')" "$stage" "$rc" >>"$L"
+  elif [ "$rc" -ne 0 ] && ! { [ "$rc" -eq 1 ] && [[ "$stage" == 合并门禁* ]]; }; then
+    # 门禁 rc=1 是正常拒绝（merge-approved.sh deny），不记 GH-FAIL
+    errline=$(sed -n '1p' "$errf" 2>/dev/null | tr -d '\r\n' | cut -c1-200)
+    [ -n "$errline" ] && suffix=" $errline"
+    printf '%s GH-FAIL %s rc=%s%s\n' "$(date '+%F %T')" "$stage" "$rc" "$suffix" >>"$L"
   fi
+}
+
+run_timed(){
+  local stage="$1"; shift
+  local errf rc
+  errf=$(mktemp "${TMPDIR:-/tmp}/mergeq-gh.XXXXXX")
+  timeout -k 10 "$GH_TIMEOUT" "$@" 2>"$errf"
+  rc=$?
+  log_gh_result "$stage" "$rc" "$errf"
+  rm -f "$errf"
   return "$rc"
 }
 
 run_timed_log(){
   local stage="$1"; shift
-  timeout -k 10 "$GH_TIMEOUT" "$@" 2>>"$L"
-  local rc=$?
-  if is_timeout_rc "$rc"; then
-    printf '%s GH-TIMEOUT %s rc=%s\n' "$(date '+%F %T')" "$stage" "$rc" >>"$L"
-  fi
+  local errf rc
+  errf=$(mktemp "${TMPDIR:-/tmp}/mergeq-gh.XXXXXX")
+  timeout -k 10 "$GH_TIMEOUT" "$@" 2>"$errf"
+  rc=$?
+  cat "$errf" >>"$L"
+  log_gh_result "$stage" "$rc" "$errf"
+  rm -f "$errf"
   return "$rc"
 }
 
@@ -113,12 +128,25 @@ while true; do
     end_round "sleep" "GH-TIMEOUT 取 main"
     continue
   fi
+  if [ "$rc" -ne 0 ]; then
+    end_round "sleep" "GH-FAIL 取 main rc=$rc"
+    continue
+  fi
+  if ! [[ "$main" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    printf '%s GH-FAIL 取 main rc=0 空/无效\n' "$(date '+%F %T')" >>"$L"
+    end_round "sleep" "GH-FAIL 取 main rc=0"
+    continue
+  fi
 
   hb "取 run" "main=${main:0:7}"
   run=$(run_timed "取 run" gh run list -R "$R" --branch main --workflow ci --limit 1 --json headSha,status,conclusion -q '.[0]|.headSha+" "+.status+" "+(.conclusion//"")')
   rc=$?
   if is_timeout_rc "$rc"; then
     end_round "sleep" "GH-TIMEOUT 取 run"
+    continue
+  fi
+  if [ "$rc" -ne 0 ]; then
+    end_round "sleep" "GH-FAIL 取 run rc=$rc"
     continue
   fi
 
@@ -141,19 +169,33 @@ while true; do
     end_round "sleep" "GH-TIMEOUT 列 PR"
     continue
   fi
+  if [ "$rc" -ne 0 ]; then
+    end_round "sleep" "GH-FAIL 列 PR rc=$rc"
+    continue
+  fi
   open=$(printf '%s\n' "$open_raw" | sort -n)
 
   # 优先表（编排者 11-15）：runtime/mergeq.priority 每行一个 PR 号，排在最前；其余按号升序
   pri=$( [ -f "$RT/mergeq.priority" ] && grep -Eo '^[0-9]+' "$RT/mergeq.priority" | while read -r p; do echo "$open" | grep -qx "$p" && echo "$p"; done )
   merged=0
-  round_timeout=0
+  round_abort=0
+  round_abort_kind=""
+  round_abort_stage=""
   skipped=""
   for n in $pri $(echo "$open" | grep -vxF -f <(echo "${pri:-__none__}")); do
     hb "检查 PR #$n" "main=${main:0:7}"
     j=$(run_timed "检查 PR #$n" gh pr view "$n" -R "$R" --json headRefOid,headRefName,baseRefName,isDraft,comments,statusCheckRollup,files,mergeable)
     rc=$?
     if is_timeout_rc "$rc"; then
-      round_timeout=1
+      round_abort=1
+      round_abort_kind="GH-TIMEOUT"
+      round_abort_stage="检查 PR #$n"
+      break
+    fi
+    if [ "$rc" -ne 0 ]; then
+      round_abort=1
+      round_abort_kind="GH-FAIL"
+      round_abort_stage="检查 PR #$n"
       break
     fi
     if [ "$fixonly" = 1 ] && ! { echo "$j" | jq -r .headRefName | grep -qi 'main-fix' || grep -qx "$n" "$MF" 2>/dev/null; }; then continue; fi
@@ -170,35 +212,38 @@ while true; do
     sha=$(run_timed_log "合并门禁 #$n" bash "$(dirname "$0")/merge-approved.sh" "$n")
     rc=$?
     if is_timeout_rc "$rc"; then
-      round_timeout=1
+      round_abort=1
+      round_abort_kind="GH-TIMEOUT"
+      round_abort_stage="合并门禁 #$n"
       break
     fi
-    if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 1 ]; then
       printf '%s #%s 合并门禁拒绝（批准或净增行数），跳过\n' "$(date '+%F %T')" "$n" >>"$L"
       continue
+    fi
+    if [ "$rc" -ne 0 ]; then
+      round_abort=1
+      round_abort_kind="GH-FAIL"
+      round_abort_stage="合并门禁 #$n"
+      break
     fi
     hb "合并前" "PR=#$n head=${sha:0:7}"
     merge_output=$(run_timed_log "合并 #$n" gh pr merge "$n" -R "$R" --merge --match-head-commit "$sha")
     rc=$?
     [ -n "$merge_output" ] && printf '%s\n' "$merge_output" >>"$L"
     if is_timeout_rc "$rc"; then
-      round_timeout=1
+      round_abort=1
+      round_abort_kind="GH-TIMEOUT"
+      round_abort_stage="合并 #$n"
       break
     fi
     if [ "$rc" -eq 0 ]; then
       mc_raw=$(run_timed "合并后查询 #$n" gh pr view "$n" -R "$R" --json mergeCommit -q .mergeCommit.oid)
       rc_view=$?
-      if is_timeout_rc "$rc_view"; then
-        round_timeout=1
-        break
-      fi
-      mc=$(printf '%s' "$mc_raw" | cut -c1-7)
+      mc=""
+      [ "$rc_view" -eq 0 ] && mc=$(printf '%s' "$mc_raw" | cut -c1-7)
+      [ -n "$mc" ] || mc="未知"
       run_timed "合并后评论 #$n" gh pr comment "$n" -R "$R" -b "已合入 $mc（自动合并队列）" >/dev/null
-      rc_comment=$?
-      if is_timeout_rc "$rc_comment"; then
-        round_timeout=1
-        break
-      fi
       printf '%s MERGED #%s -> %s\n' "$(date '+%F %T')" "$n" "$mc" >>"$L"
       merged=1
     else
@@ -207,8 +252,8 @@ while true; do
     break
   done
 
-  if [ "$round_timeout" = 1 ]; then
-    end_round "sleep" "本轮因 GH-TIMEOUT 放弃"
+  if [ "$round_abort" = 1 ]; then
+    end_round "sleep" "本轮因 $round_abort_kind 放弃（$round_abort_stage）"
     continue
   fi
   [ "$merged" = 1 ] || note "本轮无可合（fixonly=$fixonly，检查未过 $(echo "$skipped" | wc -w) 个）"
