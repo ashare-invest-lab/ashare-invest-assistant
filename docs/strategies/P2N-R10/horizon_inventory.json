@@ -1098,6 +1098,16 @@
       "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
       "scope_role": "enumerated_identity_source",
       "note": "T-R88b：st_pullback_ma v2 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/T-R99/f22_disclosure_pair.md",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R99：F22 公开披露配对研究材料；非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R105/param_sources.md",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R105：S-01/H-01 参数出处汇总；非策略身份"
     }
   ],
   "records": [
