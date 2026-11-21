@@ -16,7 +16,7 @@ const metricLabels: Record<keyof ReviewOutcomeMetrics, string> = {
 };
 
 function MetricBlock({ version }: { version: ReviewVersion }) {
-  const metricGap = version.gaps.find((gap) => gap.key === 'outcome_metrics');
+  const metricGap = version.gaps.find((gap) => gap.key.startsWith('outcome_metrics.'));
   return (
     <section className="panel" data-testid="review-metrics">
       <div className="panel-head"><span className="panel-title">结果指标</span></div>
@@ -80,7 +80,7 @@ export function ReviewDetailPage() {
   const conflictVersion = saveError instanceof ApiError && saveError.code === 'VERSION_CONFLICT' && typeof saveError.details?.current_version_no === 'number'
     ? saveError.details.current_version_no : null;
   const save = () => {
-    if (!currentVersion) return;
+    if (!currentVersion || r.current_version_no === null) return;
     saveVersion.mutate(versionBody(r, currentVersion, r.current_version_no));
   };
   return (
@@ -102,7 +102,7 @@ export function ReviewDetailPage() {
       <section className="panel" data-testid="review-versions">
         <div className="panel-head"><span className="panel-title">版本</span><Select aria-label="复盘版本" value={shownNo ?? undefined} placeholder="选择版本" loading={versions.isPending} style={{ width: 140 }} options={allVersions.map((v) => ({ value: v.version_no, label: `第 ${v.version_no} 版` }))} onChange={(v: number) => setSelectedNo(v)} /></div>
         {allVersions.map((v) => <Button key={v.version_no} size="small" type={v.version_no === shownNo ? 'primary' : 'default'} onClick={() => setSelectedNo(v.version_no)} data-testid={`review-version-${v.version_no}`}>第 {v.version_no} 版 · {fmtTime(v.created_at)}</Button>)}
-        <Button size="small" onClick={save} loading={saveVersion.isPending} disabled={!currentVersion} data-testid="review-save-version">保存为新版本</Button>
+        <Button size="small" onClick={save} loading={saveVersion.isPending} disabled={!currentVersion || r.current_version_no === null} data-testid="review-save-version">保存为新版本</Button>
         {conflictVersion !== null ? <div className="small error-box" role="alert" data-testid="review-version-save-error">保存失败：当前已是第 {conflictVersion} 版，请重新加载。</div> : saveError ? <ErrorBox error={saveError} prefix="保存新版本失败" /> : null}
       </section>
       <section className="panel" data-testid="review-timeline"><div className="panel-head"><span className="panel-title">时间线</span></div>{r.timeline.length ? r.timeline.map((item, i) => { const label = labelOf(TIMELINE_LABELS, item.kind); return <div key={`${item.at}-${i}`} className="small"><span className={label ? undefined : 'muted'}>{label ?? '未知'}</span> · {fmtTime(item.at)}{item.version_no ? ` · 第 ${item.version_no} 版` : ''}{item.evidence_ids.length ? <> · <EvidenceChips ids={item.evidence_ids} evidence={evidence} /></> : null}</div>; }) : <span className="muted small">暂无时间线。</span>}</section>

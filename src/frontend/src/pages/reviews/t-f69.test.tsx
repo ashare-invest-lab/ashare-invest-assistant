@@ -33,6 +33,17 @@ describe('T-F69 复盘页面', () => {
     expect(screen.getByTestId('review-evidence')).toHaveTextContent('暂无证据');
   });
 
+  it('缺少当前版本时列表显示横线，详情显示空态且不能保存新版本', async () => {
+    const user = userEvent.setup();
+    const router = renderAt('/reviews');
+    await screen.findByTestId('review-link-review-example-legacy');
+    expect(screen.getByTestId('reviews-table')).toHaveTextContent('—');
+    await user.click(screen.getByTestId('review-link-review-example-legacy'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/reviews/review-example-legacy'));
+    expect(await screen.findByText('暂无版本内容。')).toBeInTheDocument();
+    expect(screen.getByTestId('review-save-version')).toBeDisabled();
+  });
+
   it('按证券和计划筛选并写入 URL', async () => {
     const user = userEvent.setup();
     const router = renderAt('/reviews');

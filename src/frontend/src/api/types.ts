@@ -628,7 +628,7 @@ export interface ReviewSummary extends DataStatusBlock {
   name: string | null;
   period_start: DateStr;
   period_end: DateStr;
-  current_version_no: number;
+  current_version_no: number | null;
   created_at: DateTime;
 }
 export interface ReviewDetail extends ReviewSummary {
