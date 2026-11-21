@@ -332,10 +332,22 @@ def test_market_basis_is_shared_by_public_aggregates(world: World) -> None:
     assert "basis" not in legacy
 
 
-@pytest.mark.parametrize("stamp", [None, EARLY])
-@pytest.mark.parametrize("has_basis", [False, True])
+@pytest.mark.parametrize(
+    ("stamp", "has_basis", "has_summary"),
+    [
+        pytest.param(None, False, False, id="False-None"),
+        pytest.param(EARLY, False, False, id=f"False-{EARLY}"),
+        pytest.param(None, True, False, id="True-None"),
+        pytest.param(EARLY, True, False, id=f"True-{EARLY}"),
+        pytest.param(EARLY, False, True, id="legacy-nonempty-summary"),
+    ],
+)
 def test_daily_report_market_projects_archive_without_rewriting_it(
-    world: World, monkeypatch: pytest.MonkeyPatch, stamp: str | None, has_basis: bool
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    stamp: str | None,
+    has_basis: bool,
+    has_summary: bool,
 ) -> None:
     market = {
         "regime": None,
@@ -347,6 +359,15 @@ def test_daily_report_market_projects_archive_without_rewriting_it(
         market["data_as_of"] = stamp
     if has_basis:
         market.update(basis=KNOWN_BASIS, data_status="stale", data_as_of=stamp, gaps=[])
+    if has_summary:
+        market["summary"] = [
+            {"text": "合成旧日报市场说明", "expr": None, "evidence_ids": []},
+            {
+                "text": "合成旧日报宽度说明",
+                "expr": "up > down",
+                "evidence_ids": ["synthetic-b", "synthetic-a"],
+            },
+        ]
     body = {
         "date": str(NOW.date()),
         "generated_at": NOW.isoformat(),
@@ -377,6 +398,8 @@ def test_daily_report_market_projects_archive_without_rewriting_it(
     response = world.client.get(f"/api/v1/daily-reports/{NOW.date()}")
     assert response.status_code == 200
     projected = response.json()["market"]
+    assert projected["summary"] == before["market"]["summary"]
+    assert body == before
     assert projected == project_daily_report_market(market).model_dump(mode="json")
     assert projected["basis"] == (KNOWN_BASIS if has_basis else None)
     assert projected["data_as_of"] == stamp
@@ -388,7 +411,6 @@ def test_daily_report_market_projects_archive_without_rewriting_it(
         assert [(gap["key"], gap["reason"]) for gap in projected["gaps"]] == [
             ("market.basis", "no_source")
         ]
-    assert body == before
     world.conn.execute.assert_not_called()
 
 
