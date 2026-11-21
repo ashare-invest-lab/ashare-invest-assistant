@@ -382,8 +382,18 @@ def delete_restriction(
             )
             .with_for_update()
         ).first()
-        if row is None or row.removed_at is not None:
+        if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
+        if row.removed_at is not None:
+            item, _ = _project_row(conn, row, auth.user_id, row.removed_at)
+            return RestrictionDelete(
+                **item,
+                recheck=RestrictionRecheck(
+                    released_reason_ids=[],
+                    remaining_reason_ids=[],
+                ),
+                gaps=[],
+            )
         conn.execute(
             update(user_restrictions)
             .where(
