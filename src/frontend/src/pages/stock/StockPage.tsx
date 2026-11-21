@@ -149,10 +149,10 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   const turnoverHint = q?.data_status === 'stale' && q.price != null && q.t && q.volume == null && q.amount == null
     ? '收盘价回退，无成交量/额' : '暂无数据';
   const stats: [string, React.ReactNode, string?][] = [
-    ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{fmtPrice(tb.open)}</span> : '—'],
-    ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{fmtPrice(tb.high)}</span> : '—'],
-    ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{fmtPrice(tb.low)}</span> : '—'],
-    ['昨收', fmtPrice(preClose)],
+    ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{fmtPrice(tb.open, profile.type)}</span> : '—'],
+    ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{fmtPrice(tb.high, profile.type)}</span> : '—'],
+    ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{fmtPrice(tb.low, profile.type)}</span> : '—'],
+    ['昨收', fmtPrice(preClose, profile.type)],
     ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—', q && q.volume == null ? turnoverHint : undefined],
     ['成交额', q ? fmtAmount(q.amount) : '—', q && q.amount == null ? turnoverHint : undefined],
     ['换手率', q?.volume != null && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
@@ -174,7 +174,7 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price)}</span>
+          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, profile.type)}</span>
           {q.data_status === 'stale' && q.t ? <Tag data-testid="quote-stale-tag">{QUOTE_CLOSE_PRICE}·{fmtTime(q.t).slice(5, 10)}</Tag> : null}
           <span className={`mono ${pctClass(q.change_pct)}`}>
             {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
