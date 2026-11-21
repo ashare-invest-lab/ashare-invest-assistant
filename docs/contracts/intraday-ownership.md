@@ -8,8 +8,8 @@
 
 | 表 | `source` | `source_licence_id` | `ts` | `fetched_at` |
 | --- | --- | --- | --- | --- |
-| `market.quotes_snapshot` | 现表没有此列。目标列可空以保留旧行，新写入的 `mairui` 行必须有来源；目标端点映射未验证。 | 目标列 UUID，可空。旧行和无可证明证书的行保持 NULL。本人可读的 `mairui` 行必须非空。 | 非空，快照对应的行情时点，不得以请求时间代替。 | 现为非空，继续非空，记录采集完成的实际时刻。 |
-| `market.realtime_quotes` | 现列可空，保留 `ssjy_more`、`ssjy_all`、`real_all` 这些现有通道标签。标签与供应商字段的精确对应未验证。新写入按下表的来源关系校验。 | UUID，可空以保留旧行。本人可读的许可来源行必须绑定当前本人证书。 | 非空，实时报价的观察时点，不等同于 `fetched_at`。 | 现为非空，继续非空。 |
+| `market.quotes_snapshot` | 现表没有此列。目标列可空以保留旧行，新写入只走下表 `source=mairui`；目标端点映射未验证。 | 目标列 UUID，可空。旧行和无可证明证书的行保持 NULL。本人可读的 `mairui` 行必须非空。 | 非空，快照对应的行情时点，不得以请求时间代替。 | 现为非空，继续非空，记录采集完成的实际时刻。 |
+| `market.realtime_quotes` | 现列可空，保留 `ssjy_more`、`ssjy_all`、`real_all` 这些现有通道标签。I2 冻结只读，新实时写入改走 `quotes_snapshot`。 | UUID，可空以保留旧行；冻结表不产生新的 owner 许可行。 | 非空，实时报价的观察时点，不等同于 `fetched_at`。 | 现为非空，继续非空。 |
 | `market.minute_bars` | 现列可空。新写入只允许 `mairui` 或 `tdx_local`，旧 `pro_latest`、`pro_history` 仅作兼容。`tdx_local` 不绑定本人证书。 | UUID，可空。`mairui` 本人行必须非空，`tdx_local` 和旧无归属行保持 NULL。 | 非空，1m bar 结束时刻，例 `09:31` 表示 `09:30–09:31`。 | 现为非空，继续非空，不能写行情时点。 |
 | `market.minute5_bars` | 现列可空。新写入遵循分钟来源规则，既有 .lc5 历史和日后聚合的来源标签保持可追溯。 | UUID，可空。`mairui` 本人行必须非空，离线 `tdx_local` 行为 NULL。 | 非空，5m bar 结束时刻，例 `09:35` 表示 `09:30–09:35`。 | 现为非空，继续非空。 |
 
@@ -30,6 +30,19 @@
 
 证书只作归属键，不进入公开响应。读请求先按 owner 找当前 active 证书，再用证书 UUID 精确筛行。此口径沿用 `src/backend/app/ingest/intents.py:readable_by`、`src/backend/app/marketdata/daily_snapshot.py:active_licence_id` 和 `docs/contracts/daily-snapshot-from-bars.md §14.1、§14.3`。
 
+I2 中 `realtime_quotes` 冻结只读，新实时写入统一进入 `quotes_snapshot`；因此三种 realtime 兼容标签不得新写，快照新行使用 `mairui`。
+
+### 1.2 表级 source CHECK 约束
+
+下表的现行约束直接核对迁移文件；I2 栏是拟定迁移目标，尚未实现。PostgreSQL 的现行 `source IN (...)` 在 `source` 可空时保留 NULL 旧行。
+
+| 表 | 现行 CHECK（迁移文件） | I2 后 CHECK 取值 | 允许新写的来源 | 仅保留的历史来源 | `source_licence_id` 规则（§1.1） |
+| --- | --- | --- | --- | --- | --- |
+| `market.quotes_snapshot` | 无 `source` 列、无 CHECK（`0001_baseline.py`） | `source IN ('mairui')`，允许 NULL；拟 `ck_quotes_snapshot_source` | `mairui` | `source=NULL` 的既有旧行（迁移前无来源名）；其他历史来源名未验证 | `mairui` 必须为本人 active 证书，NULL 行为 NULL |
+| `market.realtime_quotes` | `ck_realtime_quotes_source: source IN ('ssjy_more', 'ssjy_all', 'real_all')`（`0001_baseline.py`） | 保持同值；冻结只读 | 无；新实时写入 `quotes_snapshot` | `ssjy_more`、`ssjy_all`、`real_all` | 按 §1.1 兼容来源规则为 NULL |
+| `market.minute_bars` | `ck_minute_bars_source: source IN ('pro_latest', 'pro_history', 'mairui', 'tdx_local')`（`0034_tb133_minute_bars_sources.py`） | 保持同值 | `mairui`、`tdx_local` | `pro_latest`、`pro_history` | `mairui` 必须非空；`tdx_local`、`pro_*` 必须为 NULL |
+| `market.minute5_bars` | `ck_minute5_bars_source: source IN ('pro_latest', 'pro_history', 'mairui', 'tdx_local')`（`0034_tb133_minute_bars_sources.py`） | 保持同值 | `mairui`、`tdx_local` | `pro_latest`、`pro_history` | `mairui` 必须非空；`tdx_local`、`pro_*` 必须为 NULL |
+
 ## 2. 唯一键、幂等和迟到修订
 
 ### 2.1 目标键形状
@@ -38,7 +51,7 @@
 
 - 普通表 `quotes_snapshot` 使用 `row_id` 主键。
 - TimescaleDB 超表 `realtime_quotes`、`minute_bars`、`minute5_bars` 使用包含时间列的物理主键 `(ts, row_id)`。这满足 `src/backend/app/db/tables/market.py:module docstring` 和 `src/backend/migrations/versions/0001_baseline.py:upgrade` 对超表唯一键的约束。
-- 许可行建立部分唯一键 `(code, ts, source, source_licence_id, revision)`，谓词为 `source_licence_id IS NOT NULL`。
+- 许可行建立部分唯一键 `(code, ts, source, source_licence_id, revision)`，谓词为 `source_licence_id IS NOT NULL AND source IN ('mairui')`。
 - 离线及既有兼容来源行建立 `(code, ts, source, revision)`，谓词为 `source_licence_id IS NULL AND source IN ('tdx_local','pro_latest','pro_history','ssjy_more','ssjy_all','real_all')`。旧 `source IS NULL` 行另建 `(code, ts)`，谓词为 `source IS NULL AND source_licence_id IS NULL`，避免把旧行与 `tdx_local` 行混入同一 NULL 键。
 - 超表上的上述部分唯一键都必须包含 `ts`。索引、chunk、压缩和保留配置沿 `deploy/db/timescale/sql/10-hypertable.sql:hypertable 参数`、`deploy/db/timescale/policies.conf:hypertable 策略`，本契约不调整现有保留策略。
 
@@ -48,7 +61,7 @@
 
 内容指纹只覆盖不可变行情内容，不覆盖 `fetched_at`、`revision`、`row_id` 或证书。按表取字段：`quotes_snapshot` 为 `price,pct_change,payload`；`realtime_quotes` 为 `price,open,high,low,pre_close,volume,amount,pct_change`；分钟表为 `open,high,low,close,volume,amount,is_final`。缺列按 `null`，字段名按 ASCII 升序；Decimal 以无指数的规范十进制字符串表示，去掉多余前导/尾随零，负零归零；时间统一为带时区 UTC 的 ISO-8601 字符串；JSON 对象键递归排序、数组保序、无空格；布尔值和 null 使用 JSON 标准字面量。将规范化对象以 UTF-8 编码后计算小写十六进制 `SHA-256`，得到 `content_fingerprint`。
 
-同一归属作用域 `K=(table, code, ts, source, source_licence_id)` 下，对 `(K, content_fingerprint)` 建立部分唯一键。新写入的 `content_fingerprint` 必须非空；迁移保留的旧行可为 NULL，不能据此声称旧行已完成指纹化。许可行索引谓词为 `source_licence_id IS NOT NULL`，离线/兼容行索引谓词为 `source_licence_id IS NULL AND source IN ('tdx_local','pro_latest','pro_history','ssjy_more','ssjy_all','real_all')`。同一指纹重放返回既有行，不增加行数或 revision。不同指纹保留旧行并生成新 revision，冲突审计至少记录 `table,K,old_fingerprint,new_fingerprint,observed_at`，不覆盖旧内容。供应商是否提供可直接使用的修订令牌未验证，未验证前不得把供应商字段当作 `revision` 或指纹。
+同一归属作用域 `K=(table, code, ts, source, source_licence_id)` 下，对 `(K, content_fingerprint)` 建立部分唯一键。新写入的 `content_fingerprint` 必须非空；迁移保留的旧行可为 NULL，不能据此声称旧行已完成指纹化。许可行索引谓词为 `source_licence_id IS NOT NULL AND source IN ('mairui')`，离线/兼容行索引谓词为 `source_licence_id IS NULL AND source IN ('tdx_local','pro_latest','pro_history','ssjy_more','ssjy_all','real_all')`。同一指纹重放返回既有行，不增加行数或 revision。不同指纹保留旧行并生成新 revision，冲突审计至少记录 `table,K,old_fingerprint,new_fingerprint,observed_at`，不覆盖旧内容。供应商是否提供可直接使用的修订令牌未验证，未验证前不得把供应商字段当作 `revision` 或指纹。
 
 ### 2.3 revision 分配与并发
 
