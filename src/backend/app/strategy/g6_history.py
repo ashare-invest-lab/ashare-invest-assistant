@@ -1,9 +1,4 @@
-"""Offline, point-in-time G6 history collection and reporting.
-
-The default provider is deliberately empty.  A caller may inject a read-only
-provider for an isolated history source, while the report keeps synthetic
-fixtures separate from real history.
-"""
+"""Offline, point-in-time G6 history collection and reporting."""
 
 from __future__ import annotations
 
@@ -80,6 +75,86 @@ def _instant(value: object) -> dt.datetime | None:
     return None
 
 
+def _as_of_visible(row: Mapping[str, Any], as_of: dt.datetime | None) -> tuple[bool, list[str]]:
+    if as_of is None:
+        return True, []
+    cutoff = _instant(as_of)
+    day = _date(_row_value(row, "trading_day", "date", "day"))
+    if cutoff is None or day is None:
+        return False, ["未验证", "trading_day_unverified"]
+    if day > cutoff.astimezone(dt.timezone(dt.timedelta(hours=8))).date():
+        return False, ["trading_day_after_as_of"]
+    available = _instant(_row_value(row, "available_at", "input_visible_at", "visible_at"))
+    if available is not None:
+        return (available <= cutoff, [] if available <= cutoff else ["available_at_after_as_of"])
+    close = dt.datetime.combine(day, dt.time(15), dt.timezone(dt.timedelta(hours=8)))
+    gaps = ["未验证", "available_at_missing"]
+    return close <= cutoff, gaps
+
+
+def _adjustment(row: Mapping[str, Any]) -> str | None:
+    value = _row_value(row, "adjust", "adjustment", "bar_adjust", "adj_type", "price_adjust")
+    return str(value).lower() if value is not None else None
+
+
+def _list_days_threshold(spec: Mapping[str, Any]) -> int | None:
+    raw: object = spec.get("min_list_days")
+    params = spec.get("params_schema")
+    if raw is None and isinstance(params, Mapping):
+        raw = params.get("min_list_days")
+    if isinstance(raw, Mapping):
+        raw = raw.get("default", raw.get("value"))
+    try:
+        return int(raw) if isinstance(raw, (int, str)) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _qualify(row: Mapping[str, Any], spec: Mapping[str, Any]) -> tuple[bool, list[str]]:
+    gaps: list[str] = []
+    adjustment = _adjustment(row)
+    if adjustment != "qfq":
+        gaps.extend(
+            ["未验证", "adjustment_missing" if adjustment is None else "adjustment_not_qfq"]
+        )
+        return False, gaps
+    if row.get("is_suspended") is True:
+        return False, ["suspended"]
+    threshold = _list_days_threshold(spec)
+    if threshold is None:
+        gaps.extend(["未验证", "list_days_threshold_missing"])
+        return False, gaps
+    raw_list_days = row.get("list_days")
+    try:
+        list_days = int(raw_list_days) if isinstance(raw_list_days, (int, str)) else None
+    except (TypeError, ValueError):
+        return False, ["未验证", "list_days_missing"]
+    if list_days is None:
+        return False, ["未验证", "list_days_missing"]
+    return (True, gaps) if list_days >= threshold else (False, ["new_stock"])
+
+
+def _prepare_rows(
+    rows: Iterable[Mapping[str, Any]], as_of: dt.datetime | None, spec: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    accepted: list[dict[str, Any]] = []
+    gaps: list[str] = []
+    for raw in rows:
+        row = dict(raw)
+        visible, visibility_gaps = _as_of_visible(row, as_of)
+        if not visible:
+            gaps.extend(visibility_gaps)
+            continue
+        valid, validity_gaps = _qualify(row, spec)
+        if not valid:
+            gaps.extend(visibility_gaps + validity_gaps)
+            continue
+        row["_gaps"] = visibility_gaps
+        accepted.append(row)
+        gaps.extend(visibility_gaps)
+    return accepted, gaps
+
+
 def _is_h_card(card_key: str, card_id: str | None = None) -> bool:
     return (
         card_key.upper().startswith("H-")
@@ -152,11 +227,12 @@ def _row_value(row: Mapping[str, Any], *keys: str) -> object:
 def _stat(
     value: Decimal | None, denominator: int, window: str, reason: str | None
 ) -> dict[str, Any]:
+    reported = value if denominator >= 5 else None
     return {
-        "value": float(value) if value is not None else None,
+        "value": str(reported) if reported is not None else None,
         "n": denominator,
         "window": window,
-        "small_sample": denominator < 5,
+        "small_sample": denominator < 30,
         **({"null_reason": reason} if reason else {}),
     }
 
@@ -182,6 +258,7 @@ def _section(
     own_by_day: dict[dt.date, set[str]] = defaultdict(set)
     comparable: list[set[str]] = []
     for row in rows:
+        missing.update(str(item) for item in row.get("_gaps", ()) if item)
         reason = _row_value(row, "missing_reason", "missing", "missing_reasons")
         evaluation = _instant(_row_value(row, "evaluation_at", "evaluated_at", "as_of"))
         visible_at = _instant(_row_value(row, "input_visible_at", "available_at", "visible_at"))
@@ -271,34 +348,41 @@ def _deduplicate(rows: Iterable[Mapping[str, Any]], horizon: str) -> list[dict[s
         period = _text(_row_value(row, "period", "cycle", "horizon")) or horizon
         evaluation = _text(_row_value(row, "evaluation_at", "evaluated_at", "as_of"))
         card = _text(_row_value(row, "card_version", "card_version_id", "version"))
-        key = (card, period, security, day, evaluation)
+        rule_group = _text(_row_value(row, "rule_group", "rule", "rule_id", "group"))
+        key = (card, period, security, day, evaluation, rule_group)
         unique.setdefault(key, row)
     return list(unique.values())
 
 
 def _remove_overlapping_events(rows: list[dict[str, Any]], horizon: str) -> list[dict[str, Any]]:
     accepted: list[dict[str, Any]] = []
-    intervals: dict[str, list[tuple[dt.date, dt.date]]] = defaultdict(list)
+    trading_days = sorted(
+        day for row in rows if (day := _date(_row_value(row, "trading_day", "date", "day")))
+    )
+    day_index = {day: index for index, day in enumerate(trading_days)}
+    starts: dict[tuple[str, str], list[int]] = defaultdict(list)
     try:
         length = int(horizon.removeprefix("h"))
     except ValueError:
         length = 0
+    length = max(length, 0)
     for row in sorted(
         rows,
         key=lambda item: (
-            _text(_row_value(item, "event_id")) or "",
             _text(_row_value(item, "trading_day", "date", "day")) or "",
+            _text(_row_value(item, "security", "code", "symbol")) or "",
+            _text(_row_value(item, "rule_group", "rule", "rule_id", "group")) or "",
         ),
     ):
-        event = _text(_row_value(row, "event_id", "event"))
-        start = _date(_row_value(row, "event_day", "event_date", "trading_day", "date", "day"))
-        if event and start and length:
-            end = start + dt.timedelta(days=length - 1)
-            if any(
-                start <= old_end and old_start <= end for old_start, old_end in intervals[event]
-            ):
+        start = _date(_row_value(row, "trading_day", "date", "day"))
+        security = _text(_row_value(row, "security", "code", "symbol")) or ""
+        rule_group = _text(_row_value(row, "rule_group", "rule", "rule_id", "group")) or ""
+        key = (security, rule_group)
+        index = day_index.get(start) if start is not None else None
+        if index is not None and length:
+            if any(index - old_index < length for old_index in starts[key]):
                 continue
-            intervals[event].append((start, end))
+            starts[key].append(index)
         accepted.append(row)
     return accepted
 
@@ -321,11 +405,16 @@ def build_report(
     actual_provider = provider if provider is not None else EmptyHistoryProvider()
     horizons = _horizons(card_key, spec or {}, card_id)
     all_rows: dict[str, list[dict[str, Any]]] = {}
+    filter_gaps_by_horizon: dict[str, list[str]] = {}
+    filter_gaps: list[str] = []
     for horizon in horizons:
         query = HistoryQuery(
             card_version=card_version, card_key=card_key, horizon=horizon, as_of=as_of
         )
-        rows = _deduplicate(_fetch(actual_provider, query), horizon)
+        prepared, gaps = _prepare_rows(_fetch(actual_provider, query), as_of, spec or {})
+        filter_gaps_by_horizon[horizon] = gaps
+        filter_gaps.extend(gaps)
+        rows = _deduplicate(prepared, horizon)
         all_rows[horizon] = (
             _remove_overlapping_events(rows, horizon) if _is_h_card(card_key, card_id) else rows
         )
@@ -357,6 +446,13 @@ def build_report(
             ),
         }
         real_section = sections[horizon]["real_history"]
+        section_filter_gaps = filter_gaps_by_horizon[horizon]
+        if section_filter_gaps:
+            section_gaps = Counter(section_filter_gaps)
+            real_section["missing_reasons"] = dict(
+                sorted((Counter(real_section["missing_reasons"]) | section_gaps).items())
+            )
+            real_section["warnings"] = sorted(set(real_section["warnings"]) | set(section_gaps))
         real_section["history_status"] = (
             "no_history"
             if len(real_days_for_section) < WINDOW_DAYS
@@ -459,6 +555,11 @@ def build_report(
         report["missing_reasons"] = dict(sorted(reasons.items()))
         report["input_visible_at"] = sorted(
             {value for section in real_sections for value in section["input_visible_at"]}
+        )
+    if filter_gaps:
+        report["warnings"] = sorted(set(report["warnings"]) | set(filter_gaps))
+        report["missing_reasons"] = dict(
+            sorted((Counter(report["missing_reasons"]) | Counter(filter_gaps)).items())
         )
     return report
 
