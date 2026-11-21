@@ -31,6 +31,8 @@ from app.reviews.metrics import (
     status_block,
 )
 
+OUTCOME_METRICS_ENABLED = False  # #349 §7.8.4 口径定稿前关闭
+
 # fmt: off
 
 
@@ -501,6 +503,10 @@ def _compute_outcome_metrics(
         metric_gaps["benchmark_return"] = ["no_source"]
     if not drawdowns:
         metric_gaps["max_drawdown"] = ["no_source"]
+    if not OUTCOME_METRICS_ENABLED:
+        for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
+            metrics[name]["value"] = None
+            metric_gaps[name] = ["no_source"]
     return metrics, evidence, data_as_of, metric_gaps
 
 

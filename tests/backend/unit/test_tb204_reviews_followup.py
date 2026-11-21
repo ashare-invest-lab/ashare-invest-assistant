@@ -154,9 +154,53 @@ def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:
         [r.id for r in rows],
         at,
     )
-    assert metrics["holding_return"]["value"] == "10.0"
-    assert metrics["benchmark_return"]["value"] is None
-    assert metric_gaps["benchmark_return"] == ["no_source"]
+    for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
+        assert metrics[name]["value"] is None
+        assert metrics[name]["n"] == (5 if name == "holding_return" else 0)
+        assert metric_gaps[name] == ["no_source"]
+
+
+def test_c_complete_sources_stay_unpublished_until_outcome_metric_contract_is_final(
+    monkeypatch: Any,
+) -> None:
+    at = dt.datetime(2026, 1, 10, tzinfo=dt.UTC)
+    rows = [
+        item
+        for i in range(5)
+        for item in (
+            _trade(
+                100 + i * 2,
+                side="buy",
+                quantity="10",
+                net_amount="-100",
+                traded_at=dt.datetime(2026, 1, 1 + i, tzinfo=dt.UTC),
+            ),
+            _trade(
+                101 + i * 2,
+                side="sell",
+                quantity="10",
+                net_amount="110",
+                traded_at=dt.datetime(2026, 1, 1 + i, 1, tzinfo=dt.UTC),
+            ),
+        )
+    ]
+    monkeypatch.setattr(
+        service,
+        "_benchmark_and_drawdowns",
+        lambda *_args: ([Decimal(2)], [Decimal(-3)], [Decimal(8)], at),
+    )
+    metrics, _, _, metric_gaps = service._compute_outcome_metrics(
+        TradeConnection(rows),
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [r.id for r in rows],
+        at,
+    )
+    for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
+        assert metrics[name]["value"] is None
+        assert metrics[name]["n"] == (5 if name == "holding_return" else 1)
+        assert metric_gaps[name] == ["no_source"]
 
 
 def test_c_fifo_partial_close_excludes_unclosed_quantity() -> None:
