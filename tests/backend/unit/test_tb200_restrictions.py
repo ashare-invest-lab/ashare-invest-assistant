@@ -65,6 +65,7 @@ class Result:
 class Connection:
     def __init__(self, rows: list[Any]) -> None:
         self.rows = rows
+        self.names = [SimpleNamespace(name="Synthetic target")]
         self.statements: list[Any] = []
 
     def execute(self, statement: Any, *_args: Any, **_kwargs: Any) -> Result:
@@ -74,7 +75,9 @@ class Connection:
             return Result([])
         if isinstance(statement, (Insert, Delete)):
             return Result([])
-        return Result(self.rows)
+        if "user_restrictions" in str(statement):
+            return Result(self.rows)
+        return Result([self.names.pop(0)]) if self.names else Result([])
 
 
 class Engine:
@@ -120,6 +123,7 @@ class RecheckConnection(Connection):
             remaining_restrictions,
             [signal],
             [],
+            [SimpleNamespace(name="Synthetic target")],
         ]
         self.reason_updates: list[dict[str, Any]] = []
         self.reason_events: list[dict[str, Any]] = []
@@ -189,7 +193,7 @@ def test_get_lists_expired_rows_and_uses_cursor_shape() -> None:
     assert [item["id"] for item in result.items] == [expired.id]
     assert result.items[0]["until"] == expired.until
     assert result.next_cursor is None
-    statement = str(engine.connection.statements[-1])
+    statement = str(engine.connection.statements[0])
     assert "removed_at" in statement
     assert "user_id" in statement
 
@@ -209,7 +213,11 @@ def test_post_creates_only_the_authenticated_owner_record() -> None:
 
     assert result.id == created.id
     assert result.kind == RestrictionKind.BLOCKLIST
-    insert_statement = engine.connection.statements[0]
+    insert_statement = next(
+        statement
+        for statement in engine.connection.statements
+        if isinstance(statement, Insert)
+    )
     assert isinstance(insert_statement, Insert)
     assert insert_statement.compile().params["user_id"] == USER_ID
 
