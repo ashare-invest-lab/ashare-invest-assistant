@@ -9,7 +9,7 @@ import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/comm
 import { labelOf } from '../../lib/explanations';
 import { fmtTime } from '../../lib/format';
 
-const TIMELINE_LABELS = { created: '创建复盘', version_created: '创建版本', snapshot: '生成快照' } as const;
+const TIMELINE_LABELS = { created: '创建复盘', version_created: '创建版本', snapshot: '生成快照', review_version: '复盘版本', plan_version: '计划版本', trade: '成交' } as const;
 const metricLabels: Record<keyof ReviewOutcomeMetrics, string> = {
   holding_return: '持有收益', benchmark_return: '基准收益', excess_return: '超额收益', max_drawdown: '最大回撤',
 };
