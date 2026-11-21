@@ -74,13 +74,13 @@ holding_return.value = 100 × (exit_price / entry_price − 1)
 
 ### 2.4 相对基准超额
 
-**基准冲突登记。** 当前有三处不同口径，均待架构师裁定，当前未验证。
+**基准口径（已裁定，见编排者裁定 R332-benchmark，与 #349@2fd6730c 草案一致）。** 三处口径的角色如下，基准有效性仍未验证。
 
 1. 本卡原有通用默认是 `000300.SH`（沪深300）。中证指数资料说明其覆盖 300 只规模大、流动性好的 A 股。[CSI 300 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300factsheeten.pdf)；[CSI 300 编制方法](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300_Index_Methodology_en.pdf)。
 2. `config/strategies/sw_ma_trend_pullback.yaml` 的 `validation_summary.benchmark` 是所属申万一级行业指数，对照是中证全指 `000985.SH`。中证全指的覆盖说明见[官方 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000985factsheet.pdf)和[编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20231208175438-000985_Index_Methodology_cn.pdf)。
 3. `src/backend/app/tracking/models.py` 的 `Result.benchmark_code` 默认写死为 `000300.SH`。
 
-建议优先级（供架构师裁定，未验证）是策略配置的明确基准优先，其次才使用契约层的通用默认，tracking 模型默认只能作为未确认的实现回退。裁定前不自行选择。行业历史成分、指数价格、端点可见性和复权版本任一缺失时，`benchmark_return.value` 与 `excess_return.value` 均为 `null`，顶层 `gaps` 记录相应缺口，不能用另一处基准替代。
+裁定结论：第 1 项 `000300.SH` 是产品计算基准的唯一默认，用于 `simulated_tracking`，标「未验证」；§7.8 复盘四项口径在合入前一律 `value=null` 并记 `no_source`，有默认也不出值。第 2 项属于研究员外部验证信息，不作产品跟踪或复盘基准，不覆盖第 1 项；行业基准须有 PIT 行业归属和指数端点，现无来源，日后启用须先改契约。第 3 项与契约 `TrackingResult.benchmark_code` 非空一致，可保留，但须随证据留存，缺端点时收益和超额为 `null` 并记缺口，不得以 `000985.SH` 或行业指数替代，§7.8 不读取该模拟结果。原「策略配置优先」建议不采纳。行业历史成分、指数价格、端点可见性和复权版本任一缺失时，`benchmark_return.value` 与 `excess_return.value` 均为 `null`，顶层 `gaps` 记录相应缺口，不能用另一处基准替代。
 
 **公式。**
 
