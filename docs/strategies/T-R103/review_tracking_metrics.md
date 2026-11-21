@@ -12,29 +12,29 @@ G7: ☐
 
 本卡只描述候选信号的记录与复盘口径，不构成荐股、买卖指令或收益承诺。模拟跟踪、实际成交和样本外回测必须分开保存，不能用模拟结果代替用户实际收益，也不能用实际成交结果回填历史候选信号。
 
-一条观测的去重键为 `suggestion_id`、`strategy_version_id`、`horizon_days`。`horizon_days` 只取 1、5、20 个交易日，统计窗口以交易所交易日历计数。复盘接口对外字段以 #349 §7.8 定稿为准，四项指标为 `holding_return`、`benchmark_return`、`excess_return`、`max_drawdown`，每项均为 `Stat`。`entry_price`、`exit_price`、`benchmark_code`、`price_basis` 等只属于计算输入或证据，不替代接口字段。字段存在不等于数据链路已验收。
+一条候选信号观测的去重键为 `suggestion_id`、`strategy_version_id`、`horizon_days`。`horizon_days` 只取 1、5、20 个交易日，统计窗口以交易所交易日历计数。复盘接口对照 #349@2fd6730c 草案（未合入），以合入版本为准。该草案 §7.8.4 明确四项 `Stat`（`holding_return`、`benchmark_return`、`excess_return`、`max_drawdown`）只按本人实际可见成交、版本快照和计算时点计算，当前不能以模拟跟踪补值。`entry_price`、`exit_price`、`benchmark_code`、`price_basis` 等只属于计算输入或证据，不替代接口字段。字段存在不等于数据链路已验收。
 
 计算时固定 `generated_at`、`data_as_of`、`available_at`、交易日历版本、行情版本、复权因子版本、基准代码和成本表。只使用在本次计算时点已经可见且业务日期不晚于到期日的数据。迟到、修订或后来复牌的数据不能改写已经冻结的历史观测。缺字段输出 `null` 并记录 `gaps`，不以零、邻日价格或当前时钟补值。
 
-盘后候选信号的模拟入场价取信号发出后下一交易日的第一可成交价，通常为下一交易日开盘价。盘中候选信号取生成时刻之后的下一根可见分钟线开盘价。若该价因停牌、涨停封板或缺乏可成交证据而不可得，观测记为 `untradable` 或 `unavailable`，不伪造成交。该时点规则与公开交易规则中停牌、涨跌幅和交收约束相容，具体可成交性仍需 A 股数据复测。[上交所交易规则（2026年修订）](https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml)；[深交所交易规则（2026年修订）](https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf)。
+盘后候选信号的模拟入场价取信号发出后下一交易日的第一可成交价，通常为下一交易日开盘价。盘中候选信号取生成时刻之后的下一根可见分钟线开盘价。若该价因停牌、涨停封板或缺乏可成交证据而不可得，观测记为 `untradable` 或 `unavailable`，不伪造成交。该规则只适用于独立的 `simulated_tracking`，不能写入 §7.8 四项 `Stat`。具体可成交性仍需 A 股数据复测。[上交所交易规则（2026年修订）](https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml)；[深交所交易规则（2026年修订）](https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf)。
 
 ## 2. 指标口径
 
-### 2.1 命中率与目标、止损结果
+### 2.1 `simulated_tracking` 候选命中与目标、止损结果
 
-**定义。** 默认命中率是方向命中率。分母只包含 `state=complete`、结果值非空且动作属于 `buy`、`add`、`sell`、`reduce`、`hold` 的观测。`wait` 只展示，不进入命中率。不可成交、停牌、涨跌停锁定、`pending`、`unavailable`、`excluded` 和 `forced_hold` 单独计数，不进入分母。
+**定义。** 这是 `simulated_tracking` 内部的方向命中率，分母只包含 `state=complete`、`excess_pct` 非空且动作属于 `buy`、`add`、`sell`、`reduce`、`hold` 的模拟观测。`wait` 只展示，不进入命中率。不可成交、停牌、涨跌停锁定、`pending`、`unavailable`、`excluded` 和 `forced_hold` 单独计数，不进入分母。该统计不写入 §7.8 四项 `Stat`。
 
 **公式。**
 
 ```text
-hit_rate = 命中观测数 / 有效观测数
-buy/add       命中 ⇔ excess_return.value > 0
-sell/reduce   命中 ⇔ excess_return.value < 0
-hold          命中 ⇔ |excess_return.value| ≤ θ_h
+simulated_hit_rate = 命中观测数 / 有效观测数
+buy/add       命中 ⇔ excess_pct > 0
+sell/reduce   命中 ⇔ excess_pct < 0
+hold          命中 ⇔ |excess_pct| ≤ θ_h
 θ_1=1.0%，θ_5=2.0%，θ_20=5.0%
 ```
 
-`direction_correct` 直接保存上述布尔值。阈值是产品初值，属于未验证（待回测），不能据此宣称策略有效。命中率与盈亏大小分开报告，胜率高不代表收益为正。命中率和平均胜负幅度作为两个互补维度的公开讨论见 [CFA Digest 关于 hit ratio 与 win/loss magnitude](https://rpc.cfainstitute.org/research/cfa-digest/2018/07/dig-v48-n7-8)。
+`direction_correct` 直接保存上述模拟布尔值。阈值是产品初值，属于未验证（待回测），不能据此宣称策略有效。命中率与盈亏大小分开报告，胜率高不代表收益为正。命中率和平均胜负幅度作为两个互补维度的公开讨论见 [CFA Digest 关于 hit ratio 与 win/loss magnitude](https://rpc.cfainstitute.org/research/cfa-digest/2018/07/dig-v48-n7-8)。
 
 若候选信号在卡片中预先登记了止损和止盈，另记首次可证明触发的 `target_hit`、`stop_hit` 或 `neither` 结果。需要 `stops.stop_loss`、`stops.take_profit`、逐时点可见的高低价、成交状态和 `invalidation_triggered_at`。同一根 K 线同时触及目标和止损且无法证明先后时，按止损优先的最坏规则，或标记顺序未知并剔除该细分统计。不能用收盘价越过阈值倒推盘中触发。目标、止损优先级和 A 股有效性未验证（待回测）。
 
@@ -44,9 +44,9 @@ hold          命中 ⇔ |excess_return.value| ≤ θ_h
 
 **边界。** 目标或止损命中后，退出价取实际可成交价，不取阈值价。涨停买不进、跌停卖不出和停牌不补成交。无法卖出的仓位保留为未平仓或不可用观测，不能用事后复牌价补成交。上述规则的工程细节未验证（待回测）。
 
-### 2.2 持有期收益
+### 2.2 实际成交复盘的持有期收益
 
-**定义。** 持有期收益按实际模拟入场与到期退出的同一复权口径计算，接口字段为 `holding_return.value`，单位为百分数。价格比值收益与绩效评价中的区间收益定义一致，风险指标和收益口径的公开方法见 [CFA Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation)。
+**定义。** §7.8 的 `holding_return.value` 只表示实际成交复盘结果，不能使用候选信号的模拟入场或模拟退出。只有本人未作废成交已在版本快照中可见，且费用、现金流和同一复权口径的入场与退出端点均可追溯时才计算，单位为百分数。#349@2fd6730c 草案（未合入）仍以合入版本为准。价格比值收益与绩效评价中的区间收益定义一致，风险指标和收益口径的公开方法见 [CFA Portfolio Performance Evaluation](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/portfolio-performance-evaluation)。
 
 **公式。**
 
@@ -54,21 +54,33 @@ hold          命中 ⇔ |excess_return.value| ≤ θ_h
 holding_return.value = 100 × (exit_price / entry_price − 1)
 ```
 
-`entry_price` 是候选信号发出后下一可成交价，`exit_price` 是 T+h 到期时可成交的退出价或预先登记的退出规则首次成交价。`entry_at`、`exit_at`、`horizon_days`、`price_basis`、`cost_applied` 和成交状态必须同时保存。若展示扣费结果，费用、滑点、冲击成本逐笔记录，不能把未知费用当成零。显式佣金可按适用日期的公开规则建模，[证监会关于调整证券交易佣金收取标准的通知](https://www.csrc.gov.cn/csrc/c100024/c1492350/1492350/files/928bdd362fa24b79bdadb0072d67acee.pdf)规定 A 股佣金上限 3‰ 且单笔不足 5 元按 5 元收取。历史税费必须按成交日期规则取值，[国家税务总局等关于减半征收证券交易印花税的公告汇编](https://www.chinatax.gov.cn/chinatax/c102414/c5216997/5216997/files/%E5%BB%B6%E7%BB%AD%E4%BC%98%E5%8C%96%E5%AE%8C%E5%96%84%E7%9A%84%E7%A8%8E%E8%B4%B9%E4%BC%98%E6%83%A0%E6%94%BF%E7%AD%96%E6%B1%87%E7%BC%96%EF%BC%882023%E5%B9%B4%E7%89%88%EF%BC%89-20231124113552902.pdf)给出 2023-08-28 起的历史税率变化。费用和滑点压力档位尚无 A 股普适验证，标记未验证（待回测）。
+实际成交的端点和费用必须来自版本快照中的成交证据。现有成交接口可核对 `trade_date`、`trade_time`、`qty`、`price`、`fee_total`、`side`、`security_code`、`created_at`、`voided` 和 `id`，但接口没有直接的 `available_at`、逐日价格路径或复权因子版本。缺少任一必需来源时，`holding_return.value=null`，顶层 `gaps` 记录 `outcome_metrics.holding_return` 与适用的 `no_source` 或 `user_input_missing`，不得用模拟值、邻日价格或零费用补齐。显式佣金可按适用日期的公开规则建模，[证监会关于调整证券交易佣金收取标准的通知](https://www.csrc.gov.cn/csrc/c100024/c1492350/1492350/files/928bdd362fa24b79bdadb0072d67acee.pdf)规定 A 股佣金上限 3‰ 且单笔不足 5 元按 5 元收取。历史税费必须按成交日期规则取值，[国家税务总局等关于减半征收证券交易印花税的公告汇编](https://www.chinatax.gov.cn/chinatax/c102414/c5216997/5216997/files/%E5%BB%B6%E7%BB%AD%E4%BC%98%E5%8C%96%E5%AE%8C%E5%96%84%E7%9A%84%E7%A8%8E%E8%B4%B9%E4%BC%98%E6%83%A0%E6%94%BF%E7%AD%96%E6%B1%87%E7%BC%96%EF%BC%882023%E5%B9%B4%E7%89%88%EF%BC%89-20231124113552902.pdf)给出 2023-08-28 起的历史税率变化。费用和滑点压力档位尚无 A 股普适验证，标记未验证（待回测）。
 
-**输入字段。** `generated_at`、`data_as_of`、`entry_at`、`entry_price`、`exit_at`、`exit_price`、`action`、`horizon_days`、`price_basis`、`cost_applied`、`is_suspended`、涨跌停状态、成交量或可成交证据、交易日历、复权因子版本及 `gaps`。
+**输入字段。** 仅登记现有成交接口字段及其可见性。`trade_date`、`trade_time`、`qty`、`price`、`fee_total`、`side`、`security_code`、`created_at`、`voided` 和 `id` 有接口来源。`available_at`、逐日 `close`、复权因子版本、现金流、分红和可成交队列证据均为无来源，不能写成必需可用输入。实际成交必须满足 §7.8 草案要求的 `available_at <= calculation_as_of`，并在版本快照中冻结。
 
 **窗口与时点。** T+1、T+5、T+20 交易日收盘后计算。盘后生成的 T+1 入场不能使用生成日收盘价替代下一交易日可成交价。任何输入必须满足 `available_at ≤ calculation_as_of`，不能因当前已经收盘而放行旧盘中数据。
 
-**最坏成交规则。** 涨停买不进时不生成模拟入场，记 `untradable`。跌停卖不出、停牌或可卖量未知时不补成交，保留未平仓状态并单列不可成交比例。若研究包需要风险下界，使用窗口内已证明可成交的最差价格，另标 `worst_case_lower_bound`，不能把下界混入正常命中率。该下界规则未验证（待回测）。
+**实际成交边界。** §7.8 四项 `Stat` 只纳入版本快照中已存在、未作废且在计算时点可见的本人实际成交。成交缺少可见性、费用、现金流或退出证据时，相关 `Stat.value=null`，顶层 `gaps` 记录缺口，不以模拟入场、模拟退出或当前时钟补值。
 
 **最少样本量。** 单个持有期收益需要一个完整的入场和退出端点。聚合收益在 `n<5` 时不返回均值，`5≤n<30` 标记样本少，`n≥30` 才可作为正常绩效摘要。
 
-### 2.3 相对基准超额
+### 2.3 `simulated_tracking` 候选信号模拟跟踪
 
-**基准。** 默认 `benchmark_code=000300.SH`，即沪深300。中证指数公开资料称其由 300 只规模大、流动性好的 A 股组成，目标是反映中国 A 股市场整体表现，适合作为大盘候选信号的共同对照。[CSI 300 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300factsheeten.pdf)；[CSI 300 编制方法](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300_Index_Methodology_en.pdf)。对小盘或全市场范围另做稳健性对照时使用 `000985.SH` 中证全指，其官方资料说明其覆盖沪深北市场并反映上市公司整体表现。[中证全指 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000985factsheet.pdf)；[中证全指编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20231208175438-000985_Index_Methodology_cn.pdf)。
+模拟跟踪单独保存并使用顶层标签 `simulated_tracking`。它记录候选信号发出后的假设入场、假设退出、状态和可成交证据，只用于研究跟踪，不进入实际成交复盘，也不填充 §7.8 的四项 `Stat`。现有 tracking 模型可核对 `entry_at`、`entry_price`、`exit_at`、`exit_price`、`benchmark_code`、`return_pct`、`benchmark_return_pct`、`excess_pct`、`max_drawdown_pct`、`price_basis`、`cost_applied`、`state`、`evidence` 和 `gaps`。这些字段属于模拟跟踪边界，不能映射成复盘指标名。
 
-行业基准只有在历史成分、指数价格和可见时点均齐备时才启用。缺少任一端点或版本证据时，保留个股收益，`benchmark_return.value` 和 `excess_return.value` 为 `null` 并记录顶层缺口。行业超额不能用大盘超额替代，标记未验证。
+模拟入场仍按信号之后的下一可成交时点计算，模拟退出按已登记窗口和可见价格计算。缺少价格、交易日历、复权因子或可成交证据时，模拟记录保留 `null` 并记录 `no_source` 或 `not_yet_published` 缺口。模拟结果不得写入实际成交复盘的 `outcome_metrics`，即使候选信号后来产生实际成交，也必须由实际成交快照独立计算。
+
+当前接口没有 `stops.stop_loss`、`stops.take_profit`、逐时点高低价、成交量或队列证据字段。依赖这些输入的模拟目标、止损和可成交判断保持 `enabled=false`，输出 `null` 并记录顶层缺口，不由邻近价格或收盘方向推断。
+
+### 2.4 相对基准超额
+
+**基准冲突登记。** 当前有三处不同口径，均待架构师裁定，当前未验证。
+
+1. 本卡原有通用默认是 `000300.SH`（沪深300）。中证指数资料说明其覆盖 300 只规模大、流动性好的 A 股。[CSI 300 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300factsheeten.pdf)；[CSI 300 编制方法](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300_Index_Methodology_en.pdf)。
+2. `config/strategies/sw_ma_trend_pullback.yaml` 的 `validation_summary.benchmark` 是所属申万一级行业指数，对照是中证全指 `000985.SH`。中证全指的覆盖说明见[官方 factsheet](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000985factsheet.pdf)和[编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/20231208175438-000985_Index_Methodology_cn.pdf)。
+3. `src/backend/app/tracking/models.py` 的 `Result.benchmark_code` 默认写死为 `000300.SH`。
+
+建议优先级（供架构师裁定，未验证）是策略配置的明确基准优先，其次才使用契约层的通用默认，tracking 模型默认只能作为未确认的实现回退。裁定前不自行选择。行业历史成分、指数价格、端点可见性和复权版本任一缺失时，`benchmark_return.value` 与 `excess_return.value` 均为 `null`，顶层 `gaps` 记录相应缺口，不能用另一处基准替代。
 
 **公式。**
 
@@ -77,11 +89,11 @@ benchmark_return.value = 100 × (benchmark_exit_price / benchmark_entry_price �
 excess_return.value = holding_return.value − benchmark_return.value
 ```
 
-个股和基准必须使用相同的入场时点、到期日、复权或总收益定义和可见性截止点。基准只有一个端点、停牌或定稿状态不合格时不补邻日价格。相对基准的收益分解属于公开投资绩效评价常用做法，但本项目基准覆盖、历史版本和 A 股有效性未验证（待回测）。
+个股和基准必须使用相同的入场时点、到期日、复权或总收益定义和可见性截止点。基准只有一个端点、停牌或来源状态不合格时不补邻日价格。相对基准的收益分解属于公开投资绩效评价常用做法，但本项目基准覆盖、历史版本和 A 股有效性未验证（待回测）。
 
 **最少样本量。** 只有 `holding_return.value` 和 `benchmark_return.value` 同时非空的观测进入超额统计。`n<5` 返回空值，`5≤n<30` 标记样本少，`n≥30` 才进入正常汇总。
 
-### 2.4 期间最大回撤
+### 2.5 实际成交复盘的期间最大回撤
 
 **定义。** 单条观测的路径从 `entry_price` 开始，随后按持有期内已经可见的交易日收盘价排列，最后一点为 `exit_price`。T+1 只有入场和退出两点。只用证券自身价格，不按动作取反。
 
@@ -99,27 +111,25 @@ max_drawdown.value = min_t(drawdown_t)
 
 **最少样本量。** 单条完整路径可以计算单条回撤，但聚合回撤至少需要 5 条完整路径才展示数值，30 条以上才解除样本少标记。缺少入场或退出端点的路径不计入 `n`。
 
-### 2.5 建议偏离
+### 2.6 建议偏离
 
-**定义。** 将用户实际成交与候选信号或已确认计划的冻结价格、时间和仓位在三个维度并列比较。候选信号或计划字段至少包括 `suggested_price` 或价格区间、`suggested_at`、`suggested_position_weight`、`action`、有效期和计划版本。实际字段来自成交回报的 `filled_price`、`filled_at`、`filled_qty`、`order_qty`、`portfolio_equity_at_fill`、撤改单和成交状态。
+**定义与来源登记。** 该项只作实际成交与候选信号记录的并列研究，不能把无来源的建议字段当成可计算输入。现有成交接口 `GET /trades` 可核对以下字段。
 
-**公式。** 对买入，价格偏离为 `(actual_vwap − suggested_price) / suggested_price`。对卖出，将符号反向为 `(suggested_price − actual_vwap) / suggested_price`，正值表示执行更差。时间偏离为实际首笔成交时刻减建议生效时刻，按交易分钟计。仓位偏离同时报告百分点和相对比例。
+| 用途 | 现有字段 | 来源状态 | 输出约束 |
+|---|---|---|---|
+| 成交日期、方向、标的 | `trade_date`、`side`、`security_code` | 有来源 | 只读成交记录 |
+| 成交时间 | `trade_time`（可空） | 有来源但可空 | 为空时相关时间偏离 `null` |
+| 成交数量、价格、费用 | `qty`、`price`、`fee_total`（可空） | 有来源 | 费用为空不能按零处理 |
+| 记录可见性 | `created_at`、`voided`、`id` | 有来源 | 版本快照筛选未作废记录 |
+| 建议价格与建议时点 | `suggested_price`、`suggested_at` | 无来源 | `enabled=false`，输出 `null`，顶层 `gaps` 记 `outcome_metrics.suggestion_deviation`/`no_source` |
+| 建议仓位、订单量、账户权益 | `suggested_position_weight`、`order_qty`、`portfolio_equity_at_fill` | 无来源 | `enabled=false`，输出 `null`，不得臆造 |
+| 撤改单、队列和成交状态 | 对应字段 | 无来源 | `enabled=false`，输出 `null`，不得推断无成交 |
 
-```text
-price_deviation_pct = side × 100 × (actual_vwap / suggested_price − 1)
-time_deviation_minutes = trading_minutes(filled_at_first − suggested_at)
-actual_weight = actual_filled_notional / portfolio_equity_at_fill
-weight_deviation_pp = 100 × (actual_weight − suggested_weight)
-weight_deviation_ratio = (actual_weight − suggested_weight) / suggested_weight
-```
-
-当 `suggested_weight=0` 或建议价格为空时，相对比例或价格偏离记 `null`，保留百分点、绝对金额或缺口原因，不能除以零或把缺字段当成零。
-
-分笔成交用数量加权平均价和数量加权成交时间。部分成交同时报告完成度 `filled_qty / order_qty`。无成交不能把偏离当成零，应标记 `no_fill` 并另报机会成本。实际成交、到达价和执行价之间的实现偏差是公开交易成本分析的常用分解，见 [CFA Research Foundation《Transaction Cost Measurement and Management》](https://www.cfainstitute.org/sites/default/files/-/media/documents/book/rf-publication/2015/rf-v2015-n4-1-pdf.pdf)。本卡的 A 股阈值、队列成交和仓位偏离容忍度未验证，标记未验证（待回测）。
+因此，价格偏离、时间偏离、仓位偏离和完成度当前均为 `enabled=false`。只有将建议记录和上述实际成交字段一并冻结，并补齐来源后，才可按数量加权计算。当前不使用 `filled_price`、`filled_at`、`filled_qty`、`order_qty` 或 `portfolio_equity_at_fill` 作为接口字段名，因为现有成交接口没有这些字段。无来源不能写成零，缺口统一保留为 `null` 加顶层 `gaps`。实际成交、到达价和执行价之间的实现偏差是公开交易成本分析的常用分解，见 [CFA Research Foundation《Transaction Cost Measurement and Management》](https://www.cfainstitute.org/sites/default/files/-/media/documents/book/rf-publication/2015/rf-v2015-n4-1-pdf.pdf)。
 
 **最少样本量。** 单笔实际成交即可记录偏离，不能据此判断策略执行质量。聚合偏离在 `n<5` 时不返回均值，`5≤n<30` 标记样本少，`n≥30` 才可作为正常执行摘要。无成交订单另计，不进入成交偏离的 `n`。
 
-### 2.6 盈亏比与盈亏因子
+### 2.7 盈亏比与研究候选指标
 
 **盈亏比。** 对有效完成观测中 `action ∈ {buy, add, hold}` 的非零 `holding_return.value` 计算，盈利样本为 `holding_return.value > 0`，亏损样本为 `< 0`。
 
@@ -131,15 +141,15 @@ payoff_ratio = 平均盈利 / |平均亏损|
 
 **最少样本量。** 盈亏比的有效 `n` 为盈利数与亏损数之和。`n<5` 时返回空值，`5≤n<30` 标记样本少，`n≥30` 才进入正常汇总。零收益既不进入盈利分子，也不进入亏损分母。
 
-**盈亏因子。** 为接入 T-A213，另报 `profit_factor`。
+**`profit_factor` 研究候选指标，未入契约。** §7.8 没有该字段，因此本卡不把它放入 `outcome_metrics`，也不把它作为通过、观察或淘汰依据。默认 `enabled=false`。
 
 ```text
 profit_factor = Σ盈利金额 / |Σ亏损金额|
 ```
 
-两者不混称。T-A213 候选线为 `PF ≥ 1.20` 通过，`1.00 ≤ PF < 1.20` 降级为“观察中”，`PF < 1.00` 淘汰。该数值线未被公开文献证明为 A 股普适阈值，属于未验证（待回测）。盈亏比、盈亏因子、命中率和收益幅度的关系可参阅 [CFA Digest 关于 hit ratio 与 win/loss magnitude](https://rpc.cfainstitute.org/research/cfa-digest/2018/07/dig-v48-n7-8) 和 [Pardo《The Evaluation and Optimization of Trading Strategies》](https://www.wiley.com/en-ca/the-evaluation-and-optimization-of-trading-strategies-2nd-edition-p-9780470128015)。
+若未来修订契约，至少需要可追溯的盈利金额、亏损金额、逐笔费用、持仓数量或名义金额、冻结快照和来源时点。当前这些输入没有完整来源，结果必须为 `null`，顶层 `gaps` 记录 `outcome_metrics.profit_factor`/`no_source`。不登记 PF 通过线或淘汰线。盈亏比、该研究候选指标、命中率和收益幅度的关系可参阅 [CFA Digest 关于 hit ratio 与 win/loss magnitude](https://rpc.cfainstitute.org/research/cfa-digest/2018/07/dig-v48-n7-8) 和 [Pardo《The Evaluation and Optimization of Trading Strategies》](https://www.wiley.com/en-ca/the-evaluation-and-optimization-of-trading-strategies-2nd-edition-p-9780470128015)。
 
-### 2.7 样本数门槛
+### 2.8 样本数门槛
 
 **指标展示。** 每个指标分别计算有效 `n`，不可成交和缺值不进入该指标的 `n`。`n<5` 时 `value=null`，`5≤n<30` 时保留数值并置 `small_sample=true`，`n≥30` 才可作为正常展示。没有任何有效样本时 `n=0` 是真实计数，不等于数据缺失。
 
@@ -228,7 +238,7 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 | hold 阈值 1%/2%/5% | 初值，未验证（待回测） |
 | `n<5`、`n<30` 展示门槛 | 与现有统计字段对齐，A 股统计有效性未验证（待回测） |
 | 总样本 30、每折 10、至少 5 折 | 候选闸刀线，未验证（待回测） |
-| PF 1.20 通过、1.00–1.20 观察、低于 1 淘汰 | 候选闸刀线，未验证（待回测） |
+| `profit_factor` | §7.8 无此字段，研究候选且 `enabled=false`；金额、费用和冻结来源未接入 |
 | 实盘相对 OOS −30%、Sharpe −0.50、MDD +50% | 候选降级线，未验证（待回测） |
 | 目标/止损同柱按最坏顺序 | 工程保守规则，未验证（待回测） |
 
@@ -236,9 +246,9 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 
 ## 6. §7.8 字段对齐与实现边界
 
-### 6.1 定稿字段
+### 6.1 #349@2fd6730c 草案字段（未合入）
 
-| 字段 | 定稿类型、单位与空值语义 |
+| 字段 | 草案类型、单位与空值语义（以合入版本为准） |
 |---|---|
 | `data_status` | `fresh`、`stale`、`pending`、`partial`、`unavailable`；无单位；不得把未知当作 `fresh` |
 | `data_as_of` | `string(datetime)` 或 `null`；实际使用来源的知识时点，无来源为 `null` |
@@ -248,7 +258,7 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 | `security_code` | `string` 或 `null`；证券代码 |
 | `name` | `string` 或 `null`；代码为空时必须为 `null`，代码存在但主数据缺失可回退为代码 |
 | `period_start`、`period_end` | `string(date)`，必填；闭区间，结束日不早于开始日 |
-| `current_version_no`、`version_no` | `int`；前者至少 1，后者从 1 连续递增；无单位 |
+| `current_version_no`、`version_no` | `int`；草案规定前者至少 1，后者从 1 连续递增；无单位 |
 | `current_version` | `ReviewVersion` 或 `null`；新建记录必有，旧数据缺版本时为 `null` |
 | `plan_version_ids`、`trade_ids` | `string(uuid)[]`，必填；空集为 `[]` |
 | `snapshot_id` | `string(uuid)` 或 `null`；历史缺快照保留 `null` |
@@ -265,30 +275,30 @@ profit_factor = Σ盈利金额 / |Σ亏损金额|
 | `ReviewJudgement` | `{condition_text:string, fulfilled:boolean|null, note:string|null}`；`fulfilled=null` 表示未知 |
 | `evidence` | `Evidence[]`；无证据为 `[]`，ID 只在本详情内解析 |
 
-指标缺口只通过版本顶层 `DataStatusBlock.gaps` 对外表达。`Stat` 不新增 `gaps`、`source` 或 `label` 字段，除非先修订 §7.8。
+指标缺口只通过版本顶层 `DataStatusBlock.gaps` 对外表达。`Stat` 不新增 `gaps`、`source` 或 `label` 字段，除非先修订 §7.8。草案明确四项 `Stat` 只按实际可见成交和快照时点计算，模拟跟踪不进入这些字段。
 
 ### 6.2 `not_yet_published` 与模拟跟踪
 
-`not_yet_published` 只表示结果期尚未结束或尚未到达契约规定的可发布时点，不表示收益为零，也不表示策略失败。此时四项指标的 `value` 均为 `null`，顶层 `data_status` 为 `pending`，顶层缺口使用该 reason；周期结束后仍缺来源则改用 `no_source` 或其他适用 reason。
+`not_yet_published` 只表示结果期尚未结束或尚未到达草案规定的可发布时点，不表示收益为零，也不表示策略失败。此时四项指标的 `value` 均为 `null`，顶层 `data_status` 为 `pending`，顶层缺口使用该 reason；周期结束后仍缺来源则改用 `no_source` 或其他适用 reason。
 
 模拟跟踪与实际成交复盘必须有独立的来源标签和存储边界。模拟结果只能标为“模拟跟踪”，实际成交结果只能标为“实盘成交复盘”；任何模拟结果进入复盘投影时均清空指标值并记录 `no_source`。对外叙述统一使用“候选信号”，不承诺收益，不把模拟跟踪写成实盘绩效。
 
 ### 6.3 实现参照
 
-本卡对照 `eccb3d25` 的实现行号。该提交不是本卡的验收证明，缺失来源仍保持未验证。
+本卡对照 `eccb3d25` 的实现行号。该提交不是本卡的验收证明，缺失来源仍保持未验证。#349@2fd6730c 草案（未合入）仅作只读对照，以合入版本为准。
 
 | 实现位置 | 结论 |
 |---|---|
-| `src/backend/app/reviews/metrics.py:18-24` | `Stat` 的百分数字符串、`n<5` 空值、`n<30` 小样本与定稿一致 |
+| `src/backend/app/reviews/metrics.py:18-24` | `Stat` 的百分数字符串、`n<5` 空值、`n<30` 小样本与草案结构相符 |
 | `src/backend/app/reviews/metrics.py:14,51-60` | reason 只保留三项且会丢弃未知值，与 §7.8 完整枚举和原样保留要求不一致 |
 | `src/backend/app/reviews/metrics.py:81-97` | `not_yet_published` 用工作日近似，未接交易日历，待后端改 |
 | `src/backend/app/reviews/metrics.py:117-127` | 模拟来源被清空并改为 `no_source`，需保留用户可见的“模拟跟踪”标签边界 |
 | `src/backend/app/reviews/service.py:171-197,210-240` | 仅从真实 execution 成交计算 holding，benchmark 与 drawdown 暂无来源，均为 `no_source` |
 | `src/backend/app/reviews/service.py:185-191` | 以 `traded_at` 作为可见时点，未满足 `available_at` 约束，待后端改 |
 | `src/backend/app/reviews/service.py:393-402,405-428` | 顶层状态、时间点与版本字段基本对齐，但状态读取再次按当前时钟判断，需冻结计算时点 |
-| `src/backend/app/reviews/service.py:432-448` | 时间线三种闭集 kind、升序和证据 ID 与定稿一致 |
-| `src/backend/app/reviews/service.py:457-488` | summary/detail 字段齐全；旧数据无当前版本时 summary 仍可能输出 `current_version_no=null`，与定稿 `≥1` 有差异 |
+| `src/backend/app/reviews/service.py:432-448` | 时间线三种闭集 kind、升序和证据 ID 与草案结构相符 |
+| `src/backend/app/reviews/service.py:457-488` | summary/detail 字段齐全；旧数据无当前版本时 summary 仍可能输出 `current_version_no=null`，与草案 `≥1` 有差异 |
 
 ## 7. 收口状态
 
-本卡仍为 `draft`，G7 保持 `☐`。#349 §7.8 是定稿字段依据，#356 仅作为实现对照。基准历史价格、复权因子链、交易日历和最大回撤价格路径未接入前，相关指标保持 `value=null`、缺口和“未验证”，不得据此宣称策略有效或产生收益承诺。
+本卡仍为 `draft`，G7 保持 `☐`。#349@2fd6730c 草案（未合入）仅作为只读字段对照，以合入版本为准。基准历史价格、复权因子链、交易日历和最大回撤价格路径未接入前，相关指标保持 `value=null`、缺口和“未验证”，不得据此宣称策略有效或产生收益承诺。
