@@ -4,6 +4,8 @@ import { errorBody, notFound, page, validation } from './handlerUtils';
 
 const API = '/api/v1';
 const gap = (key: string, reason: 'no_source' | 'not_yet_published' | 'user_input_missing', message: string) => ({ key, reason, message });
+const outcomeMetricKeys = ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown'] as const;
+const outcomeMetricGaps = (reason: 'no_source' | 'not_yet_published', message: string) => outcomeMetricKeys.map((key) => gap(`outcome_metrics.${key}`, reason, message));
 const emptyMetrics = (): ReviewOutcomeMetrics => {
   const stat = () => ({ value: null, n: 0, window: 'review_period', small_sample: true });
   return { holding_return: stat(), benchmark_return: stat(), excess_return: stat(), max_drawdown: stat() };
@@ -16,12 +18,12 @@ const seed = (): ReviewDetail[] => {
     lessons: '先记录执行条件，再复核结果。', tags: ['执行纪律'],
     attribution: { judgement: [{ condition_text: '按计划执行', fulfilled: true, note: '示例标注' }], execution: [], market: [] },
     outcome_metrics: emptyMetrics(), created_at: now, data_status: 'partial', data_as_of: null,
-    gaps: [gap('trade_ids', 'user_input_missing', '缺少可关联成交记录'), gap('outcome_metrics', 'no_source', '缺少价格、基准或公式来源，指标暂不计算')],
+    gaps: [gap('trade_ids', 'user_input_missing', '缺少可关联成交记录'), ...outcomeMetricGaps('no_source', '缺少价格、基准或公式来源，指标暂不计算')],
   };
   const pending: ReviewVersion = {
     ...complete, id: 'review-version-example-2', plan_version_ids: [],
     lessons: null, tags: ['等待结果期'], attribution: { judgement: [], execution: [], market: [] },
-    data_status: 'pending', gaps: [gap('outcome_metrics', 'not_yet_published', '结果期尚未结束，暂不发布指标')],
+    data_status: 'pending', gaps: outcomeMetricGaps('not_yet_published', '结果期尚未结束，暂不发布指标'),
   };
   const base = (id: string, planId: string | null, code: string | null, start: string, end: string, version: ReviewVersion): ReviewDetail => ({
     id, plan_id: planId, security_code: code, name: code ? '示例银行' : null, period_start: start, period_end: end,
@@ -29,7 +31,12 @@ const seed = (): ReviewDetail[] => {
     gaps: version.gaps, current_version: version, evidence: [],
     timeline: [{ kind: 'review_version', at: now, resource_id: id, version_no: 1, evidence_ids: [] }],
   });
-  return [base('review-example-1', 'plan-example-1', '600000.SH', '2026-10-01', '2026-11-01', complete), base('review-example-2', null, '600000.SH', '2026-11-10', '2026-12-31', pending)];
+  const legacy: ReviewDetail = {
+    id: 'review-example-legacy', plan_id: null, security_code: '000001.SZ', name: '演示电子',
+    period_start: '2026-09-01', period_end: '2026-09-30', current_version_no: null, created_at: now,
+    data_status: 'unavailable', data_as_of: null, gaps: [], current_version: null, evidence: [], timeline: [],
+  };
+  return [base('review-example-1', 'plan-example-1', '600000.SH', '2026-10-01', '2026-11-01', complete), base('review-example-2', null, '600000.SH', '2026-11-10', '2026-12-31', pending), legacy];
 };
 
 const initialReviews = seed();
@@ -79,7 +86,7 @@ export const reviewHandlers = [
       id: `${id}-version-1`, version_no: 1, plan_version_ids: body.plan_version_ids ?? [], trade_ids: body.trade_ids ?? [], snapshot_id: null,
       lessons: body.lessons ?? null, tags: body.tags ?? [],
       attribution: { judgement: body.judgement ?? [], execution: [], market: [] }, outcome_metrics: emptyMetrics(), created_at: now,
-      data_status: 'partial', data_as_of: null, gaps: [gap('trade_ids', 'user_input_missing', '缺少可关联成交记录'), gap('outcome_metrics', 'no_source', '缺少价格、基准或公式来源，指标暂不计算')],
+      data_status: 'partial', data_as_of: null, gaps: [gap('trade_ids', 'user_input_missing', '缺少可关联成交记录'), ...outcomeMetricGaps('no_source', '缺少价格、基准或公式来源，指标暂不计算')],
     };
     const created: ReviewDetail = {
       id, plan_id: body.plan_id ?? null, security_code: body.security_code ?? null, name: body.security_code ? '示例证券' : null,
@@ -102,13 +109,14 @@ export const reviewHandlers = [
       const prior = idempotent.get(`version:${review.id}:${key}`);
       if (prior) return prior.text === text ? HttpResponse.json(prior.response, { status: 201 }) : HttpResponse.json(errorBody('IDEMPOTENCY_CONFLICT', '幂等键已用于其他请求'), { status: 409 });
     }
-    if (body.base_version_no !== review.current_version_no) return conflict(review.current_version_no);
     const previous = review.current_version;
-    if (!previous) return validation('base_version_no', '复盘没有当前版本');
+    const currentVersionNo = review.current_version_no;
+    if (!previous || currentVersionNo === null) return validation('base_version_no', '复盘没有当前版本');
+    if (body.base_version_no !== currentVersionNo) return conflict(currentVersionNo);
     const version: ReviewVersion = {
       ...previous,
-      id: `${review.id}-version-${review.current_version_no + 1}`,
-      version_no: review.current_version_no + 1,
+      id: `${review.id}-version-${currentVersionNo + 1}`,
+      version_no: currentVersionNo + 1,
       plan_version_ids: body.plan_version_ids ?? previous.plan_version_ids,
       trade_ids: body.trade_ids ?? previous.trade_ids,
       lessons: body.lessons ?? previous.lessons,

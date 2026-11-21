@@ -68,7 +68,7 @@ export function ReviewsPage() {
         columns={[
           { title: '证券 / 计划', key: 'subject', render: (_: unknown, review) => <Link to={`/reviews/${review.id}`} data-testid={`review-link-${review.id}`}>{review.security_code ?? '未填证券'}{review.plan_id ? <span className="muted small"> · 计划 {review.plan_id}</span> : null}</Link> },
           { title: '复盘区间', key: 'period', render: (_: unknown, r) => <span className="mono">{r.period_start} ～ {r.period_end}</span> },
-          { title: '当前版本', dataIndex: 'current_version_no', width: 95, render: (v: number) => `第 ${v} 版` },
+          { title: '当前版本', dataIndex: 'current_version_no', width: 95, render: (v: number | null) => v === null ? '—' : `第 ${v} 版` },
           { title: '数据状态', key: 'status', width: 120, render: (_: unknown, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} /> },
           { title: '数据截至', key: 'data_as_of', width: 150, render: (_: unknown, r) => <span className="mono small">{r.data_as_of ? fmtTime(r.data_as_of) : '未知'}</span> },
           { title: '创建时间', dataIndex: 'created_at', width: 150, render: (v: string) => <span className="mono small">{fmtTime(v)}</span> },
