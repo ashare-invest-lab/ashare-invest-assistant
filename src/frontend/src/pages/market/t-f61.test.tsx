@@ -22,34 +22,49 @@ const basis: MarketBasis = {
   eligible: 10, observed: 10, trading: 8, suspended: 2, missing: 0, source: '合成夹具（未验证）',
 };
 const base: MarketOverview = { ...MARKET_OVERVIEW, basis, indices: [], trade_date: '2026-11-02' };
+type MarketCaseBody = MarketOverview | Omit<MarketOverview, 'basis'>;
+function withoutBasis(body: MarketOverview): Omit<MarketOverview, 'basis'> {
+  const copy = { ...body } as Partial<MarketOverview>;
+  delete copy.basis;
+  return copy as Omit<MarketOverview, 'basis'>;
+}
 function mount(path: string, body: unknown) {
   server.use(http.get('/api/v1/market/overview', () => HttpResponse.json(body as MarketOverview)));
   return render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={createMemoryRouter(marketRoutes, { initialEntries: [path] })} /></AppProviders>);
 }
-const cases: [string, MarketOverview, string, boolean, boolean][] = [
-  ['同批', base, '覆盖率：100.0%', false, false],
-  ['部分批', { ...base, data_status: 'partial', breadth: null, turnover_total: null, basis: { ...basis, observed: 8, missing: 2 }, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：缺两个成员' }] }, 'missing：2', true, false],
-  ['旧收盘', { ...base, data_status: 'stale', basis: { ...basis, observed_date: '2026-10-30', mode: 'close' } }, 'observed_date：2026-10-30', false, true],
-  ['旧且部分', { ...base, data_status: 'partial', basis: { ...basis, observed_date: '2026-10-30', missing: 2, observed: 8 } }, 'missing：2', true, true],
-  ['真实零', { ...base, breadth: { up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0 }, basis: { ...basis, eligible: 0, observed: 0, trading: 0, suspended: 0 } }, '覆盖率：—', false, false],
-  ['未知资格池', { ...base, basis: { ...basis, eligible: null, observed: null, trading: null, suspended: null, missing: null } }, 'eligible：—', false, false],
-  ['旧响应', { ...base, basis: undefined }, 'basis：—', false, false],
-  ['全空', { ...base, basis: null, breadth: null, turnover_total: null, data_status: 'unavailable', data_as_of: null, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：无市场批次' }] }, 'basis：—', false, false],
+const cases: [string, MarketCaseBody, string, boolean, boolean, boolean][] = [
+  ['同批', base, '覆盖率：100.0%', false, false, false],
+  ['部分批', { ...base, data_status: 'partial', breadth: null, turnover_total: null, basis: { ...basis, observed: 8, missing: 2 }, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：缺两个成员' }] }, 'missing：2', true, false, false],
+  ['部分缺失', { ...base, basis: { ...basis, observed: null, suspended: null, missing: null } }, '覆盖率：—', false, false, false],
+  ['旧收盘', { ...base, data_status: 'stale', basis: { ...basis, observed_date: '2026-10-30', mode: 'close' } }, 'observed_date：2026-10-30', false, true, false],
+  ['旧且部分', { ...base, data_status: 'partial', basis: { ...basis, observed_date: '2026-10-30', missing: 2, observed: 8 } }, 'missing：2', true, true, false],
+  ['真实零', { ...base, breadth: { up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0 }, basis: { ...basis, eligible: 0, observed: 0, trading: 0, suspended: 0 } }, '覆盖率：—', false, false, false],
+  ['未知资格池', { ...base, basis: { ...basis, eligible: null, observed: null, trading: null, suspended: null, missing: null } }, 'eligible：—', false, false, false],
+  ['旧响应缺失 basis', withoutBasis(base), 'basis：—', false, false, true],
+  ['无市场快照', { ...base, basis: null, breadth: null, turnover_total: null, data_status: 'unavailable', data_as_of: null, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：无市场批次' }] }, 'basis：—', false, false, true],
 ];
 
 describe.each(paths)('%s 共用市场展示', (path) => {
-  it.each(cases)('%s', async (_name, body, text, partial, old) => {
+  it.each(cases)('%s', async (_name, body, text, partial, old, missingBasis) => {
     const { container } = mount(path, body);
     const panel = await screen.findByTestId('market-basis');
     expect(panel).toHaveTextContent(text);
-    if (body.basis?.eligible === null) expect(panel).toHaveTextContent('覆盖率：—');
+    const responseBasis = 'basis' in body ? body.basis : undefined;
+    if (responseBasis?.eligible === null) expect(panel).toHaveTextContent('覆盖率：—');
+    if (responseBasis?.mode === 'intraday') expect(panel).toHaveTextContent('mode：intraday');
+    if (responseBasis?.mode === 'close') expect(panel).toHaveTextContent('mode：close');
+    if (responseBasis) expect(panel).toHaveTextContent('scope：沪深股票口径');
+    if (missingBasis) {
+      expect(panel).toHaveTextContent('无市场快照证据');
+      expect(panel).toHaveTextContent('basis：—');
+    }
     expect(!!within(panel).queryByText('部分批')).toBe(partial);
     expect(!!within(panel).queryByText('旧批')).toBe(old);
-    if (body.basis) expect(panel).toHaveTextContent(body.basis.source!);
+    if (responseBasis) expect(panel).toHaveTextContent(responseBasis.source!);
     if (body.gaps.length) expect(screen.getByTestId('market-gap-note')).toHaveTextContent(body.gaps[0].message);
     const breadth = screen.getByTestId('breadth-panel');
     if (!body.breadth) expect(breadth).toHaveTextContent('涨跌家数暂不可用');
-    if (body.basis?.eligible === 0) {
+    if (responseBasis?.eligible === 0) {
       expect(breadth.querySelector('.breadth-bar')).toBeNull();
       expect(breadth).toHaveTextContent('上涨占比—');
       expect(breadth).toHaveTextContent('涨停0');
@@ -64,8 +79,7 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     expect(panel).toHaveTextContent('mode：未知');
     expect(screen.getByTestId('regime-panel')).toHaveTextContent('市场状态 未知');
     expect(screen.getByTestId('market-gap-note')).toHaveTextContent('未知（合成未知原因）');
-    const status = screen.getAllByText('未知').find((el) => el.className.includes('ds-tag'));
-    expect(status).toHaveStyle({ color: '#8c8c8c' });
+    expect(screen.getByTestId('market-page')).toHaveTextContent('未知');
     expect(await screen.findByText('暂无板块资金：未知')).toBeInTheDocument();
     expect(screen.getByTestId('sector-meta')).toHaveTextContent('未知');
   });

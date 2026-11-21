@@ -54,9 +54,10 @@ export const etfNotApplicable = (code: string, key: string) => ({
 });
 const indexOf = (code: string) => INDEX_SPECS.find((s) => s.code === code) ?? ETF_SPECS.find((s) => s.code === code);
 
-/** v0.2.3 #9 §7.3 最小结构（示例数据） */
+/** v0.2.11 §5.1 / §7.3（示例数据；无市场快照证据） */
 export const MARKET_OVERVIEW: MarketOverview = {
   trade_date: TRADE_DATE, session: 'morning',
+  basis: null,
   indices: INDEX_SPECS.map((s) => ({
     security_code: s.code, name: s.name, price: f2(s.price), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100), amount: f2(s.amount), t: NOW,
   })),
