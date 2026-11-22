@@ -831,14 +831,21 @@ def _timeline_data(
     if current is not None and current.trade_ids:
         trade_rows = conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
         batch_committed_at, _ = _batch_commitments(conn, owner, trade_rows)
+        current_snapshot = _snapshot(conn, owner, current.snapshot_id)
+        calculation_as_of = _now()
+        raw_calculation_as_of = current_snapshot.get("calculation_as_of")
+        if isinstance(raw_calculation_as_of, str):
+            with contextlib.suppress(ValueError):
+                calculation_as_of = dt.datetime.fromisoformat(raw_calculation_as_of)
+        calculation_as_of = _as_datetime(calculation_as_of) or _now()
         trade_evidence = {
             str(item.get("value")): str(item.get("id"))
-            for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", [])
+            for item in current_snapshot.get("evidence", [])
             if item.get("key") == "trade"
         }
         for row in trade_rows:
             available_at = _available_at(row, committed_at=batch_committed_at.get(row.id))
-            if available_at is None:
+            if available_at is None or available_at > calculation_as_of:
                 continue
             result.append(
                 {
@@ -864,7 +871,7 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
     current = None if review.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == review.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == review.security_code)).scalar()
     snap = _snapshot(conn, owner, current.snapshot_id) if current is not None else status_block()
-    status = _status_for(snap, review.period_end, conn)
+    status = _status_for(snap, review.period_end, conn) if current is not None else snap
     timeline, timeline_evidence = _timeline_data(conn, owner, identifier, current)
     evidence = timeline_evidence
     return {
@@ -887,7 +894,7 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
     version = None if row.current_version_id is None else conn.execute(select(review_versions).where(review_versions.c.id == row.current_version_id)).first()
     sec = conn.execute(select(securities.c["name"]).where(securities.c.code == row.security_code)).scalar()
     snap = _snapshot(conn, row.user_id, version.snapshot_id) if version is not None else status_block()
-    status = _status_for(snap, row.period_end, conn)
+    status = _status_for(snap, row.period_end, conn) if version is not None else snap
     return {
         "id": str(row.id),
         "plan_id": str(row.plan_id) if row.plan_id else None,
