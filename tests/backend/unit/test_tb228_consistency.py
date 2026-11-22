@@ -5,11 +5,11 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
-
 from app.aggregates import models as aggregate_models
 from app.aggregates.market_overview import _dedupe_gaps
 from app.api.v1.notifications import _bj_iso as notification_iso
-from app.api.v1.restrictions import _bj_iso as restriction_iso, _project_row
+from app.api.v1.restrictions import _bj_iso as restriction_iso
+from app.api.v1.restrictions import _project_row
 from app.reviews.service import _bj_iso as review_iso
 from app.schemas.enums import GapReason
 
