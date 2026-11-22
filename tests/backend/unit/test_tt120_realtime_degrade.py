@@ -147,14 +147,21 @@ def _snapshot(ts: dt.datetime, price: str = "8.1250") -> FixtureRow:
         fetched_at=ts, source="mairui", source_licence_id=LICENCE, revision=1,
     )
 
-def _breaker_runtime() -> tuple[Any, Any, type[BaseException], Any]:
+def _strict_xfail(request: pytest.FixtureRequest, reason: str) -> None:
+    request.applymarker(pytest.mark.xfail(strict=True, reason=reason))
+    pytest.xfail(reason)
+
+
+def _breaker_runtime(
+    request: pytest.FixtureRequest,
+) -> tuple[Any, Any, type[BaseException], Any]:
     try:
         import app.workers.ingest as ingest
         from app.workers.ingest import tick_realtime_quotes
         import app.marketdata.realtime_collect as realtime_collect
         from app.marketdata.realtime_collect import RealtimeCollectionStoppedError
     except ImportError:
-        pytest.xfail("待 T-B224/#391：breaker_cooldown_s 运行时未接线")
+        _strict_xfail(request, "待 T-B224/#391：breaker_cooldown_s 运行时未接线")
     return tick_realtime_quotes, realtime_collect, RealtimeCollectionStoppedError, ingest
 
 @pytest.fixture
@@ -203,6 +210,26 @@ def test_realtime_missing_falls_back_to_owned_daily_close(world: Any) -> None:
     assert result["data_as_of"] == "2041-05-06T15:10:00+08:00"
     assert result["data_status"] == "fresh"
 
+
+def test_intraday_daily_fallback_is_stale_without_realtime_snapshot(world: Any) -> None:
+    previous = DAY - dt.timedelta(days=1)
+    when = dt.datetime(2041, 5, 6, 3, 0, tzinfo=UTC)  # 11:00 Beijing
+    world.state.now = when
+    Clock.current = when
+    world.state.calendar = {DAY: True, previous: True}
+    world.state.bars = [
+        daily_bar(
+            trade_date=previous,
+            fetched_at=dt.datetime(2041, 5, 5, 7, 10, tzinfo=UTC),
+        )
+    ]
+    world.state.snapshots = []
+    result = item(world)
+    assert result["price"] == "7.8750"
+    assert result["t"] == "2041-05-05T15:00:00+08:00"
+    assert result["data_as_of"] == "2041-05-05T15:10:00+08:00"
+    assert result["data_status"] == "stale"
+
 def test_suspended_daily_row_has_null_quote_fields(world: Any) -> None:
     world.state.bars = [daily_bar(is_suspended=True)]
     result = item(world)
@@ -230,7 +257,7 @@ def test_unusable_owner_licence_cannot_fall_back_to_daily_price(world: Any) -> N
     ],
 )
 def test_session_freshness_uses_beijing_calendar_and_30s_threshold(
-    world: Any, when: dt.datetime
+    world: Any, when: dt.datetime, request: pytest.FixtureRequest
 ) -> None:
     world.state.now = when
     Clock.current = when
@@ -245,12 +272,22 @@ def test_session_freshness_uses_beijing_calendar_and_30s_threshold(
         world.state.bars = []
         world.state.snapshots = [_snapshot(dt.datetime(2041, 5, 6, 3, 29, 55, tzinfo=UTC))]
     result = item(world)
-    if result["data_status"] != "fresh":
-        if local_time.hour == 8:
-            pytest.xfail("待 T-B223/#390：盘前上一开市日收盘 fresh 判定未接线")
-        if "price" in result and result["price"] == "8.1250":
-            pytest.xfail("待 T-B223/#390：午休按上午收盘时点判 fresh 未接线")
-        pytest.xfail("待 T-B213b/#377：午休实时快照读链未接线")
+    if local_time.hour == 8:
+        if result.get("price") is None:
+            _strict_xfail(request, "待 T-B223/#390：盘前上一开市日收盘读链未接线")
+        assert result["price"] == "7.8750"
+        assert result["t"] == "2041-05-05T15:00:00+08:00"
+        assert result["data_as_of"] == "2041-05-05T15:10:00+08:00"
+        if result["data_status"] != "fresh":
+            _strict_xfail(request, "待 T-B223/#390：盘前上一开市日收盘 fresh 判定未接线")
+    elif result.get("price") in (None, "7.8750"):
+        _strict_xfail(request, "待 T-B213b/#377：午休实时快照读链未接线")
+    else:
+        assert result["price"] == "8.1250"
+        assert result["t"] == "2041-05-06T11:29:55+08:00"
+        assert result["data_as_of"] == "2041-05-06T11:29:55+08:00"
+        if result["data_status"] != "fresh":
+            _strict_xfail(request, "待 T-B223/#390：午休按上午收盘时点判 fresh 未接线")
     assert result["data_status"] == "fresh"
 
 def test_post_close_uses_last_trading_session_close(world: Any) -> None:
@@ -266,7 +303,9 @@ def test_closed_day_uses_last_open_day_close(world: Any) -> None:
     world.state.bars = [daily_bar(trade_date=previous, fetched_at=dt.datetime(2041, 5, 5, 7, 10, tzinfo=UTC))]
     assert item(world)["data_status"] == "fresh"
 
-def test_realtime_snapshot_precedes_daily_fallback(world: Any) -> None:
+def test_realtime_snapshot_precedes_daily_fallback(
+    world: Any, request: pytest.FixtureRequest
+) -> None:
     previous = DAY - dt.timedelta(days=1)
     now = dt.datetime(2041, 5, 6, 6, 0, tzinfo=UTC)  # 14:00 Beijing，墙钟龄 20s
     world.state.now = now
@@ -275,33 +314,46 @@ def test_realtime_snapshot_precedes_daily_fallback(world: Any) -> None:
     world.state.bars = [daily_bar(trade_date=previous, fetched_at=dt.datetime(2041, 5, 5, 7, 10, tzinfo=UTC))]
     world.state.snapshots = [_snapshot(dt.datetime(2041, 5, 6, 5, 59, 40, tzinfo=UTC))]
     result = item(world)
-    if "price" not in result or result["price"] != "8.1250":
-        pytest.xfail("待 T-B213b/#377：实时快照读链未接线，仍回落日线价")
+    if result.get("price") in (None, "7.8750"):
+        _strict_xfail(request, "待 T-B213b/#377：实时快照读链未接线，仍回落日线价")
     assert result["price"] == "8.1250"
+    assert result["t"] == "2041-05-06T13:59:40+08:00"
+    assert result["data_as_of"] == "2041-05-06T13:59:40+08:00"
     assert result["data_status"] == "fresh"
 
 @pytest.mark.parametrize(("age_s", "expected"), [(29, "fresh"), (31, "stale")])
 def test_realtime_snapshot_age_uses_default_30_second_threshold(
-    world: Any, age_s: int, expected: str
+    world: Any, age_s: int, expected: str, request: pytest.FixtureRequest
 ) -> None:
     now = dt.datetime(2041, 5, 6, 2, 0, tzinfo=UTC)
     world.state.now = now
     Clock.current = now
     world.state.snapshots = [_snapshot(now - dt.timedelta(seconds=age_s))]
     result = item(world)
-    if "price" not in result or result["price"] != "8.1250":
-        pytest.xfail("待 T-B213b/#377：实时快照 freshness 读链未接线")
+    if result.get("price") in (None, "7.8750"):
+        _strict_xfail(request, "待 T-B213b/#377：实时快照 freshness 读链未接线")
+    assert result["price"] == "8.1250"
+    expected_stamp = (now - dt.timedelta(seconds=age_s)).astimezone(BJ).isoformat()
+    assert result["t"] == expected_stamp
+    assert result["data_as_of"] == expected_stamp
     assert result["data_status"] == expected
 
 @pytest.mark.parametrize("status", [429, 503])
 def test_upstream_rate_or_server_error_opens_runtime_breaker(
-    status: int, monkeypatch: pytest.MonkeyPatch
+    status: int, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> None:
-    tick_realtime_quotes, realtime_collect, stopped_error, ingest = _breaker_runtime()
+    tick_realtime_quotes, realtime_collect, stopped_error, ingest = _breaker_runtime(request)
 
     calls: list[float] = []
 
-    def fake_task(*_args: Any, **_kwargs: Any) -> None:
+    def fake_task(
+        settings: Settings,
+        *,
+        now: Any = None,
+        owner: Any = None,
+        transport: Any = None,
+        secret_loader: Any = None,
+    ) -> None:
         calls.append(1.0)
         raise stopped_error("upstream", status=status)
 
@@ -316,11 +368,20 @@ def test_upstream_rate_or_server_error_opens_runtime_breaker(
     tick_realtime_quotes(settings, now_monotonic=300.0)
     assert len(calls) == 2
 
-def test_breaker_cooldown_can_be_changed_to_ten_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
-    tick_realtime_quotes, realtime_collect, stopped_error, ingest = _breaker_runtime()
+def test_breaker_cooldown_can_be_changed_to_ten_seconds(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    tick_realtime_quotes, realtime_collect, stopped_error, ingest = _breaker_runtime(request)
     calls: list[float] = []
 
-    def fake_task(*_args: Any, **_kwargs: Any) -> None:
+    def fake_task(
+        settings: Settings,
+        *,
+        now: Any = None,
+        owner: Any = None,
+        transport: Any = None,
+        secret_loader: Any = None,
+    ) -> None:
         calls.append(1.0)
         raise stopped_error("upstream", status=429)
 
@@ -338,11 +399,20 @@ def test_breaker_cooldown_can_be_changed_to_ten_seconds(monkeypatch: pytest.Monk
     tick_realtime_quotes(settings, now_monotonic=10.0)
     assert len(calls) == 2
 
-def test_upstream_timeout_cooling_behavior_is_unverified(monkeypatch: pytest.MonkeyPatch) -> None:
-    tick_realtime_quotes, realtime_collect, _stopped_error, ingest = _breaker_runtime()
+def test_upstream_timeout_cooling_behavior_is_unverified(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    tick_realtime_quotes, realtime_collect, _stopped_error, ingest = _breaker_runtime(request)
     calls: list[float] = []
 
-    def fake_task(*_args: Any, **_kwargs: Any) -> None:
+    def fake_task(
+        settings: Settings,
+        *,
+        now: Any = None,
+        owner: Any = None,
+        transport: Any = None,
+        secret_loader: Any = None,
+    ) -> None:
         calls.append(1.0)
         raise TimeoutError("synthetic timeout")
 
@@ -356,5 +426,8 @@ def test_upstream_timeout_cooling_behavior_is_unverified(monkeypatch: pytest.Mon
         except (TimeoutError, socket.timeout):
             pass
     if len(calls) >= 2:
-        pytest.xfail("未验证：契约/配置未说明超时是否熔断")
+        _strict_xfail(
+            request,
+            "待 T-A230/#未裁定：未验证：契约/配置未说明超时是否熔断",
+        )
     assert len(calls) == 1
