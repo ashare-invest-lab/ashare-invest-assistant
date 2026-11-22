@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, text, update
 
 from app.auth.deps import AuthDep, EngineDep, RedisDep, SettingsDep
 from app.common import idempotency
@@ -384,6 +384,10 @@ def delete_restriction(
 ) -> RestrictionDelete:
     removed_at = _now()
     with engine.begin() as conn:
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),
+            {"owner": str(auth.user_id)},
+        )
         row = conn.execute(
             select(user_restrictions)
             .where(

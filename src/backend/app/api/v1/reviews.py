@@ -11,7 +11,7 @@ from typing import Annotated, Any, cast
 import redis
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import Connection, select, tuple_
+from sqlalchemy import Connection, Row, select, tuple_
 
 from app.auth.deps import AuthDep, EngineDep, RedisDep, SettingsDep
 from app.common import idempotency
@@ -87,7 +87,7 @@ def _page_reviews(
     )
 
 def _version_page(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, cfg: Settings, pp: PageParams) -> Page[Any]:
-    service._owned(conn, owner, identifier)
+    review = service._owned(conn, owner, identifier)
     scope = f"reviews:{owner}:{identifier}:versions"
     query = select(review_versions).where(review_versions.c.review_id == identifier)
     if pp.cursor:
@@ -97,7 +97,10 @@ def _version_page(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, cfg
         query = query.where(review_versions.c.version_no < keys[0])
     rows = conn.execute(query.order_by(review_versions.c.version_no.desc()).limit(pp.limit + 1)).all()
     page = build_page(rows, limit=pp.limit, key=lambda r: [r.version_no], scope=scope, settings=cfg)
-    return Page(items=[service.version_body(conn, owner, r) for r in page.items], next_cursor=page.next_cursor)
+    def body(row: Row[Any]) -> dict[str, Any]:
+        end = getattr(review, "period_end", None)
+        return service.version_body(conn, owner, row) if end is None else service.version_body(conn, owner, row, period_end=end)
+    return Page(items=[body(r) for r in page.items], next_cursor=page.next_cursor)
 
 def _run(rds: redis.Redis, user: uuid.UUID, scope: str, key: str | None, payload: dict[str, Any], fn: Callable[[], tuple[int, Any]]) -> dict[str, Any]:
     _, result = idempotency.run(rds, user_id=user, scope=scope, key=key, payload=payload, fn=fn)
@@ -147,7 +150,7 @@ def versions(identifier: uuid.UUID, auth: AuthDep, engine: EngineDep, cfg: Setti
 @router.get("/reviews/{identifier}/versions/{version_no}")
 def version_detail(identifier: uuid.UUID, version_no: int, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
     with engine.connect() as conn:
-        service._owned(conn, auth.user_id, identifier)
+        review = service._owned(conn, auth.user_id, identifier)
         row = conn.execute(
             select(review_versions).where(
                 review_versions.c.review_id == identifier,
@@ -156,7 +159,8 @@ def version_detail(identifier: uuid.UUID, version_no: int, auth: AuthDep, engine
         ).first()
         if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
-        return service.version_body(conn, auth.user_id, row)
+        end = getattr(review, "period_end", None)
+        return service.version_body(conn, auth.user_id, row) if end is None else service.version_body(conn, auth.user_id, row, period_end=end)
 
 @router.post("/reviews/{identifier}/versions", status_code=201)
 def revise(
