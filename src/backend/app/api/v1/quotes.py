@@ -7,7 +7,7 @@ import re
 from fastapi import APIRouter, Header, Request, Response
 
 from app.api.v1.imports import etag_response
-from app.auth.deps import AuthDep, EngineDep
+from app.auth.deps import AuthDep, EngineDep, SettingsDep
 from app.marketdata.quotes_read import QuotesResponse, read_quotes
 from app.marketdata.subresource_read import one
 from app.master.search import invalid
@@ -31,9 +31,10 @@ def quotes(
     request: Request,
     auth: AuthDep,
     engine: EngineDep,
+    settings: SettingsDep,
     if_none_match: str | None = Header(default=None),
 ) -> Response:
     codes = parse_codes(request)
     with engine.connect() as conn:
-        content = read_quotes(conn, auth.user_id, codes)
+        content = read_quotes(conn, auth.user_id, codes, settings)
     return etag_response(content.model_dump(mode="json"), if_none_match)

@@ -123,6 +123,7 @@ tests:
   - {"file": "tests/backend/unit/test_pn03_entry_wiring.py", "group": "serial_pg", "keywords": ["pg_url isolated PostgreSQL", "docker", "local HTTP and PS1 docker fake", "socket egress denied"], "unverified": false}
   - {"file": "tests/backend/unit/test_pn06_entry_wiring.py", "group": "serial_pg", "keywords": ["pg_url isolated PostgreSQL", "docker", "local HTTP and PS1 docker fake", "socket egress denied"], "unverified": false}
   - {"file": "tests/backend/unit/test_quotes_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "subprocess import check", "socket monkeypatch"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb213b_realtime_read.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic realtime rows", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_s12_market_public_json.py", "group": "parallel", "keywords": ["pure model serialization", "synthetic JSON", "no external resources"], "unverified": false}
   - {"file": "tests/backend/unit/test_s3_report_chain_coverage.py", "group": "parallel", "keywords": ["fake RedisQueue", "isolated_jobs autouse monkeypatch", "TASKS restored via setitem"], "unverified": false}
   - {"file": "tests/backend/unit/test_sector_flows_empty_s3.py", "group": "parallel", "keywords": ["fake DB", "ASGI TestClient", "socket monkeypatch"], "unverified": false}
