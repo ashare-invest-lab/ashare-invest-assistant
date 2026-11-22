@@ -22,6 +22,7 @@ vi.mock('../components/DataGrid', () => ({
 it('WatchTable：持仓 ETF 现价固定显示 3 位小数', () => {
   const row: TerminalRow = {
     ...TERMINAL_NULL_QUOTE_EXAMPLE,
+    security_type: 'etf',
     quote: { ...TERMINAL_NULL_QUOTE_EXAMPLE.quote!, price: '3.94' },
     holding: {
       qty: '100', sellable_qty: '100', cost_price: '3.90', weight_pct: '1.00',
