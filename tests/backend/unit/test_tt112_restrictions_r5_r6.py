@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import importlib.util
-import inspect
 import socket
 import uuid
 from contextlib import contextmanager
@@ -43,21 +42,7 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _require_restrictions() -> None:
     if restrictions is None:
-        pytest.xfail("app.api.v1.restrictions endpoint is absent on this tree")
-
-
-def _require_recheck() -> None:
-    if not callable(getattr(service, "recheck_restriction", None)):
-        pytest.xfail("service.recheck_restriction is absent on this tree")
-
-
-def _require_candidate_pit() -> None:
-    write_candidate = getattr(service, "write_candidate", None)
-    if not callable(write_candidate):
-        pytest.xfail("service.write_candidate is absent on this tree")
-    source = inspect.getsource(write_candidate)
-    if "user_restrictions.c.created_at" not in source or "user_restrictions.c.removed_at" not in source:
-        pytest.xfail("#348 write_candidate PIT window is absent on this tree")
+        pytest.xfail("app.api.v1.restrictions 模块缺失")
 
 
 def auth(user_id: uuid.UUID = USER) -> SimpleNamespace:
@@ -342,7 +327,6 @@ def test_recheck_keeps_reason_until_last_same_target_restriction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _require_restrictions()
-    _require_recheck()
     clock = iter((NOW, NOW + dt.timedelta(hours=1)))
     monkeypatch.setattr(restrictions, "_now", lambda: next(clock))
     first = row(
@@ -654,7 +638,7 @@ class CandidateConnection:
     ],
 )
 def test_write_candidate_restriction_point_in_time(label: str, restriction: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    _require_candidate_pit()
+    _require_restrictions()
     content = CandidateContent()
     facts = SimpleNamespace(model_dump=lambda mode="python": {})
     instance = SimpleNamespace(
