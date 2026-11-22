@@ -95,18 +95,29 @@ def _reference_parse_heartbeat_ts(raw: str) -> int | None:
     return ts
 def _run(tmp_path: Path, *, now: int, enabled: str = "true", heartbeat: str | None = None,
          queue: str | None = None, queue_key: str | None = None,
-         queue_alert: int = 900) -> subprocess.CompletedProcess[str]:
+         queue_alert: int = 900, quotes_ts: int | str | None = None,
+         quotes_source: str | None = None, trading_day: int | str | None = None,
+         config_text: str | None = None, config_missing: bool = False,
+         stale_override: str | None = None) -> subprocess.CompletedProcess[str]:
     source = tmp_path / "source"
     source.mkdir(parents=True, exist_ok=True)
     if heartbeat is not None: (source / "heartbeat").write_text(f"{heartbeat}\n", encoding="utf-8")
     if queue is not None: (source / "queue_len").write_text(f"{queue}\n", encoding="utf-8")
+    if quotes_ts is not None: (source / "quotes_ts").write_text(f"{quotes_ts}\n", encoding="utf-8")
+    if trading_day is not None: (source / "trading_day").write_text(f"{trading_day}\n", encoding="utf-8")
+    config = tmp_path / "realtime.yaml"
+    config.write_text(config_text or "intervals:\n  quote_interval_s: 15\n  stale_threshold_s: null\n", encoding="utf-8")
+    if config_missing: config.unlink()
     env = {
         "INTRADAY_ENABLED": enabled,
         "INTRADAY_HEALTH_LOG": str(tmp_path / "health.log"),
         "INTRADAY_HEALTH_STATE": str(tmp_path / "health.state"),
         "INTRADAY_QUEUE_ZERO_ALERT_S": str(queue_alert),
+        "INTRADAY_REALTIME_CONFIG": str(config),
     }
     if queue_key is not None: env["INTRADAY_QUEUE_KEY"] = queue_key
+    if quotes_source is not None: env["REALTIME_QUOTES_SOURCE"] = quotes_source
+    if stale_override is not None: env["INTRADAY_QUOTES_STALE_S"] = stale_override
     return subprocess.run(["sh", str(SCRIPT), "--from-dir", str(source), "--now", str(now)],
                           capture_output=True, text=True, env=env, timeout=30, check=False)
 def test_intraday_health_offline_states(tmp_path: Path) -> None:
@@ -192,6 +203,41 @@ def test_intraday_health_queue_zero_and_off_hours(tmp_path: Path) -> None:
     off_hours = _run(tmp_path / "off-hours", now=now - 60 * 60 * 4, heartbeat=_heartbeat(now), queue="0")
     assert off_hours.returncode == 0
     assert "状态=非交易时段" in off_hours.stdout
+
+@pytest.mark.parametrize(
+    ("label", "now_delta", "expected"),
+    [("fresh", 0, "状态=正常"), ("stale", 40, "状态=行情过期"),
+     ("lunch", 2 * 60 * 60, "状态=非交易时段"),
+     ("preopen", -60 * 60, "状态=非交易时段"),
+     ("closed", 8 * 60 * 60, "状态=非交易时段")],
+)
+def test_intraday_health_quotes_session_states(tmp_path: Path, label: str, now_delta: int, expected: str) -> None:
+    now = _epoch()
+    result = _run(tmp_path / label, now=now + now_delta, heartbeat=_heartbeat(now + now_delta),
+                  quotes_ts=now, quotes_source="fake")
+    assert expected in result.stdout
+    if label == "fresh": assert "行情龄=0秒" in result.stdout
+    if label == "stale": assert result.returncode == 2 and "阈值=30" in result.stdout
+
+def test_intraday_health_quotes_off_and_nontrading_day(tmp_path: Path) -> None:
+    now = _epoch()
+    off = _run(tmp_path / "off", now=now, heartbeat=_heartbeat(now), quotes_ts=now)
+    assert off.returncode == 0 and "行情采集未启用" in off.stdout
+    holiday = _run(tmp_path / "holiday", now=now, heartbeat=_heartbeat(now), quotes_ts=now,
+                   quotes_source="fake", trading_day=0)
+    assert holiday.returncode == 0 and "状态=非交易时段" in holiday.stdout and "非交易日" in holiday.stdout
+
+def test_intraday_health_quotes_config_and_override(tmp_path: Path) -> None:
+    now = _epoch()
+    derived = _run(tmp_path / "derived", now=now + 31, heartbeat=_heartbeat(now + 31),
+                   quotes_ts=now, quotes_source="fake")
+    assert derived.returncode == 2 and "状态=行情过期" in derived.stdout
+    missing = _run(tmp_path / "missing-config", now=now, heartbeat=_heartbeat(now), quotes_ts=now,
+                   quotes_source="fake", config_missing=True)
+    assert missing.returncode == 2 and "状态=配置错误" in missing.stdout
+    override = _run(tmp_path / "override", now=now + 20, heartbeat=_heartbeat(now + 20),
+                    quotes_ts=now, quotes_source="fake", stale_override="30")
+    assert override.returncode == 0 and "行情龄=20秒" in override.stdout
 def test_intraday_health_has_no_redis_write_command() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert not re.search(r"redis-cli[^\n]*(?:SET|DEL|LPUSH|RPUSH|LPOP|RPOP|INCR|EXPIRE)\b", text)
