@@ -20,6 +20,16 @@ function localParts(now: Date): { date: string; minutes: number } {
   return { date: `${value('year')}-${value('month')}-${value('day')}`, minutes: Number(value('hour')) * 60 + Number(value('minute')) };
 }
 
+function previousWeekday(day: string): string | null {
+  const parsed = Date.parse(`${day}T00:00:00+08:00`);
+  if (!Number.isFinite(parsed)) return null;
+  const date = new Date(parsed);
+  do {
+    date.setUTCDate(date.getUTCDate() - 1);
+  } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
+  return date.toISOString().slice(0, 10);
+}
+
 function referenceTime(now: Date, session?: string, tradeDate?: string, quoteAt?: number): number {
   const local = localParts(now);
   const quoteDay = quoteAt === undefined ? undefined : localParts(new Date(quoteAt)).date;
@@ -28,9 +38,11 @@ function referenceTime(now: Date, session?: string, tradeDate?: string, quoteAt?
   if (session === 'lunch_break' || (!session && minutes >= 11 * 60 + 30 && minutes < 13 * 60)) return Date.parse(`${day}T11:30:00+08:00`);
   if (session === 'closed' || (!session && minutes >= 15 * 60)) return Date.parse(`${day}T15:00:00+08:00`);
   if (session === 'call_auction' || session === 'pre_open' || session === 'non_trading_day' || (!session && minutes < 9 * 60 + 30)) {
-    // 在开盘前或闭市日，最新可见行情的日期就是最近开市日。调用方传入 tradeDate 时，
-    // 以行情日期作为收盘参考，避免把跨休市日的合法收盘误判为过期。
-    if (session !== 'non_trading_day' && quoteDay === local.date) return now.getTime();
+    // 当天交易日的盘前与集合竞价参照上一开市日收盘，避免用当前时钟给当天盘前行情计龄。
+    if (session !== 'non_trading_day' && quoteDay === local.date) {
+      const previous = previousWeekday(local.date);
+      if (previous !== null) return Date.parse(`${previous}T15:00:00+08:00`);
+    }
     return Date.parse(`${quoteDay ?? day}T15:00:00+08:00`);
   }
   return now.getTime();
