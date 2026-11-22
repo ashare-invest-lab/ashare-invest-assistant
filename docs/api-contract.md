@@ -1231,7 +1231,7 @@ evidence: Evidence[]
 | `ReviewDetail.evidence` | `Evidence[]`，证据 ID 只在本详情内解析；无证据为 `[]` |
 | `ReviewVersion.id` | `string(uuid)`，必填 |
 | `ReviewVersion.version_no` | `int`，≥1，无单位；同一复盘从 1 连续递增 |
-| `ReviewVersion.plan_version_ids`, `trade_ids` | `string(uuid)[]`，必填；分别为本人计划版本和未作废本人成交，空集为 `[]` |
+| `ReviewVersion.plan_version_ids`, `trade_ids` | `string(uuid)[]`，必填；分别为本人计划版本，以及版本保存时点（`calculation_as_of`）尚未作废的本人成交 ID 快照；之后作废不改写已冻结版本的 `trade_ids`，GET 旧版本仍按快照显示这些引用，空集为 `[]` |
 | `ReviewVersion.snapshot_id` | `string(uuid) \| null`；新版本应有不可变快照，历史缺快照时保留 `null` |
 | `ReviewVersion.lessons` | `string \| null`，用户笔记，无单位 |
 | `ReviewVersion.tags` | `string[]`，用户标签，无单位；无标签为 `[]` |
@@ -1292,6 +1292,8 @@ RV-03 验收（按入口）：
 RV-06 验收（按入口）：
 
 - `POST /reviews`、`POST /reviews/{id}/versions`：核对截止时点前后作废成交的纳入规则，且旧版本不变。
+- 成交在版本保存后作废：`GET /reviews/{id}/versions/{n}`（及对应旧版本详情）的 `trade_ids` 仍包含该成交 ID，页面/投影按快照显示该引用；新版本按 `voided_at <= calculation_as_of` 排除该成交。
+- 缺费用/费率快照时，依赖费用的指标为 `null` 并记既有 `no_source`。
 - `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions`、`GET /reviews/{id}/versions/{n}`：只读冻结快照。
 - `reviews.service` 与 `feedback.plan_source`：可见性与作废判定一致。
 
