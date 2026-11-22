@@ -132,6 +132,34 @@ class State:
     review_versions: list[Any] = field(default_factory=list)
     data_snapshots: list[Any] = field(default_factory=list)
 
+
+_ACTIVE_REQUEST: pytest.FixtureRequest | None = None
+
+
+@pytest.fixture(autouse=True)
+def _record_xfail_request(request: pytest.FixtureRequest):
+    global _ACTIVE_REQUEST
+    previous = _ACTIVE_REQUEST
+    _ACTIVE_REQUEST = request
+    try:
+        yield
+    finally:
+        _ACTIVE_REQUEST = previous
+
+
+def _strict_xfail(reason: str) -> None:
+    if not any(
+        character == "#"
+        and index + 1 < len(reason)
+        and reason[index + 1].isdigit()
+        for index, character in enumerate(reason)
+    ):
+        pytest.fail(f"strict xfail reason lacks responsible issue number: {reason}")
+    if _ACTIVE_REQUEST is None:
+        pytest.fail("strict xfail request is unavailable")
+    _ACTIVE_REQUEST.node.add_marker(pytest.mark.xfail(strict=True, reason=reason))
+    pytest.xfail(reason)
+
 class Engine:
     def __init__(self, state: State) -> None:
         self.state = state
@@ -148,9 +176,9 @@ class Connection:
     def __init__(self, state: State) -> None:
         self.state = state
 
-    def execute(self, statement: Any, *_args: Any, **_kwargs: Any) -> Result:
+    def execute(self, statement: Any, parameters: Any = None, *, execution_options: Any = None) -> Result:
         rendered = str(statement.compile(dialect=postgresql.dialect()))
-        params = statement.compile().params
+        params = parameters if parameters is not None else statement.compile().params
         if "app.users" in rendered:
             user_id = params.get("id_1", OWNER)
             return Result([SimpleNamespace(id=user_id, status="approved", role="user")])
@@ -255,17 +283,33 @@ class Store:
     def delete(self, _session: Session) -> None:
         return None
 
-    def revoke_user(self, _user_id: str) -> int:
+    def revoke_user(self, user_id: str, *, keep: Session | None = None) -> int:
         return 0
 
 class Redis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
 
-    def set(self, key: str, value: str, *, nx: bool = False, ex: int) -> bool:
-        if nx and key in self.values:
+    def set(
+        self,
+        name: str,
+        value: str,
+        ex: Any = None,
+        px: Any = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: bool = False,
+        exat: Any = None,
+        pxat: Any = None,
+        ifeq: Any = None,
+        ifne: Any = None,
+        ifdeq: Any = None,
+        ifdne: Any = None,
+    ) -> bool:
+        if nx and name in self.values:
             return False
-        self.values[key] = value
+        self.values[name] = value
         return True
 
     def get(self, _key: str) -> None:
@@ -349,9 +393,17 @@ def test_tt119_realtime_quotes_unusable_certificate_cannot_borrow_other_user(wor
     _assert_quote_unavailable(response, reason="data_licence_unavailable")
     assert "9876.54" not in response.text
 
-@pytest.mark.parametrize("path", ["/api/v1/quotes?codes=999991.SH", "/api/v1/market/overview", "/api/v1/terminal", "/api/v1/restrictions"])
-def test_tt119_http_requires_session(world: Any, path: str) -> None:
-    _require_http_route(world, "GET", path.split("?", 1)[0], f"本栈未注册 {path.split('?', 1)[0]} 路由")
+@pytest.mark.parametrize(
+    ("path", "reason"),
+    [
+        ("/api/v1/quotes?codes=999991.SH", "待 #385：本栈未注册 quotes 路由"),
+        ("/api/v1/market/overview", "待 #371：本栈未注册 market/overview 路由"),
+        ("/api/v1/terminal", "待 #385：本栈未注册 terminal 路由"),
+        ("/api/v1/restrictions", "待 #337/#348：本栈未注册 restrictions 路由"),
+    ],
+)
+def test_tt119_http_requires_session(world: Any, path: str, reason: str) -> None:
+    _require_http_route(world, "GET", path.split("?", 1)[0], reason)
     _json_error(world.client.get(path), 401, "AUTH_REQUIRED")
 
 def test_tt119_market_overview_empty_shape(world: Any) -> None:
@@ -413,14 +465,30 @@ def test_tt119_restrictions_empty_list_shape(world: Any) -> None:
 def test_tt119_restrictions_create_returns_201_and_json_paths(world: Any) -> None:
     _require_restriction_route(world)
     world.login()
+    payload = {
+        "kind": "blocklist",
+        "target_type": "security",
+        "target_id": CODE,
+        "until": None,
+        "reason": "synthetic",
+    }
     response = world.client.post(
         "/api/v1/restrictions",
-        json={"kind": "blocklist", "target_type": "security", "target_id": CODE, "until": None, "reason": "synthetic"},
+        json=payload,
         headers={"X-CSRF-Token": "owner-csrf"},
     )
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["kind"] == "blocklist" and body["target_id"] == CODE
+    assert body["kind"] == payload["kind"]
+    assert body["target_type"] == payload["target_type"]
+    assert body["target_id"] == payload["target_id"]
+    assert body["until"] is None
+    assert body["reason"] == payload["reason"]
+    restriction_id = uuid.UUID(body["id"])
+    assert restriction_id.int != 0
+    created_at = body["created_at"]
+    assert created_at
+    dt.datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
 
 def test_tt119_restrictions_missing_resource_is_404(world: Any) -> None:
     _require_restriction_route(world)
@@ -467,7 +535,7 @@ def test_tt119_restrictions_until_pit_pending_mainline(world: Any) -> None:
     expired = by_target[CODE]
     active = by_target[OTHER_CODE]
     if "status" not in expired or "status" not in active:
-        pytest.xfail("待 #348：restrictions until 的时点区间语义尚未在主线接线")
+        _strict_xfail("待 #348：restrictions until 的时点区间语义尚未在主线接线")
     assert expired["status"] == "expired"
     assert active["status"] == "active"
 
@@ -487,13 +555,13 @@ def _require_http_route(world: Any, method: str, path: str, reason: str) -> None
         err is None or (missing.status_code == 404 and missed is not None and err.get("code") == missed.get("code") and err.get("message") == missed.get("message"))
     )
     if unregistered:
-        pytest.xfail(reason)
+        _strict_xfail(reason)
 
 def _require_review_route(world: Any, method: str, path: str) -> None:
     _require_http_route(world, method, path, "复盘待 #379/#356（#349 契约）：主线尚未注册 reviews 路由")
 
 def _require_restriction_route(world: Any) -> None:
-    _require_http_route(world, "GET", "/api/v1/restrictions", "本栈未注册 restrictions 路由")
+    _require_http_route(world, "GET", "/api/v1/restrictions", "待 #337/#348：本栈未注册 restrictions 路由")
 
 def _review_create_payload() -> dict[str, Any]:
     return {
@@ -531,35 +599,35 @@ def test_tt119_reviews_available_at_pit_pending_mainline(world: Any) -> None:
         headers={"X-CSRF-Token": "owner-csrf"},
     )
     if response.status_code == 404:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     assert response.status_code == 201, response.text
     body = response.json()
     review_id = body["id"] if "id" in body else None
     if review_id is None:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     trade_rows = getattr(world.state, "trades", None)
     batch_rows = getattr(world.state, "import_batches", None)
     if trade_rows is None or batch_rows is None:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     if not trade_rows or not batch_rows:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     detail = world.client.get(f"/api/v1/reviews/{review_id}")
     if detail.status_code == 404:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     assert detail.status_code == 200, detail.text
     detail_body = detail.json()
     if "evidence" not in detail_body or detail_body["evidence"] is None:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     if any(not hasattr(row, "id") or not hasattr(row, "import_batch_id") for row in trade_rows):
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     if any(not hasattr(row, "id") or not hasattr(row, "committed_at") for row in batch_rows):
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     saved_at_value = body.get("created_at")
     if saved_at_value is None:
         version_body = body.get("version")
         saved_at_value = version_body.get("created_at") if isinstance(version_body, dict) else None
     if saved_at_value is None:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     saved_at = saved_at_value if isinstance(saved_at_value, dt.datetime) else dt.datetime.fromisoformat(str(saved_at_value).replace("Z", "+00:00"))
     late_batches = {
         row.id
@@ -569,13 +637,13 @@ def test_tt119_reviews_available_at_pit_pending_mainline(world: Any) -> None:
         > saved_at
     }
     if not late_batches:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     late_trade_ids = {row.id for row in trade_rows if row.import_batch_id in late_batches}
     if not late_trade_ids:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     version = detail_body["current_version"] if "current_version" in detail_body else None
     if not isinstance(version, dict) or "trade_ids" not in version:
-        pytest.xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     assert not late_trade_ids & set(version["trade_ids"])
 
 def test_tt119_reviews_other_user_isolation_pending_route(world: Any) -> None:
