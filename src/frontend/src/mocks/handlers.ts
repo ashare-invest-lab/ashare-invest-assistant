@@ -1,6 +1,7 @@
 import { withExampleReportExplanation } from './explanationFixtures';
 import { phase2Handlers, resetPhase2 } from './phase2Handlers';
 import { promotionHandlers, resetPromotions } from './promotionHandlers';
+import { resetReviews, reviewHandlers } from './reviewHandlers';
 /**
  * MSW 处理器：按契约 v0.2.8 §7 的路径与响应结构返回示例数据。只拦截同源 `/api/v1/*`。
  * 未实现的端点统一返回 404 + 契约错误信封（code=NOT_FOUND），便于发现漏接。
@@ -36,6 +37,7 @@ import {
 } from './marketFixtures';
 import { ENUMS } from '../api/enums';
 import { TODAY_EVIDENCE, riskEvents, todayAlerts, todayDataGaps, todayPlanTriggers, todaySamples, todayTView } from './todayFixtures';
+import { resetRestrictions, restrictionHandlers } from './restrictionHandlers';
 
 /**
  * T-F26（契约 v0.2.9 内 #33 ②，SecurityHit.quote_missing）：按当前用户本人证书给值。
@@ -70,6 +72,8 @@ export function resetMockState() {
   resetWatchlist();
   resetPlansAlerts();
   resetIngestAlertsMock();
+  resetRestrictions();
+  resetReviews();
 }
 
 /** 浏览器里加一点延迟让加载态可见；测试（node）里不延迟 */
@@ -389,6 +393,9 @@ const routeHandlers = [
   ...candidateHandlers,
   // 操作计划与提醒（T-F23 裁定跟进，§7.7B，见 planAlertHandlers.ts）
   ...planAlertHandlers,
+  ...restrictionHandlers,
+  // 复盘页面虚构夹具（T-F69；后端 V1 路由尚未实现）
+  ...reviewHandlers,
   http.get(`${API}/signals`, ({ request }) => {
     const url = new URL(request.url);
     const code = url.searchParams.get('security_code');
