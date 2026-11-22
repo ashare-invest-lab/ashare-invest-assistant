@@ -23,6 +23,7 @@ function rng(seed: number) {
 }
 const SUSPENDED = new Set(['601001.SH', '830001.BJ']);
 const MAIRUI = (endpoint: string | null, fetched_at: string | null): ProviderRef => ({ provider: 'mairui', endpoint, fetched_at });
+const marketGap = (path: string, reason: Gap['reason'], message: string): Gap => ({ key: path, reason, message });
 const MASTER_AS_OF = '2026-11-02';
 const ATTRIBUTION = '证券列表来自上交所、深交所、北交所公开信息（示例）';
 
@@ -110,7 +111,7 @@ export const MARKET_OVERVIEW_NO_CERTIFICATE: MarketOverview = {
   ...MARKET_OVERVIEW, basis: null, indices: [{ security_code: MARKET_OVERVIEW_INDEX.security_code, name: MARKET_OVERVIEW_INDEX.name, price: null, change_pct: null, amount: null, t: null }],
   breadth: null, regime: null, regime_position_range: null, turnover_total: null, data_status: 'unavailable', data_as_of: null,
   gaps: [
-    { ['key']: MARKET_INDEX_GAP_PATH, reason: 'data_licence_unavailable', message: '本人数据证书不可用（虚构夹具）' },
+    marketGap(MARKET_INDEX_GAP_PATH, 'data_licence_unavailable', '本人数据证书不可用（虚构夹具）'),
     { key: 'market.breadth', reason: 'no_source', message: '无本人行情来源（虚构夹具）' },
     { key: 'market.turnover_total', reason: 'no_source', message: '无本人成交额来源（虚构夹具）' },
     { key: 'market.regime', reason: 'no_source', message: '未生成市场环境结论（虚构夹具）' },
@@ -120,7 +121,7 @@ export const MARKET_OVERVIEW_NO_CERTIFICATE: MarketOverview = {
 /** T-A219 §9 全空。query_as_of=2026-11-02T10:31:00+08:00，所有虚构行 fetched_at=2026-11-02T10:32:00+08:00（行情 ts=2026-11-02T10:30:00+08:00）；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000907。 */
 export const MARKET_OVERVIEW_EMPTY: MarketOverview = {
   ...MARKET_OVERVIEW_NO_CERTIFICATE, gaps: [
-    { ['key']: MARKET_INDEX_GAP_PATH, reason: 'no_source', message: '行情行对查询时点不可见（虚构夹具）' },
+    marketGap(MARKET_INDEX_GAP_PATH, 'no_source', '行情行对查询时点不可见（虚构夹具）'),
     { key: 'market.breadth', reason: 'no_source', message: '宽度批次为空（虚构夹具）' },
     { key: 'market.turnover_total', reason: 'no_source', message: '成交额批次为空（虚构夹具）' },
     { key: 'market.regime', reason: 'no_source', message: '未生成市场环境结论（虚构夹具）' },
