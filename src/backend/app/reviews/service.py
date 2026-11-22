@@ -195,8 +195,34 @@ def _batch_commitments(
     return committed_at, unproven
 
 
+def _pit_trade_ids(
+    conn: Connection,
+    owner: uuid.UUID,
+    trade_ids: Sequence[uuid.UUID],
+    calculation_as_of: dt.datetime,
+) -> list[uuid.UUID]:
+    """Keep requested execution IDs whose evidence was available at the cutoff."""
+    rows = _trade_rows(conn, owner, trade_ids)
+    batch_committed_at, _ = _batch_commitments(conn, owner, rows)
+    cutoff = _as_datetime(calculation_as_of)
+    if cutoff is None:
+        return []
+    visible_ids: set[uuid.UUID] = set()
+    for row in rows:
+        if getattr(row, "voided_at", None) is not None:
+            continue
+        if getattr(row, "epistemic_type", "execution") != "execution":
+            continue
+        available_at = _available_at(
+            row, committed_at=batch_committed_at.get(row.id)
+        )
+        if available_at is not None and available_at <= cutoff:
+            visible_ids.add(row.id)
+    return [identifier for identifier in trade_ids if identifier in visible_ids]
+
+
 def _trade_date(row: Any) -> dt.date | None:
-    value = row.trade_date
+    value = getattr(row, "trade_date", None)
     if isinstance(value, dt.date):
         return value
     return None
@@ -219,7 +245,9 @@ def _visible_trade_rows(
     )
     for row in rows:
         traded_at = _executed_at(row)
-        if row.voided_at is not None or row.epistemic_type != "execution":
+        if getattr(row, "voided_at", None) is not None:
+            continue
+        if getattr(row, "epistemic_type", "execution") != "execution":
             continue
         row_date = _trade_date(row)
         if traded_at is None or row_date is None:
@@ -596,11 +624,17 @@ def _snapshot_items(
     trade_ids: Sequence[uuid.UUID] = (),
     plan_version_ids: Sequence[uuid.UUID] = (),
     calculation_as_of: dt.datetime | None = None,
+    metric_trade_ids: Sequence[uuid.UUID] | None = None,
 ) -> dict[str, Any]:
     calculation_as_of = calculation_as_of or _now()
     if conn is not None and owner is not None:
         metrics, evidence, data_as_of, metric_reasons = _compute_outcome_metrics(
-            conn, owner, start, end, trade_ids, calculation_as_of
+            conn,
+            owner,
+            start,
+            end,
+            trade_ids if metric_trade_ids is None else metric_trade_ids,
+            calculation_as_of,
         )
     else:
         metrics, evidence, data_as_of = empty_metrics(start, end), [], None
@@ -683,13 +717,28 @@ def _new_version(
     lessons: str | None,
     tags: list[str],
     judgement: list[dict[str, Any]],
+    calculation_as_of: dt.datetime | None = None,
 ) -> Row[Any]:
     snapshot_id, version_id = uuid.uuid4(), uuid.uuid4()
-    calculation_as_of = _now()
-    items = _snapshot_items(start, end, lessons, tags, judgement, bool(trade_ids), conn=conn, owner=owner, trade_ids=trade_ids, plan_version_ids=plan_version_ids, calculation_as_of=calculation_as_of)
+    calculation_as_of = calculation_as_of or _now()
+    filtered_trade_ids = _pit_trade_ids(conn, owner, trade_ids, calculation_as_of)
+    items = _snapshot_items(
+        start,
+        end,
+        lessons,
+        tags,
+        judgement,
+        bool(trade_ids),
+        conn=conn,
+        owner=owner,
+        trade_ids=filtered_trade_ids,
+        metric_trade_ids=trade_ids,
+        plan_version_ids=plan_version_ids,
+        calculation_as_of=calculation_as_of,
+    )
     raw = json.dumps(items, sort_keys=True, default=str, ensure_ascii=False).encode()
     conn.execute(insert(data_snapshots).values(id=snapshot_id, user_id=owner, purpose="review", items=items, hash=hashlib.sha256(raw).hexdigest()))
-    conn.execute(insert(review_versions).values(id=version_id, review_id=review_id, version_no=version_no, plan_version_ids=plan_version_ids, trade_ids=trade_ids, outcome_metrics=items["outcome_metrics"], attribution=items["attribution"], lessons=lessons, tags=tags, snapshot_id=snapshot_id))
+    conn.execute(insert(review_versions).values(id=version_id, review_id=review_id, version_no=version_no, plan_version_ids=plan_version_ids, trade_ids=filtered_trade_ids, outcome_metrics=items["outcome_metrics"], attribution=items["attribution"], lessons=lessons, tags=tags, snapshot_id=snapshot_id, created_at=calculation_as_of))
     return conn.execute(select(review_versions).where(review_versions.c.id == version_id)).one()
 
 
@@ -699,7 +748,13 @@ def create(conn: Connection, owner: uuid.UUID, body: Any) -> uuid.UUID:
     code, _ = _validate_links(conn, owner, plan_id=body.plan_id, security_code=body.security_code, plan_version_ids=body.plan_version_ids, trade_ids=body.trade_ids)
     review_id = uuid.uuid4()
     conn.execute(insert(reviews).values(id=review_id, user_id=owner, plan_id=body.plan_id, security_code=code, period_start=body.period_start, period_end=body.period_end))
-    version = _new_version(conn, owner, review_id, 1, start=body.period_start, end=body.period_end, plan_version_ids=list(body.plan_version_ids), trade_ids=list(body.trade_ids), lessons=body.lessons, tags=list(body.tags), judgement=[j.model_dump(mode="json") for j in body.judgement])
+    created_row = conn.execute(
+        select(reviews.c.created_at).where(reviews.c.id == review_id)
+    ).first()
+    calculation_as_of = _as_datetime(
+        getattr(created_row, "created_at", None)
+    ) or _now()
+    version = _new_version(conn, owner, review_id, 1, start=body.period_start, end=body.period_end, plan_version_ids=list(body.plan_version_ids), trade_ids=list(body.trade_ids), lessons=body.lessons, tags=list(body.tags), judgement=[j.model_dump(mode="json") for j in body.judgement], calculation_as_of=calculation_as_of)
     conn.execute(update(reviews).where(reviews.c.id == review_id).values(current_version_id=version.id))
     return review_id
 

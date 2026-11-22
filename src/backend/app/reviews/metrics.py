@@ -140,7 +140,9 @@ def period_pending_state(
     if endpoint is None:
         return True, False
     endpoint_date = endpoint.date
-    endpoint_open = endpoint.is_open
+    endpoint_open = getattr(endpoint, "is_open", None)
+    if endpoint_open is None:
+        return True, False
     if not endpoint_open:
         endpoint = conn.execute(
             select(trading_calendar.c.date, trading_calendar.c.is_open)
