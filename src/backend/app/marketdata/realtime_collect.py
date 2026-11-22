@@ -71,6 +71,10 @@ SecretLoader = Callable[[Engine, uuid.UUID], str]
 class RealtimeCollectionStoppedError(RuntimeError):
     """本轮因 STOP、上游错误或响应校验失败而停止，调用方不得重试。"""
 
+    def __init__(self, reason: str, status: int | None = None) -> None:
+        super().__init__(reason)
+        self.status = status
+
 
 def _now(value: dt.datetime | None) -> dt.datetime:
     stamp = value if value is not None else dt.datetime.now(dt.UTC)
@@ -165,7 +169,7 @@ def _validate_response(status: int, body: object) -> list[Mapping[str, object]]:
     if status in (101, 103, 429, 503) or status != 200:
         if status in (103, 429):
             log.error("实时行情上游触发限流，停止本轮")
-        raise RealtimeCollectionStoppedError(f"realtime_http_{status}")
+        raise RealtimeCollectionStoppedError(f"realtime_http_{status}", status=status)
     if limited(status, body) or classify(status, body) is not Signal.OK:
         raise RealtimeCollectionStoppedError("realtime_upstream_error")
     return _response_rows(body)

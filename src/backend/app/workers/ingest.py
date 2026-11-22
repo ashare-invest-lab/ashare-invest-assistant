@@ -37,6 +37,7 @@ from app.workers.runner import run
 
 INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
 _last_realtime_quotes_tick: float | None = None
+_realtime_breaker_until: float | None = None
 
 #: 已废弃的全站证书变量（T-A07）；只判断是否非空，从不读取或输出它的值
 LEGACY_LICENCE_ENV = "MAIRUI_LICENCE"
@@ -94,13 +95,16 @@ def heartbeat_payload(now: float | None = None) -> str:
 
 def tick_realtime_quotes(settings: Settings, now_monotonic: float | None = None) -> None:
     """按配置间隔触发一次实时行情采集，失败时保留心跳。"""
-    global _last_realtime_quotes_tick
+    global _last_realtime_quotes_tick, _realtime_breaker_until
 
     if getattr(settings, "realtime_quotes_source", "off") != "mairui":
         _last_realtime_quotes_tick = None
+        _realtime_breaker_until = None
         return
 
     now = time.monotonic() if now_monotonic is None else now_monotonic
+    if _realtime_breaker_until is not None and now < _realtime_breaker_until:
+        return
     interval = settings.business.realtime.intervals.quote_interval_s
     if (
         _last_realtime_quotes_tick is not None
@@ -110,9 +114,19 @@ def tick_realtime_quotes(settings: Settings, now_monotonic: float | None = None)
 
     _last_realtime_quotes_tick = now
     try:
-        from app.marketdata.realtime_collect import realtime_quotes_task
+        from app.marketdata.realtime_collect import (
+            RealtimeCollectionStoppedError,
+            realtime_quotes_task,
+        )
 
         realtime_quotes_task(settings)
+    except RealtimeCollectionStoppedError as exc:
+        if exc.status in (429, 503):
+            cooldown = settings.business.realtime.adaptive.breaker_cooldown_s
+            _realtime_breaker_until = now + cooldown if cooldown else None
+            logging.warning("realtime quotes upstream status %s", exc.status)
+        else:
+            logging.warning("realtime quotes tick failed: %s", type(exc).__name__)
     except Exception as exc:  # noqa: BLE001 - realtime collection must not stop heartbeat
         logging.warning("realtime quotes tick failed: %s", type(exc).__name__)
 
