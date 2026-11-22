@@ -1,5 +1,6 @@
 import { Alert, Badge, Button, Dropdown, List, Popover, Tag } from 'antd';
 import { BellOutlined, DownOutlined } from '@ant-design/icons';
+import { Suspense } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useMarkNotificationRead, useNotifications, useUnreadCount } from '../api/queries';
 import { NOTIFY_KIND, severityTag } from '../i18n/labels';
@@ -12,6 +13,7 @@ import { SecuritySearch } from './SecuritySearch';
 import { navMoreFor, NAV_MAIN } from '../app/nav';
 import { useApiErrorRedirect } from '../app/useApiErrorRedirect';
 import { useLogout } from '../api/accountQueries';
+import { Loading } from './common';
 import { LicenceBanner } from './LicenceBanner';
 import { StreamProvider } from '../app/StreamProvider';
 import { notificationRoute } from '../lib/notificationTarget';
@@ -126,7 +128,9 @@ function Shell() {
           />
         ) : null}
         <main className="content">
-          <Outlet />
+          <Suspense fallback={<Loading />}>
+            <Outlet />
+          </Suspense>
         </main>
         <RiskDisclosure />
         {IS_MOCK ? <div className="watermark" aria-hidden>示例数据</div> : null}
