@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Row, insert, select, update
 
@@ -32,6 +33,12 @@ from app.reviews.metrics import (
 
 # fmt: off
 
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+def _bj_iso(value: dt.datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.UTC)
+    return value.astimezone(BEIJING).isoformat()
 
 def _bad(field: str, issue: str) -> AppError:
     return AppError(ErrorCode.VALIDATION_ERROR, details={"fields": [{"field": field, "issue": issue}]})
@@ -422,7 +429,7 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
         "outcome_metrics": metrics,
         "evidence": list(snap.get("evidence", [])),
         "calculation_as_of": snap.get("calculation_as_of"),
-        "created_at": row.created_at.isoformat(),
+        "created_at": _bj_iso(row.created_at),
         "data_status": status.get("data_status", "unavailable"),
         "data_as_of": status.get("data_as_of"),
         "gaps": status.get("gaps", []),
@@ -435,15 +442,15 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
     for version in versions:
         snap = _snapshot(conn, owner, version.snapshot_id)
         ids = [str(item.get("id")) for item in snap.get("evidence", []) if item.get("id")]
-        result.append({"kind": "review_version", "at": version.created_at.isoformat(), "resource_id": str(version.id), "version_no": version.version_no, "evidence_ids": ids})
+        result.append({"kind": "review_version", "at": _bj_iso(version.created_at), "resource_id": str(version.id), "version_no": version.version_no, "evidence_ids": ids})
     if current is not None and current.plan_version_ids:
         plan_rows = conn.execute(select(plan_versions).where(plan_versions.c.id.in_(current.plan_version_ids))).all()
         plan_evidence = {str(item.get("value")): str(item.get("id")) for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", []) if item.get("key") == "plan_version"}
-        result.extend({"kind": "plan_version", "at": r.created_at.isoformat(), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
+        result.extend({"kind": "plan_version", "at": _bj_iso(r.created_at), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
     if current is not None and current.trade_ids:
         trade_rows = conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
         evidence = {str(item.get("value")): str(item.get("id")) for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", []) if item.get("key") == "trade"}
-        result.extend({"kind": "trade", "at": (_executed_at(r) or _now()).isoformat(), "resource_id": str(r.id), "version_no": None, "evidence_ids": [evidence[str(r.id)]] if str(r.id) in evidence else []} for r in trade_rows)
+        result.extend({"kind": "trade", "at": _bj_iso(_executed_at(r) or _now()), "resource_id": str(r.id), "version_no": None, "evidence_ids": [evidence[str(r.id)]] if str(r.id) in evidence else []} for r in trade_rows)
     result.sort(key=lambda item: item["at"])
     return result
 
@@ -462,7 +469,7 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
         "period_start": review.period_start.isoformat(),
         "period_end": review.period_end.isoformat(),
         "current_version_no": current.version_no if current is not None else None,
-        "created_at": review.created_at.isoformat(),
+        "created_at": _bj_iso(review.created_at),
         "current_version": version_body(conn, owner, current, period_end=review.period_end) if current is not None else None,
         "timeline": _timeline(conn, owner, identifier, current),
         "evidence": list(snap.get("evidence", [])),
@@ -483,6 +490,6 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "period_start": row.period_start.isoformat(),
         "period_end": row.period_end.isoformat(),
         "current_version_no": version.version_no if version is not None else None,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _bj_iso(row.created_at),
         **status,
     }

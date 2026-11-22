@@ -31,6 +31,13 @@ ALLOWED = {
     MODE: {"replay", "${MAIRUI_MODE:-replay}"},
     SOURCE: {"off", "${DAILY_BARS_SOURCE:-off}"},
 }
+GENERIC_KEY = re.compile(
+    r"^(?:MAIRUI_[A-Z0-9_]*|[A-Z0-9_]*_SOURCE|[A-Z0-9_]*(?:REALTIME|QUOTES|INTRADAY)[A-Z0-9_]*_ENABLED)$"
+)
+# 只接受带关闭默认值（含空串）的插值；裸 $VAR、无默认值的 ${VAR} 不算关闭。
+GENERIC_ENV_VAR = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:?-(?:off|false|replay|0)?\}$")
+GENERIC_LITERAL = {"", "off", "false", "replay", "0"}
+EXEMPT_SUFFIX = re.compile(r"_(?:URL|TIMEOUT[A-Z0-9_]*|KEY[A-Z0-9_]*|TOKEN[A-Z0-9_]*|FILE|DIR|PATH)$")
 
 
 def _allowed_key(key: object) -> str | None:
@@ -66,6 +73,25 @@ def _environment_items(environment: object):
                     yield str(key), value
 
 
+def _is_closed_value(value: object) -> bool:
+    # None 表示 YAML 空值或无等号的列表项，compose 会从主机环境继承，不算关闭。
+    if value is None:
+        return False
+    if value is False or (value == 0 and not isinstance(value, bool)):
+        return True
+    if isinstance(value, str):
+        return value in GENERIC_LITERAL or bool(GENERIC_ENV_VAR.fullmatch(value))
+    return False
+
+
+def _is_generic_switch(key: str) -> bool:
+    if key in ALLOWED:
+        return False
+    if not GENERIC_KEY.fullmatch(key):
+        return False
+    return not (key.startswith("MAIRUI_") and EXEMPT_SUFFIX.search(key))
+
+
 def _check_compose_file(path: Path, repo: Path, errs: list[str]) -> dict | None:
     rel = path.relative_to(repo).as_posix()
     try:
@@ -86,12 +112,15 @@ def _check_compose_file(path: Path, repo: Path, errs: list[str]) -> dict | None:
     for service, definition in services.items():
         if not isinstance(definition, dict):
             continue
-        for key, value in _environment_items(definition.get("environment")):
-            key = _allowed_key(key)
-            if key is None:
+        for raw_key, value in _environment_items(definition.get("environment")):
+            key = _allowed_key(raw_key)
+            if key is not None:
+                if not isinstance(value, str) or value not in ALLOWED[key]:
+                    errs.append(f"{rel}:{service}/{key}: 值必须是 {sorted(ALLOWED[key])}（发现 {value!r}）")
                 continue
-            if not isinstance(value, str) or value not in ALLOWED[key]:
-                errs.append(f"{rel}:{service}/{key}: 值必须是 {sorted(ALLOWED[key])}（发现 {value!r}）")
+            key = str(raw_key).strip()
+            if _is_generic_switch(key) and not _is_closed_value(value):
+                errs.append(f"{rel}:services/{service}/{key}：默认必须关闭")
     return document
 
 
@@ -122,18 +151,27 @@ def _check_env_example(repo: Path, errs: list[str]) -> None:
     except (OSError, UnicodeDecodeError) as exc:
         errs.append(f"{rel}:MAIRUI_MODE: 无法读取文件（{type(exc).__name__}）")
         return
-    mode_seen = False
+    values: dict[str, list[str]] = {}
     for line in lines:
         stripped = line.strip()
-        key, _, value = stripped.partition("=")
-        if _allowed_key(key) == MODE:
-            mode_seen = True
-            if value != "replay":
-                errs.append(f"{rel}:{MODE}: 值必须为 replay（发现 {value!r}）")
-        elif _allowed_key(key) == SOURCE and value != "off":
-            errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {value!r}）")
-    if not mode_seen:
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, separator, value = stripped.partition("=")
+        key = key.strip()
+        normalized = _allowed_key(key)
+        if separator and normalized in ALLOWED:
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            values.setdefault(normalized, []).append(value)
+        elif separator and _is_generic_switch(key) and not _is_closed_value(value.strip()):
+            errs.append(f"{rel}:{key}：默认必须关闭")
+    if MODE not in values:
         errs.append(f"{rel}:{MODE}: 必须有一行 MAIRUI_MODE=replay")
+    for bad in [v for v in values.get(MODE, []) if v != "replay"]:
+        errs.append(f"{rel}:{MODE}: 值必须为 replay（发现 {bad!r}）")
+    for bad in [v for v in values.get(SOURCE, []) if v != "off"]:
+        errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {bad!r}）")
 
 
 def _check_workflow_environment(
