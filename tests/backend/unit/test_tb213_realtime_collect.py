@@ -98,8 +98,8 @@ def test_schedule_uses_quote_interval_and_registers_task() -> None:
         import_rows_purge_interval_s=60,
         import_raw_purge_interval_s=60,
     )
-    assert jobs.schedule(settings)[jobs.REALTIME_QUOTES_FETCH] == interval
-    assert jobs.TASKS[jobs.REALTIME_QUOTES_FETCH] is realtime_collect.realtime_quotes_task
+    assert "market.realtime_quotes_fetch" not in jobs.schedule(settings)
+    assert "market.realtime_quotes_fetch" not in jobs.TASKS
 
 
 @pytest.mark.parametrize("status", [101, 103, 429, 503, 500])

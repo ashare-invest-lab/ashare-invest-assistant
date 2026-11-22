@@ -1,6 +1,6 @@
 """交易时段内按用户证书采集并写入 ``market.quotes_snapshot``。
 
-入口是 :func:`realtime_quotes_task`，由 ``market.realtime_quotes_fetch`` 调度。
+入口是 :func:`realtime_quotes_task`，由 ingest 心跳按间隔调度。
 ``REALTIME_QUOTES_SOURCE=off`` 是默认值，关闭时不会创建数据库或麦蕊连接。
 生产请求必须经过既有 ``single_egress`` / ``mairui_get``，测试可注入无网络
 ``transport``。一轮先完成所有响应校验，再在一个事务中写入同一 ``batch_id``。
@@ -44,6 +44,7 @@ log = logging.getLogger("app.marketdata.realtime_collect")
 # 麦蕊既有 egress halt 路径；不为实时任务另造 halt 文件。
 HALT = DAILY_HALT
 SOURCE = "mairui"
+REALTIME_QUOTES_FETCH: Final = "market.realtime_quotes_fetch"
 # Endpoint documented in docs/plan.md §2.1 and §0A.6.
 PATH = "/hsrl/ssjy_more?stock_codes="
 # docs/plan.md §0A.6 / §2.1: the multi-stock endpoint accepts at most 20 codes.
@@ -371,7 +372,7 @@ def realtime_quotes_task(
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
 ) -> int:
-    """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
+    """ingest 心跳入口，依赖 DB、日历、market_rules 与 active 证书。"""
     if verification_is_offline():
         log.info("实时行情跳过：当前为 replay/离线模式")
         return 0
