@@ -10,7 +10,7 @@
 
 ### v0.2.11（2026-11-20，T-B187：市场快照契约）
 
-- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。第2次修订（T-R109/R346）：`ReviewSummary.current_version_no` 缺版本时可空；`calculation_as_of` 不对外、`Stat` 不带 `gaps`，指标缺口归顶层。第3次修订（T-G16 #349 退回 4 条）：current_version_no 可空与 current_version=null 一致；定义 calculation_as_of 类型/存放位置及成交 available_at；§7.8.4 标未定稿、不以 T-R103 草案为据；已知值闭集与客户端未知兜底分开写明。第4次修订（T-G16 #349 退回 2 条）：成交可见时点并入导入批次 committed_at；DataStatusBlock 三字段平铺于 Summary/Detail/Version 顶层。第4次修订（T-G16 第3轮）：`traded_at=null` 按 `trade_date` 北京 15:00 回退；定稿前 `n=0`。`voided_at` 时点（应按 `voided_at <= calculation_as_of` 排除）列为已知缺口，后续单修。
+- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。第2次修订（T-R109/R346）：`ReviewSummary.current_version_no` 缺版本时可空；`calculation_as_of` 不对外、`Stat` 不带 `gaps`，指标缺口归顶层。第4次修订（T-A225）：§7.8 结果期 `pending`+`not_yet_published` 仅适用于口径定稿后，定稿前以 §7.8.4 `no_source` 为准。第3次修订（T-G16 #349 退回 4 条）：current_version_no 可空与 current_version=null 一致；定义 calculation_as_of 类型/存放位置及成交 available_at；§7.8.4 标未定稿、不以 T-R103 草案为据；已知值闭集与客户端未知兜底分开写明。第4次修订（T-G16 #349 退回 2 条）：成交可见时点并入导入批次 committed_at；DataStatusBlock 三字段平铺于 Summary/Detail/Version 顶层。第4次修订（T-G16 第3轮）：`traded_at=null` 按 `trade_date` 北京 15:00 回退；定稿前 `n=0`。`voided_at` 时点（应按 `voided_at <= calculation_as_of` 排除）列为已知缺口，后续单修。
 
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
@@ -1212,7 +1212,7 @@ evidence: Evidence[]
 | `Stat.window` | `string`，`YYYY-MM-DD/YYYY-MM-DD` 复盘窗口 |
 | `Stat.small_sample` | `boolean`；`n<30` 为 `true`，`n≥30` 为 `false` |
 
-`data_status` 沿用 §3 的 `fresh`、`stale`、`pending`、`partial`、`unavailable`，不新增复盘专用状态；`gap_reason` 完整取值为 `no_source`、`not_yet_published`、`upstream_error`、`quota_deferred`、`user_input_missing`、`data_licence_unavailable`、`not_applicable`、`suspended`。结果期尚未结束时，指标均为 `null`，状态为 `pending`，并带 `gap_reason=not_yet_published`。缺用户标注或实际成交时使用 `user_input_missing`，缺价格、基准或尚未定稿的计算公式时使用 `no_source`；确证停牌使用既有 `suspended`。**线上取值与兜底**：`data_status`、`gaps[].reason`、`ReviewTimelineItem.kind` 在线上都是字符串；服务端只发出上述已知值（§3 枚举或本节闭集），新增取值须先改契约。客户端类型按「已知值 ∪ string」前向兼容，收到未知值原样保留并显示“未知”，不得当作 `fresh`、无缺口或数值零。
+`data_status` 沿用 §3 的 `fresh`、`stale`、`pending`、`partial`、`unavailable`，不新增复盘专用状态；`gap_reason` 完整取值为 `no_source`、`not_yet_published`、`upstream_error`、`quota_deferred`、`user_input_missing`、`data_licence_unavailable`、`not_applicable`、`suspended`。**口径定稿后**，结果期尚未结束时，指标均为 `null`，状态为 `pending`，并带 `gap_reason=not_yet_published`；**定稿前以 §7.8.4 为准（T-A225 裁定，优先于本句）**：不论结果期是否结束，四项指标只记 `outcome_metrics.<指标名>`/`no_source`，不叠加 `not_yet_published`，`data_status` 不因结果期取 `pending`，按 §3 由缺口判定。缺用户标注或实际成交时使用 `user_input_missing`，缺价格、基准或尚未定稿的计算公式时使用 `no_source`；确证停牌使用既有 `suspended`。**线上取值与兜底**：`data_status`、`gaps[].reason`、`ReviewTimelineItem.kind` 在线上都是字符串；服务端只发出上述已知值（§3 枚举或本节闭集），新增取值须先改契约。客户端类型按「已知值 ∪ string」前向兼容，收到未知值原样保留并显示“未知”，不得当作 `fresh`、无缺口或数值零。
 
 #### 7.8.2 列表、详情与创建
 
