@@ -5,9 +5,11 @@ import { ownValue } from '../../lib/enumValue';
 /** 只展示后端给出的市场批次证据。没有批次时明确显示缺证，不从客户端时间推断。 */
 export function BasisTrace({ basis, testId = 'basis-trace' }: { basis?: MarketBasisValue | null; testId?: string }) {
   if (!basis) return <div className="muted small" data-testid={testId}>市场批次：缺证</div>;
+  const value = (item: string | number | null) => item ?? '缺证';
+  const mode = basis.mode === null ? '缺证' : ownValue({ intraday: 'intraday', close: 'close' }, basis.mode, '未知');
   return (
     <div className="muted small" data-testid={testId}>
-      市场批次：{basis.snapshot_id ?? '缺证'} · 观察日：{basis.observed_date ?? '缺证'} · 口径：{basis.mode ?? '缺证'} · 来源：{basis.source ?? '缺证'}
+      市场批次：snapshot_id：{value(basis.snapshot_id)} · observed_date：{value(basis.observed_date)} · mode：{mode} · scope：{value(basis.scope)} · source：{value(basis.source)} · eligible：{value(basis.eligible)} · observed：{value(basis.observed)} · trading：{value(basis.trading)} · suspended：{value(basis.suspended)} · missing：{value(basis.missing)}
     </div>
   );
 }
@@ -23,13 +25,11 @@ export function MarketBasis({ m }: { m: MarketOverview }) {
     <section className="panel side-panel" data-testid="market-basis" aria-label="市场 basis">
       <b>basis</b> {partial ? <Tag color="gold">部分批</Tag> : null} {old ? <Tag>旧批</Tag> : null}
       {!b ? <>
-        <div className="muted small">basis：—</div>
+        <div className="muted small">basis：缺证</div>
         <div className="gap-note small" role="note" data-testid="market-basis-gap">无市场快照证据</div>
       </> : <>
-        <div>snapshot_id：{b.snapshot_id ?? '—'} · observed_date：{b.observed_date ?? '—'}</div>
-        <div className="muted">mode：{b.mode === null ? '—' : ownValue({ intraday: 'intraday', close: 'close' }, b.mode, '未知')} · scope：{b.scope} · source：{b.source ?? '—'}</div>
-        <div>eligible：{b.eligible ?? '—'} · observed：{b.observed ?? '—'} · trading：{b.trading ?? '—'} · suspended：{b.suspended ?? '—'} · missing：{b.missing ?? '—'} · 覆盖率：{coverage}</div>
         <BasisTrace basis={b} testId="market-basis-trace" />
+        <div>覆盖率：{coverage === '—' ? '缺证' : coverage}</div>
       </>}
     </section>
   );
