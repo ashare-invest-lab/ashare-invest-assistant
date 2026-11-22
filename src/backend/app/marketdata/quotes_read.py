@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Sequence
+from datetime import date as date_type
 from datetime import datetime as datetime_type
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,6 +19,8 @@ from app.marketdata.subresource_read import DecimalText, Gap, Shape
 from app.schemas.enums import DataStatus, GapReason, SecurityType
 
 BEIJING = ZoneInfo("Asia/Shanghai")
+_DEFAULT_MORNING = (dt.time(9, 30), dt.time(11, 30))
+_DEFAULT_AFTERNOON = (dt.time(13), dt.time(15))
 
 
 class QuoteItem(Shape):
@@ -95,22 +98,62 @@ def _realtime_latest(
     return {row.code: row for row in rows}
 
 
-def _fresh_close_day(conn: Connection, now: dt.datetime) -> dt.date | None:
+def _session_bounds(day: dt.date) -> tuple[dt.time, dt.time, dt.time, dt.time]:
+    """Return main-board continuous-session bounds, with conservative defaults."""
+    try:
+        segment = get_settings().business.market_rules.segment_for(day)
+        if segment is not None:
+            sessions = segment.sessions
+            return (
+                sessions.morning[0],
+                sessions.morning[1],
+                sessions.afternoon[0],
+                sessions.closing_auction[1],
+            )
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return (
+        _DEFAULT_MORNING[0],
+        _DEFAULT_MORNING[1],
+        _DEFAULT_AFTERNOON[0],
+        _DEFAULT_AFTERNOON[1],
+    )
+
+
+def _reference_time(conn: Connection, now: dt.datetime) -> tuple[dt.datetime | None, bool]:
+    """Return the market instant and whether the market is in session."""
     local = now.astimezone(BEIJING)
     calendar = trading_calendar.c
     is_open = conn.execute(
         select(calendar.is_open).where(calendar.date == local.date())
     ).scalar_one_or_none()
-    # A daily fallback cannot satisfy the realtime.yaml intraday quote threshold.
-    # Missing calendar facts and an open day's pre-close data remain stale.
-    if is_open is None or (is_open and local.time() < dt.time(15)):
-        return None
-    return conn.execute(
+    if not isinstance(is_open, bool):
+        return None, False
+    if is_open:
+        morning_start, morning_end, afternoon_start, closing_end = _session_bounds(
+            local.date()
+        )
+        clock = local.time().replace(tzinfo=None)
+        if morning_start <= clock < morning_end or afternoon_start <= clock < closing_end:
+            return now, True
+        if clock >= morning_end and clock < afternoon_start:
+            return dt.datetime.combine(local.date(), morning_end, BEIJING), False
+        if clock >= closing_end:
+            return dt.datetime.combine(local.date(), closing_end, BEIJING), False
+
+    previous = conn.execute(
         select(calendar.date)
-        .where(calendar.is_open.is_(True), calendar.date <= local.date())
+        .where(
+            calendar.is_open.is_(True),
+            calendar.date < local.date(),
+        )
         .order_by(calendar.date.desc())
         .limit(1)
     ).scalar_one_or_none()
+    if not isinstance(previous, date_type):
+        return None, False
+    _, _, _, closing_end = _session_bounds(previous)
+    return dt.datetime.combine(previous, closing_end, BEIJING), False
 
 
 def _identity_rows(conn: Connection, codes: tuple[str, ...]) -> Sequence[Row[Any, Any, Any]]:
@@ -127,7 +170,12 @@ def _row_value(row: object, name: str) -> object | None:
 
 
 def _realtime_item(
-    row: Row[Any], name: str, security_type: SecurityType, now: dt.datetime, threshold: int
+    row: Row[Any],
+    name: str,
+    security_type: SecurityType,
+    now: dt.datetime,
+    threshold: int,
+    reference: dt.datetime | None = None,
 ) -> QuoteItem:
     stamp = row.realtime_ts
     if not isinstance(stamp, datetime_type):
@@ -136,7 +184,8 @@ def _realtime_item(
     pct_change = row.realtime_pct_change
     volume = row.realtime_volume
     amount = row.realtime_amount
-    age = (now - stamp).total_seconds()
+    reference = now if reference is None else reference
+    age = (reference - stamp).total_seconds()
     return QuoteItem(
         security_code=row.code,
         name=name,
@@ -149,7 +198,9 @@ def _realtime_item(
         volume=None if volume is None else format(volume, "f"),
         amount=None if amount is None else format(amount, "f"),
         t=stamp.astimezone(BEIJING).isoformat(),
-        data_status=DataStatus.FRESH if 0 <= age <= threshold else DataStatus.STALE,
+        data_status=DataStatus.FRESH
+        if stamp <= now and 0 <= age <= threshold
+        else DataStatus.STALE,
         data_as_of=stamp.astimezone(BEIJING).isoformat(),
         gaps=[],
     )
@@ -176,7 +227,14 @@ def read_quotes(
     realtime: dict[str, Row[*tuple[Any, ...]]] = {}
     if realtime_enabled and licence is not None:
         realtime = _realtime_latest(conn, codes, licence, now)
-    fresh_day = _fresh_close_day(conn, now) if closes else None
+    reference, in_session = (
+        _reference_time(conn, now) if closes or realtime else (None, False)
+    )
+    fresh_day = (
+        None
+        if reference is None or in_session
+        else reference.astimezone(BEIJING).date()
+    )
     reason = GapReason.NO_SOURCE if licence is not None else GapReason.DATA_LICENCE_UNAVAILABLE
     message = "本人行情缓存尚无可用读取源" if licence is not None else "本人数据证书不可用"
     items: list[QuoteItem] = []
@@ -192,7 +250,16 @@ def read_quotes(
                 row = None
         if realtime_row is not None:
             threshold = resolved_settings.business.realtime.intervals.effective_stale_threshold_s
-            items.append(_realtime_item(realtime_row, identity.name, identity.type, now, threshold))
+            items.append(
+                _realtime_item(
+                    realtime_row,
+                    identity.name,
+                    identity.type,
+                    now,
+                    threshold,
+                    reference,
+                )
+            )
             continue
         item = QuoteItem(
             security_code=code,
