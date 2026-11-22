@@ -150,7 +150,9 @@ def prepare(
         raise ValueError("unit_or_adjust_mismatch")
     day = as_of.astimezone(dt.timezone(dt.timedelta(hours=8))).date().isoformat()
     known_factors = [
-        row for row in factors if row["date"] <= day and instant(row["available_at"]) <= as_of
+        row
+        for row in factors
+        if row.get("available_at") and row["date"] <= day and instant(row["available_at"]) <= as_of
     ]
     known_factors.sort(key=lambda row: (row["date"], instant(row["available_at"])))
 
