@@ -3,7 +3,8 @@ import type { ColumnsType } from 'antd/es/table';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useDailyReport, useToday } from '../../api/queries';
-import type { TodayFocusRow, TodayResponse } from '../../api/types';
+import { QuoteStreamFallback } from '../../components/QuoteStreamFallback';
+import { securityTypeOf, type TodayFocusRow, type TodayResponse } from '../../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
@@ -51,7 +52,7 @@ const stockLink = (code: string | null, name: string | null) =>
 
 const focusColumns = (nonTradingDay: boolean): ColumnsType<TodayFocusRow> => [
   { title: '证券', key: 'sec', width: 150, render: (_, r) => stockLink(r.security_code, r.name) },
-  { title: '现价', key: 'price', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{fmtPrice(r.quote?.price, r.holding?.security_type)}</span> },
+  { title: '现价', key: 'price', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{fmtPrice(r.quote?.price, securityTypeOf(r))}</span> },
   { title: '涨跌幅', key: 'chg', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{r.quote?.change_pct != null ? `${signed(r.quote.change_pct)}%` : '—'}</span> },
   { title: '持仓占比', key: 'w', width: 80, align: 'right', render: (_, r) => (r.holding ? <span className="num">{fmtNum(r.holding.weight_pct)}%</span> : <span className="muted">未持有</span>) },
   {
@@ -98,6 +99,7 @@ export function TodayPage() {
     <div className="page-scroll today" data-testid="today-page">
       <div className="detail-head">
         <span className="q-name">今日关注</span>
+        <QuoteStreamFallback path="/today" />
         <span className="small">交易日 <span className="mono">{t.trade_date}</span></span>
         <Tag data-testid="today-session">{Object.hasOwn(SESSION, t.session) ? SESSION[t.session] : '未知时段'}</Tag>
         <span className="small" data-testid="today-regime">
