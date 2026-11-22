@@ -7,16 +7,25 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterator
 
+import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from psycopg import sql
 from sqlalchemy import create_engine, delete, insert, text
+from sqlalchemy.engine import make_url
 
 from app.auth.deps import AuthContext, current_auth, get_redis
 from app.config import Settings
@@ -74,53 +83,99 @@ def _settings(pg_url: str) -> Settings:
     )
 
 
-@pytest.fixture()
-def world(pg_url: str) -> Iterator[World]:
-    engine = create_engine(pg_url, hide_parameters=True)
-    user_id = uuid.uuid4()
-    named_code = f"600{uuid.uuid4().hex[:3]}.SH"
-    missing_code = f"600{uuid.uuid4().hex[:3]}.SH"
-    with engine.begin() as conn:
-        conn.execute(
-            insert(users).values(
-                id=user_id,
-                username=f"tt127_{user_id.hex[:12]}",
-                password_hash="synthetic-password-hash",
-                display_name="T-T127 虚构用户",
-                role="user",
-                status="approved",
-            )
-        )
-        conn.execute(
-            insert(securities).values(
-                code=named_code,
-                type="stock",
-                name="T-T127 虚构证券",
-                exchange="SH",
-                board="main",
-                listing_status="listed",
-            )
-        )
-
-    settings = _settings(pg_url)
-    app = create_app(settings)
-    app.dependency_overrides[current_auth] = lambda: AuthContext(
-        user=SimpleNamespace(id=user_id, status="approved", role="user"),
-        session=SimpleNamespace(),
+@pytest.fixture(scope="session")
+def tt127_pg_url() -> str:
+    """优先使用显式 DSN，否则连接本验收专用的隔离 PG 监听实例。"""
+    return os.environ.get(
+        "AIA_TEST_DATABASE_URL",
+        "postgresql+psycopg://aia@127.0.0.1:55432/aia",
     )
-    redis = MemoryRedis()
-    app.dependency_overrides[get_redis] = lambda: redis
-    client = TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture()
+def world(tt127_pg_url: str) -> Iterator[World]:
+    base_url = make_url(tt127_pg_url)
+    database_name = "tt127_" + uuid.uuid4().hex
+    admin_url = base_url.set(drivername="postgresql", database="postgres")
+    source_database = base_url.database
+    if not source_database:
+        raise RuntimeError("pg_url must include a source database")
+    admin = psycopg.connect(
+        admin_url.render_as_string(hide_password=False),
+        autocommit=True,
+    )
+    created = False
     try:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+        created = True
+    finally:
+        admin.close()
+    isolated_url = base_url.set(database=database_name)
+    assert isolated_url.database == database_name, "T-T127 必须写入独立临时库"
+    repo_root = Path(__file__).resolve().parents[3]
+    alembic_config = Config(str(repo_root / "src/backend/alembic.ini"))
+    alembic_config.cmd_opts = SimpleNamespace(
+        x=[f"url={isolated_url.render_as_string(hide_password=False)}"]
+    )
+    command.upgrade(alembic_config, "head")
+    engine = create_engine(isolated_url, hide_parameters=True)
+    client: TestClient | None = None
+    app: Any | None = None
+    try:
+        user_id = uuid.uuid4()
+        named_code = f"600{uuid.uuid4().hex[:3]}.SH"
+        missing_code = f"600{uuid.uuid4().hex[:3]}.SH"
+        with engine.begin() as conn:
+            conn.execute(
+                insert(users).values(
+                    id=user_id,
+                    username=f"tt127_{user_id.hex[:12]}",
+                    password_hash="synthetic-password-hash",
+                    display_name="T-T127 虚构用户",
+                    role="user",
+                    status="approved",
+                )
+            )
+            conn.execute(
+                insert(securities).values(
+                    code=named_code,
+                    type="stock",
+                    name="T-T127 虚构证券",
+                    exchange="SH",
+                    board="main",
+                    listing_status="listed",
+                )
+            )
+
+        settings = _settings(isolated_url.render_as_string(hide_password=False))
+        app = create_app(settings)
+        app.dependency_overrides[current_auth] = lambda: AuthContext(
+            user=SimpleNamespace(id=user_id, status="approved", role="user"),
+            session=SimpleNamespace(),
+        )
+        redis = MemoryRedis()
+        app.dependency_overrides[get_redis] = lambda: redis
+        client = TestClient(app, raise_server_exceptions=False)
         yield World(engine, client, user_id, named_code, missing_code)
     finally:
-        client.close()
-        app.dependency_overrides.clear()
-    with engine.begin() as conn:
-        conn.execute(delete(user_restrictions).where(user_restrictions.c.user_id == user_id))
-        conn.execute(delete(securities).where(securities.c.code == named_code))
-        conn.execute(delete(users).where(users.c.id == user_id))
-    engine.dispose()
+        if client is not None:
+            client.close()
+        if app is not None:
+            app.dependency_overrides.clear()
+        engine.dispose()
+        if created:
+            admin = psycopg.connect(
+                admin_url.render_as_string(hide_password=False),
+                autocommit=True,
+            )
+            try:
+                admin.execute(
+                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(database_name)
+                    )
+                )
+            finally:
+                admin.close()
 
 
 def _seed_restriction(
@@ -154,15 +209,80 @@ def _error(response: Any) -> dict[str, Any]:
     return body["error"]
 
 
+def _run_mutated_copy(tmp_path: Path, replacement: tuple[str, str], test_name: str) -> subprocess.CompletedProcess[str]:
+    source = Path(__file__)
+    mutated = tmp_path / source.name
+    content = source.read_text(encoding="utf-8")
+    old, new = replacement
+    assert old in content
+    mutated.write_text(content.replace(old, new, 1), encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("MAIRUI_LICENCE", None)
+    env["PYTHONPATH"] = str(source.parents[3] / "src/backend")
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-c",
+            str(source.parents[2] / "pytest.ini"),
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--tb=short",
+            f"{mutated}::{test_name}",
+        ],
+        cwd=source.parents[3],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_mutation_b1_wrong_xfail_exception_is_red(tmp_path: Path) -> None:
+    result = _run_mutated_copy(
+        tmp_path,
+        ("raises=AssertionError,", "raises=RuntimeError,"),
+        "test_delete_recheck_gap_is_not_reported_as_release",
+    )
+    assert result.returncode != 0, result.stdout[-2000:]
+
+
+def test_mutation_b2_shared_database_target_is_red(tmp_path: Path) -> None:
+    result = _run_mutated_copy(
+        tmp_path,
+        (
+            "isolated_url = base_url.set(database=database_name)",
+            'isolated_url = base_url.set(database="aia")',
+        ),
+        "test_cooling_off_future_value_is_visible_over_http",
+    )
+    assert result.returncode != 0, result.stdout[-2000:]
+
+
+def test_mutation_b3_wrong_until_expectation_is_red(tmp_path: Path) -> None:
+    result = _run_mutated_copy(
+        tmp_path,
+        (
+            '"fields": [{"field": "until", "issue": "required_for_kind"}]',
+            '"fields": [{"field": "until", "issue": "must_be_future"}]',
+        ),
+        "test_cooling_off_requires_timezone_and_future_until",
+    )
+    assert result.returncode != 0, result.stdout[-2000:]
+
+
 def test_cooling_off_requires_timezone_and_future_until(world: World) -> None:
     missing = world.client.post(
         API,
         json={"kind": "cooling_off", "target_type": "security", "target_id": world.named_code},
     )
     assert missing.status_code == 400
-    assert _error(missing)["code"] == "VALIDATION_ERROR"
-    assert {item["issue"] for item in _error(missing)["details"]["fields"]} == {
-        "required_for_kind"
+    missing_error = _error(missing)
+    assert missing_error["code"] == "VALIDATION_ERROR"
+    assert missing_error["details"] == {
+        "fields": [{"field": "until", "issue": "required_for_kind"}]
     }
 
     past = world.client.post(
@@ -175,8 +295,9 @@ def test_cooling_off_requires_timezone_and_future_until(world: World) -> None:
         },
     )
     assert past.status_code == 400
-    assert _error(past)["code"] == "VALIDATION_ERROR"
-    assert {item["issue"] for item in _error(past)["details"]["fields"]} == {"must_be_future"}
+    past_error = _error(past)
+    assert past_error["code"] == "VALIDATION_ERROR"
+    assert past_error["details"] == {"fields": [{"field": "until", "issue": "must_be_future"}]}
 
 
 def test_cooling_off_future_value_is_visible_over_http(world: World) -> None:
@@ -279,6 +400,7 @@ def test_concurrent_delete_rechecks_and_empty_state_are_http_visible(world: Worl
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="T-T127 / §7.5 recheck gaps must return 200 with explicit no_source gap",
 )
 def test_delete_recheck_gap_is_not_reported_as_release(world: World) -> None:
@@ -327,6 +449,7 @@ def test_delete_recheck_gap_is_not_reported_as_release(world: World) -> None:
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="T-T127 / §7.5 future kind/status must render 未知 without HTTP response failure",
 )
 def test_unknown_kind_is_preserved_by_http_projection(world: World) -> None:
