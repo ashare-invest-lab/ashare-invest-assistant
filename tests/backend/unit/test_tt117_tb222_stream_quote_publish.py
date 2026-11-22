@@ -152,11 +152,8 @@ def _quote_events(world: SimpleNamespace, last_id: str) -> list[dict[str, object
     events = [event for event in _events(asyncio.run(_read_stream(world.app, last_id)))
               if event["event"] == "quote"]
     identifiers = [event["id"] for event in events]
-    assert all(isinstance(identifier, str) and identifier for identifier in identifiers)
-    assert len(set(identifiers)) == len(identifiers)
-    if identifiers and all(identifier.isdecimal() for identifier in identifiers):
-        assert all(int(left) < int(right) for left, right in zip(identifiers, identifiers[1:]))
-    # 非十进制 id 的单调性未验证，但仍已验证非空且互不相同。
+    assert all(isinstance(identifier, str) and identifier.isdecimal() for identifier in identifiers)
+    assert all(int(left) < int(right) for left, right in zip(identifiers, identifiers[1:]))
     return events
 
 def _first_quote_or_xfail(world: SimpleNamespace) -> str:
