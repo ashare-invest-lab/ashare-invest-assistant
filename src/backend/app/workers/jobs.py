@@ -64,7 +64,6 @@ from app.feedback.worker import task as rc5_expiry_task
 from app.intraday.engine import TASK as INTRADAY_UPDATED
 from app.intraday.engine import task as intraday_updated_task
 from app.marketdata.daily_bars import DAILY_BARS_FETCH, daily_bars_fetch_task
-from app.marketdata.realtime_collect import realtime_quotes_task
 from app.master.mairui_snapshot import TASK as MAIRUI_SNAPSHOT
 from app.plans.worker import TASK as PLAN_CONDITIONS
 from app.plans.worker import task as plan_conditions_task
@@ -117,7 +116,6 @@ VENDOR_SWEEP: Final = "master.vendor_batches_sweep"
 CODE_MAP_TIME: Final = "18:30"
 DAILY_BARS_FETCH_TIME: Final = "17:15"
 PURGE_SNAPSHOTS_TIME: Final = "03:30"
-REALTIME_QUOTES_FETCH: Final = "market.realtime_quotes_fetch"
 
 
 def _now() -> dt.datetime:
@@ -413,7 +411,6 @@ TASKS: Final[dict[str, Task]] = {
     RECONCILE_VENDOR_APPLY: reconcile_vendor_apply_task,
     VENDOR_SWEEP: vendor_sweep_task,
     DAILY_BARS_FETCH: daily_bars_fetch_task,
-    REALTIME_QUOTES_FETCH: realtime_quotes_task,
 }
 #: 失败重试（10 分钟后，共 3 次）且执行时持锁的任务 → 重试用尽时的处理
 RETRY_TASKS: Final[dict[str, Callable[[Settings, dict[str, Any], BaseException], None]]] = {
@@ -438,7 +435,6 @@ LOCKED_TASKS: Final = frozenset(
         RECONCILE_VENDOR,
         VENDOR_SWEEP,
         DAILY_BARS_FETCH,
-        REALTIME_QUOTES_FETCH,
     }
 )
 
@@ -448,7 +444,6 @@ def schedule(settings: Settings) -> dict[str, int]:
     return {
         RC1_CHECKS: settings.business.realtime.intervals.quote_interval_s,
         RC5_EXPIRY: settings.business.realtime.intervals.quote_interval_s,
-        REALTIME_QUOTES_FETCH: settings.business.realtime.intervals.quote_interval_s,
         "plans.conditions_sweep": settings.business.realtime.intervals.quote_interval_s,
         "master.mairui_daily_sweep": 60,
         PURGE_COOLDOWNS: settings.cooldown_purge_interval_s,
