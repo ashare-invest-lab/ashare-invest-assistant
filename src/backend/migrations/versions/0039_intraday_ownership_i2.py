@@ -114,13 +114,13 @@ def _replace_primary_key(table: str, columns: tuple[str, ...]) -> None:
 def _create_ownership_checks(table: str) -> None:
     if table == "quotes_snapshot":
         op.create_check_constraint(
-            "ck_quotes_snapshot_source",
+            "source",
             table,
             "source IN ('mairui')",
             schema=SCHEMA,
         )
     op.create_check_constraint(
-        f"ck_{table}_source_licence_relation",
+        "source_licence_relation",
         table,
         "(source IS NULL AND source_licence_id IS NULL) OR "
         "(source = 'mairui' AND source_licence_id IS NOT NULL) OR "
@@ -128,7 +128,7 @@ def _create_ownership_checks(table: str) -> None:
         schema=SCHEMA,
     )
     op.create_check_constraint(
-        f"ck_{table}_revision_nonnegative",
+        "revision_nonnegative",
         table,
         "revision >= 0",
         schema=SCHEMA,
