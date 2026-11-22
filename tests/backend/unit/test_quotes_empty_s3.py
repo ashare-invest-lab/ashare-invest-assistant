@@ -24,6 +24,8 @@ from app.api.v1 import router
 from app.auth import deps
 from app.auth.sessions import SESSION_COOKIE, Session
 from app.common.errors import install_exception_handlers
+from app.config import Settings
+from app.main import create_app
 
 OWNER, OTHER = uuid.UUID(int=711), uuid.UUID(int=712)
 CODE, ETF = "999991.SH", "999992.SH"
@@ -204,7 +206,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 is_open = state.calendar.get(params["date_1"])
                 return Result([] if is_open is None else [is_open])
             assert selected_names == {"date"}
-            assert date_comparisons[0] in (operators.lt, operators.le)
+            assert date_comparisons[0] == operators.lt
             assert params["param_1"] == 1
             has_open_filter = has_is_predicate(
                 statement,
@@ -216,11 +218,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             open_dates = [
                 day for day, is_open in state.calendar.items()
                 if (not has_open_filter or is_open is True)
-                and (
-                    day < params["date_1"]
-                    if date_comparisons[0] is operators.lt
-                    else day <= params["date_1"]
-                )
+                and day < params["date_1"]
             ]
             return Result([max(open_dates)] if open_dates else [])
         if "app.user_data_licence_status" in tables:
@@ -677,6 +675,47 @@ def test_open_day_close_freshness_before_and_after_beijing_1500(
     assert len(calendar_queries) <= calendar_reads
     if len(calendar_queries) == 2:
         assert calendar_queries[1] == "calendar_prev"
+
+
+def test_open_day_pre_market_uses_previous_close_fetched_that_day_as_fresh(
+    world: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 08:30 Beijing on an open day must use the previous open day's close.
+    world.state.now = dt.datetime(2041, 5, 7, 0, 30, tzinfo=dt.UTC)
+    world.state.latest_close_date = dt.date(2041, 5, 6)
+    world.state.calendar = {dt.date(2041, 5, 6): True, dt.date(2041, 5, 7): True}
+    world.state.bars = [
+        bar(
+            trade_date=dt.date(2041, 5, 6),
+            close=Decimal("8.1250"),
+            fetched_at=dt.datetime(2041, 5, 6, 9, 5, tzinfo=dt.UTC),
+        )
+    ]
+
+    monkeypatch.setattr("app.main.check_startup", lambda _settings: None)
+    monkeypatch.setattr("app.main.private_keys_present", lambda: False)
+    settings = Settings(
+        app_env="test",
+        database_url="postgresql://127.0.0.1:1/aia_test",
+        redis_url="redis://127.0.0.1:1/0",
+        app_master_key="test-only-master-key-xxxxxxxxxxxxxxxx",
+    )
+    app = create_app(settings)
+    app.dependency_overrides.update(world.client.app.dependency_overrides)
+    with TestClient(app) as client:
+        client.cookies.set(SESSION_COOKIE, "a")
+        response = client.get("/api/v1/quotes", params={"codes": CODE})
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["data_status"] == "fresh"
+    assert item["price"] == "8.1250"
+    assert item["t"] == "2041-05-06T15:00:00+08:00"
+    assert item["data_as_of"] == "2041-05-06T17:05:00+08:00"
+    assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
+    calendar_queries = [read for read in world.state.reads if read.startswith("calendar_")]
+    assert calendar_queries == ["calendar_is_open", "calendar_prev"]
 
 
 @pytest.mark.parametrize(
