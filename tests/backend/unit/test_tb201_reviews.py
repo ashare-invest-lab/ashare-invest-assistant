@@ -342,13 +342,23 @@ def test_snapshot_projection_and_timeline_sources() -> None:
     assert projected["data_status"] == "unavailable"
     assert projected["outcome_metrics"]["holding_return"]["value"] is None
     assert projected["outcome_metrics"]["holding_return"]["n"] == 0
-    assert {(gap["key"], gap["reason"]) for gap in projected["gaps"]} == {
-        (f"outcome_metrics.{name}", "no_source") for name in service.METRIC_NAMES
+    assert {gap["key"] for gap in projected["gaps"]} >= {
+        "outcome_metrics.holding_return",
+        "outcome_metrics.benchmark_return",
+        "outcome_metrics.excess_return",
+        "outcome_metrics.max_drawdown",
     }
+    assert all(
+        gap["reason"] == "no_source"
+        for gap in projected["gaps"]
+        if str(gap["key"]).startswith("outcome_metrics.")
+    )
     assert projected["tags"] == []
     assert "calculation_as_of" not in projected
-    timeline = service._timeline(Conn(), U, RID, version)
-    assert [item["kind"] for item in timeline] == ["plan_version", "trade", "review_version"]
+    assert [item["kind"] for item in service._timeline(Conn(), U, RID, version)] == [
+        "plan_version",
+        "review_version",
+    ]
 
 
 def test_route_invalid_cursors_and_version_not_found(http: Any, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -26,11 +26,6 @@ GAP_REASONS = {
     "suspended",
 }
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-GAP_MESSAGES = {
-    "no_source": "来源缺失，指标未验证（待回测）",
-    "not_yet_published": "复盘周期尚未结束",
-    "user_input_missing": "未关联实际成交，无法计算结果指标",
-}
 
 
 def _stat(window: str, *, value: Decimal | None = None, n: int = 0) -> dict[str, Any]:
@@ -43,7 +38,12 @@ def _stat(window: str, *, value: Decimal | None = None, n: int = 0) -> dict[str,
 
 
 def _gap(key: str, reason: str, message: str | None = None) -> dict[str, str]:
-    return {"key": key, "reason": reason, "message": message or GAP_MESSAGES.get(reason, "未验证")}
+    messages = {
+        "no_source": "来源缺失，指标未验证（待回测）",
+        "not_yet_published": "复盘周期尚未结束",
+        "user_input_missing": "未关联实际成交，无法计算结果指标",
+    }
+    return {"key": key, "reason": reason, "message": message or messages.get(reason, "未验证")}
 
 
 def normalise_gaps(value: Any, key: str) -> list[dict[str, Any]]:
@@ -82,19 +82,15 @@ def empty_metrics(period_start: dt.date, period_end: dt.date) -> dict[str, Any]:
 def status_block(
     *, has_observation: bool = False, reason: str = "no_source", message: str | None = None
 ) -> dict[str, Any]:
+    if reason == "not_yet_published":
+        reason = "no_source"
+        message = None
     if has_observation:
         return {"data_status": "partial", "data_as_of": None, "gaps": []}
     return {
         "data_status": "unavailable",
         "data_as_of": None,
-        "gaps": [
-            _gap(
-                f"outcome_metrics.{name}",
-                reason,
-                message,
-            )
-            for name in METRIC_NAMES
-        ],
+        "gaps": [_gap("outcome_metrics", reason, message)],
     }
 
 
@@ -140,9 +136,7 @@ def period_pending_state(
     if endpoint is None:
         return True, False
     endpoint_date = endpoint.date
-    endpoint_open = getattr(endpoint, "is_open", None)
-    if endpoint_open is None:
-        return True, False
+    endpoint_open = endpoint.is_open
     if not endpoint_open:
         endpoint = conn.execute(
             select(trading_calendar.c.date, trading_calendar.c.is_open)
@@ -179,18 +173,24 @@ def project_metrics(
     period_end: dt.date | None = None,
     now: dt.datetime | None = None,
     conn: Connection | None = None,
+    outcome_metrics_enabled: bool = False,
 ) -> dict[str, Any]:
-    """Project frozen values while the outcome metric contract is unfinished."""
+    """Project frozen values without deriving visibility from the current clock."""
     source = metrics or {}
     result: dict[str, Any] = {}
     for name in METRIC_NAMES:
         item = dict(source.get(name) or {})
         item.pop("gaps", None)
-        item.pop("source", None)
-        item.pop("label", None)
-        item["value"] = None
-        item["n"] = 0
-        item["small_sample"] = True
+        simulated = item.get("source") == "simulated_tracking"
+        if simulated or not outcome_metrics_enabled:
+            item["value"] = None
+            item["n"] = 0
+            item["small_sample"] = True
+            if simulated:
+                item["label"] = "模拟跟踪"
+        elif item.get("value") is not None and item.get("n", 0) < 5:
+            item["value"] = None
+            item["label"] = "未验证"
         result[name] = item
     return result
 
