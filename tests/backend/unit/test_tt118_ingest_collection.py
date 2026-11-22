@@ -114,7 +114,9 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 def _engine() -> object:
-    pg_url = os.environ["AIA_TEST_DATABASE_URL"]
+    pg_url = os.environ.get("AIA_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    if not pg_url:
+        pytest.skip("AIA_TEST_DATABASE_URL or DATABASE_URL is required")
     backend = Path(__file__).resolve().parents[3] / "src" / "backend"
     alembic = Config(str(backend / "alembic.ini"))
     alembic.cmd_opts = SimpleNamespace(x=[f"url={pg_url}"])
