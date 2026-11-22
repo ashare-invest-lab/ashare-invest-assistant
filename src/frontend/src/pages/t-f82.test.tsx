@@ -9,7 +9,8 @@ import { QuoteStreamFallback } from '../components/QuoteStreamFallback';
 import { StreamPollingContext, StreamStatusContext, isStreamEnabled, streamConfig, useStreamStatus } from '../app/streamContext';
 import { applyStreamEvent } from '../app/streamEvents';
 import { mk, useQuote } from '../api/marketQueries';
-import type { QuoteItem, TerminalResponse } from '../api/types';
+import type { QuoteItem, TerminalResponse, TodayResponse } from '../api/types';
+import { isQuoteStale } from '../lib/quoteDisplay';
 import { makeQueryClient } from '../app/queryClient';
 import { STALE_QUOTE_EXAMPLE, TERMINAL_ROWS } from '../mocks/fixtures';
 import { mockLoginAs } from '../mocks/session';
@@ -62,6 +63,52 @@ describe('T-F82 stream consumption', () => {
     expect(qc.getQueryData(['terminal'])).toBeUndefined();
   });
 
+  it('按项 t 判断过期、同步 /today，并拒绝倒退行情', () => {
+    const qc = new QueryClient();
+    const row = TERMINAL_ROWS.find((item) => item.quote)!;
+    const snapshot = {
+      account_id: null, server_time: '2026-11-02T10:31:00+08:00', trade_date: '2026-11-02', session: 'morning',
+      account: null, rows: [{ ...row, quote: { ...row.quote!, t: '2026-11-02T09:00:00+08:00' }, data_status: 'fresh' }], truncated: false, unread_notifications: 0,
+    } satisfies TerminalResponse;
+    qc.setQueryData<TerminalResponse>(['terminal', 'all'], snapshot);
+    qc.setQueryData<TodayResponse>(['today'], {
+      server_time: snapshot.server_time, trade_date: snapshot.trade_date, session: snapshot.session,
+      focus: { items: snapshot.rows, more: false },
+    } as unknown as TodayResponse);
+    qc.setQueryData<QuoteItem>(['quotes', row.security_code], { ...STALE_QUOTE_EXAMPLE.item, t: '2026-11-02T09:00:00+08:00', data_status: 'fresh' });
+
+    applyStreamEvent(qc, { id: '1', type: 'quote', data: {
+      items: [{ security_code: row.security_code, name: row.name, price: '12.34', change_pct: '1.20', amount: '5678', t: '2026-11-02T10:00:00+08:00' }],
+      data_as_of: '2026-11-02T10:00:00+08:00',
+    } });
+    expect(qc.getQueryData<TerminalResponse>(['terminal', 'all'])!.rows[0]).toMatchObject({ data_status: 'stale', quote: { price: '12.34' } });
+    expect(qc.getQueryData<TodayResponse>(['today'])!.focus.items[0]).toMatchObject({ data_status: 'stale', quote: { price: '12.34' } });
+    expect(qc.getQueryData<QuoteItem>(['quotes', row.security_code])!.data_status).toBe('stale');
+
+    applyStreamEvent(qc, { id: '2', type: 'quote', data: {
+      items: [{ security_code: row.security_code, name: row.name, price: '99.99', change_pct: '9.99', amount: '9999', t: '2026-11-02T09:59:00+08:00' }],
+      data_as_of: '2026-11-02T09:59:00+08:00',
+    } });
+    expect(qc.getQueryData<TerminalResponse>(['terminal', 'all'])!.rows[0].quote?.price).toBe('12.34');
+  });
+
+  it('按 #387 时段表使用 30 秒 stale_threshold_s', () => {
+    expect(isQuoteStale('2026-11-02T10:30:31+08:00', { now: '2026-11-02T10:31:00+08:00', session: 'morning' })).toBe(false);
+    expect(isQuoteStale('2026-11-02T10:30:00+08:00', { now: '2026-11-02T10:31:00+08:00', session: 'morning' })).toBe(true);
+    expect(isQuoteStale('2026-11-02T11:29:00+08:00', { now: '2026-11-02T12:30:00+08:00', session: 'lunch_break' })).toBe(true);
+    expect(isQuoteStale('2026-11-02T15:00:00+08:00', { now: '2026-11-02T15:00:20+08:00', session: 'closed' })).toBe(false);
+    expect(isQuoteStale('2026-10-30T15:00:00+08:00', { now: '2026-11-02T09:20:00+08:00', session: 'call_auction', tradeDate: '2026-11-02' })).toBe(false);
+    expect(isQuoteStale('2026-10-30T15:00:00+08:00', { now: '2026-11-02T09:00:00+08:00', session: 'pre_open', tradeDate: '2026-11-02' })).toBe(false);
+  });
+
+  it('/quotes 条件读取返回 304，复用 ETag', async () => {
+    const first = await fetch('/api/v1/quotes?codes=600000.SH');
+    const etag = first.headers.get('ETag');
+    expect(etag).toBeTruthy();
+    const second = await fetch('/api/v1/quotes?codes=600000.SH', { headers: { 'If-None-Match': etag! } });
+    expect(second.status).toBe(304);
+  });
+
   it('delivers an opened stream quote to terminal and mounted /quotes cache', async () => {
     const qc = new QueryClient();
     const row = TERMINAL_ROWS.find((item) => item.quote)!;
@@ -93,6 +140,24 @@ describe('T-F82 stream consumption', () => {
       expect(qc.getQueryCache().find({ queryKey: mk.quote('600000.SH') })!.observers[0].options.refetchInterval).toBe(15_000);
       view.unmount();
     }
+  });
+
+  it('useQuote 的后续读取带 If-None-Match 并接受 304', async () => {
+    const seen: (string | null)[] = [];
+    const item = STALE_QUOTE_EXAMPLE.item;
+    server.use(http.get('/api/v1/quotes', ({ request }) => {
+      const inm = request.headers.get('If-None-Match');
+      seen.push(inm);
+      if (inm === 'W/"quote-test"') return new HttpResponse(null, { status: 304, headers: { ETag: 'W/"quote-test"' } });
+      return HttpResponse.json({ items: [item] }, { headers: { ETag: 'W/"quote-test"' } });
+    }));
+    const qc = new QueryClient();
+    const view = renderHook(() => useQuote(item.security_code), { wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
+    await waitFor(() => expect(view.result.current.data?.security_code).toBe(item.security_code));
+    await qc.refetchQueries({ queryKey: mk.quote(item.security_code) });
+    expect(seen).toEqual([null, 'W/"quote-test"']);
+    expect(view.result.current.data?.price).toBe(item.price);
+    view.unmount();
   });
 });
 

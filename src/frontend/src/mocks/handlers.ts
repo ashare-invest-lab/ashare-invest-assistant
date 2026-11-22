@@ -232,7 +232,7 @@ const routeHandlers = [
     if (codes.length > 200) return validation('codes', 'codes 最多 200 个');
     // ETF 只在明确请求时返回（示例自选里没有 ETF）
     const items = codes.length ? [...QUOTES, ...ETF_QUOTES].filter((q) => codes.includes(q.security_code)) : QUOTES;
-    return HttpResponse.json({ items: items.map((q) => degrade(q, `quote.${q.security_code}`)) });
+    return jsonWithEtag(request, { items: items.map((q) => degrade(q, `quote.${q.security_code}`)) });
   }),
   http.get(`${API}/securities/:code/bars`, async ({ params, request }) => {
     await lag();

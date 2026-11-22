@@ -7,7 +7,7 @@ import { DataGrid, type DataColumn } from '../../components/DataGrid';
 import { ActionBadge, ConsensusBadge, DataStatusTag } from '../../components/common';
 import { EXECUTABILITY, REGIME, RISK_LEVEL } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtPrice, pctClass, signed } from '../../lib/format';
-import { quoteCloseTagText } from '../../lib/quoteDisplay';
+import { isQuoteStale, quoteCloseTagText } from '../../lib/quoteDisplay';
 
 const SCOPES: { label: string; value: TerminalScope }[] = [
   { label: '全部', value: 'all' },
@@ -37,7 +37,7 @@ export function AccountStrip({ account }: { account: TerminalAccount | null | un
 /** 行 id 用稳定引用（批量事务按 id 对齐） */
 const rowIdOf = (r: TerminalRow) => r.security_code;
 
-export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, onOpen }: {
+export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, onOpen, serverTime, session, tradeDate }: {
   rows: TerminalRow[];
   loading: boolean;
   scope: TerminalScope;
@@ -45,6 +45,9 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
   selected: string | null;
   onSelect: (r: TerminalRow) => void;
   onOpen: (r: TerminalRow) => void;
+  serverTime?: string;
+  session?: string;
+  tradeDate?: string;
 }) {
   const columns = useMemo<DataColumn<TerminalRow>[]>(() => [
     {
@@ -62,7 +65,9 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       render: (r) => {
         const q = r.quote;
         if (!q) return <span className="muted">—</span>;
-        const closeTag = quoteCloseTagText(r.data_status, q.t);
+        const freshness = { now: serverTime, session, tradeDate };
+        const displayStatus = r.data_status === 'fresh' && serverTime !== undefined && isQuoteStale(q.t, freshness) ? 'stale' : r.data_status;
+        const closeTag = quoteCloseTagText(displayStatus, q.t, freshness);
         if (q.price === null || q.price === undefined || q.price === '') {
           return (
             <>
@@ -122,14 +127,14 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       key: 'risk', header: '风控', width: 50, sortable: false,
       render: (r) => (r.max_risk_level ? <span style={{ color: tagOf(RISK_LEVEL, r.max_risk_level).color === 'red' ? '#ff7b72' : tagOf(RISK_LEVEL, r.max_risk_level).color === 'orange' ? '#f0b429' : labelOf(RISK_LEVEL, r.max_risk_level) ? '#58a6ff' : '#7d8794' }}>{tagOf(RISK_LEVEL, r.max_risk_level).text}</span> : <span className="muted">—</span>),
     },
-    { key: 'ds', header: '数据', width: 72, sortable: false, render: (r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
-  ], []);
+    { key: 'ds', header: '数据', width: 72, sortable: false, render: (r) => <DataStatusTag status={r.data_status === 'fresh' && serverTime !== undefined && isQuoteStale(r.quote?.t, { now: serverTime, session, tradeDate }) ? 'stale' : r.data_status} asOf={r.data_as_of} /> },
+  ], [serverTime, session, tradeDate]);
 
   return (
     <>
       <div className="panel-head">
         <span className="panel-title">自选 / 持仓</span>
-        <Segmented size="small" options={SCOPES} value={scope} onChange={(v) => onScope(v as TerminalScope)} />
+        <Segmented size="small" options={SCOPES} value={scope} onChange={(v: string | number) => onScope(v as TerminalScope)} />
         <span className="muted small" style={{ marginLeft: 'auto' }}>{rows.length} 只</span>
       </div>
       <DataGrid<TerminalRow>
@@ -142,7 +147,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
         selectedId={selected}
         onRowClick={onSelect}
         onRowDoubleClick={onOpen}
-        rowClass={(r) => (r.data_status === 'stale' || r.data_status === 'unavailable' ? 'row-stale' : undefined)}
+        rowClass={(r) => (r.data_status === 'stale' || r.data_status === 'unavailable' || (serverTime !== undefined && isQuoteStale(r.quote?.t, { now: serverTime, session, tradeDate })) ? 'row-stale' : undefined)}
         emptyText="暂无自选或持仓"
       />
       <div className="table-foot muted small">单击切换图表与右侧卡片 · 双击进入候选信号卡详情 · 灰显行 = 数据已过期/不可用</div>

@@ -110,13 +110,16 @@ export function TerminalPage() {
                     selected={current?.security_code ?? null}
                     onSelect={(r) => select(r.security_code)}
                     onOpen={open}
+                    serverTime={terminal.data?.server_time}
+                    session={terminal.data?.session}
+                    tradeDate={terminal.data?.trade_date}
                   />
                 </section>
               </Panel>
               <Separator className="rz-sep h" data-testid="sep-left" />
               <Panel id="center" minSize="26">
                 <section className="panel center center-body">
-                  <ChartPanel row={current} suggestion={sug.data} tradeDate={terminal.data?.trade_date ?? null} />
+                  <ChartPanel row={current} suggestion={sug.data} tradeDate={terminal.data?.trade_date ?? null} serverTime={terminal.data?.server_time} session={terminal.data?.session} />
                 </section>
               </Panel>
               <Separator className="rz-sep h" data-testid="sep-right" />
