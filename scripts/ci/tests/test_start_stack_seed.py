@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -78,9 +79,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 # remaining: container + command
-if [[ "$*" == *alembic_version* ]]; then
-  echo 'relation "alembic_version" does not exist' >&2
-  exit 1
+if [[ "$*" == *"SELECT version_num FROM alembic_version"* ]]; then
+  echo "QUERY $*" >>"$FAKE_DIR/docker.log"
+  # The production query must leave the container role and target-db fallback
+  # expression for the container shell to expand.  Host-side defaults are the
+  # regressions this shim rejects.
+  if [[ "$*" != *'"$POSTGRES_USER"'* ]] || [[ "$*" != *'"${AIA_TARGET_DB:-$POSTGRES_DB}"'* ]]; then
+    echo 'role "postgres" does not exist' >&2
+    exit 1
+  fi
+  printf '0028\n'
+  exit 0
 fi
 exit 0
 """
@@ -102,7 +111,9 @@ def fake(tmp_path: Path) -> Path:
     bindir.mkdir()
     compose = bindir / "compose.sh"
     # Bypass the real compose wrapper: never read .env or any secret files.
-    compose.write_text('#!/usr/bin/env bash\nexec docker compose "$@"\n', encoding="utf-8")
+    compose.write_text(
+        '#!/usr/bin/env bash\nexec docker compose "$@"\n', encoding="utf-8"
+    )
     compose.chmod(0o755)
     (bindir / "compose-stub.sh").write_text(FAKE_COMPOSE, encoding="utf-8")
     docker = bindir / "docker"
@@ -114,7 +125,9 @@ def fake(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _run(fake: Path, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    fake: Path, *args: str, script: Path = SCRIPT, **extra: str
+) -> subprocess.CompletedProcess[str]:
     dest = fake / "20260101T000000Z"
     env = {
         "PATH": str(fake / "bin") + os.pathsep + os.environ["PATH"],
@@ -132,7 +145,7 @@ def _run(fake: Path, *args: str, **extra: str) -> subprocess.CompletedProcess[st
     return subprocess.run(
         [
             "bash",
-            str(SCRIPT),
+            str(script),
             *args,
             "--backup-dir",
             str(dest),
@@ -143,11 +156,30 @@ def _run(fake: Path, *args: str, **extra: str) -> subprocess.CompletedProcess[st
             "--volume-prefix",
             "o69",
         ],
+        check=False,
         capture_output=True,
         text=True,
         env=env,
         timeout=30,
     )
+
+
+def _copy_script(fake: Path, *, mutate_credentials: bool = False) -> Path:
+    wrapup = fake / "wrapup"
+    wrapup.mkdir(exist_ok=True)
+    script = wrapup / "start-stack.sh"
+    text = SCRIPT.read_text(encoding="utf-8")
+    if mutate_credentials:
+        old = 'psql -X -q -At -U "$POSTGRES_USER" -d "${AIA_TARGET_DB:-$POSTGRES_DB}"'
+        text = text.replace(
+            old,
+            'psql -X -q -At -U "${POSTGRES_USER:-postgres}" -d "${AIA_TARGET_DB:-$POSTGRES_DB}"',
+        )
+        assert text != SCRIPT.read_text(encoding="utf-8")
+    script.write_text(text, encoding="utf-8")
+    script.chmod(0o755)
+    shutil.copy(SCRIPT.parent / "lib.sh", wrapup / "lib.sh")
+    return script
 
 
 def _compose_log(fake: Path) -> str:
@@ -177,8 +209,14 @@ def test_seed_inserted_continues_and_starts_worker(fake: Path, inserted: str) ->
     assert _seed_run(log)
     assert _worker_up(log)
     # seed RUN 出现在 worker UP 之前
-    run_at = min(i for i, line in enumerate(log.splitlines()) if line.startswith("RUN "))
-    up_at = min(i for i, line in enumerate(log.splitlines()) if "UP " in line and "worker" in line)
+    run_at = min(
+        i for i, line in enumerate(log.splitlines()) if line.startswith("RUN ")
+    )
+    up_at = min(
+        i
+        for i, line in enumerate(log.splitlines())
+        if "UP " in line and "worker" in line
+    )
     assert run_at < up_at
     assert "--entrypoint" not in log
     assert "postgresql" not in r.stdout + r.stderr
@@ -204,7 +242,9 @@ def test_hash_conflict_stops_without_starting_worker(fake: Path) -> None:
 
 
 def test_nonzero_rc_stops_without_starting_worker(fake: Path) -> None:
-    r = _run(fake, "--apply", FAKE_SEED_OUT="", FAKE_SEED_ERR="boom\n", FAKE_SEED_RC="3")
+    r = _run(
+        fake, "--apply", FAKE_SEED_OUT="", FAKE_SEED_ERR="boom\n", FAKE_SEED_RC="3"
+    )
     assert r.returncode != 0, r.stderr
     assert "退出码为 3" in r.stderr
     assert "不启动 worker" in r.stderr
@@ -216,7 +256,12 @@ def test_nonzero_rc_stops_without_starting_worker(fake: Path) -> None:
 
 @pytest.mark.parametrize(
     "out",
-    ["", "not-a-result\n", "engine_policy_seed_inserted=2\n", "engine_policy_seed_inserted=1\nextra\n"],
+    [
+        "",
+        "not-a-result\n",
+        "engine_policy_seed_inserted=2\n",
+        "engine_policy_seed_inserted=1\nextra\n",
+    ],
 )
 def test_unparseable_output_stops_without_starting_worker(fake: Path, out: str) -> None:
     r = _run(fake, "--apply", FAKE_SEED_OUT=out, FAKE_SEED_RC="0")
@@ -285,24 +330,39 @@ def test_crlf_output_is_accepted_and_starts_worker(fake: Path, out: str) -> None
 def test_one_shot_jobs_use_exit_codes_and_only_daemons_wait(fake: Path) -> None:
     r = _run(fake, "--apply")
     assert r.returncode == 0, r.stdout + r.stderr
-    commands = [line.removeprefix("DOCKER compose ") for line in
-                (fake / "docker.log").read_text(encoding="utf-8").splitlines()
-                if line.startswith("DOCKER compose up ")]
+    commands = [
+        line.removeprefix("DOCKER compose ")
+        for line in (fake / "docker.log").read_text(encoding="utf-8").splitlines()
+        if line.startswith("DOCKER compose up ")
+    ]
     assert len(commands) == 5, commands
     assert commands[0].endswith("--no-deps postgres redis")
     assert commands[-1].endswith("--no-deps api worker beat ingest signal-rt nginx")
     for command in (commands[0], commands[-1]):
         assert "--wait" in command.split() and "-d" in command.split()
-    for command, service in zip(commands[1:4], ("migrate", "timescale-apply", "db-roles")):
-        assert command.split() == ["up", "--build", "--no-deps", "--exit-code-from", service, service]
+    for command, service in zip(
+        commands[1:4], ("migrate", "timescale-apply", "db-roles")
+    ):
+        assert command.split() == [
+            "up",
+            "--build",
+            "--no-deps",
+            "--exit-code-from",
+            service,
+            service,
+        ]
     log = _compose_log(fake)
-    assert log.index("UP up --build --no-deps --exit-code-from db-roles") < log.index("RUN run")
+    assert log.index("UP up --build --no-deps --exit-code-from db-roles") < log.index(
+        "RUN run"
+    )
     assert _receipt(fake) == "engine_policy_seed_inserted=1\n"
 
 
 @pytest.mark.parametrize("service", ["migrate", "timescale-apply", "db-roles"])
 @pytest.mark.parametrize("rc", [1, 7])
-def test_one_shot_failure_stops_all_later_steps(fake: Path, service: str, rc: int) -> None:
+def test_one_shot_failure_stops_all_later_steps(
+    fake: Path, service: str, rc: int
+) -> None:
     r = _run(fake, "--apply", FAKE_JOB_SERVICE=service, FAKE_JOB_RC=str(rc))
     assert r.returncode == rc, r.stdout + r.stderr
     assert f"{service} 退出码为 {rc}" in r.stderr
@@ -311,8 +371,11 @@ def test_one_shot_failure_stops_all_later_steps(fake: Path, service: str, rc: in
     assert not _worker_up(log)
     assert _receipt(fake) is None
     jobs = ["migrate", "timescale-apply", "db-roles"]
-    for later in jobs[jobs.index(service) + 1:]:
-        assert not any(line.startswith("UP ") and line.endswith(f" {later}") for line in log.splitlines())
+    for later in jobs[jobs.index(service) + 1 :]:
+        assert not any(
+            line.startswith("UP ") and line.endswith(f" {later}")
+            for line in log.splitlines()
+        )
     calls = (fake / "docker.log").read_text(encoding="utf-8")
     assert f"RESULT compose rc={rc}" in calls
 
@@ -321,7 +384,36 @@ def test_dry_run_describes_foreground_one_shot_jobs(fake: Path) -> None:
     r = _run(fake)
     assert r.returncode == 0, r.stderr
     for service in ("migrate", "timescale-apply", "db-roles"):
-        line = next(line for line in r.stderr.splitlines() if f"--exit-code-from {service} {service}" in line)
+        line = next(
+            line
+            for line in r.stderr.splitlines()
+            if f"--exit-code-from {service} {service}" in line
+        )
         assert "--wait" not in line and " -d " not in line
     assert _compose_log(fake) == ""
     assert not (fake / "docker.log").exists()
+
+
+def test_alembic_query_uses_container_credentials(fake: Path) -> None:
+    r = _run(fake, "--apply")
+    assert r.returncode == 0, r.stderr
+    query = next(
+        line
+        for line in (fake / "docker.log").read_text(encoding="utf-8").splitlines()
+        if line.startswith("QUERY ")
+    )
+    assert '"$POSTGRES_USER"' in query
+    assert '"${AIA_TARGET_DB:-$POSTGRES_DB}"' in query
+    assert '"$POSTGRES_DB"' not in query
+    assert '"${POSTGRES_USER:-postgres}"' not in query
+    assert '"postgres"' not in query
+    docker = (fake / "docker.log").read_text(encoding="utf-8")
+    assert "-e AIA_TARGET_DB=aia" in docker
+
+
+def test_alembic_query_credential_mutation_is_red(fake: Path) -> None:
+    mutated = _copy_script(fake, mutate_credentials=True)
+    r = _run(fake, "--apply", script=mutated)
+    assert r.returncode != 0
+    assert 'role "postgres" does not exist' in r.stderr
+    assert "拒绝 migrate" in r.stderr
