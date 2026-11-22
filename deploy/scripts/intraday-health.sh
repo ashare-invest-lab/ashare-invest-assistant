@@ -249,6 +249,9 @@ if [ "$quotes_source" = off ]; then
 elif [ "$quotes_source" != fake ] && [ "$quotes_source" != mairui ]; then
     emit "$(format_time) 状态=配置错误 心跳龄=${heartbeat_age} 队列=${queue_display} 说明=REALTIME_QUOTES_SOURCE 无效"
     exit 2
+elif [ -z "$quotes_ts_key" ]; then
+    emit "$(format_time) 状态=行情未接入 心跳龄=${heartbeat_age} 队列=${queue_display} 说明=行情时间戳键未配置"
+    exit 2
 elif [ "$quotes_connected" = true ]; then
     quotes_ts=$(printf '%s' "$quotes_ts" | tr -d '\r\n')
     if ! is_uint "$quotes_ts"; then
@@ -288,8 +291,10 @@ elif [ "$quotes_connected" = true ]; then
         if [ "$config_stale" = null ]; then quote_stale_after=$((quote_interval * 2)); else quote_stale_after=$config_stale; fi
     fi
     quote_age=$((now - quotes_ts))
-    [ "$quote_age" -lt 0 ] && quote_age=0
-    if [ "$quote_age" -gt "$quote_stale_after" ]; then quote_state=过期; else quote_state=正常; fi
+    if [ "$quote_age" -lt 0 ]; then quote_state=时间异常
+    elif [ "$quote_age" -gt "$quote_stale_after" ]; then quote_state=过期
+    else quote_state=正常
+    fi
 fi
 if [ "$queue_check" = true ] && [ "$queue" -eq 0 ]; then
     first_zero=''
@@ -311,6 +316,10 @@ else
 fi
 if [ "$quote_state" = 过期 ]; then
     emit "$(format_time) 状态=行情过期 心跳龄=${heartbeat_age} 队列=${queue_display} 说明=行情龄=${quote_age}秒 阈值=${quote_stale_after}秒"
+    exit 2
+fi
+if [ "$quote_state" = 时间异常 ]; then
+    emit "$(format_time) 状态=行情时间异常 心跳龄=${heartbeat_age} 队列=${queue_display} 说明=行情时间差=${quote_age}秒（未来时间戳）"
     exit 2
 fi
 if [ "$queue_check" = true ]; then
