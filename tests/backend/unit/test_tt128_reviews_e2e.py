@@ -396,7 +396,7 @@ def test_timeline_separates_simulated_tracking_from_actual_trade_evidence(http: 
     review_id, version_id, snapshot_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     window = "2025-01-02/2025-01-08"
     simulated = {
-        name: {"value": "12.00", "n": 10, "window": window, "small_sample": True, "source": "simulated_tracking"}
+        name: {"value": "12.00", "n": 10, "window": window, "small_sample": True}
         for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown")
     }
     items = {
@@ -423,7 +423,9 @@ def test_timeline_separates_simulated_tracking_from_actual_trade_evidence(http: 
     assert payload["current_version"]["attribution"]["execution"] == []
     for metric in payload["current_version"]["outcome_metrics"].values():
         assert metric["value"] is None
-        assert metric["source"] == "simulated_tracking"
+        assert metric["n"] == 0
+        assert metric["small_sample"] is True
+        assert "source" not in metric
 
 
 def test_import_commit_visibility_and_pit_do_not_make_zero_samples(http: TestClient, pg: Engine) -> None:
