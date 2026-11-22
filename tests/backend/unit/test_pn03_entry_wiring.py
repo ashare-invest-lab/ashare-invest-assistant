@@ -1,5 +1,5 @@
 """T-T86 / PN-03 §12：十七个原入口逐一接线；仅虚构数据与隔离资源。
-PR162 契约未合入；5个已确认实现FAIL以strict xfail关联T-B168，环境缺工具单列。D0–D3/代码全合成。
+PR162 契约未合入；5个T-B168测试已不再使用strict xfail，环境缺工具单列。D0–D3/代码全合成。
 """
 
 from __future__ import annotations
@@ -175,7 +175,6 @@ def _prepare(*, factors=(), instrument=None, as_of=None):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="T-B168: seed_calendar 冲突未拒")
 def test_pn03_entry_seed_calendar(conn) -> None:
     assert seed_calendar(conn, _seed()) == 3
     rows = conn.execute(
@@ -277,7 +276,6 @@ def test_pn03_entry_owned_snapshot(conn) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="T-B168: prepare 缺 available_at 仍 KeyError")
 def test_pn03_entry_prepare() -> None:
     early = {
         "date": D0.isoformat(),
@@ -303,7 +301,6 @@ def test_pn03_entry_prepare() -> None:
     assert bj["gaps"] == [f"adjust_factor_missing:{D0}"]
 
 
-@pytest.mark.xfail(strict=True, reason="T-B168: calendar_seed CLI 冲突未拒")
 def test_pn03_entry_calendar_seed_cli(
     tmp_path, monkeypatch, capsys, pn03_engine
 ) -> None:
@@ -356,7 +353,6 @@ def _gbbq_zip(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-@pytest.mark.xfail(strict=True, reason="T-B168: GBBQ 因子缺 available_at 仍 KeyError")
 def test_pn03_entry_gbbq_cli(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tb143_export, "load_pytdx_keys", lambda: KEYS)
     archive = tmp_path / "gbbq.zip"
@@ -539,9 +535,6 @@ def _event_rows(duplicate=False) -> dict[str, list]:
     }
 
 
-@pytest.mark.xfail(
-    strict=True, reason="T-B168: load_meta 因子缺 available_at 仍 KeyError"
-)
 def test_pn03_entry_load_meta_sql(pg_conn) -> None:
     schema = _probe_schema(pg_conn)
     counts = _run_sql(
