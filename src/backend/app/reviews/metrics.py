@@ -82,10 +82,13 @@ def empty_metrics(period_start: dt.date, period_end: dt.date) -> dict[str, Any]:
 def status_block(
     *, has_observation: bool = False, reason: str = "no_source", message: str | None = None
 ) -> dict[str, Any]:
+    if reason == "not_yet_published":
+        reason = "no_source"
+        message = None
     if has_observation:
         return {"data_status": "partial", "data_as_of": None, "gaps": []}
     return {
-        "data_status": "pending" if reason == "not_yet_published" else "unavailable",
+        "data_status": "unavailable",
         "data_as_of": None,
         "gaps": [_gap("outcome_metrics", reason, message)],
     }
@@ -170,19 +173,21 @@ def project_metrics(
     period_end: dt.date | None = None,
     now: dt.datetime | None = None,
     conn: Connection | None = None,
+    outcome_metrics_enabled: bool = False,
 ) -> dict[str, Any]:
-    """Project frozen values, applying only the not-yet-ended period gate."""
+    """Project frozen values without deriving visibility from the current clock."""
     source = metrics or {}
-    pending = period_pending(period_end, now=now, conn=conn)
     result: dict[str, Any] = {}
     for name in METRIC_NAMES:
         item = dict(source.get(name) or {})
         item.pop("gaps", None)
-        if item.get("source") == "simulated_tracking":
+        simulated = item.get("source") == "simulated_tracking"
+        if simulated or not outcome_metrics_enabled:
             item["value"] = None
-            item["label"] = "模拟跟踪"
-        if pending:
-            item["value"] = None
+            item["n"] = 0
+            item["small_sample"] = True
+            if simulated:
+                item["label"] = "模拟跟踪"
         elif item.get("value") is not None and item.get("n", 0) < 5:
             item["value"] = None
             item["label"] = "未验证"
