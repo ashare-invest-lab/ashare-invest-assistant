@@ -9,6 +9,7 @@ import json
 import uuid
 from collections.abc import Sequence
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Row, insert, select, update
 
@@ -20,6 +21,13 @@ from app.db.tables.reviews import data_snapshots, review_versions, reviews
 from app.reviews.metrics import empty_metrics, status_block
 
 # fmt: off
+
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+def _bj_iso(value: dt.datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.UTC)
+    return value.astimezone(BEIJING).isoformat()
 
 def _bad(field: str, issue: str) -> AppError:
     return AppError(ErrorCode.VALIDATION_ERROR, details={"fields": [{"field": field, "issue": issue}]})
@@ -242,7 +250,7 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any]) -> dict[str,
         "tags": list(row.tags or []),
         "attribution": row.attribution or snap.get("attribution", {"judgement": [], "execution": [], "market": []}),
         "outcome_metrics": row.outcome_metrics or snap.get("outcome_metrics", {}),
-        "created_at": row.created_at.isoformat(),
+        "created_at": _bj_iso(row.created_at),
         "data_status": snap.get("data_status", "unavailable"),
         "data_as_of": snap.get("data_as_of"),
         "gaps": snap.get("gaps", []),
@@ -252,7 +260,7 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
     result = [
         {
             "kind": "review_version",
-            "at": r.created_at.isoformat(),
+            "at": _bj_iso(r.created_at),
             "resource_id": str(r.id),
             "version_no": r.version_no,
             "evidence_ids": [],
@@ -263,7 +271,7 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
         result.extend(
             {
                 "kind": "plan_version",
-                "at": r.created_at.isoformat(),
+                "at": _bj_iso(r.created_at),
                 "resource_id": str(r.id),
                 "version_no": r.version_no,
                 "evidence_ids": [],
@@ -274,7 +282,7 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
         result.extend(
             {
                 "kind": "trade",
-                "at": r.created_at.isoformat(),
+                "at": _bj_iso(r.created_at),
                 "resource_id": str(r.id),
                 "version_no": None,
                 "evidence_ids": [],
@@ -297,7 +305,7 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
         "period_start": review.period_start.isoformat(),
         "period_end": review.period_end.isoformat(),
         "current_version_no": current.version_no if current is not None else None,
-        "created_at": review.created_at.isoformat(),
+        "created_at": _bj_iso(review.created_at),
         "current_version": version_body(conn, owner, current) if current is not None else None,
         "timeline": _timeline(conn, owner, identifier, current),
         "evidence": [],
@@ -317,7 +325,7 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "period_end": row.period_end.isoformat(),
         "current_version_no": version.version_no if version is not None else None,
         "current_version": version_body(conn, row.user_id, version) if version is not None else None,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _bj_iso(row.created_at),
         "data_status": snap.get("data_status", "unavailable"),
         "data_as_of": snap.get("data_as_of"),
         "gaps": snap.get("gaps", []),

@@ -187,7 +187,7 @@ def test_get_lists_expired_rows_and_uses_cursor_shape() -> None:
     )
 
     assert [item["id"] for item in result.items] == [expired.id]
-    assert result.items[0]["until"] == expired.until
+    assert result.items[0]["until"] == "2026-11-21T19:59:59+08:00"
     assert result.next_cursor is None
     statement = str(engine.connection.statements[-1])
     assert "removed_at" in statement

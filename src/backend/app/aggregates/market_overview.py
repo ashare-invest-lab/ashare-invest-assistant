@@ -102,6 +102,16 @@ def _gap(key: str, message: str, reason: GapReason = GapReason.NO_SOURCE) -> m.G
     return m.Gap(key=key, reason=reason, message=message)
 
 
+def _dedupe_gaps(gaps: list[m.Gap]) -> list[m.Gap]:
+    seen: set[str] = set()
+    result: list[m.Gap] = []
+    for gap in gaps:
+        if gap.key not in seen:
+            seen.add(gap.key)
+            result.append(gap)
+    return result
+
+
 def _empty(
     clock: m.MarketClock,
     indices: list[MarketIndexQuote],
@@ -119,7 +129,7 @@ def _empty(
         turnover_total=None,
         data_status=status,
         data_as_of=None,
-        gaps=gaps,
+        gaps=_dedupe_gaps(gaps),
     )
 
 
@@ -553,7 +563,7 @@ def _overview(
         turnover_total=_text(turnover) if turnover_complete else None,
         data_status=status,
         data_as_of=min(as_of_values) if as_of_values else None,
-        gaps=gaps,
+        gaps=_dedupe_gaps(gaps),
     )
 
 

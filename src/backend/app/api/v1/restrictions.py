@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import uuid
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -58,6 +59,15 @@ class RestrictionDelete(BaseModel):
 
 
 SCOPE = "restrictions:list"
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+
+def _bj_iso(value: dt.datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.UTC)
+    return value.astimezone(BEIJING).isoformat()
 
 
 def _row_out(row: Any) -> dict[str, Any]:
@@ -66,9 +76,9 @@ def _row_out(row: Any) -> dict[str, Any]:
         "kind": row.kind,
         "target_type": row.target_type,
         "target_id": row.target_id,
-        "until": row.until,
+        "until": _bj_iso(row.until),
         "reason": row.reason,
-        "created_at": row.created_at,
+        "created_at": _bj_iso(row.created_at),
     }
 
 
