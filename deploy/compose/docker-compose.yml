@@ -152,6 +152,8 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      # 实时行情默认关闭；开启即真实调用麦蕊，须按红线获批
+      REALTIME_QUOTES_SOURCE: ${REALTIME_QUOTES_SOURCE:-off}
       # 证书封装：api 只有公钥（只能加密）；当前版本号
       DATA_LICENCE_SEAL_KEY_VERSION: ${DATA_LICENCE_SEAL_KEY_VERSION:-1}
       # 没挂 app_master_key 就拒绝启动，不回落临时主密钥（T-O11 评审 M1）
@@ -188,6 +190,8 @@ services:
       # 到期原始文件清理（imports.purge_expired_raw_files）的存储根目录，与 api 相同
       IMPORT_STORAGE_BACKEND: ${IMPORT_STORAGE_BACKEND:-local}
       IMPORT_STORAGE_PATH: ${IMPORT_STORAGE_PATH:-/var/lib/aia-dev/imports}
+      # 实时行情采集任务在 worker 执行；默认关闭（worker 无出网，开启前见 deploy/runbooks/realtime-quotes.md「已知缺口」）
+      REALTIME_QUOTES_SOURCE: ${REALTIME_QUOTES_SOURCE:-off}
       # 非 local/test 未设置则主数据同步直接失败（review-baa4539 M1）
       MASTER_SNAPSHOT_PATH: ${MASTER_SNAPSHOT_PATH:-/var/lib/aia-dev/master}
       SMTP_HOST: ${SMTP_HOST:-}
