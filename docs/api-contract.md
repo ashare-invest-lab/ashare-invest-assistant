@@ -21,6 +21,7 @@
 - T-A231（2026-11-21，不升版本）：补充 `/securities/{code}` 首导未完成错误口径与 `/quotes` 闭市日收盘回落 freshness 口径。
 - T-A215（2026-11-21）：§7.5 将 `/restrictions` 的目标可见性、`until`、响应投影、删除重查与 PIT 口径定稿，幂等沿用 §1.3，不新增错误码或公共枚举。
 - T-A215 第2轮（2026-11-21）：统一 §7.5 与 T-A209 的 PIT 口径；明确已删除限制重复 DELETE 的 `200`、原 `removed_at` 与无事件幂等语义；补充按 `target_type` 的删除重查关联、行锁、保留与释放规则；主线尚未实现 restrictions 路由的现状改为未验证。
+- T-A241（2026-11-22，不升版本）：收口 RV-03 复盘与模拟跟踪边界、RV-04 RC6 三个未接通 gap key 与 unknown 状态、RV-05 T+1 可卖与 RC1 触发时点边界、RV-06 `voided_at` 截止与费用快照要求；不新增枚举、原因码或错误码；与未合入 PR #419（T-A238）中 RV-03/RV-04/RV-06 文字重叠，以本条为准。
 
 ### v0.2.10（2026-11-19，A2b：明确停牌的 K 线缺口与日报说明）
 
@@ -1230,7 +1231,7 @@ evidence: Evidence[]
 | `ReviewDetail.evidence` | `Evidence[]`，证据 ID 只在本详情内解析；无证据为 `[]` |
 | `ReviewVersion.id` | `string(uuid)`，必填 |
 | `ReviewVersion.version_no` | `int`，≥1，无单位；同一复盘从 1 连续递增 |
-| `ReviewVersion.plan_version_ids`, `trade_ids` | `string(uuid)[]`，必填；分别为本人计划版本和未作废本人成交，空集为 `[]` |
+| `ReviewVersion.plan_version_ids`, `trade_ids` | `string(uuid)[]`，必填；分别为本人计划版本，以及版本保存时点（`calculation_as_of`）尚未作废的本人成交 ID 快照；之后作废不改写已冻结版本的 `trade_ids`，GET 旧版本仍按快照显示这些引用，空集为 `[]` |
 | `ReviewVersion.snapshot_id` | `string(uuid) \| null`；新版本应有不可变快照，历史缺快照时保留 `null` |
 | `ReviewVersion.lessons` | `string \| null`，用户笔记，无单位 |
 | `ReviewVersion.tags` | `string[]`，用户标签，无单位；无标签为 `[]` |
@@ -1277,6 +1278,24 @@ evidence: Evidence[]
 ② `POST /reviews/{id}/versions`：同 ①，且旧版本快照不变。
 ③ `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions[/{n}]`：只读冻结快照，平铺三字段存在且与快照一致，不按当前时钟重算可见性。
 ④ 手工录入成交（`import_batch_id` 为空）：`available_at=max(traded_at, created_at)`，行为不变。
+
+**RV-03 边界**：`ReviewOutcomeMetrics`（`holding_return`、`benchmark_return`、`excess_return`、`max_drawdown`）只代表本人实际成交。定稿前四项固定为 `value=null`、`n=0`、`small_sample=true`，并带 `outcome_metrics.<指标名>/no_source`。`TrackingResult` 只代表模拟跟踪，界面标注“模拟，不代表实际收益”。两者数据集与状态机独立，不得互填，`TrackingResult` 的样本数不得计入 `n`。
+
+RV-03 验收（按入口）：
+
+- `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions[/{n}]`：定稿前四项返回 null、`n=0`、`small_sample=true` 并带对应 gap，不读取模拟结果。
+- `GET /suggestions/{id}/tracking`：只投影 `TrackingResult` 并展示模拟免责。
+- 复盘前端：实际成交与模拟跟踪分开呈现。
+
+**RV-06 作废与费用快照**：版本保存时只纳入 `available_at <= calculation_as_of` 且在该时点尚未作废的 execution 成交，即 `voided_at` 为 null 或 `voided_at > calculation_as_of`；`voided_at <= calculation_as_of` 的成交排除。已冻结的旧版本不因之后的作废而改变，作废后的再计算只能写新版本。费用、费率快照（`fee_total`、`net_amount` 及适用费率）必须随版本证据保存；其持久化字段与形状【未验证，需后端】。缺证据时依赖费用的指标为 null 并记既有 `no_source`，不得从模拟跟踪或当前费率反推实际费用。
+
+RV-06 验收（按入口）：
+
+- `POST /reviews`、`POST /reviews/{id}/versions`：核对截止时点前后作废成交的纳入规则，且旧版本不变。
+- 成交在版本保存后作废：`GET /reviews/{id}/versions/{n}`（及对应旧版本详情）的 `trade_ids` 仍包含该成交 ID，页面/投影按快照显示该引用；新版本按 `voided_at <= calculation_as_of` 排除该成交。
+- 缺费用/费率快照时，依赖费用的指标为 `null` 并记既有 `no_source`。
+- `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions`、`GET /reviews/{id}/versions/{n}`：只读冻结快照。
+- `reviews.service` 与 `feedback.plan_source`：可见性与作废判定一致。
 
 ### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |
@@ -1402,6 +1421,14 @@ evidence: Evidence[]
 - 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
 - **T-A33（R4）**：`RiskEvaluation` 的 `DataStatusBlock.data_as_of` 取参与判定各输入时点中**最早**的非空值，全空为 null（同 T-A29 日报口径，不取最新、不取 evaluated_at）。
 
+**RV-04 RC6 未接通检查**：`feedback.plans._assess` 对不在 `SUPPORTED={"opposite_side","qty_over_plan"}` 的检查产出 gap key 前缀 `plan_check_not_connected:`。当前稳定的三个 key 为 `plan_check_not_connected:held_after_invalidation`、`plan_check_not_connected:buy_without_stop`、`plan_check_not_connected:buy_during_wait`（出处：`src/backend/app/feedback/plans.py` `_assess` 与 `src/backend/selfchecks/test_p2n08_plans.py`，已在主线核实，不再标未验证）。含任一该 gap 时 `RiskEvaluation.controls[RC6].state` 为 `unknown`，沿既有“未接通 RC5/RC6 时是 unknown，不冒充 ok 或 disabled”的规则，不得写 `ok`/`disabled`，不得进入候选可执行结论或被投影为已通过。只复用既有 gap_reason（如 `no_source`）与错误码，不新增枚举或 HTTP 错误码。
+
+RV-04 验收（按入口）：
+
+- `GET /risk-controls/evaluation`：核对 `controls[RC6]` 状态为 `unknown`，并保留三个 gap key。
+- 候选原因投影、`GET /candidate-signals`、`GET /non-executable-reasons`：不把 `unknown` 转为可执行结论或已通过状态。
+- `POST /non-executable-reasons/{id}/release`：沿既有 `machine_checkable` 规则处理。
+
 **T-A52 裁定（status: 生效（T-A69，隔离 PG 复验 T-O54 与 tb95 22/22 T-T36b 通过后）；「清除覆盖」接口，v0.2.9 内；docs/reviews/T-A52-risk-control-reset-ruling.md）**：
 
 1. **语义**：`DELETE /risk-controls/{control}` 删除**操作者本人**该 control 的 `scope='user'` 覆盖、恢复继承（文件默认 → system 行 → 本人 user 行链回退），不是删除配置本身。**权限边界（用户裁定）**：只能删除本人 user 行；system 行与文件默认一律不可经本接口删除或改动；普通用户对 system 行无任何写/删路径（变体形状一律 `404 NOT_FOUND`，隐藏存在性，不提供 403 探测面）；不设管理员跨用户重置；system 行管理入口属独立管理员功能，不在本契约范围。
@@ -1425,6 +1452,16 @@ evidence: Evidence[]
 细化 §7.8 `GET /suggestions/{id}/tracking`：他人/不存在的建议返回 404；本人的建议返回 `200 {t1: Stat, t5: Stat, t20: Stat, results: TrackingResult[], DataStatusBlock}`。无结果 results=[] 并列 gap；GET 不触发行情拉取或补算。
 
 `TrackingResult`：`{strategy_version_id: uuid, instance_id: uuid|null, action: action, horizon_days: 1|5|20, state: "pending"|"complete"|"untradable"|"excluded"|"unavailable", entry_at: datetime|null, entry_price: string(decimal)|null, exit_at: datetime|null, exit_price: string(decimal)|null, benchmark_code: string, benchmark_entry_price: string(decimal)|null, benchmark_exit_price: string(decimal)|null, return_pct: string(decimal)|null, benchmark_return_pct: string(decimal)|null, excess_pct: string(decimal)|null, max_drawdown_pct: string(decimal)|null, max_runup_pct: string(decimal)|null, direction_correct: boolean|null, invalidation_triggered_at: datetime|null, exclusion_reason: string|null, price_basis: "qfq", cost_applied: boolean, evidence: Evidence[], evidence_ids: string[], gaps}`。
+
+**RV-05 时点边界**：T+1 只约束模拟卖出/退出（`exit_at` 不早于可卖日）与持仓 `sellable_qty`，不得用于信号触发、观察起点、命中判定或 RC1 事件时点。RC1 触发沿 §7.11.2 T-A26 第 2 点（不复权、盘中新鲜最新价、收盘后当日 low/high 补判、同日两者都满足按止损、事件时点为价格时间戳或当日 15:00 北京时间），买入当日的触发不得因 T+1 延后或漏记。独立 `sellable_at` 字段主线未有，本契约不新增字段，标“需后端，未验证”。
+
+RV-05 验收（按入口）：
+
+- `risk.rc1`：核对买入当日盘中或收盘补判的触发事件时点。
+- tracking engine：模拟退出不早于 T+1 可卖日，且 `t1.*` 证据与 gap 保持。
+- 两者时点独立，不能互相替代。
+
+本节遵守 §7.8.4「RV-03 边界」；`TrackingResult` 只用于模拟跟踪并保留“模拟，不代表实际收益”免责。模拟跟踪聚合的 `profit_loss_ratio` 沿 T-A27② 取毛 `return_pct`，`cost_applied=false` 时不得称净收益。净费用口径（佣金、印花税、过户费）不在本契约，仍为研究候选口径，以 PR #408 `docs/strategies/T-R116/review-metrics.md` 为准且标未验证。
 
 - 每策略版本/建议/跟踪期唯一；停牌、一字板、forced_hold、wait 的排除与方向定义按 plan §2.8，不把 sell/reduce 的标的区间收益强行取反；缺基准只把相关结果置 null + gap。pending 表示尚未到期；unavailable 表示到期但缺计算所需数据；untradable/excluded 必有 exclusion_reason，不进入有效样本 n。价格依据列入本条 result 的 evidence，evidence_ids 必须能解析；可成交性使用不复权实际价格，收益及 entry/exit_price 使用同一 as-of 的 qfq 序列，原价与复权价分开留证。分钟线若无可核实的复权衔接依据，该项 unavailable + gap，不混用 raw/qfq 或生成时参考价与模拟入场价。
 - `results` 是**单条观测**，其十进制结果是 §5.1“统计收益使用 Stat”的明确草案例外，不是胜率/业绩聚合；界面必须写“模拟，不代表实际收益”。旧 t1/t5/t20 保留 Stat 约束，不能把 n 虚增到 5 来显示单样本；新前端读 results。策略聚合继续只用 Stat，n<5 为 null、n<30 标 small_sample。
