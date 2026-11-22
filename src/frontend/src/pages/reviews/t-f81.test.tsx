@@ -18,6 +18,11 @@ const renderAt = (path: string) => {
 const metricKeys = ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown'] as const;
 const emptyStat = () => ({ value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true });
 const outcomeGaps = () => metricKeys.map((key) => ({ key: `outcome_metrics.${key}`, reason: 'no_source', message: '缺少指标来源' }));
+const assertEmptyMetrics = (metrics: Record<string, unknown>) => {
+  for (const key of metricKeys) {
+    expect(metrics[key]).toEqual(expect.objectContaining({ value: null, n: 0, small_sample: true }));
+  }
+};
 
 beforeAll(() => preloadRoutes(routes), 30_000);
 
@@ -66,6 +71,7 @@ describe('T-F81 复盘指标口径', () => {
     expect(body.gaps.map((gap) => gap.key)).toEqual(metricKeys.map((key) => `outcome_metrics.${key}`));
     expect(body.gaps.every((gap) => gap.reason === 'no_source')).toBe(true);
     expect(body.gaps.some((gap) => gap.reason === 'not_yet_published')).toBe(false);
+    assertEmptyMetrics((body.current_version as unknown as { outcome_metrics: Record<string, unknown> }).outcome_metrics);
 
     renderAt('/reviews/review-example-2');
     await screen.findByTestId('metric-holding_return');
@@ -75,6 +81,32 @@ describe('T-F81 复盘指标口径', () => {
     expect(page).not.toHaveTextContent('尚未发布');
     expect(page).not.toHaveTextContent('拉取中');
     for (const key of metricKeys) expect(within(page).getByTestId(`metric-${key}`)).toHaveTextContent('—');
+  });
+
+  it('列表与版本响应保留状态块，并逐项标注 null、n=0 和 no_source', async () => {
+    const listResponse = await fetch(`${API}/reviews`);
+    const list = await listResponse.json() as {
+      items: Array<{ current_version_no: number | null; data_status: string; data_as_of: string | null; gaps: { key: string; reason: string }[] }>;
+    };
+    expect(listResponse.ok).toBe(true);
+    const versioned = list.items.filter((item) => item.current_version_no !== null);
+    expect(versioned.length).toBeGreaterThan(0);
+    for (const item of versioned) {
+      expect(item.data_status).toBe('partial');
+      expect(item.data_as_of).toBeNull();
+      expect(item.gaps.map((gap) => gap.key)).toEqual(expect.arrayContaining(metricKeys.map((key) => `outcome_metrics.${key}`)));
+      expect(item.gaps.every((gap) => gap.reason === 'no_source' || gap.key === 'trade_ids')).toBe(true);
+    }
+
+    const versionsResponse = await fetch(`${API}/reviews/review-example-1/versions`);
+    const versions = await versionsResponse.json() as { items: Array<{ data_status: string; data_as_of: string | null; gaps: { key: string; reason: string }[]; outcome_metrics: Record<string, unknown> }> };
+    expect(versionsResponse.ok).toBe(true);
+    expect(versions.items).toHaveLength(1);
+    const version = versions.items[0];
+    expect(version.data_status).toBe('partial');
+    expect(version.data_as_of).toBeNull();
+    expect(version.gaps.map((gap) => gap.key)).toEqual(expect.arrayContaining(metricKeys.map((key) => `outcome_metrics.${key}`)));
+    assertEmptyMetrics(version.outcome_metrics);
   });
 
   it('按原因合并缺口，去重消息并列出合法指标名', () => {
