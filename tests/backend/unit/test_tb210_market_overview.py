@@ -552,6 +552,139 @@ def test_bj_gate_stays_closed_below_twenty_confirmed_codes() -> None:
     assert result.basis is None and result.breadth is None
 
 
+def test_bj_gate_needs_twenty_clean_codes_and_both_sources() -> None:
+    class BJConnection(Connection):
+        def execute(self, statement: object) -> Result:
+            sql = str(statement)
+            if "securities" in sql:
+                params = statement.compile().params  # type: ignore[attr-defined]
+                if "index" not in params.values():
+                    return Result(
+                        [
+                            item
+                            for item in self.stocks
+                            if item._mapping.get("type", "stock") == "stock"
+                            and item._mapping["exchange"] in {"SH", "SZ", "BJ"}
+                            and item._mapping["listing_status"] == "listed"
+                        ]
+                    )
+            return super().execute(statement)
+
+    bj_codes = [f"830{i:03d}.BJ" for i in range(1, 21)]
+    stocks = [security(code, "BJ") for code in bj_codes]
+    daily_rows = [
+        daily(code, source=source, volume="100")
+        for code in bj_codes
+        for source in ("mairui", "tdx_local")
+    ]
+    result = overview(
+        BJConnection(stocks=stocks, daily_rows=daily_rows),
+        dt.datetime(2031, 2, 3, 17, 30, tzinfo=BEIJING),
+    )
+    assert result.breadth is None
+    assert result.basis is not None and result.basis.eligible == 0
+    assert any(
+        gap.key == "market.breadth"
+        and gap.reason is GapReason.NO_SOURCE
+        and gap.message == "BJ 门闩待 T-A172 §10 可信证据"
+        for gap in result.gaps
+    )
+
+
+def test_close_bj_gate_does_not_make_sh_sz_incomplete() -> None:
+    class BJConnection(Connection):
+        def execute(self, statement: object) -> Result:
+            sql = str(statement)
+            if "securities" in sql:
+                params = statement.compile().params  # type: ignore[attr-defined]
+                if "index" not in params.values():
+                    return Result(
+                        [
+                            item
+                            for item in self.stocks
+                            if item._mapping.get("type", "stock") == "stock"
+                            and item._mapping["exchange"] in {"SH", "SZ", "BJ"}
+                            and item._mapping["listing_status"] == "listed"
+                        ]
+                    )
+            return super().execute(statement)
+
+    stocks = [
+        security("600000.SH", "SH"),
+        security("000001.SZ", "SZ"),
+        security("830001.BJ", "BJ"),
+        security("830002.BJ", "BJ"),
+    ]
+    daily_rows = [
+        daily("600000.SH", amount="120.00"),
+        daily("000001.SZ", amount="80.00"),
+        daily("000300.SH"),
+    ]
+    for code in ("830001.BJ", "830002.BJ"):
+        daily_rows.extend(
+            [
+                daily(code, source="mairui"),
+                daily(code, source="tdx_local"),
+            ]
+        )
+
+    result = overview(
+        BJConnection(stocks=stocks, daily_rows=daily_rows),
+        dt.datetime(2031, 2, 3, 17, 30, tzinfo=BEIJING),
+    )
+
+    assert result.basis is not None
+    assert (result.basis.eligible, result.basis.observed, result.basis.missing) == (2, 2, 0)
+    assert result.breadth is not None and (result.breadth.up, result.breadth.down) == (2, 0)
+    assert result.turnover_total == "200.00"
+
+
+def test_previous_close_bj_gate_uses_observed_trade_date() -> None:
+    class BJConnection(Connection):
+        def execute(self, statement: object) -> Result:
+            sql = str(statement)
+            if "securities" in sql:
+                params = statement.compile().params  # type: ignore[attr-defined]
+                if "index" not in params.values():
+                    return Result(
+                        [
+                            item
+                            for item in self.stocks
+                            if item._mapping.get("type", "stock") == "stock"
+                            and item._mapping["exchange"] in {"SH", "SZ", "BJ"}
+                            and item._mapping["listing_status"] == "listed"
+                        ]
+                    )
+            return super().execute(statement)
+
+    previous = DAY - dt.timedelta(days=1)
+    bj_codes = [f"830{i:03d}.BJ" for i in range(1, 21)]
+    stocks = [security("600000.SH", "SH"), security("000001.SZ", "SZ")]
+    stocks.extend(security(code, "BJ") for code in bj_codes)
+    daily_rows = [
+        daily("600000.SH", trade_date=previous),
+        daily("000001.SZ", trade_date=previous),
+        daily("000300.SH", trade_date=previous),
+    ]
+    for code in bj_codes:
+        daily_rows.extend(
+            [
+                daily(code, trade_date=previous, source="mairui"),
+                daily(code, trade_date=previous, source="tdx_local"),
+            ]
+        )
+
+    result = overview(
+        BJConnection(stocks=stocks, daily_rows=daily_rows),
+        dt.datetime(2031, 2, 3, 17, 30, tzinfo=BEIJING),
+    )
+
+    assert result.basis is not None
+    assert result.basis.observed_date == previous
+    assert (result.basis.eligible, result.basis.observed, result.basis.missing) == (2, 2, 0)
+    assert result.turnover_total is not None
+
+
 def test_pit_reads_only_current_licence_and_excludes_future_and_unbound_rows() -> None:
     same_ts = dt.datetime(2031, 2, 3, 10, tzinfo=BEIJING)
     quotes = [
