@@ -19,8 +19,8 @@ from app.risk.evaluation import inputs as risk_inputs
 from app.risk.events import record as record_risk_events
 from app.schemas.enums import Action, Dimension, GapReason, Horizon
 from app.signals.models import Gap, MarketFacts, SignalInput, Stops
+from app.signals.service import add_same_template_gap, same_template_cooldown, write_candidate
 from app.signals.service import snapshot_items as signal_items
-from app.signals.service import write_candidate
 from app.strategy.cards.dsl import Interpreter, parse
 from app.suggestions.confidence import components, numeric
 from app.suggestions.models import Conclusion, SuggestionInput
@@ -246,6 +246,15 @@ def conclusion(
             Gap(key=k, reason=GapReason.NO_SOURCE, message="风控事实尚无证据。") for k in risk.gaps
         ],
     )
+    _, cooldown_gap = same_template_cooldown(
+        conn,
+        user_id=owner,
+        security_code=signal.security_code,
+        strategy_version_id=instance.derived_strategy_version_id or instance.strategy_version_id,
+        created_at=signal.created_at,
+        cooldown_days=risk_config.executability.same_template_cooldown_days,
+    )
+    signal = add_same_template_gap(signal, cooldown_gap)
     signature = {
         "signal": signal.model_dump(mode="json"),
         "source_id": str(source.id),
