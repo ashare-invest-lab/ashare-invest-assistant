@@ -473,16 +473,8 @@ def test_same_template_cooldown_after_hours_starts_next_open_day(
     isolated_pg: SimpleNamespace,
     synthetic_user: SimpleNamespace,
     sql: Any,
-    request: pytest.FixtureRequest,
 ) -> None:
     """盘后 2026-11-02 16:00 从下一开市日起算，至 11-05 15:00 到期。"""
-    request.applymarker(
-        pytest.mark.xfail(
-            strict=True,
-            raises=AssertionError,
-            reason="转绿条件：盘后 2026-11-02 16:00 必须从 11-03 起算并于 11-05 15:00 到期，单号 T-B244",
-        )
-    )
     world = _seed_world(
         sql,
         str(synthetic_user.id),
