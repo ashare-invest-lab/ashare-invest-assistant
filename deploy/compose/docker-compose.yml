@@ -235,6 +235,7 @@ services:
       SERVICE_NAME: ingest
       DATABASE_URL: *db-ingest-url
       MAIRUI_MODE: ${MAIRUI_MODE:-replay}
+      REALTIME_QUOTES_SOURCE: ${REALTIME_QUOTES_SOURCE:-off}
       MAIRUI_REPLAY_DIR: ${MAIRUI_REPLAY_DIR:-/fixtures/mairui}
       MAIRUI_BASE_URL: ${MAIRUI_BASE_URL:-https://api.mairuiapi.com}
       MAIRUI_PRO_BASE_URL: ${MAIRUI_PRO_BASE_URL:-https://pro.mairuiapi.com}
