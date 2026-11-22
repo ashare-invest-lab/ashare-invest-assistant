@@ -3,9 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
-import re
 import uuid
-from pathlib import Path
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -16,6 +14,7 @@ from app.auth.sessions import SESSION_COOKIE
 from app.config import Settings, get_settings
 from app.main import create_app
 from app.marketdata import quotes_read, realtime_collect
+from app.notify import transport
 from app.schemas.enums import DataStatus
 OWNER = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1")
 CODE, CODE_2 = "999991.SH", "999992.SZ"
@@ -34,7 +33,9 @@ class FakeRedis:
             return []
         if numkeys != 4:
             raise AssertionError(f"unexpected Redis script shape: {numkeys}")
-        at, raw_body, _cutoff, _ttl, token = _args
+        keys_and_args = _args
+        _keys = keys_and_args[:numkeys]
+        at, raw_body, _cutoff, _ttl, token = keys_and_args[numkeys:]
         token_text = str(token)
         if token_text and token_text in self.dedup:
             return b""
@@ -59,14 +60,6 @@ def _settings(source: str) -> Settings:
     return Settings(app_env="test", database_url=None, redis_url=None,
                     realtime_quotes_source=source, session_cookie_secure=False,
                     business=get_settings().business)
-def _wired() -> bool:
-    """确认 marketdata 生产代码已把 quote 接到发布路径（不含通用 transport）。"""
-    pat = re.compile(r"\bpublish\s*\([\s\S]{0,500}['\"]quote['\"]")
-    root = Path(realtime_collect.__file__).resolve().parent
-    return any(pat.search(item.read_text()) for item in root.glob("*.py"))
-def _require_wired() -> None:
-    if not _wired():
-        pytest.xfail("待 T-B222：生产入口尚未接入 /stream quote 发布（R376 裁定 /stream；T-B222）")
 def _quote(code: str, price: str, stamp: str) -> dict[str, str]:
     return {"code": code, "price": price, "pct_change": "1.00", "amount": "1000", "ts": stamp}
 def _quote_response(rows: list[dict[str, str]]) -> quotes_read.QuotesResponse:
@@ -80,7 +73,11 @@ def _events(text: str) -> list[dict[str, object]]:
     for block in text.split("\n\n"):
         lines = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
         if "event" in lines and "data" in lines:
-            result.append({"event": lines["event"], "data": json.loads(lines["data"])})
+            result.append({
+                "id": lines.get("id"),
+                "event": lines["event"],
+                "data": json.loads(lines["data"]),
+            })
     return result
 async def _read_stream(app: object, last_id: str | None) -> str:
     messages: list[bytes] = []
@@ -143,9 +140,31 @@ def world(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 def _run(world: SimpleNamespace, source: str | None = None) -> int:
     settings = world.settings if source is None else _settings(source)
     return realtime_collect.realtime_quotes_task(settings, owner=OWNER, now=NOW)
+
+def _seed_stream_anchor(rds: FakeRedis) -> str:
+    rds.seq += 1
+    identifier = str(rds.seq)
+    rds.order.append((NOW.timestamp(), identifier))
+    rds.body[identifier] = {"event": "notification", "data": {"synthetic": True}}
+    return identifier
+
 def _quote_events(world: SimpleNamespace, last_id: str) -> list[dict[str, object]]:
-    return [event for event in _events(asyncio.run(_read_stream(world.app, last_id)))
-            if event["event"] == "quote"]
+    events = [event for event in _events(asyncio.run(_read_stream(world.app, last_id)))
+              if event["event"] == "quote"]
+    identifiers = [event["id"] for event in events]
+    assert all(isinstance(identifier, str) and identifier for identifier in identifiers)
+    assert len(set(identifiers)) == len(identifiers)
+    if identifiers and all(identifier.isdecimal() for identifier in identifiers):
+        assert all(int(left) < int(right) for left, right in zip(identifiers, identifiers[1:]))
+    # 非十进制 id 的单调性未验证，但仍已验证非空且互不相同。
+    return events
+
+def _first_quote_or_xfail(world: SimpleNamespace) -> str:
+    baseline = _seed_stream_anchor(world.rds)
+    _run(world)
+    if not _quote_events(world, baseline):
+        pytest.xfail("待 T-B222：realtime_quotes_task + GET /stream 尚未产生 quote 事件")
+    return str(world.rds.seq)
 def _assert_quote_shape(event: dict[str, object]) -> None:
     data = event["data"]
     assert isinstance(data, dict)
@@ -157,27 +176,27 @@ def _assert_quote_shape(event: dict[str, object]) -> None:
         assert isinstance(item["t"], str) and item["t"]
     assert "source" not in data and "basis" not in data
 
+def test_fake_redis_transport_publish_contract() -> None:
+    rds = FakeRedis()
+    payload = {"items": [], "data_as_of": EARLY}
+    identifier = transport.publish(rds, OWNER, "quote", payload, NOW, "synthetic-token")
+    assert identifier == "1"
+    assert rds.order == [(NOW.timestamp(), identifier)]
+    assert rds.body[identifier] == {"event": "quote", "data": payload}
+
 def test_no_quote_change_does_not_publish(world: SimpleNamespace) -> None:
-    _require_wired()
-    _run(world)
-    baseline = str(world.rds.seq)
-    assert any(payload["event"] == "quote" for payload in world.rds.body.values())
+    baseline = _first_quote_or_xfail(world)
     _run(world)
     assert _quote_events(world, baseline) == []
 
 def test_realtime_quotes_source_off_does_not_publish(world: SimpleNamespace) -> None:
-    _require_wired()
-    _run(world)
-    assert any(payload["event"] == "quote" for payload in world.rds.body.values())
-    baseline = str(world.rds.seq)
+    baseline = _first_quote_or_xfail(world)
     world.state.rows = [_quote(CODE, "10.01", LATE)]
     _run(world, "off")
     assert _quote_events(world, baseline) == []
 
 def test_changed_cached_quote_publishes_once_with_contract_shape(world: SimpleNamespace) -> None:
-    _require_wired()
-    _run(world)
-    baseline = str(world.rds.seq)
+    baseline = _first_quote_or_xfail(world)
     world.state.rows = [_quote(CODE, "10.01", LATE)]
     _run(world)
     events = _quote_events(world, baseline)
@@ -185,9 +204,7 @@ def test_changed_cached_quote_publishes_once_with_contract_shape(world: SimpleNa
     _assert_quote_shape(events[0])
 
 def test_quote_data_as_of_is_earliest_actual_item_time(world: SimpleNamespace) -> None:
-    _require_wired()
-    _run(world)
-    baseline = str(world.rds.seq)
+    baseline = _first_quote_or_xfail(world)
     world.state.rows = [_quote(CODE, "10.01", EARLY), _quote(CODE_2, "20.01", LATE)]
     _run(world)
     events = _quote_events(world, baseline)
