@@ -7,6 +7,7 @@ import { useBarsWindow } from '../../api/marketQueries';
 import { chartStops, markerSignals } from './chartStops';
 import { securityTypeOf, type Suggestion, type TerminalRow } from '../../api/types';
 import { DataStatusTag } from '../../components/common';
+import { QuoteStreamFallback } from '../../components/QuoteStreamFallback';
 import { KlineChart } from '../../components/charts/KlineChart';
 import { KlineWindowInfo } from '../../components/charts/KlineWindowInfo';
 import { IntradayChart } from '../../components/charts/IntradayChart';
@@ -50,6 +51,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
       <div className="quote-head" data-testid="quote-head">
         <span className="q-name">{row.name}</span>
         <span className="mono muted">{row.security_code}</span>
+        <QuoteStreamFallback path="/terminal" />
         {q ? (
           <>
             <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, securityTypeOf(row))}</span>
