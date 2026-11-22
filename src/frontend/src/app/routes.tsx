@@ -13,8 +13,8 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
-  ['restrictions', '禁投 / 冷静期 / 屏蔽'],
   ['reviews', '复盘'],
+  ['restrictions', '禁投 / 冷静期 / 屏蔽'],
 ];
 
 export const routes: RouteObject[] = [
@@ -25,6 +25,7 @@ export const routes: RouteObject[] = [
   {
     path: '/',
     element: <AppShell />,
+    hydrateFallbackElement: <AppShell />,
     children: [
       // 评审 T-F08 m1：首页落在“今日关注”
       { index: true, element: <Navigate to="/today" replace /> },
@@ -62,8 +63,11 @@ export const routes: RouteObject[] = [
       { path: 'plans/:id', lazy: lazyPage(() => import('../pages/plans/PlanDetailPage'), (m) => m.PlanDetailPage) },
       { path: 'alerts', lazy: lazyPage(() => import('../pages/alerts/AlertsPage'), (m) => m.AlertsPage) },
       { path: 'alerts/:id', lazy: lazyPage(() => import('../pages/alerts/AlertDetailPage'), (m) => m.AlertDetailPage) },
+      { path: 'reviews', lazy: lazyPage(() => import('../pages/reviews/ReviewsPage'), (m) => m.ReviewsPage) },
+      { path: 'reviews/:id', lazy: lazyPage(() => import('../pages/reviews/ReviewDetailPage'), (m) => m.ReviewDetailPage) },
       { path: 'plan-drafts/:id', lazy: lazyPage(() => import('../pages/plans/PlanDraftDetailPage'), (m) => m.PlanDraftDetailPage) },
       { path: 'notifications', lazy: lazyPage(() => import('../pages/NotificationsPage'), (m) => m.NotificationsPage) },
+      { path: 'restrictions', lazy: lazyPage(() => import('../pages/restrictions/RestrictionsPage'), (m) => m.RestrictionsPage) },
       ...PLACEHOLDERS.map(([path, title]) => ({ path, element: <PlaceholderPage title={title} /> })),
       { path: 'admin', element: <AdminGate><Navigate to="/admin/users" replace /></AdminGate> },
       {

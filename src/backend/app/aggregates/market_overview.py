@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -77,6 +77,17 @@ def _decimal(value: object) -> Decimal | None:
 def _text(value: object) -> str | None:
     number = _decimal(value)
     return format(number, "f") if number is not None else None
+
+
+def _change_pct_text(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    quantized = value.quantize(RATIO_QUANTUM, rounding=ROUND_HALF_UP)
+    formatted = format(value, "f")
+    fractional_digits = len(formatted.partition(".")[2])
+    if value == quantized and fractional_digits <= 4:
+        return formatted
+    return format(quantized, "f")
 
 
 def _aware(value: object) -> dt.datetime | None:
@@ -154,7 +165,7 @@ def _stock_rows(conn: Connection, day: dt.date) -> list[object]:
         )
         .where(
             s.type == "stock",
-            s.exchange.in_(("SH", "SZ")),
+            s.exchange.in_(("SH", "SZ", "BJ")),
             s.list_date.is_(None) | (s.list_date <= day),
             s.delist_date.is_(None) | (s.delist_date > day),
         )
@@ -373,6 +384,9 @@ def _overview(
 
     licence = active_licence_id(conn, user_id, query_as_of)
     if licence is None:
+        for card in cards:
+            gaps.append(_gap(f"market.indices.{card.security_code}", "指数行情缺失。"))
+        gaps.append(_gap("market.basis", "没有可验证的本人行情来源。"))
         gaps.append(
             _gap("market.indices", "本人数据证书不可用。", GapReason.DATA_LICENCE_UNAVAILABLE)
         )
@@ -392,6 +406,7 @@ def _overview(
     close_mode = local.time() >= FINAL_AFTER or clock.session == MarketSession.NON_TRADING_DAY
     stocks = _stock_rows(conn, clock.trade_date)
     stock_codes = [str(_row_value(row, "code")) for row in stocks]
+    had_stock_universe = bool(stock_codes)
     index_codes = [card.security_code for card in cards]
     codes = tuple(dict.fromkeys((*stock_codes, *index_codes)))
     rows = (
@@ -411,14 +426,23 @@ def _overview(
         )
     )
     used_previous_close = False
-    if close_mode and clock.session == MarketSession.NON_TRADING_DAY and not rows:
+    if close_mode and not rows:
         rows = _daily_rows(conn, codes, licence, clock.trade_date, query_as_of, exact_day=False)
         used_previous_close = bool(rows)
     if not rows and not close_mode:
         close_mode = True
         rows = _daily_rows(conn, codes, licence, clock.trade_date, query_as_of, exact_day=False)
         used_previous_close = bool(rows)
-    if not rows and not cards:
+    bj_codes = {code for code in stock_codes if code.endswith(".BJ")}
+    bj_gate_applied = False
+    if bj_codes:
+        # BJ 证据字段未验证。T-A172 §10 可信证据投影未接入此读路径，门闩保持关闭。
+        bj_gate_applied = True
+        rows = [row for row in rows if str(_row_value(row, "code")) not in bj_codes]
+        stock_codes = [code for code in stock_codes if code not in bj_codes]
+        if not any(gap.key == "market.breadth" for gap in gaps):
+            gaps.append(_gap("market.breadth", "BJ 门闩待 T-A172 §10 可信证据"))
+    if not rows and not cards and not bj_gate_applied:
         gaps.append(_gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"))
         return _empty(clock, cards, gaps)
     by_code = {str(_row_value(row, "code")): row for row in rows}
@@ -434,10 +458,10 @@ def _overview(
             continue
         price, change, amount, _suspended, _volume = _row_metrics(row, close_mode)
         card.price = _text(price)
-        card.change_pct = _text(change)
+        card.change_pct = _change_pct_text(change)
         card.amount = _text(amount)
         card.t = _row_time(row, close_mode)
-    candidate = {str(_row_value(row, "code")) for row in stocks}
+    candidate = set(stock_codes)
     observed = candidate & set(by_code)
     up = down = flat = trading = suspended = 0
     turnover = Decimal(0)
@@ -488,7 +512,7 @@ def _overview(
     if limit_up is None or limit_down is None:
         gaps.append(_gap("market.breadth.limit_counts", "涨跌停来源字段和规则版本未验证。"))
     gaps.append(_gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"))
-    if breadth is None:
+    if breadth is None and not any(gap.key == "market.breadth" for gap in gaps):
         gaps.append(_gap("market.breadth", "没有具备完整比较字段的同批次股票。"))
     if not turnover_complete:
         gaps.append(_gap("market.turnover_total", "成交额批次覆盖或单位未验证。"))
@@ -503,7 +527,7 @@ def _overview(
             missing=len(candidate - observed),
             source="mairui",
         )
-        if candidate
+        if candidate or had_stock_universe
         else None
     )
     status = DataStatus.UNAVAILABLE
@@ -536,12 +560,9 @@ def _overview(
     if not rows:
         if cards:
             gaps.append(_gap("market.indices", "交易日行情全部缺失。"))
-        gaps.extend(
-            [
-                _gap("market.breadth", "交易日行情全部缺失。"),
-                _gap("market.turnover_total", "交易日行情全部缺失。"),
-            ]
-        )
+        if not any(gap.key == "market.breadth" for gap in gaps):
+            gaps.append(_gap("market.breadth", "交易日行情全部缺失。"))
+        gaps.append(_gap("market.turnover_total", "交易日行情全部缺失。"))
     return MarketOverview(
         basis=basis,
         trade_date=clock.trade_date,

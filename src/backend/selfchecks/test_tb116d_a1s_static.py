@@ -161,10 +161,10 @@ def _has_a28_negative(src: str, lineno: int) -> bool:
     return False
 
 
-def _daily_bars_seam_call(tree: ast.Module, node: ast.Call) -> bool:
+def _registered_seam_call(tree: ast.Module, node: ast.Call, name: str) -> bool:
     expected = ast.parse("operation(*args, transport=sender, **options)").body[0].value
     for function in tree.body:
-        if isinstance(function, ast.FunctionDef) and function.name == "daily_bars_seam":
+        if isinstance(function, ast.FunctionDef) and function.name == name:
             last = function.body[-1]
             return isinstance(last, ast.Return) and last.value is node and ast.dump(node) == ast.dump(expected)
     return False
@@ -232,6 +232,7 @@ def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
         is_sources = rel == "app/master/sources.py"
         is_worker = rel == "app/workers/ingest.py"
         is_daily = rel == "app/ingest/daily_lists.py"
+        is_realtime = rel == "app/marketdata/realtime_collect.py"
         is_test = rel.startswith("selfchecks/test_") or rel.startswith("tests/")
         is_a28 = _has_a28_negative(src, 1) and is_test
 
@@ -328,7 +329,10 @@ def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
                     elif isinstance(node.func, ast.Attribute):
                         func_name = node.func.attr
                     for kw in node.keywords:
-                        if kw.arg == "transport" and not (is_daily and _daily_bars_seam_call(tree, node)):
+                        if kw.arg == "transport" and not (
+                            (is_daily and _registered_seam_call(tree, node, "daily_bars_seam"))
+                            or (is_realtime and _registered_seam_call(tree, node, "realtime_quotes_seam"))
+                        ):
                             violations.append(("S5", rel, node.lineno, "transport_kw"))
                         if kw.arg == "upstream" and func_name == "process":
                             violations.append(("S5", rel, node.lineno, "process_upstream"))

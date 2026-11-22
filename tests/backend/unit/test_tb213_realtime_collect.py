@@ -88,18 +88,18 @@ def test_config_switch_defaults_off() -> None:
     assert realtime_collect.Settings.model_fields["realtime_quotes_source"].default == "off"
 
 
-def test_schedule_uses_quote_interval_and_registers_task() -> None:
-    interval = 17
+def test_worker_does_not_register_realtime_task() -> None:
     settings = SimpleNamespace(
         business=SimpleNamespace(
-            realtime=SimpleNamespace(intervals=SimpleNamespace(quote_interval_s=interval))
+            realtime=SimpleNamespace(intervals=SimpleNamespace(quote_interval_s=17))
         ),
         cooldown_purge_interval_s=60,
         import_rows_purge_interval_s=60,
         import_raw_purge_interval_s=60,
     )
-    assert jobs.schedule(settings)[jobs.REALTIME_QUOTES_FETCH] == interval
-    assert jobs.TASKS[jobs.REALTIME_QUOTES_FETCH] is realtime_collect.realtime_quotes_task
+    assert "market.realtime_quotes_fetch" not in jobs.schedule(settings)
+    assert "market.realtime_quotes_fetch" not in jobs.TASKS
+    assert "market.realtime_quotes_fetch" not in jobs.LOCKED_TASKS
 
 
 @pytest.mark.parametrize("status", [101, 103, 429, 503, 500])
@@ -225,7 +225,7 @@ def test_calendar_gate_returns_without_transport(monkeypatch: pytest.MonkeyPatch
             settings,
             owner=OWNER,
             now=NOW,
-            transport=transport,
+            upstream=transport,
             engine=Mock(),
         )
         == 0
