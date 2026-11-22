@@ -10,7 +10,7 @@
 
 ### v0.2.11（2026-11-20，T-B187：市场快照契约）
 
-- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。第2次修订（T-R109/R346）：`ReviewSummary.current_version_no` 缺版本时可空；`calculation_as_of` 不对外、`Stat` 不带 `gaps`，指标缺口归顶层。第3次修订（T-G16 #349 退回 4 条）：current_version_no 可空与 current_version=null 一致；定义 calculation_as_of 类型/存放位置及成交 available_at；§7.8.4 标未定稿、不以 T-R103 草案为据；已知值闭集与客户端未知兜底分开写明。
+- T-A217（2026-11-21）：§7.8 定稿 `/reviews` 列表、详情、创建、不可变版本、幂等、乐观并发、状态缺口与指标时点口径，正式替代 T-A209 §5 草案。第2次修订（T-R109/R346）：`ReviewSummary.current_version_no` 缺版本时可空；`calculation_as_of` 不对外、`Stat` 不带 `gaps`，指标缺口归顶层。第3次修订（T-G16 #349 退回 4 条）：current_version_no 可空与 current_version=null 一致；定义 calculation_as_of 类型/存放位置及成交 available_at；§7.8.4 标未定稿、不以 T-R103 草案为据；已知值闭集与客户端未知兜底分开写明。第4次修订（T-G16 #349 退回 2 条）：成交可见时点并入导入批次 committed_at；DataStatusBlock 三字段平铺于 Summary/Detail/Version 顶层。
 
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
@@ -1182,6 +1182,7 @@ evidence: Evidence[]
 | 对象或字段 | 类型、可空性与单位 |
 |---|---|
 | `DataStatusBlock` | `{data_status: data_status, data_as_of: string(datetime) \| null, gaps: Gap[]}`；时间为实际使用来源的知识时点，无来源为 `null` |
+| `ReviewSummary.data_status`, `data_as_of`, `gaps`；`ReviewDetail.data_status`, `data_as_of`, `gaps`；`ReviewVersion.data_status`, `data_as_of`, `gaps` | `ReviewSummary`、`ReviewDetail`、`ReviewVersion` 三者顶层都平铺 `DataStatusBlock` 的三个字段，均必填，`gaps` 无缺口为 `[]`。`ReviewVersion` 的三字段冻结于该版本快照；`ReviewDetail` 与 `ReviewSummary` 取当前版本的值；无当前版本（历史缺版本）时为 `data_status=unavailable`、`data_as_of=null`，且 `gaps` 含 `{key:"outcome_metrics", reason:"no_source"}` |
 | `Gap` | `{key: string, reason: gap_reason, message: string}`；无单位；`reason` 只能使用 §3 既有枚举 |
 | `ReviewSummary.id` | `string(uuid)`，必填 |
 | `ReviewSummary.plan_id` | `string(uuid) \| null`，无单位 |
@@ -1228,11 +1229,20 @@ evidence: Evidence[]
 
 #### 7.8.4 指标、证据与时点
 
-**口径状态：未定稿。** 四项结果指标的详细定义待「实际成交复盘口径卡」批准并入库后另行修订本节；[T-R103 卡](./strategies/T-R103/review_tracking_metrics.md)（lifecycle: draft，且以模拟跟踪为主）只作参考，不是本节依据。定稿前后端对四项指标一律返回 `value=null`、真实 `n`，并在顶层 `gaps` 记 `outcome_metrics.<指标名>`/`no_source`；以下为定稿后必须遵守的约束。`holding_return` 使用同一复权口径的入场与退出端点，`benchmark_return` 使用同一时点和窗口的基准端点，`excess_return = holding_return - benchmark_return`，`max_drawdown` 按窗口内逐日路径峰值计算，不对各笔回撤简单平均。费用、现金流、分红、未平仓或行业基准任一输入不可追溯时，保留可计算字段，其余 `value=null` 并记录缺口，不用模拟跟踪结果替代实际成交。
+**口径状态：未定稿。** 四项结果指标的详细定义待「实际成交复盘口径卡」批准并入库后另行修订本节；[T-R103 卡](./strategies/T-R103/review_tracking_metrics.md)（lifecycle: draft，且以模拟跟踪为主）只作参考，不是本节依据。定稿前后端对四项指标一律返回 `value=null`、真实 `n`，并在对应的 `ReviewSummary.gaps`、`ReviewDetail.gaps` 或 `ReviewVersion.gaps` 中记 `outcome_metrics.<指标名>`/`no_source`；以下为定稿后必须遵守的约束。`holding_return` 使用同一复权口径的入场与退出端点，`benchmark_return` 使用同一时点和窗口的基准端点，`excess_return = holding_return - benchmark_return`，`max_drawdown` 按窗口内逐日路径峰值计算，不对各笔回撤简单平均。费用、现金流、分红、未平仓或行业基准任一输入不可追溯时，保留可计算字段，其余 `value=null` 并记录缺口，不用模拟跟踪结果替代实际成交。
 
-`calculation_as_of`：`string(datetime)`，服务端内部字段，取版本保存时的服务器时刻，冻结在该版本 `data_snapshots.items.calculation_as_of`，对外不返回。成交的 `available_at` 取 `max(traded_at, trades.created_at)`。每个指标只纳入 `available_at <= calculation_as_of` 且已到达窗口端点的数据，`as_of` 截断后不因当前时钟已收盘而放行旧盘中或未来修订数据。`n` 只计入有效、已结束且必需端点齐全的观测；`n<5` 时 `value=null`，`5≤n<30` 时保留十进制值并 `small_sample=true`，`n≥30` 时 `small_sample=false`。未知、缺失和不可成交不转成 0，不伪造样本数。版本快照冻结当时的计划、成交、证据和指标，后续数据只能生成新版本。对外只给 `data_as_of`。`Stat` 沿用 §5 共享结构，**不带 `gaps`**；指标缺口一律进所在对象顶层 `gaps`，`key` 写 `outcome_metrics.<指标名>`，`reason` 只用 §3 `gap_reason`（T-R109 裁定）。
+`calculation_as_of`：`string(datetime)`，服务端内部字段，取版本保存时的服务器时刻，冻结在该版本 `data_snapshots.items.calculation_as_of`，对外不返回。成交的 `available_at = max(traded_at, trades.created_at, import_batches.committed_at)`，后者仅当 `trades.import_batch_id` 非空时参与。导入批次不属本人/本账户、不存在或 `committed_at` 为空时，该成交不可见，并在对应对象平铺 `gaps` 记 `{key:"trades.import_commit_unproven", reason:"no_source"}`；口径与 `src/backend/app/feedback/plan_source.py` 中计划成交投影（`max(created_at, committed_at)`，未证提交即跳过）一致。已作废（`voided_at` 非空）或非 execution 成交不纳入，沿用现文。每个指标只纳入 `available_at <= calculation_as_of` 且已到达窗口端点的数据，`as_of` 截断后不因当前时钟已收盘而放行旧盘中或未来修订数据。`n` 只计入有效、已结束且必需端点齐全的观测；`n<5` 时 `value=null`，`5≤n<30` 时保留十进制值并 `small_sample=true`，`n≥30` 时 `small_sample=false`。未知、缺失和不可成交不转成 0，不伪造样本数。版本快照冻结当时的计划、成交、证据和指标，后续数据只能生成新版本。对外只给 `data_as_of`。`Stat` 沿用 §5 共享结构，**不带 `gaps`**；指标缺口一律写入 `ReviewSummary.gaps`、`ReviewDetail.gaps` 或 `ReviewVersion.gaps`，`key` 写 `outcome_metrics.<指标名>`，`reason` 只用 §3 `gap_reason`（T-R109 裁定）。
 
 错误码只复用 §4 既有表：参数或关联不一致为 `400 VALIDATION_ERROR`，不存在或非本人资源为 `404 NOT_FOUND`，未开放方法为 `405 METHOD_NOT_ALLOWED`，幂等键冲突为 `409 IDEMPOTENCY_CONFLICT`，乐观并发冲突为 `409 VERSION_CONFLICT`。本节不新增错误码。
+
+##### 受影响入口与逐项验收（L-042/043）
+
+**状态：后端待实现、未验证。**
+
+① `POST /reviews`：导入成交在 `committed_at` 晚于版本保存时刻时不进入 trade 证据和 `data_as_of`，`gaps` 无该项；批次未提交时出现 `trades.import_commit_unproven`。
+② `POST /reviews/{id}/versions`：同 ①，且旧版本快照不变。
+③ `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions[/{n}]`：只读冻结快照，平铺三字段存在且与快照一致，不按当前时钟重算可见性。
+④ 手工录入成交（`import_batch_id` 为空）：`available_at=max(traded_at, created_at)`，行为不变。
 
 ### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |
