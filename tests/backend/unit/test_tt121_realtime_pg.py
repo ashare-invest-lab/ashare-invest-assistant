@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, select
 
 from app.marketdata import realtime_collect
 from app.db.tables.market import quotes_snapshot
@@ -27,52 +27,14 @@ def pg_conn() -> Iterator[Any]:
     if not url:
         pytest.skip("TT41_DATABASE_URL 未设置：T-T121 需要隔离 PostgreSQL")
     parsed = urlsplit(url)
-    assert parsed.hostname == "127.0.0.1" and parsed.port == 55432, (
-        "T-T121 PG 例只允许连接 127.0.0.1:55432 隔离库"
+    assert parsed.hostname == "127.0.0.1" and parsed.path == "/aia", (
+        "T-T121 PG 例只允许连接本机回环的 aia 隔离库"
     )
     engine = create_engine(url, hide_parameters=True)
     try:
         with engine.connect() as conn:
             transaction = conn.begin()
             try:
-                # 仅在 127.0.0.1:55432 的隔离 TT41 测试库创建合成最小表。
-                conn.execute(text("CREATE SCHEMA IF NOT EXISTS market"))
-                conn.execute(
-                    text(
-                        """
-                        CREATE TABLE IF NOT EXISTS market.quotes_snapshot (
-                            code text NOT NULL,
-                            ts timestamptz NOT NULL,
-                            price numeric,
-                            pct_change numeric,
-                            payload jsonb,
-                            source text,
-                            source_licence_id uuid,
-                            revision bigint NOT NULL DEFAULT 0,
-                            content_fingerprint text,
-                            volume numeric,
-                            amount numeric,
-                            is_suspended boolean,
-                            limit_up boolean,
-                            limit_down boolean,
-                            batch_id uuid,
-                            fetched_at timestamptz
-                        )
-                        """
-                    )
-                )
-                conn.execute(
-                    text(
-                        """
-                        CREATE UNIQUE INDEX IF NOT EXISTS
-                            tt121_quotes_snapshot_owner_revision
-                        ON market.quotes_snapshot
-                            (code, ts, source, source_licence_id, revision)
-                        WHERE source_licence_id IS NOT NULL
-                          AND source IN ('mairui')
-                        """
-                    )
-                )
                 yield conn
             finally:
                 transaction.rollback()
