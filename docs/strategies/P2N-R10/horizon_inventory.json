@@ -9,6 +9,18 @@
   ],
   "scope_snapshot": [
     {
+      "path": "docs/strategies/T-R81/README.md",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R81/gen_reference.py",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
+      "path": "docs/strategies/T-R81/reference_values.csv",
+      "scope_role": "public_tdx_reference_not_strategy_identity"
+    },
+    {
       "path": "docs/strategies/T-R16/L-01_lt_value.md",
       "scope_role": "enumerated_identity_source"
     },
@@ -908,6 +920,56 @@
       "note": "T-R74 四卡参数出处/状态及最小复测方案；非策略身份"
     },
     {
+      "path": "docs/strategies/T-R83/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R83 B9–B12 财务输入公开出处审计；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R83/finance_inputs_audit.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R83 B9–B12 财务输入公开出处审计；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R83/fq_options.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R85 F-Q01–F-Q09 备选口径、出处与推荐，已由 T-A197 / #225 裁定采用 Opt-A；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R99/f22_disclosure_pair.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R99 W-01 F22 固定报告期公开公告配对复算；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/announcement_indexes.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/calendar_excerpts.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/dividend_excerpts.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/public_profiles.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/report_excerpts.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
+      "path": "docs/strategies/T-R86/sources_ext/url_status.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86d 公开来源摘录；建议拆入第二个 PR 的证据层"
+    },
+    {
       "path": "docs/strategies/R-R1/README.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
@@ -946,6 +1008,111 @@
       "path": "docs/strategies/R-R1/test_audit_public_lists.py",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R71c：登记 main（bec079a）上 R-R1 公开名单审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R78/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R78/horizon_inputs_spec.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R78 horizon输入特征口径卡draft；非策略身份，不改变运行周期"
+    },
+    {
+      "path": "docs/strategies/T-R79/README.md",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79 draft benchmark specification; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/benchmark_spec.md",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79 draft benchmark specification; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/readonly_checks.sql",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R79c unexecuted read-only SQL draft; no strategy identity or runtime change"
+    },
+    {
+      "path": "docs/strategies/T-R79/u11_calib.py",
+      "scope_role": "research_support_not_strategy",
+      "note": "T-R80 offline U11 descriptive calibration; no system suggestions or runtime change"
+    },
+    {
+      "path": "docs/strategies/R-R2/README.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/audit_bse_code_map.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/bse_code_mapping.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/check_result.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/r_r1_recheck.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/sources.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R2/test_audit_bse_code_map.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "S7-03 #234：登记 merge-main 带入的 R-R2 公开代码对照审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/audit_exchange_calendar.py",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/differences.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/report.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/R-R3/summary.json",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "R-R3 #286：沪深交易所公开交易日历审计文件；非策略身份"
+    },
+    {
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v3.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R88b：hold_risk_monitor v3 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R88b：st_pullback_ma v2 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R88b：sw_ma_trend_pullback v2 升版前原文冻结；历史身份，不晋级"
     },
     {
       "path": "docs/strategies/T-R86/README.md",
@@ -1015,7 +1182,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 26,
+          "line": 43,
           "quote": "v1 原文冻结在 `cards/history/hold_risk_monitor.v1.md`"
         }
       ],
@@ -1053,7 +1220,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 124,
+          "line": 147,
           "quote": "v2 原文冻结在 `cards/history/hold_risk_monitor.v2.md`"
         }
       ],
@@ -1088,7 +1255,7 @@
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 2,
+          "line": 3,
           "quote": "v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`"
         }
       ],
@@ -1123,7 +1290,7 @@
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 26,
+          "line": 43,
           "quote": "v1 原文冻结在 `cards/history/sw_ma_trend_pullback.v1.md`"
         }
       ],
@@ -1131,11 +1298,11 @@
       "release_condition": null
     },
     {
-      "record_id": "hold_risk_monitor@3:current_formal_L1_with_L2_spec",
+      "record_id": "hold_risk_monitor@4:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/hold_risk_monitor.md",
       "key": "hold_risk_monitor",
-      "version_no": 3,
-      "document_version": "v3",
+      "version_no": 4,
+      "document_version": "v4",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "intraday_t",
@@ -1151,17 +1318,17 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 32,
-          "quote": "version_no: 3"
+          "line": 49,
+          "quote": "version_no: 4"
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 35,
+          "line": 52,
           "quote": "horizons: [intraday_t, short, swing, long]"
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 3,
+          "line": 4,
           "quote": "> 正式卡"
         }
       ],
@@ -1169,11 +1336,11 @@
       "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
     },
     {
-      "record_id": "sw_ma_trend_pullback@2:current_formal_L1_with_L2_spec",
+      "record_id": "sw_ma_trend_pullback@3:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
       "key": "sw_ma_trend_pullback",
-      "version_no": 2,
-      "document_version": "v2",
+      "version_no": 3,
+      "document_version": "v3",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "swing"
@@ -1186,17 +1353,17 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 33,
-          "quote": "version_no: 2"
+          "line": 50,
+          "quote": "version_no: 3"
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 36,
+          "line": 53,
           "quote": "horizons: [swing]"
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 3,
+          "line": 4,
           "quote": "> 正式卡"
         }
       ],
@@ -1352,11 +1519,11 @@
       "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
     },
     {
-      "record_id": "st_pullback_ma@2:current_formal_L1_with_L2_spec",
+      "record_id": "st_pullback_ma@3:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/st_pullback_ma.md",
       "key": "st_pullback_ma",
-      "version_no": 2,
-      "document_version": "v2",
+      "version_no": 3,
+      "document_version": "v3",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "short"
@@ -1369,17 +1536,17 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 3,
+          "line": 4,
           "quote": "> 正式卡"
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 29,
-          "quote": "version_no: 2"
+          "line": 45,
+          "quote": "version_no: 3"
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 32,
+          "line": 48,
           "quote": "horizons: [short]"
         }
       ],
@@ -2499,13 +2666,136 @@
       ],
       "gap_reason": "通用/跨周期研究条目，没有单一策略版本周期；不以标题、触发频率或观察窗替代",
       "release_condition": "若另派制成正式卡，先由权威规格明确版本周期/结论绑定及生命周期；本轮不新建策略"
+    },
+    {
+      "record_id": "hold_risk_monitor@3:historical_frozen",
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v3.md",
+      "key": "hold_risk_monitor",
+      "version_no": 3,
+      "document_version": "v3",
+      "scope": "historical_frozen",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v3.md",
+          "line": 32,
+          "quote": "version_no: 3"
+        },
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v3.md",
+          "line": 35,
+          "quote": "horizons: [intraday_t, short, swing, long]"
+        },
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v3.md",
+          "line": 3,
+          "quote": "> 正式卡"
+        },
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 2,
+          "quote": "v3 原文冻结在 `cards/history/hold_risk_monitor.v3.md`"
+        }
+      ],
+      "gap_reason": "四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜",
+      "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
+    },
+    {
+      "record_id": "st_pullback_ma@2:historical_frozen",
+      "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+      "key": "st_pullback_ma",
+      "version_no": 2,
+      "document_version": "v2",
+      "scope": "historical_frozen",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级；正式≠G7批准≠运行态",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+          "line": 3,
+          "quote": "> 正式卡"
+        },
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+          "line": 29,
+          "quote": "version_no: 2"
+        },
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v2.md",
+          "line": 32,
+          "quote": "horizons: [short]"
+        },
+        {
+          "path": "docs/strategies/cards/st_pullback_ma.md",
+          "line": 2,
+          "quote": "v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "sw_ma_trend_pullback@2:historical_frozen",
+      "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
+      "key": "sw_ma_trend_pullback",
+      "version_no": 2,
+      "document_version": "v2",
+      "scope": "historical_frozen",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
+          "line": 33,
+          "quote": "version_no: 2"
+        },
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
+          "line": 36,
+          "quote": "horizons: [swing]"
+        },
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
+          "line": 3,
+          "quote": "> 正式卡"
+        },
+        {
+          "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+          "line": 2,
+          "quote": "v2 原文冻结在 `cards/history/sw_ma_trend_pullback.v2.md`"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
     }
   ],
   "excluded_render_mirrors": [
     {
       "path": "docs/strategies/golden/hold_risk_monitor.card.tmpl",
       "key": "hold_risk_monitor",
-      "version_no": 3,
+      "version_no": 4,
       "horizons": [
         "intraday_t",
         "short",
@@ -2518,7 +2808,7 @@
     {
       "path": "docs/strategies/golden/sw_ma_trend_pullback.card.tmpl",
       "key": "sw_ma_trend_pullback",
-      "version_no": 2,
+      "version_no": 3,
       "horizons": [
         "swing"
       ],
@@ -2559,21 +2849,21 @@
     }
   ],
   "stats": {
-    "identity_records": 45,
-    "source_identity_files": 23,
+    "identity_records": 48,
+    "source_identity_files": 26,
     "scope_counts": {
-      "historical_frozen": 4,
+      "historical_frozen": 7,
       "current_formal_L1_with_L2_spec": 3,
       "research_blocked_not_importable": 15,
       "catalog_research_not_formal_card": 23
     },
     "explicit_single_distribution": {
-      "swing": 11,
+      "short": 11,
+      "swing": 12,
       "long": 8,
-      "short": 10,
       "intraday_t": 7
     },
-    "multi_records": 9,
+    "multi_records": 10,
     "source_field_repairs": 0,
     "missing_horizons": 0
   },
@@ -2755,16 +3045,44 @@
     "runtime_changed": false,
     "change": "scope 197→205：登记 main 上 R-R1 公开名单审计 8 文件，T-R71c；来源提交 bec079a；身份45、来源身份文件23、records/stats不变"
   },
+  "t_r88b_refresh": {
+    "reason": "T-R88 按 T-R87 出处表补参数出处；整数版本 +1，旧版逐字冻结，规则与参数不变",
+    "versions": {
+      "hold_risk_monitor": "3→4",
+      "st_pullback_ma": "2→3",
+      "sw_ma_trend_pullback": "2→3"
+    },
+    "new_historical_records": 3,
+    "identity_records": 48,
+    "lifecycle": "draft",
+    "G7": "☐",
+    "runtime_verified": false
+  },
+  "t_r88c_merge_refresh": {
+    "basis": "T-R88c 解冲突（第四批）：以 origin/main 为底，保留 #178 的 R-R1 八文件登记与 HEAD 的三卡升版、三个冻结身份及证据",
+    "previous_scope_files": 205,
+    "scope_files": 235,
+    "identity_records": 48,
+    "source_identity_files": 26,
+    "historical_frozen": 7,
+    "runtime_changed": false,
+    "change": "scope 205→235；身份45→48、来源身份文件23→26、冻结身份4→7；H-01 v4、S-01 v3、W-01 v3；保留两侧历史刷新记录，不推断运行态"
+  },
   "t_r86r_refresh": {
     "basis": "T-R86r 用户任务：将复现所需公开行情切片入库并登记",
-    "previous_scope_files": 210,
-    "scope_files": 212,
+    "previous_scope_files": 239,
+    "scope_files": 246,
     "added_paths": [
+      "docs/strategies/T-R86/README.md",
+      "docs/strategies/T-R86/gen_reference.py",
+      "docs/strategies/T-R86/reference_values.csv",
+      "docs/strategies/T-R86/sources/public_sources.csv",
+      "docs/strategies/T-R86/sources/proxy_inputs.jsonl",
       "docs/strategies/T-R86/inputs/calendar.csv",
       "docs/strategies/T-R86/inputs/listings.csv"
     ],
     "identity_records_unchanged": true,
     "runtime_changed": false,
-    "change": "scope 210→212；身份45、来源身份文件23、records/stats不变"
+    "change": "scope 239→246；以 origin/main 为底合并，records/stats 不变"
   }
 }

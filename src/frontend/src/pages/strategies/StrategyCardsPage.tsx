@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Button, Empty, Tag } from 'antd';
 import { useStrategyCardReading, useStrategyCards, type StrategyCardSummary } from '../../api/strategyCardQueries';
@@ -31,8 +32,8 @@ function KnowledgeCard({ card }: { card: StrategyCardSummary }) {
   return (
     <article className="panel" data-testid="strategy-knowledge-card" aria-label={card.name}>
       <h3>{card.name} <span className="muted small">{card.key} · v{card.current_version_no}</span></h3>
-      <p>分类：{card.category} · 周期：{card.horizons.length ? card.horizons.map((h) => HORIZON[h]).join('、') : '未声明适用周期'}</p>
-      <p>完整度：{COMPLETENESS[card.completeness]}</p>
+      <p>分类：{card.category} · 周期：{card.horizons.length ? card.horizons.map((h) => (labelOf(HORIZON, h) ?? '未知')).join('、') : '未声明适用周期'}</p>
+      <p>完整度：{(labelOf(COMPLETENESS, card.completeness) ?? '未知')}</p>
       {card.performance === null ? <p className="muted">暂无表现记录</p> : (
         <p>5日胜率：{card.performance.win_rate_5d.value ?? '—'}（样本 {card.performance.win_rate_5d.n}）；5日平均超额：{card.performance.avg_excess_5d.value ?? '—'}（样本 {card.performance.avg_excess_5d.n}）</p>
       )}

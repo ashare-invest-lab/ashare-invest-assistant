@@ -1,3 +1,4 @@
+import { labelOf, tagOf } from '../lib/explanations';
 import { ExplanationView } from '../components/ExplanationView';
 import { TrackingResults } from '../components/TrackingResults';
 import { RiskFlagView } from '../components/RiskFlagView';
@@ -30,10 +31,10 @@ import { RuleRefs } from './signals/CandidateSignalDetailPage';
 
 function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
   return [
-    { key: 'dimension', header: '维度', width: 96, pinned: 'left', sortable: false, render: (r) => <b>{DIMENSION[r.dimension]}{r.divergent ? <Tag color="orange" style={{ marginLeft: 4 }}>分歧</Tag> : null}</b> },
+    { key: 'dimension', header: '维度', width: 96, pinned: 'left', sortable: false, render: (r) => <b>{(labelOf(DIMENSION, r.dimension) ?? '未知')}{r.divergent ? <Tag color="orange" style={{ marginLeft: 4 }}>分歧</Tag> : null}</b> },
     ...sg.strategies.map<DataColumn<DimensionMatrixRow>>((s) => ({
       key: s.strategy_version_id,
-      header: `${s.strategy_name} · ${ACTION_SHORT[s.action]}`,
+      header: `${s.strategy_name} · ${(labelOf(ACTION_SHORT, s.action) ?? '未知')}`,
       flex: 1,
       sortable: false,
       tooltip: (r) => {
@@ -45,7 +46,7 @@ function matrixColumns(sg: Suggestion): DataColumn<DimensionMatrixRow>[] {
         if (!c) return <span className="muted">—</span>;
         return (
           <div className={`mx-cell v-${c.view}`}>
-            <span className="mx-view" style={{ color: VIEW[c.view].color }}>{VIEW[c.view].text}</span>
+            <span className="mx-view" style={{ color: tagOf(VIEW, c.view).color }}>{tagOf(VIEW, c.view).text}</span>
             <span className="mono mx-score">{c.score ?? '—'}</span>
             <span className="mono muted small">{ruleCountText(c)}</span>
             <EvidenceChips ids={c.key_evidence_ids} evidence={sg.evidence} />
@@ -60,7 +61,7 @@ const evidenceColumns: DataColumn<Evidence>[] = [
   { key: 'id', header: 'ID', width: 56, value: (e) => e.id },
   { key: 'key', header: '指标 key', width: 220, value: (e) => e.key, render: (e) => <span className="mono">{e.key}</span> },
   { key: 'value', header: '值', width: 120, sortable: false, render: (e) => <span className="mono">{e.value === null ? '—（缺值，见数据缺口）' : String(e.value)}{e.unit ? ` ${e.unit}` : ''}</span> },
-  { key: 'type', header: '类型', width: 70, sortable: false, render: (e) => <Tag color={EPISTEMIC[e.epistemic_type].color}>{EPISTEMIC[e.epistemic_type].text}</Tag> },
+  { key: 'type', header: '类型', width: 70, sortable: false, render: (e) => <Tag color={tagOf(EPISTEMIC, e.epistemic_type).color}>{tagOf(EPISTEMIC, e.epistemic_type).text}</Tag> },
   { key: 'src', header: '来源', flex: 1, sortable: false, render: (e) => <span className="mono small">{providerText(e)}</span> },
   { key: 'asof', header: '数据时间', width: 130, value: (e) => e.data_as_of, render: (e) => <span className="mono small">{fmtTime(e.data_as_of)}</span> },
   { key: 'fetched', header: '抓取时间', width: 130, value: (e) => e.fetched_at, render: (e) => <span className="mono small">{fmtTime(e.fetched_at)}</span> },
@@ -74,7 +75,7 @@ function SuitableHorizons({ sg }: { sg: Suggestion }) {
   const q = useHorizonAssessment(sg.security_code);
   const list = sg.horizon_assessment.suitable;
   return (
-    <span className="small" data-testid="sg-suitable">适合周期：{list.length ? list.map((h) => <Tag key={h}>{HORIZON[h]}</Tag>)
+    <span className="small" data-testid="sg-suitable">适合周期：{list.length ? list.map((h) => <Tag key={h}>{(labelOf(HORIZON, h) ?? '未知')}</Tag>)
       : q.data && noSuitableForLackOfData(q.data) ? <Tag data-testid="sg-hz-data-missing">{HORIZON_DATA_MISSING}</Tag> : <span className="muted">—</span>}
     </span>
   );
@@ -97,7 +98,7 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
             const rs = a.reasons.filter((x) => x.horizon === h);
             return (
               <div key={h} className="hz-row">
-                <div><Tag color={a.suitable.includes(h) ? 'blue' : undefined}>{HORIZON[h]}</Tag><span className="mono">{a.scores[h]}</span>
+                <div><Tag color={a.suitable.includes(h) ? 'blue' : undefined}>{(labelOf(HORIZON, h) ?? '未知')}</Tag><span className="mono">{a.scores[h]}</span>
                   {a.suitable.includes(h) ? <span className="muted">　适合</span>
                     : horizonDataMissing(a, h) ? <span className="muted" data-testid={`hz-dm-${h}`}>　{HORIZON_DATA_MISSING}</span> : null}</div>
                 {(['for', 'against'] as const).map((pol) => rs.filter((x) => x.polarity === pol).map((x, i) => (
@@ -111,14 +112,14 @@ function HorizonPanel({ sg }: { sg: Suggestion }) {
           })}
           {a.caps.map((c, i) => (
             <div key={`cap-${i}`} className="hz-missing" data-testid={`cap-${c.horizon}-${c.rule_id ?? "missing"}`}>
-              {HORIZON[c.horizon]} 封顶 {c.cap}（{CAP_KIND_TEXT[c.kind]}）：{capExplanation(c)}
+              {(labelOf(HORIZON, c.horizon) ?? '未知')} 封顶 {c.cap}（{(labelOf(CAP_KIND_TEXT, c.kind) ?? '未知')}）：{capExplanation(c)}
               {c.rule_id ? <span className="mono muted">（{c.rule_id}）</span> : null}
             </div>
           ))}
           {/* v0.2.5 #2/#3：画像类规则只提示，不影响分数与 suitable */}
           {(a.hints ?? []).map((h, i) => (
             <div key={`hint-${i}`} className="hz-hint" data-testid={`hint-${h.horizon}-${h.rule_id}`}>
-              {HORIZON[h.horizon]} 提示：{h.text}<span className="mono muted">（{h.rule_id}）</span>
+              {(labelOf(HORIZON, h.horizon) ?? '未知')} 提示：{h.text}<span className="mono muted">（{h.rule_id}）</span>
             </div>
           ))}
           {a.inputs_missing.length ? (
@@ -146,10 +147,10 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
         <ActionBadge action={s.action} tLeg={s.t_leg} lifecycle={s.lifecycle} size="lg" />
         <div>
           <div className="sc-name">{s.strategy_name}</div>
-          <div className="muted small">{HORIZON[s.horizon]} · v{s.version_no} · {LIFECYCLE[s.lifecycle]} · {EVAL_STATE[s.state]}{s.priority_downweighted ? ` · 优先级权重 ${s.priority_weight}` : ''}</div>
+          <div className="muted small">{(labelOf(HORIZON, s.horizon) ?? '未知')} · v{s.version_no} · {(labelOf(LIFECYCLE, s.lifecycle) ?? '未知')} · {(labelOf(EVAL_STATE, s.state) ?? '未知')}{s.priority_downweighted ? ` · 优先级权重 ${s.priority_weight}` : ''}</div>
         </div>
         <span className="spacer" />
-        {sig ? <Link to={`/candidate-signals/${sig.id}`} data-testid="to-signal"><Tag color={SIGNAL_STATE[sig.state].color}>{SIGNAL_STATE[sig.state].text}</Tag>候选信号详情</Link> : <Tag>不生成候选信号</Tag>}
+        {sig ? <Link to={`/candidate-signals/${sig.id}`} data-testid="to-signal"><Tag color={tagOf(SIGNAL_STATE, sig.state).color}>{tagOf(SIGNAL_STATE, sig.state).text}</Tag>候选信号详情</Link> : <Tag>不生成候选信号</Tag>}
       </div>
       <div className="sc-metrics">
         <div><label>规则满足度</label><b className="mono">{s.score ?? '—'}</b></div>
@@ -168,12 +169,12 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
           <h4>不可执行原因 · 解除条件</h4>
           {rs.map((r) => (
             <div key={r.id} className={`reason reason-${r.status}`} data-testid={`sg-reason-${r.id}`}>
-              <div>{r.status === 'released' ? <Tag color="green">已解除</Tag> : null}<Tag color={r.status === 'active' ? 'orange' : 'default'}>{r.code}</Tag><b>{REASON_CODE[r.code]}</b>：{r.description}</div>
+              <div>{r.status === 'released' ? <Tag color="green">已解除</Tag> : null}<Tag color={r.status === 'active' ? 'orange' : 'default'}>{r.code}</Tag><b>{(labelOf(REASON_CODE, r.code) ?? '未知')}</b>：{r.description}</div>
               <div className="rc">
-                解除条件（{RELEASE_KIND[r.release_condition.kind]}）：{r.release_condition.human_text}
+                解除条件（{(labelOf(RELEASE_KIND, r.release_condition.kind) ?? '未知')}）：{r.release_condition.human_text}
                 {r.release_condition.expr ? <code>{r.release_condition.expr}</code> : null}
               </div>
-              <div className="muted small">检查时机：{r.release_condition.check_on.map((c) => CHECK_ON[c]).join('、')} · {r.release_condition.machine_checkable ? '系统自动检查' : '需您操作'} · 检出 {fmtTime(r.detected_at).slice(11)}{r.released_at ? ` · 解除 ${fmtTime(r.released_at).slice(11)}` : ''}</div>
+              <div className="muted small">检查时机：{r.release_condition.check_on.map((c) => (labelOf(CHECK_ON, c) ?? '未知')).join('、')} · {r.release_condition.machine_checkable ? '系统自动检查' : '需您操作'} · 检出 {fmtTime(r.detected_at).slice(11)}{r.released_at ? ` · 解除 ${fmtTime(r.released_at).slice(11)}` : ''}</div>
             </div>
           ))}
         </div>
@@ -184,7 +185,7 @@ function StrategyCard({ s, sg }: { s: StrategyConclusion; sg: Suggestion }) {
         </Button>
         <span className="spacer" />
         {/* T-F12：只对本策略生成的候选信号拟定草案（POST /plan-drafts {signal_ids}，§7）；状态不允许时禁用并说明 */}
-        <Tooltip title={!sig ? '本策略没有候选信号，不能拟定计划草案' : canDraft(sig.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : `候选信号为“${SIGNAL_STATE[sig.state].text}”，仅“待检查”“可拟定草案”“原因已解除”状态可拟定`}>
+        <Tooltip title={!sig ? '本策略没有候选信号，不能拟定计划草案' : canDraft(sig.state) ? '按你的持仓与资金拟定计划草案；草案需你确认，交易由你在券商端自行完成' : `候选信号为“${tagOf(SIGNAL_STATE, sig.state).text}”，仅“待检查”“可拟定草案”“原因已解除”状态可拟定`}>
           <Button
             size="small"
             disabled={!sig || sig.lifecycle === 'simulating' || !canDraft(sig.state) || sg.status !== 'active'}
@@ -214,7 +215,7 @@ export function SuggestionDetailPage() {
   if (q.isLoading) return <Loading />;
   if (q.isError || !q.data) return <div className="page-scroll"><ErrorBox error={q.error ?? new Error('未找到候选信号卡')} /></div>;
   const sg = q.data;
-  const exe = EXECUTABILITY[sg.executability.status];
+  const exe = tagOf(EXECUTABILITY, sg.executability.status);
   return (
     <div className="page-scroll detail" data-testid="suggestion-detail">
       <div className="detail-head">
@@ -227,9 +228,9 @@ export function SuggestionDetailPage() {
         <span className="q-name">{sg.name}</span>
         <span className="mono muted">{sg.security_code}</span>
         <DataStatusTag status={sg.data_status} asOf={sg.data_as_of} gaps={sg.gaps} />
-        <span className="muted small">候选信号卡 · {ORIGIN[sg.origin]} · 生成 {fmtTime(sg.created_at)} · 快照 {sg.snapshot_id} · {sg.feature_set_version}</span>
+        <span className="muted small">候选信号卡 · {(labelOf(ORIGIN, sg.origin) ?? '未知')} · 生成 {fmtTime(sg.created_at)} · 快照 {sg.snapshot_id} · {sg.feature_set_version}</span>
         <AddToResearch origin="suggestion" securityCode={sg.security_code} suggestionId={sg.id} />
-        <Tag color={SUGGESTION_STATUS[sg.status].color} data-testid="sg-status">{SUGGESTION_STATUS[sg.status].text}</Tag>
+        <Tag color={tagOf(SUGGESTION_STATUS, sg.status).color} data-testid="sg-status">{tagOf(SUGGESTION_STATUS, sg.status).text}</Tag>
         <Tooltip title="按已缓存的数据重算本证券的候选信号卡，不额外拉取行情">
           <Button
             size="small" icon={<ReloadOutlined />} loading={refresh.isPending} data-testid="sg-refresh"
@@ -269,7 +270,7 @@ export function SuggestionDetailPage() {
             <div className="div-list">
               {sg.divergence.map((d, i) => (
                 <div key={i}>
-                  <Tag color="orange">{d.dimensions.map((x) => DIMENSION[x]).join(' / ')}</Tag>{d.summary}
+                  <Tag color={d.dimensions.every((x) => labelOf(DIMENSION, x)) ? 'orange' : undefined}>{d.dimensions.map((x) => (labelOf(DIMENSION, x) ?? '未知')).join(' / ')}</Tag>{d.summary}
                   <span className="muted">　能化解分歧的信息：</span>{d.resolving_info.map((r) => r.description).join('；')}
                   {d.explanation ? <details data-testid={`divergence-explanation-${i}`}><summary>本项分歧解释</summary><ExplanationView explanation={d.explanation} evidence={sg.evidence} testId={`sg-divergence-explanation-${i}`} title="本项分歧解释" /></details> : null}
                 </div>
@@ -299,7 +300,7 @@ export function SuggestionDetailPage() {
           <div className="panel-head"><span className="panel-title">风控标记</span></div>
           {sg.risk_flags.length ? sg.risk_flags.map((f, i) => <RiskFlagView key={i} flag={f} evidence={sg.evidence} />) : <div className="muted small">无</div>}
           <div className="panel-head"><span className="panel-title">数据缺口</span></div>
-          {sg.gaps.length ? sg.gaps.map((g) => <div key={g.key} className="gap-row small"><Tag>{GAP_REASON[g.reason]}</Tag>{g.message}</div>) : <div className="muted small">无</div>}
+          {sg.gaps.length ? sg.gaps.map((g) => <div key={g.key} className="gap-row small"><Tag>{(labelOf(GAP_REASON, g.reason) ?? '未知')}</Tag>{g.message}</div>) : <div className="muted small">无</div>}
           <HorizonPanel sg={sg} />
           <ExplanationView explanation={sg.explanation} evidence={sg.evidence} testId="sg-explanation" callTestId="sg-llm-call" />
         </section>
@@ -328,7 +329,7 @@ function SupersedeInfo({ sg }: { sg: Suggestion }) {
       {sg.status !== 'active' ? (
         <Alert
           className="div-alert" type={sg.status === 'invalidated' ? 'error' : 'warning'} showIcon data-testid="sg-inactive"
-          title={<span>本卡{SUGGESTION_STATUS[sg.status].text}，内容仅供回看，不能据此拟定计划草案。</span>}
+          title={<span>本卡{tagOf(SUGGESTION_STATUS, sg.status).text}，内容仅供回看，不能据此拟定计划草案。</span>}
           description={sg.superseded_by_id ? <Link to={`/suggestions/${sg.superseded_by_id}`} data-testid="sg-superseded-by">查看取代它的候选信号卡</Link> : null}
         />
       ) : null}

@@ -1,3 +1,4 @@
+import { labelOf } from '../../lib/explanations';
 import { useState } from 'react';
 import { Segmented, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -9,6 +10,7 @@ import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/comm
 import { GAP_REASON, INDUSTRY_TAXONOMY, REGIME, SESSION } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from '../stock/PriceChartPanel';
+import { MarketBasis } from './MarketBasis';
 
 /** /market 市场概览（plan §2.3 能力 1 / §2.4）：指数、涨跌家数与涨跌停、regime 与参考仓位区间、两市成交额、板块资金 */
 export function MarketPage() {
@@ -24,7 +26,7 @@ export function MarketPage() {
       <div className="mk-head">
         <span className="page-title">市场概览</span>
         <span className="mono">{m.trade_date}</span>
-        <Tag variant="outlined">{SESSION[m.session]}</Tag>
+        <Tag variant="outlined">{(labelOf(SESSION, m.session) ?? '未知')}</Tag>
         <DataStatusTag status={m.data_status} asOf={m.data_as_of} gaps={m.gaps} />
         {/* F-07 + F-13 合并口径：data_as_of 为 null（契约 T-A53/A-12）时给出明确的「数据不可用（无数据时点）」，
             既不像 F-13 那样整条隐藏丢信息，也不编造时间；缺口原因另由下方 GapNote 披露 */}
@@ -33,6 +35,7 @@ export function MarketPage() {
           : <span className="muted small mono">数据不可用（无数据时点）</span>}
       </div>
       <GapNote status={m.data_status} gaps={m.gaps} asOf={m.data_as_of} testId="market-gap-note" />
+      <MarketBasis m={m} />
       <div className="index-strip" role="list" aria-label="主要指数">
         {m.indices.map((i) => (
           <button
@@ -67,27 +70,30 @@ export function MarketPage() {
 
 function BreadthPanel({ m }: { m: MarketOverview }) {
   const b = m.breadth;
-  const total = b ? b.up + b.down + b.flat : 0;
+  const hasRatios = b?.up_ratio !== null && b?.up_ratio !== undefined
+    && b.down_ratio !== null && b.down_ratio !== undefined
+    && b.flat_ratio !== null && b.flat_ratio !== undefined;
+  const countText = (value: number | null) => value === null ? '—' : String(value);
   return (
     <section className="panel side-panel" data-testid="breadth-panel">
       <div className="panel-head"><span className="panel-title">涨跌分布</span></div>
       {!b ? <div className="muted small hz-empty">涨跌家数暂不可用</div> : (
         <div className="breadth">
-          <div className="breadth-bar" aria-label={`上涨 ${b.up} 家，平盘 ${b.flat} 家，下跌 ${b.down} 家`}>
-            <span className="seg up-bg" style={{ width: `${(b.up / total) * 100}%` }} />
-            <span className="seg flat-bg" style={{ width: `${(b.flat / total) * 100}%` }} />
-            <span className="seg down-bg" style={{ width: `${(b.down / total) * 100}%` }} />
-          </div>
+          {hasRatios ? <div className="breadth-bar" aria-label={`上涨 ${countText(b.up)} 家，平盘 ${countText(b.flat)} 家，下跌 ${countText(b.down)} 家`}>
+            <span className="seg up-bg" style={{ width: `${Number(b.up_ratio) * 100}%` }} />
+            <span className="seg flat-bg" style={{ width: `${Number(b.flat_ratio) * 100}%` }} />
+            <span className="seg down-bg" style={{ width: `${Number(b.down_ratio) * 100}%` }} />
+          </div> : null}
           <div className="breadth-nums">
-            <span className="up">上涨 <b className="mono">{b.up}</b></span>
-            <span className="muted">平盘 <b className="mono">{b.flat}</b></span>
-            <span className="down">下跌 <b className="mono">{b.down}</b></span>
+            <span className="up">上涨 <b className="mono">{countText(b.up)}</b></span>
+            <span className="muted">平盘 <b className="mono">{countText(b.flat)}</b></span>
+            <span className="down">下跌 <b className="mono">{countText(b.down)}</b></span>
           </div>
           <div className="stat-grid two">
-            <div><label>涨停</label><b className="mono up">{b.limit_up}</b></div>
-            <div><label>跌停</label><b className="mono down">{b.limit_down}</b></div>
+            <div><label>涨停</label><b className="mono up">{countText(b.limit_up)}</b></div>
+            <div><label>跌停</label><b className="mono down">{countText(b.limit_down)}</b></div>
             <div><label>两市成交额</label><b className="mono">{fmtAmount(m.turnover_total)}</b></div>
-            <div><label>上涨占比</label><b className="mono">{fmtNum((b.up / total) * 100, 1)}%</b></div>
+            <div><label>上涨占比</label><b className="mono">{b.up_ratio === null ? '—' : `${fmtNum(Number(b.up_ratio) * 100, 1)}%`}</b></div>
           </div>
         </div>
       )}
@@ -104,7 +110,7 @@ function RegimePanel({ m }: { m: MarketOverview }) {
       <div className="panel-head"><span className="panel-title">大盘状态</span></div>
       <div className="regime" style={{ paddingTop: 8 }}>
         <div>
-          市场状态 <b>{m.regime ? REGIME[m.regime] : '—'}</b>
+          市场状态 <b>{m.regime ? (labelOf(REGIME, m.regime) ?? '未知') : '—'}</b>
           <span className="muted small">　{r ? `参考仓位区间 ${fmtNum(lo, 0)}–${fmtNum(hi, 0)}%` : '参考仓位区间暂不可用'}</span>
         </div>
         {r ? (
@@ -155,7 +161,7 @@ function SectorPanel() {
         <span className="panel-title">板块资金</span>
         <Segmented size="small" value={kind} onChange={(v) => setKind(v as SectorKind)} options={[{ value: 'industry', label: '行业' }, { value: 'concept', label: '概念' }]} />
         <span className="muted small" data-testid="sector-meta">
-          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date ?? '交易日期暂不可用'}${q.data.taxonomy ? ` · ${INDUSTRY_TAXONOMY[q.data.taxonomy]}` : ''}）` : ''}
+          按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date ?? '交易日期暂不可用'}${q.data.taxonomy ? ` · ${(labelOf(INDUSTRY_TAXONOMY, q.data.taxonomy) ?? '未知')}` : ''}）` : ''}
         </span>
         <span className="spacer" />
         {q.data ? <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} /> : null}
@@ -164,7 +170,7 @@ function SectorPanel() {
         <>
           <GapNote status={q.data.data_status} gaps={q.data.gaps} asOf={q.data.data_as_of} testId="sector-gap-note" />
           <Table className="dense-table static" size="small" rowKey="sector_code" pagination={false} columns={cols} dataSource={q.data.items}
-            locale={{ emptyText: q.data.gaps.length ? `暂无板块资金：${q.data.gaps.map((g) => GAP_REASON[g.reason]).join('、')}` : '暂无板块资金' }} />
+            locale={{ emptyText: q.data.gaps.length ? `暂无板块资金：${q.data.gaps.map((g) => (labelOf(GAP_REASON, g.reason) ?? '未知')).join('、')}` : '暂无板块资金' }} />
         </>
       )}
     </section>

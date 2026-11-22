@@ -216,7 +216,8 @@ def test_worker_task_carries_explicit_batch_kind_and_sequence(world, monkeypatch
     monkeypatch.setattr(daily_bars_outbox, "utcnow", lambda: NOW)
     monkeypatch.setattr(fetcher, "read_daily_bars_grant", lambda **_: world.grant)
     assert daily_bars_fetch_task(SimpleNamespace(daily_bars_source="mairui"), DAY.isoformat(),
-                                str(world.grant.user_id), batch_kind="backfill", batch_seq=4) == 0
+                                str(world.grant.user_id), batch_kind="backfill", batch_seq=4,
+                                window_trading_days=5) == 0
     items, runs, count = facts(world)
     assert items[0].batch_kind == "backfill" and items[0].batch_seq == 4
     assert len(items) == len(runs) == 1 and count == 0 and world.calls == []

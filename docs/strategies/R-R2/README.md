@@ -1,0 +1,15 @@
+# R-R2：R-R1 复核与北交所 920 新旧代码公开对照
+- 范围：复核已合入 [PR #169](https://github.com/ashare-invest-lab/ashare-invest-assistant/pull/169) 的 R-R1 冻结公开归档，并新增北交所逐行公开对照；不是 11-15 晚间实时全量刷新，不改旧 PR。
+- R-R1：2026-11-15 20:53:30–20:53:34 MST 复跑 9/9 通过；当前 ST 193（深113/沪80）、终止上市 A 股338（深190/沪148）、差异6项，详见 [r_r1_recheck.json](r_r1_recheck.json)。
+- R-R1 边界：90个已登记公开终止记录中89个一致；600543 为 `*ST`，排除1只科创板 CDR；沪市旧 ST 仅汇总对比，旧终止仅核36个公开键；600190 公告日与退市日双值保留。
+- 北交所来源：[当前官网对照表](https://www.bse.cn/service/code_mapping.html)与[北证公告〔2024〕231号](https://www.bse.cn/important_news/200024109.html)原始 DOCX 各248行，抓取 URL、时间、字节数及 SHA256 见 [sources.json](sources.json)。
+- 结果：旧码前缀43/83/87分别16/178/54行；简单尾号保持222行，第四位递进例外26行；完整逐行数据见 [bse_code_mapping.csv](bse_code_mapping.csv)。
+- 两源248组旧码、新码、上市日期全部一致；仅5项当前简称变化：830879 基康仪器→基康技术、831834 三维股份→三维装备、835305 云创数据→*ST云创、838810 春光药装→春光智能、839680 广道数字→*ST广道。
+- [differences.csv](differences.csv) 共31项＝5项名称差异＋26项分配例外；[check_result.json](check_result.json) 保存逐字段比较及来源校验，名称双值保留，代码/日期不一致会 fail-closed。
+- 规则依据：[北证公告〔2024〕20号](https://www.bse.cn/important_news/200021617.html)规定2024-04-22起新发行使用920号段；231号及[官方说明](https://www.bse.cn/important_news/200024115.html)明确248家、后三位原则及第四位递进；[北证公告〔2025〕46号](https://www.bse.cn/important_news/200026735.html)明确2025-10-09起存量股票启用新码。
+- 使用边界：按官网 `old_code` 精确查 `new_code`，禁止用“920＋旧码后三位”覆盖26个真实例外；`list_date` 是上市日期，不是切换日，不提供逐股 `switch_date`，248行也不代表当前仍在市。
+- 首批试点日期/名单尚无本单可核的北交所原文，不采用券商转载口径，不编造逐股切换批次；本单不是当前北交所全市名单刷新。
+- 在线抓取：`python -I -B docs/strategies/R-R2/audit_bse_code_map.py --fetch --raw-dir <仓库外原始响应目录> --write`；原始响应及 `fetch_manifest.json` 留仓库外，公开字节不含 cookie。
+- 离线复验：`python -I -B docs/strategies/R-R2/audit_bse_code_map.py --raw-dir F:/workspace/team/status/R-R2/public-raw-v1 --write`；测试：`python -I -B docs/strategies/R-R2/test_audit_bse_code_map.py`。
+- 安全：仅用公开数据；未调用麦蕊，未做 F23 判读、策略/风控/契约修改或部署，未使用私有样本、真实交易/持仓、股东代码或密钥。
+- DeepSeek：V4-Pro 负责公开来源核对、确定性脚本与差异表；公开安全扫描不等于事实校验通过。

@@ -37,10 +37,49 @@ env:
   REDIS_IMAGE: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
 
 jobs:
+  # Only PRs need a diff; every other event keeps full CI.
+  changes:
+    name: classify docs-only PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only || 'false' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Classify PR paths
+        id: classify
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # pull_request 工作流文件本身来自 PR；改 .github/ 会被分类为非文档。
+        # 分类程序只取事件给定的可信 base 版本，在 PR 工作树外保存并隔离执行。
+        run: |
+          set -euo pipefail
+          classifier_dir=$(mktemp -d "$RUNNER_TEMP/docs-only.XXXXXX")
+          trap 'rm -rf "$classifier_dir"' EXIT
+          docs_only=false
+          if ! git show "$BASE_SHA:scripts/ci/docs_only_paths.py" > "$classifier_dir/classifier.py"; then
+            echo '::notice::Base classifier unavailable; running full CI.'
+          elif ! python3 -I "$classifier_dir/classifier.py" "$BASE_SHA" "$HEAD_SHA" > "$classifier_dir/output"; then
+            echo '::warning::Base classifier failed; running full CI.'
+          elif cmp -s "$classifier_dir/output" <(printf 'docs_only=true\n'); then
+            docs_only=true
+          elif ! cmp -s "$classifier_dir/output" <(printf 'docs_only=false\n'); then
+            echo '::warning::Invalid classifier output; running full CI.'
+          fi
+          printf 'docs_only=%s\n' "$docs_only" >> "$GITHUB_OUTPUT"
+
   # Wait only for an already-running exact-main push, in parallel with backend.
   # Retain this required readiness check; never run another measurement.
   # PR and merge_group both require their exact main base, without fallback.
   coverage-base:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: trusted main coverage readiness
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -57,17 +96,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json" --coverage-output "${RUNNER_TEMP}/coverage-base-ready-coverage.json"
 
-  # ------------------------------------------------------------------ 后端：ruff / mypy strict / pytest + 覆盖率
-  backend:
-    name: backend (ruff, mypy, pytest+coverage)
+  # ------------------------------------------------------------------ 后端：lint / pytest 分片 / 覆盖率汇总
+  backend-lint:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
+    name: backend-lint
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: ruff check
+        working-directory: src/backend
+        run: uv run --frozen ruff check --output-format=github .
+      - name: mypy --strict
+        working-directory: src/backend
+        run: uv run --frozen mypy
+
+  backend-shard:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
+    name: backend-shard (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
     permissions:
       contents: read
       actions: read
-    # T-O80：慢次 pytest+覆盖率约 28 分钟，自检约 0.4 分钟，曾顶满 30 分钟；原运行预算为 45 分钟。
-    # T-O89：与 coverage-base 并行，pytest 后再冻结基线；最坏仍可能额外等待 main 归档 1800 秒。
-    # 保留原 45 分钟运行余量 + 最多 30 分钟等待 = 75 分钟，避免等待挤占测试/收尾预算。
-    timeout-minutes: 75
+    # T-O120：按文件 LPT 分 6 片，每片独立 PG/端口/Unix 资源，serial 组在片内仍顺序执行。
     # T-O66：t_t41 / t_t45 读 TT41_DATABASE_URL；T-O67：A2–A31 读 PGHOST 等，均指向本 job 内建 PG（ci-only）。
     services:
       db:
@@ -112,12 +180,6 @@ jobs:
       - name: uv sync --frozen
         working-directory: src/backend
         run: uv sync --frozen
-      - name: ruff check
-        working-directory: src/backend
-        run: uv run --frozen ruff check --output-format=github .
-      - name: mypy --strict
-        working-directory: src/backend
-        run: uv run --frozen mypy
       - name: 迁移到 head（供 TT41_DATABASE_URL / t_t41·t_t45）
         working-directory: src/backend
         run: uv run --frozen alembic upgrade head
@@ -165,6 +227,7 @@ jobs:
         run: |
           set -euo pipefail
           py=src/backend/.venv/bin/python
+          mkdir -p "$RUNNER_TEMP/cov"
           # Observe metadata only; preserve pytest argv (plus durations) and exit.
           "$py" scripts/ci/observe_template_connections.py &
           template_observer_pid=$!
@@ -182,26 +245,21 @@ jobs:
           fi
           # A1r 正式例 ③/⑤（__import__('requests')、urllib3.PoolManager）需要这两库在测试环境里
           uv pip install --python "$py" "requests==${REQUESTS_VERSION}" "urllib3==${URLLIB3_VERSION}"
-          dirs=()
-          for d in src/backend/tests tests/backend tests/replay; do
-            [ -d "$d" ] && dirs+=("$d")
-          done
-          if [ "${#dirs[@]}" -eq 0 ]; then
-            echo "::error title=backend tests::没有找到后端测试（src/backend/tests、tests/backend、tests/replay 都不存在）——需要测试角色合入 T-T01 测试骨架"
+          mapfile -t test_files < <(python3 scripts/ci/shard_backend_tests.py --shards 6 --index "${{ matrix.shard }}")
+          if [ "${#test_files[@]}" -eq 0 ]; then
+            echo "::error title=backend tests::分片没有测试文件"
             exit 1
           fi
           ini=()
           [ -f tests/pytest.ini ] && ini=(-c tests/pytest.ini)
-          PYTHONPATH=src/backend "$py" -m pytest -p scripts.ci.pytest_safe_failures "${ini[@]}" "${dirs[@]}" \
+          COVERAGE_FILE="$RUNNER_TEMP/cov/.coverage.shard${{ matrix.shard }}" \
+            PYTHONPATH=src/backend "$py" -m pytest -p scripts.ci.pytest_safe_failures \
+            "${ini[@]}" "${test_files[@]}" \
             --durations=30 --durations-min=0.5 \
-            --cov=src/backend/app --cov-report=term-missing:skip-covered \
-            --cov-report="json:${RUNNER_TEMP}/coverage.json" \
-            --junitxml="${RUNNER_TEMP}/backend-pytest.xml"
-      - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
-        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
-        run: python3 scripts/ci/assert_a1s_a32_ran.py "${RUNNER_TEMP}/backend-pytest.xml"
+            --cov=src/backend/app --cov-report= \
+            --junitxml="$RUNNER_TEMP/cov/backend-pytest-shard${{ matrix.shard }}.xml"
       - name: 后端自检 A1s/A1r/A28–A31（A32 在 tb90，正式例已覆盖）
-        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        if: ${{ matrix.shard == 0 && !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -210,7 +268,98 @@ jobs:
             src/backend/selfchecks/test_tb116d_a1s_static.py \
             src/backend/selfchecks/test_tb116d_a1r_runtime.py \
             src/backend/selfchecks/test_tb116d_a28_a32.py \
-            --junitxml="${RUNNER_TEMP}/selfcheck-a1s-a32.xml"
+            --junitxml="$RUNNER_TEMP/cov/selfcheck-a1s-a32.xml"
+      - name: 上传后端分片测量
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: backend-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/cov
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: 正常收尾本 run 新建的 0030 模板与 head 自检库
+        if: ${{ always() }}
+        env:
+          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
+        run: |
+          set -euo pipefail
+          if [ -f "$AIA_CI_TEMPLATE_RECEIPT" ]; then
+            bash scripts/ci/prepare_tt50_template.sh cleanup
+          fi
+      - name: 正常收尾本 run 的精确自有 Unix 资源
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -f "$AIA_CI_UNIX_RECEIPT" ]; then
+            src/backend/.venv/bin/python scripts/ci/owned_unix_resources.py cleanup --receipt "$AIA_CI_UNIX_RECEIPT"
+          fi
+
+  # 汇总 job 保留原 backend 检查名，作为唯一覆盖率与 JUnit 检查入口。
+  backend:
+    needs: [changes, backend-lint, backend-shard]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true') }}
+    name: backend (ruff, mypy, pytest+coverage)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: 确认 backend-lint 与 backend-shard 成功
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.backend-lint.result }}" != "success" ] ||
+             [ "${{ needs.backend-shard.result }}" != "success" ]; then
+            echo "::error title=backend::backend-lint 或 backend-shard 未成功"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # 冻结可信 base 需要完整历史（与原 backend job 一致）。
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: src/backend/uv.lock
+      - name: uv sync --frozen
+        working-directory: src/backend
+        run: uv sync --frozen
+      - name: 安装 pytest-cov
+        run: uv pip install --python src/backend/.venv/bin/python "pytest-cov==${PYTEST_COV_VERSION}"
+      - name: 检查后端分片规划
+        run: python3 scripts/ci/shard_backend_tests.py --shards 6 --check
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: backend-shard-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/cov
+      - name: 合并覆盖率
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x src/backend/.venv/bin/coverage
+          COVERAGE_FILE="$RUNNER_TEMP/cov/.coverage" src/backend/.venv/bin/coverage combine "$RUNNER_TEMP/cov"
+          COVERAGE_FILE="$RUNNER_TEMP/cov/.coverage" src/backend/.venv/bin/coverage json -o "$RUNNER_TEMP/coverage.json"
+          COVERAGE_FILE="$RUNNER_TEMP/cov/.coverage" src/backend/.venv/bin/coverage report --skip-covered -m
+      - name: 合并后端 JUnit
+        run: |
+          set -euo pipefail
+          mapfile -d '' junit_files < <(find "$RUNNER_TEMP/cov" -type f -name 'backend-pytest-shard*.xml' -print0)
+          if [ "${#junit_files[@]}" -eq 0 ]; then
+            echo "::error title=backend junit::没有找到分片 JUnit"
+            exit 1
+          fi
+          python3 scripts/ci/merge_junit.py --output "$RUNNER_TEMP/backend-pytest.xml" \
+            "${junit_files[@]}"
+          selfcheck=$(find "$RUNNER_TEMP/cov" -type f -name 'selfcheck-a1s-a32.xml' -print -quit)
+          test -n "$selfcheck"
+          cp "$selfcheck" "$RUNNER_TEMP/selfcheck-a1s-a32.xml"
+      - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
+        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        run: python3 scripts/ci/assert_a1s_a32_ran.py "${RUNNER_TEMP}/backend-pytest.xml"
       - name: 冻结可信 base 覆盖率棘轮基线
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         env:
@@ -239,25 +388,11 @@ jobs:
             ${{ runner.temp }}/selfcheck-a1s-a32.xml
           if-no-files-found: error
           retention-days: 90
-      - name: 正常收尾本 run 新建的 0030 模板与 head 自检库
-        if: ${{ always() }}
-        env:
-          AIA_CI_PG_SERVICE_ID: ${{ job.services.db.id }}
-        run: |
-          set -euo pipefail
-          if [ -f "$AIA_CI_TEMPLATE_RECEIPT" ]; then
-            bash scripts/ci/prepare_tt50_template.sh cleanup
-          fi
-      - name: 正常收尾本 run 的精确自有 Unix 资源
-        if: ${{ always() }}
-        run: |
-          set -euo pipefail
-          if [ -f "$AIA_CI_UNIX_RECEIPT" ]; then
-            src/backend/.venv/bin/python scripts/ci/owned_unix_resources.py cleanup --receipt "$AIA_CI_UNIX_RECEIPT"
-          fi
 
   # ------------------------------------------------------------------ 前端：eslint / tsc / vitest / pnpm audit
   frontend:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: frontend (eslint, tsc, vitest, pnpm audit)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -316,7 +451,14 @@ jobs:
       - name: pnpm audit
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: src/frontend
-        run: pnpm audit --audit-level high
+        shell: bash
+        # 审计完整开发/生产依赖的 high/critical；不做公告、版本或路径豁免。
+        run: |
+          set +e
+          pnpm audit --audit-level high --json > "$RUNNER_TEMP/frontend-audit.json"
+          audit_status=$?
+          set -e
+          python3 ../../scripts/ci/frontend_audit.py --report "$RUNNER_TEMP/frontend-audit.json" --audit-exit "$audit_status"
       - name: AG Grid Enterprise（已安装依赖）
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: python3 scripts/ci/check_licenses.py --node-modules src/frontend/node_modules
@@ -331,6 +473,8 @@ jobs:
 
   # ------------------------------------------------------------------ 契约：文档对照脚本 + 三类码不得重名 + schemathesis
   contract:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: contract (doc check, code namespaces, schemathesis)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -408,6 +552,8 @@ jobs:
 
   # ------------------------------------------------------------------ Alembic 迁移可升可降（plan §8.0）
   migrations:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: migrations (alembic up/down/up)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -467,6 +613,8 @@ jobs:
 
   # ------------------------------------------------------------------ 镜像构建（只构建不推送）
   image:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: image (backend.Dockerfile, no push)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -501,6 +649,8 @@ jobs:
 
   # ------------------------------------------------------------------ 前端镜像（只构建不推送；dist 在镜像内，网关配置仍用仓库 nginx.conf）
   frontend-image:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: frontend-image (frontend.Dockerfile, no push)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -526,6 +676,8 @@ jobs:
 
   # ------------------------------------------------------------------ 依赖审计
   pip-audit:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: pip-audit
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -550,6 +702,8 @@ jobs:
 
   # ------------------------------------------------------------------ 依赖许可
   licenses:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: licenses (no ag-grid-enterprise, no GPL/AGPL/NC)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -589,6 +743,8 @@ jobs:
   # 冒烟 upstream 模式：路由/前缀/头不变，桩上游换 IP 后网关不重启即恢复。
   # 正反例在 scripts/ci/tests/test_gateway_limits.py（secret-scan.yml selftest job 运行）。
   gateway-limits:
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}
     name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -643,3 +799,98 @@ jobs:
           persist-credentials: false
       - name: check_ignored_sources.py
         run: python3 scripts/ci/check_ignored_sources.py
+
+  # 惰性文档 PR：轻检查真跑；以下空跑仅覆盖已审计的不相关输入。
+  # 安全：只验证 main 覆盖率制品；惰性文档不改变可执行代码或测量输入。
+  coverage-base-docs:
+    name: trusted main coverage readiness
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：测试读取的契约/策略等 docs 已列入 CONSUMED_DOCS；其余惰性文档不参与测试。
+  backend-docs:
+    name: backend (ruff, mypy, pytest+coverage)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：测试读取的契约、plan 和免责策略已排除；构建/依赖输入均在 src/frontend。
+  frontend-docs:
+    name: frontend (eslint, tsc, vitest, pnpm audit)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  contract-docs:
+    name: contract (doc check, code namespaces, schemathesis)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          python3 scripts/ci/check_contract.py
+          python3 scripts/ci/check_code_namespaces.py
+
+  # 安全：输入为 src/backend 迁移、deploy/db 和配置；不读取惰性文档。
+  migrations-docs:
+    name: migrations (alembic up/down/up)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：构建上下文 src/backend，仅 COPY 应用/依赖/迁移；不 COPY docs 或根 Markdown。
+  image-docs:
+    name: image (backend.Dockerfile, no push)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：构建上下文 src/frontend；不 COPY docs 或根 Markdown，冒烟只读部署配置。
+  frontend-image-docs:
+    name: frontend-image (frontend.Dockerfile, no push)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：仅审计 uv.lock、pyproject 和 tests/requirements.txt；不读取惰性文档。
+  pip-audit-docs:
+    name: pip-audit
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：仅检查依赖许可元数据与前端依赖清单；不读取惰性文档。
+  licenses-docs:
+    name: licenses (no ag-grid-enterprise, no GPL/AGPL/NC)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0
+
+  # 安全：只读取 nginx/compose/config 与冒烟脚本；不读取惰性文档。
+  gateway-limits-docs:
+    name: gateway-limits (nginx client_max_body_size ↔ config/imports.yaml)
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.docs_only == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: exit 0

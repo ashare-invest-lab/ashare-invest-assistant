@@ -181,7 +181,8 @@ export interface SuggestionSummary {
   divergent_dimensions: Dimension[];
   top_score: number | null;
 }
-export interface TerminalQuote { price: Decimal; change_pct: Decimal; amount: Decimal; t: DateTime }
+/** 价格/时点存在时保留行情；缺少前收或成交额不应丢弃整条行情。 */
+export interface TerminalQuote { price: Decimal; change_pct: Decimal | null; amount: Decimal | null; t: DateTime }
 export interface TerminalHolding {
   qty: Decimal;
   sellable_qty: Decimal;
@@ -470,6 +471,8 @@ export interface TerminalAccount {
   data_status: DataStatus;
 }
 export interface TerminalResponse {
+  /** T-A12：实际选中的本人账户；没有账户时为 null。 */
+  account_id: Uuid | null;
   server_time: DateTime;
   /** v0.2.3：行情所属交易日（非交易日为最近一个交易日） */
   trade_date: DateStr;
@@ -530,13 +533,29 @@ export interface HealthReady {
   version: string;
 }
 
-// ---------- v0.2.3 §7.3 /market/overview（最小结构） ----------
+// ---------- v0.2.11 §7.3 /market/overview ----------
 export interface MarketIndexQuote { security_code: string; name: string; price: Decimal | null; change_pct: Decimal | null; amount: Decimal | null; t: DateTime | null }
+/** v0.2.11 §5.1 MarketBasis；没有市场快照证据时响应返回 null，前端不推造批次。 */
+export interface MarketBasis {
+  snapshot_id: Uuid | null; observed_date: DateStr | null; mode: 'intraday' | 'close' | null; scope: string;
+  eligible: number | null; observed: number | null; trading: number | null; suspended: number | null; missing: number | null;
+  source: string | null;
+}
 export interface MarketOverview extends DataStatusBlock {
+  basis: MarketBasis | null;
   trade_date: DateStr;
   session: MarketSession;
   indices: MarketIndexQuote[];
-  breadth: { up: number; down: number; flat: number; limit_up: number; limit_down: number } | null;
+  breadth: {
+    up: number | null;
+    down: number | null;
+    flat: number | null;
+    limit_up: number | null;
+    limit_down: number | null;
+    up_ratio: Decimal | null;
+    down_ratio: Decimal | null;
+    flat_ratio: Decimal | null;
+  } | null;
   regime: MarketRegime | null;
   regime_position_range: RegimePositionRange | null;
   turnover_total: Decimal | null;
@@ -565,6 +584,7 @@ export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }
 export interface TodayResponse {
+  account_id: Uuid | null;
   server_time: DateTime;
   trade_date: DateStr;
   session: MarketSession;

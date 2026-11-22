@@ -1,6 +1,7 @@
 import type { DimensionCell, Evidence } from '../api/types';
 import { PROVIDER } from '../i18n/labels';
-/** 契约时间均为 +08:00；界面统一按北京时间显示。Z 或其他偏移换算到 Asia/Shanghai；+08:00 输出与旧实现逐字节不变。 */
+import { ownValue } from './enumValue';
+/** 契约时间均为 +08:00；界面统一按北京时间显示。Z 或其他偏移换算到 Asia/Shanghai；截去小数秒（不四舍五入）；+08:00 其余输出与旧实现不变。 */
 /**
  * F-13：`t` 为 null/undefined 时返回空串，**不抛错**。
  * 空数据场景（契约 T-A53）`data_as_of` 为 null 是合法的；此前直接调 `.endsWith` 会让整页
@@ -10,7 +11,7 @@ import { PROVIDER } from '../i18n/labels';
 export const fmtTime = (t: string | null | undefined) => {
   if (t === null || t === undefined || t === '') return '';
   if (t.endsWith('+08:00') || !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(t)) {
-    return t.replace('T', ' ').replace(/\+08:00$/, '').replace(/:00$/, '');
+    return t.replace('T', ' ').replace(/\+08:00$/, '').replace(/(:\d{2})\.\d+$/, '$1').replace(/:00$/, '');
   }
   const date = new Date(t);
   if (Number.isNaN(date.getTime())) return t;
@@ -24,6 +25,18 @@ export const fmtTime = (t: string | null | undefined) => {
   if (!g('year') || !g('month') || !g('day') || !g('hour') || !g('minute') || !g('second')) return t;
   const base = `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}`;
   return g('second') === '00' ? base : `${base}:${g('second')}`;
+};
+/** 行情价格：股票按既有规则显示，ETF 固定 3 位；cdr/index 的特殊位数未验证，按默认规则显示。 */
+const PRICE_RULES = {
+  stock: { minimumFractionDigits: 2, maximumFractionDigits: 3 },
+  etf: { minimumFractionDigits: 3, maximumFractionDigits: 3 },
+} as const satisfies Readonly<Record<string, Intl.NumberFormatOptions>>;
+const DEFAULT_PRICE_RULE = { minimumFractionDigits: 2, maximumFractionDigits: 3 } as const;
+
+export const fmtPrice = (v: string | number | null | undefined, securityType?: string | null) => {
+  if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return '—';
+  const rule = ownValue(PRICE_RULES, securityType ?? '', DEFAULT_PRICE_RULE);
+  return Number(v).toLocaleString('zh-CN', rule);
 };
 export const fmtNum = (v: string | number | null | undefined, digits = 2) =>
   v === null || v === undefined || v === '' || Number.isNaN(Number(v))
@@ -49,7 +62,7 @@ export const bjToChartTime = (t: string) => {
 
 /** 证据来源：数据源 + 接口路径 */
 export const providerText = (e: Evidence) =>
-  `${(PROVIDER as Record<string, string | undefined>)[e.provider] ?? e.provider}${e.endpoint ? ' ' + e.endpoint : ''}`;
+  `${Object.hasOwn(PROVIDER, e.provider) ? PROVIDER[e.provider] : e.provider}${e.endpoint ? ' ' + e.endpoint : ''}`;
 
 /** 维度单元格规则计数：入场类 “规则 x/y”；纯离场策略（rules_total = 0）显示 “离场 x/y”（v0.2.3 #20） */
 export const ruleCountText = (c: Pick<DimensionCell, 'rules_passed' | 'rules_total' | 'exit_hits' | 'exit_total'>) =>

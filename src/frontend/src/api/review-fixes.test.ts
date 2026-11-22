@@ -156,7 +156,8 @@ describe('契约 v0.2.3 同步', () => {
     const supplement = CONTRACT.slice(CONTRACT.indexOf('#### `/today` 补充'));
     const added = ['alerts', 'plan_triggers', 'data_gaps', 'evidence'];
     for (const k of added) expect(supplement).toMatch(new RegExp(`^${k}: `, 'm'));
-    expect(Object.keys(t).sort()).toEqual([...endpointKeys('/today'), ...added].sort());
+    // #213 合入后可删除 account_id 兼容补键；Set 保证合入前后均无重复。
+    expect(Object.keys(t).sort()).toEqual([...new Set([...endpointKeys('/today'), ...added, 'account_id'])].sort());
     for (const k of ['focus', 'pending_plan_drafts', 'released_reasons', 'risk_flags', 'invalidations_today'] as const) {
       expect(t[k].items.length).toBeLessThanOrEqual(50);
       expect(typeof t[k].more).toBe('boolean');
@@ -165,8 +166,10 @@ describe('契约 v0.2.3 同步', () => {
 
   it('#9 /market/overview 最小结构', async () => {
     const m = await apiGet<MarketOverview>('/market/overview');
-    expect(Object.keys(m).sort()).toEqual(endpointKeys('/market/overview'));
-    expect(m.breadth && Object.keys(m.breadth).sort()).toEqual(['down', 'flat', 'limit_down', 'limit_up', 'up']);
+    const supplement = CONTRACT.slice(CONTRACT.indexOf('**v0.2.11**：响应增'));
+    expect(supplement).toContain('basis: MarketBasis \\| null');
+    expect(Object.keys(m).sort()).toEqual([...new Set([...endpointKeys('/market/overview'), 'basis'])].sort());
+    expect(m.breadth && Object.keys(m.breadth).sort()).toEqual(['down', 'down_ratio', 'flat', 'flat_ratio', 'limit_down', 'limit_up', 'up', 'up_ratio']);
   });
 
   it('#17 /non-executable-reasons：suggestion_id / signal_ids 不分页返回 {items}；signal_ids > 100 → 400', async () => {
