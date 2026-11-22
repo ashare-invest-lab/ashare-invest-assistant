@@ -332,14 +332,17 @@ def test_snapshot_projection_and_timeline_sources() -> None:
         def execute(self, statement: Any) -> Any:
             text = str(statement)
             if "data_snapshots" in text:
-                return SimpleNamespace(first=lambda: SimpleNamespace(_mapping={"items": snap_items}))
+                return SimpleNamespace(first=lambda: SimpleNamespace(items=snap_items))
             if "plan_versions" in text:
                 return SimpleNamespace(all=lambda: [pv_row])
             if "trades" in text:
                 return SimpleNamespace(all=lambda: [trade_row])
             return SimpleNamespace(all=lambda: [version], first=lambda: version, scalar=lambda: None)
     projected = service.version_body(Conn(), U, version)
-    assert projected["data_status"] == "partial" and projected["outcome_metrics"]["holding_return"]["value"] == "1" and projected["tags"] == []
+    assert projected["data_status"] == "partial"
+    assert projected["outcome_metrics"]["holding_return"]["value"] == "1"
+    assert projected["tags"] == []
+    assert "calculation_as_of" not in projected
     timeline = service._timeline(Conn(), U, RID, version)
     assert [item["kind"] for item in timeline] == ["plan_version", "trade", "review_version"]
 
@@ -348,10 +351,10 @@ def test_route_invalid_cursors_and_version_not_found(http: Any, monkeypatch: pyt
     cfg = get_settings()
     scope = f"reviews:{U}:{RID}:versions"
     bad = encode_cursor(["wrong"], scope=scope, settings=cfg)
-    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
+    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID, period_end=dt.date(2026, 1, 5)))
     response = http[0].get(f"/api/v1/reviews/{RID}/versions", params={"cursor": bad})
     assert response.status_code == 400 and response.json()["error"]["code"] == "INVALID_CURSOR"
-    monkeypatch.setattr(api.service, "version_body", lambda *_: {"version_no": 1})
+    monkeypatch.setattr(api.service, "version_body", lambda *_args, **_kwargs: {"version_no": 1})
     http[1].execute = lambda _s: SimpleNamespace(first=lambda: None)
     response = http[0].get(f"/api/v1/reviews/{RID}/versions/99")
     assert response.status_code == 404 and response.json()["error"]["code"] == "NOT_FOUND"
@@ -359,13 +362,13 @@ def test_route_invalid_cursors_and_version_not_found(http: Any, monkeypatch: pyt
 
 def test_paging_helpers_and_revise_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = get_settings()
-    current = SimpleNamespace(version_no=1, id=VID)
+    current = SimpleNamespace(version_no=1, id=VID, period_end=dt.date(2026, 1, 5))
     rows = [SimpleNamespace(id=RID, created_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC))]
     class Conn:
         def execute(self, statement: Any) -> Any:
             text = str(statement)
             if "review_versions" in text:
-                return SimpleNamespace(all=lambda: [SimpleNamespace(version_no=1)], first=lambda: current)
+                return SimpleNamespace(all=lambda: [SimpleNamespace(version_no=1, id=VID, snapshot_id=None, outcome_metrics={}, plan_version_ids=[], trade_ids=[], lessons=None, tags=[], attribution=None, created_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC))], first=lambda: current)
             return SimpleNamespace(all=lambda: rows, first=lambda: current, one=lambda: SimpleNamespace(id=VID))
     page = api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=None), CODE, None)
     assert len(page.items) == 1
@@ -376,8 +379,8 @@ def test_paging_helpers_and_revise_replacement(monkeypatch: pytest.MonkeyPatch) 
         api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=bad_cursor), CODE, None)
     assert exc.value.code == ErrorCode.INVALID_CURSOR
 
-    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
-    monkeypatch.setattr(api.service, "version_body", lambda *_: {"version_no": 1})
+    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID, period_end=dt.date(2026, 1, 5)))
+    monkeypatch.setattr(api.service, "version_body", lambda *_args, **_kwargs: {"version_no": 1})
     assert api._version_page(Conn(), U, RID, cfg, PageParams(limit=1, cursor=encode_cursor([1], scope=f"reviews:{U}:{RID}:versions", settings=cfg))).items == [{"version_no": 1}]
 
     review = SimpleNamespace(current_version_id=VID)
