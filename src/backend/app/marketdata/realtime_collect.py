@@ -14,26 +14,31 @@ import json
 import logging
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
+import redis
 from sqlalchemy import Connection, Engine, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.aggregates.calendar import BEIJING, market_clock
 from app.aggregates.models import MarketClock
+from app.aggregates.service import select_account
+from app.api.v1.portfolio import _account
 from app.common.errors import AppError
 from app.config import Settings
-from app.db.tables.market import quotes_snapshot
+from app.db.tables.market import quotes_snapshot, securities
+from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.ingest.daily_lists import HALT as DAILY_HALT
 from app.ingest.daily_lists import STOP, credential, limited
 from app.ingest.egress import EgressDenied, mairui_get, single_egress
+from app.ingest.mode import verification_is_offline
 from app.ingest.runtime import get_ingest_core
 from app.ingest.state import Priority
 from app.ingest.upstream import Signal, classify
-from app.marketdata.daily_bars import daily_universe
 from app.marketdata.daily_snapshot import active_licence_id
 
 log = logging.getLogger("app.marketdata.realtime_collect")
@@ -62,6 +67,7 @@ REALTIME_FIELD_MAP: Final[Mapping[str, str]] = {
 
 Transport = Callable[[str, str], tuple[int, object]]
 SecretLoader = Callable[[Engine, uuid.UUID], str]
+RedisClient = redis.Redis
 
 
 class RealtimeCollectionStoppedError(RuntimeError):
@@ -204,7 +210,34 @@ def _write_rows(conn: Connection, rows: Sequence[dict[str, object]], batch_id: u
 
 
 def _owned_codes(conn: Connection, owner: uuid.UUID, trade_date: dt.date) -> list[str]:
-    return daily_universe(conn, owner, trade_date)
+    raw: set[str] = set()
+    account_id = select_account(conn, owner, None)
+    if account_id is not None:
+        raw.update(_account(conn, account_id, trade_date).positions)
+    raw.update(
+        conn.execute(
+            select(watchlist_items.c.security_code).where(
+                watchlist_items.c.user_id == owner,
+                watchlist_items.c.removed_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not raw:
+        return []
+    listed = (
+        conn.execute(
+            select(securities.c.code).where(
+                securities.c.code.in_(sorted(raw)),
+                securities.c.type.in_({"stock", "etf"}),
+                securities.c.listing_status == "listed",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return sorted(listed)
 
 
 def _approved_owners(conn: Connection) -> list[uuid.UUID]:
@@ -279,10 +312,14 @@ def collect_realtime_quotes(
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
     engine: Engine | None = None,
+    redis_client: RedisClient | None = None,
     stop: Path = STOP,
     halt: Path = HALT,
 ) -> int:
     """采集一个用户持仓与自选的一轮行情，所有响应通过后才写库。"""
+    if verification_is_offline():
+        log.info("实时行情跳过：当前为 replay/离线模式")
+        return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
     stamp = _now(now)
@@ -327,7 +364,18 @@ def collect_realtime_quotes(
     if stop.is_file() or halt.is_file():
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
     with engine.begin() as write_conn:
-        return _write_rows(write_conn, fetched_rows, uuid.uuid4())
+        written = _write_rows(write_conn, fetched_rows, uuid.uuid4())
+    if written and redis_client is not None:
+        from app.marketdata.quotes_read import read_quotes
+        from app.marketdata.realtime_publish import publish_quote
+
+        try:
+            with engine.connect() as read_conn:
+                response = read_quotes(read_conn, owner, tuple(codes), settings)
+            publish_quote(redis_client, owner, response, stamp)
+        except Exception as exc:  # noqa: BLE001 - publication must not change write result
+            log.warning("实时行情 SSE 发布准备失败：%s", type(exc).__name__)
+    return written
 
 
 def realtime_quotes_task(
@@ -337,8 +385,12 @@ def realtime_quotes_task(
     owner: uuid.UUID | str | None = None,
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
+    redis_client: RedisClient | None = None,
 ) -> int:
     """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
+    if verification_is_offline():
+        log.info("实时行情跳过：当前为 replay/离线模式")
+        return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
     from app.workers.jobs import _engine
@@ -355,24 +407,38 @@ def realtime_quotes_task(
         selected_owner = None
     stamp = _now(now)
     engine = _engine(settings)
-    if selected_owner is not None:
-        owners = [selected_owner]
-    else:
-        with engine.connect() as owner_conn:
-            owners = _approved_owners(owner_conn)
+    owned_redis = False
+    if redis_client is None and getattr(settings, "redis_url", None):
+        from app.workers.jobs import _redis
 
-    total = 0
-    for current_owner in owners:
-        with engine.connect() as owner_conn:
-            total += collect_realtime_quotes(
-                owner_conn,
-                settings,
-                owner=current_owner,
-                now=stamp,
-                transport=transport,
-                secret_loader=secret_loader,
-                engine=engine,
-                stop=STOP,
-                halt=HALT,
-            )
-    return total
+        try:
+            redis_client = _redis(settings)
+            owned_redis = True
+        except Exception as exc:  # noqa: BLE001 - Redis is best effort for collection
+            log.warning("实时行情 SSE Redis 初始化失败：%s", type(exc).__name__)
+    try:
+        if selected_owner is not None:
+            owners = [selected_owner]
+        else:
+            with engine.connect() as owner_conn:
+                owners = _approved_owners(owner_conn)
+        total = 0
+        for current_owner in owners:
+            with engine.connect() as owner_conn:
+                total += collect_realtime_quotes(
+                    owner_conn,
+                    settings,
+                    owner=current_owner,
+                    now=stamp,
+                    transport=transport,
+                    secret_loader=secret_loader,
+                    engine=engine,
+                    redis_client=redis_client,
+                    stop=STOP,
+                    halt=HALT,
+                )
+        return total
+    finally:
+        if owned_redis and redis_client is not None and hasattr(redis_client, "close"):
+            with suppress(Exception):
+                redis_client.close()

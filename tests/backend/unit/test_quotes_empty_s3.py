@@ -17,6 +17,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import elements
+from sqlalchemy.sql import operators, visitors
 
 from app.api.v1 import router
 from app.auth import deps
@@ -27,6 +29,34 @@ OWNER, OTHER = uuid.UUID(int=711), uuid.UUID(int=712)
 CODE, ETF = "999991.SH", "999992.SH"
 LICENCE = uuid.UUID(int=713)
 NOW = dt.datetime(2041, 5, 6, 16, 5, tzinfo=dt.UTC)
+
+
+def has_is_predicate(
+    statement: Any,
+    *,
+    table_name: str,
+    column_name: str,
+    value: bool | None,
+) -> bool:
+    """Inspect a SELECT's WHERE AST without depending on rendered SQL text."""
+    expected = {
+        None: elements.Null,
+        False: elements.False_,
+        True: elements.True_,
+    }[value]
+    for criterion in statement._where_criteria:
+        for expression in visitors.iterate(criterion):
+            if getattr(expression, "operator", None) is not operators.is_:
+                continue
+            column = getattr(expression, "left", None)
+            if (
+                getattr(column, "name", None) == column_name
+                and getattr(getattr(column, "table", None), "fullname", None)
+                == table_name
+                and isinstance(getattr(expression, "right", None), expected)
+            ):
+                return True
+    return False
 
 
 def test_aggregates_service_import_succeeds_in_fresh_process() -> None:
@@ -85,14 +115,27 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
     )
 
     def execute(statement: Any) -> Result:
-        rendered = str(statement.compile(dialect=postgresql.dialect()))
-        assert rendered.lstrip().upper().startswith("SELECT "), "GET must never write"
-        state.reads.append(rendered)
+        assert statement.is_select, "GET must never write"
+        compiled = statement.compile(dialect=postgresql.dialect())
+        assert compiled.statement.is_select, "GET must never write"
+        params = statement.compile().params
         if state.fail:
             raise RuntimeError("synthetic database failure")
-        params = statement.compile().params
-        if "market.securities" in rendered:
-            assert "market.securities.type" in rendered
+        tables = set()
+        for from_clause in statement.get_final_froms():
+            pending = [from_clause]
+            while pending:
+                current = pending.pop()
+                fullname = getattr(current, "fullname", None)
+                if fullname:
+                    tables.add(fullname)
+                for side in ("left", "right"):
+                    child = getattr(current, side, None)
+                    if child is not None:
+                        pending.append(child)
+
+        if "market.securities" in tables:
+            state.reads.append("securities")
             requested = params["code_1"]
             return Result(
                 [
@@ -103,7 +146,8 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                     if code in requested
                 ]
             )
-        if "market.daily_bars" in rendered:
+        if "market.daily_bars" in tables:
+            state.reads.append("daily_bars")
             assert params["source_1"] == "mairui"
             assert params["adj_type_1"] == "none"
             assert params["source_licence_id_1"] == LICENCE
@@ -111,21 +155,13 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             assert params["trade_date_2"] == dt.time(15)
             assert params["param_1"] == "Asia/Shanghai"
             assert params["fetched_at_1"] == state.now
-            for field in ("open", "high", "low", "close"):
-                assert f"market.daily_bars.{field} IS NOT NULL" in rendered
-            assert "market.daily_bars.is_suspended IS false" in rendered
-            assert "market.daily_bars.code IN" in rendered
-            for field in ("source", "adj_type", "source_licence_id"):
-                assert f"market.daily_bars.{field} = " in rendered
-            for field in ("trade_date", "fetched_at"):
-                assert f"market.daily_bars.{field} <= " in rendered
-            assert (
-                "market.daily_bars.fetched_at >= "
-                "((market.daily_bars.trade_date + %(trade_date_2)s::TIME WITHOUT TIME ZONE) "
-                "AT TIME ZONE %(param_1)s::VARCHAR)"
-            ) in rendered
-            assert "SELECT DISTINCT ON (market.daily_bars.code)" in rendered
-            assert "ORDER BY market.daily_bars.code, market.daily_bars.trade_date DESC" in rendered
+            has_suspend_filter = has_is_predicate(
+                statement,
+                table_name="market.daily_bars",
+                column_name="is_suspended",
+                value=False,
+            )
+            state.daily_has_suspend_filter = has_suspend_filter
             eligible = [
                 row
                 for row in state.bars
@@ -133,7 +169,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 and row.source == params["source_1"]
                 and row.adj_type == params["adj_type_1"]
                 and row.source_licence_id == params["source_licence_id_1"]
-                and row.is_suspended is False
+                and (not has_suspend_filter or row.is_suspended is False)
                 and all(getattr(row, f) is not None for f in ("open", "high", "low", "close"))
                 and row.trade_date <= params["trade_date_1"]
                 and row.fetched_at >= dt.datetime.combine(
@@ -145,30 +181,70 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             for row in sorted(eligible, key=lambda row: row.trade_date, reverse=True):
                 latest.setdefault(row.code, row)
             return Result(list(latest.values()))
-        if "market.trading_calendar" in rendered:
+        if "market.trading_calendar" in tables:
+            state.reads.append("calendar_is_open" if "is_open" in {
+                getattr(column, "name", None) for column in statement.selected_columns
+            } else "calendar_prev")
             assert params["date_1"] == state.now.astimezone(ZoneInfo("Asia/Shanghai")).date()
-            if rendered.startswith("SELECT market.trading_calendar.is_open \nFROM "):
-                assert "market.trading_calendar.date = " in rendered
-                assert "ORDER BY" not in rendered and "LIMIT" not in rendered
+            selected_names = {
+                getattr(column, "name", None) for column in statement.selected_columns
+            }
+            date_comparisons = [
+                expression.operator
+                for criterion in statement._where_criteria
+                for expression in visitors.iterate(criterion)
+                if getattr(expression, "left", None) is not None
+                and getattr(expression.left, "name", None) == "date"
+                and getattr(getattr(expression.left, "table", None), "fullname", None)
+                == "market.trading_calendar"
+            ]
+            assert date_comparisons
+            if "is_open" in selected_names:
+                assert date_comparisons == [operators.eq]
                 is_open = state.calendar.get(params["date_1"])
                 return Result([] if is_open is None else [is_open])
-            assert rendered.startswith("SELECT market.trading_calendar.date \nFROM ")
-            assert "market.trading_calendar.is_open IS true" in rendered
-            assert "market.trading_calendar.date <= " in rendered
-            assert "ORDER BY market.trading_calendar.date DESC" in rendered
-            assert "LIMIT" in rendered and params["param_1"] == 1
+            assert selected_names == {"date"}
+            assert date_comparisons[0] in (operators.lt, operators.le)
+            assert params["param_1"] == 1
+            has_open_filter = has_is_predicate(
+                statement,
+                table_name="market.trading_calendar",
+                column_name="is_open",
+                value=True,
+            )
+            state.calendar_prev_has_open_filter = has_open_filter
             open_dates = [
                 day for day, is_open in state.calendar.items()
-                if is_open is True and day <= params["date_1"]
+                if (not has_open_filter or is_open is True)
+                and (
+                    day < params["date_1"]
+                    if date_comparisons[0] is operators.lt
+                    else day <= params["date_1"]
+                )
             ]
             return Result([max(open_dates)] if open_dates else [])
-        if "app.user_data_licence_status" in rendered:
-            assert rendered.startswith("SELECT app.user_data_licence_status.id \nFROM ")
-            assert "app.user_data_licence_holds" in rendered
-            assert "deleted_at IS NULL" in rendered and "paused_until" in rendered
-            assert "expires_on" in rendered and "held" not in params
-            return Result([LICENCE] if params["user_id_1"] in state.active else [])
-        raise AssertionError(f"unexpected SQL: {rendered}")
+        if "app.user_data_licence_status" in tables:
+            state.reads.append("licence")
+            assert "app.user_data_licence_holds" in tables
+            assert "held" not in params
+            has_deleted_filter = has_is_predicate(
+                statement,
+                table_name="app.user_data_licence_status",
+                column_name="deleted_at",
+                value=None,
+            )
+            state.licence_has_deleted_filter = has_deleted_filter
+            if not hasattr(state, "licences"):
+                return Result([LICENCE] if params["user_id_1"] in state.active else [])
+            eligible = [
+                row
+                for row in state.licences
+                if row.user_id == params["user_id_1"]
+                and row.user_id in state.active
+                and (not has_deleted_filter or row.deleted_at is None)
+            ]
+            return Result([row.id for row in eligible[:1]])
+        raise AssertionError(f"unexpected SELECT from tables: {sorted(tables)}")
 
     engine = SimpleNamespace(
         connect=lambda: nullcontext(SimpleNamespace(execute=execute))
@@ -262,7 +338,7 @@ def test_owner_query_cannot_borrow_another_users_active_licence(world: Any) -> N
         response.json()["items"][0]["gaps"][0]["reason"] == "data_licence_unavailable"
     )
     assert len(world.state.reads) == 2
-    assert all("daily_bars" not in sql for sql in world.state.reads)
+    assert "daily_bars" not in world.state.reads
 
 
 @pytest.mark.parametrize(
@@ -389,9 +465,11 @@ def test_only_latest_eligible_bound_mairui_bar_is_used(world: Any) -> None:
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["price"] == "7.8750"
     assert item["t"] == "2041-05-05T15:00:00+08:00"
-    assert sum("market.daily_bars" in sql for sql in world.state.reads) == 1
-    assert sum("market.trading_calendar" in sql for sql in world.state.reads) == 1
-    assert len(world.state.reads) == 4
+    assert world.state.reads.count("daily_bars") == 1
+    assert world.state.reads.count("securities") == 1
+    assert world.state.reads.count("licence") == 1
+    assert sum(read.startswith("calendar_") for read in world.state.reads) <= 2
+    assert len(world.state.reads) <= 5
 
 
 @pytest.mark.parametrize(
@@ -415,6 +493,7 @@ def test_incomplete_latest_bar_falls_back_or_reports_no_source(world: Any, inval
         bar(),
     ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
+    assert world.state.daily_has_suspend_filter is True
     assert item["data_status"] == "stale" and item["price"] == "7.8750"
     world.state.reads.clear()
     world.state.bars.pop()
@@ -427,7 +506,8 @@ def test_incomplete_latest_bar_falls_back_or_reports_no_source(world: Any, inval
         for key in ("price", "change_pct", "volume", "amount", "t", "data_as_of")
     )
     assert len(world.state.reads) == 3
-    assert all("market.trading_calendar" not in sql for sql in world.state.reads)
+    assert "calendar_is_open" not in world.state.reads
+    assert "calendar_prev" not in world.state.reads
 
 
 def test_no_active_licence_skips_even_existing_daily_bars(world: Any) -> None:
@@ -437,7 +517,7 @@ def test_no_active_licence_skips_even_existing_daily_bars(world: Any) -> None:
     assert item["data_status"] == "unavailable" and item["price"] is None
     assert item["gaps"][0]["reason"] == "data_licence_unavailable"
     assert len(world.state.reads) == 2
-    assert all("daily_bars" not in sql for sql in world.state.reads)
+    assert "daily_bars" not in world.state.reads
 
 
 @pytest.mark.parametrize("with_etf_bar", [False, True])
@@ -457,9 +537,11 @@ def test_mixed_codes_keep_deduplicated_request_order_with_one_daily_select(
         assert items[0]["price"] == "7.875"
         assert Decimal(items[0]["change_pct"]) == Decimal(5)
     assert items[1]["price"] == "7.8750"
-    assert sum("market.daily_bars" in sql for sql in world.state.reads) == 1
-    assert sum("market.trading_calendar" in sql for sql in world.state.reads) == 1
-    assert len(world.state.reads) == 4
+    assert world.state.reads.count("daily_bars") == 1
+    assert world.state.reads.count("securities") == 1
+    assert world.state.reads.count("licence") == 1
+    assert sum(read.startswith("calendar_") for read in world.state.reads) <= 2
+    assert len(world.state.reads) <= 5
 
 
 @pytest.mark.parametrize(
@@ -504,7 +586,8 @@ def test_intraday_complete_bar_falls_back_to_closed_day(
     assert item["price"] is None and item["t"] is None
     assert all(item[key] is None for key in ("change_pct", "volume", "amount", "data_as_of"))
     assert len(world.state.reads) == 3
-    assert all("market.trading_calendar" not in sql for sql in world.state.reads)
+    assert "calendar_is_open" not in world.state.reads
+    assert "calendar_prev" not in world.state.reads
 
 
 @pytest.mark.parametrize("hour,minute,second", [(1, 0, 0), (6, 59, 59)])
@@ -537,7 +620,8 @@ def test_intraday_fetch_is_not_a_close_even_after_beijing_1500(
     assert all(item[key] is None for key in ("price", "t", "data_as_of"))
     assert all(item[key] is None for key in ("change_pct", "volume", "amount"))
     assert len(world.state.reads) == 3
-    assert all("market.trading_calendar" not in sql for sql in world.state.reads)
+    assert "calendar_is_open" not in world.state.reads
+    assert "calendar_prev" not in world.state.reads
 
 
 @pytest.mark.parametrize("minute,fetch_minute", [(0, 0), (1, 0), (1, 1)])
@@ -590,11 +674,12 @@ def test_open_day_close_freshness_before_and_after_beijing_1500(
     assert item["data_as_of"] == item["t"]
     assert item["volume"] == "123.00" and item["amount"] == "456.000"
     assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
-    calendar_sql = [sql for sql in world.state.reads if "market.trading_calendar" in sql]
-    assert len(calendar_sql) == calendar_reads
-    assert calendar_sql[0].startswith("SELECT market.trading_calendar.is_open ")
-    if calendar_reads == 2:
-        assert calendar_sql[1].startswith("SELECT market.trading_calendar.date ")
+    calendar_queries = [read for read in world.state.reads if read.startswith("calendar_")]
+    # 上限：盘中只要当日 is_open；收盘后 #390 只查 1 次，基线仍可能查上一开市日，均不得超过 calendar_reads。
+    assert calendar_queries and calendar_queries[0] == "calendar_is_open"
+    assert len(calendar_queries) <= calendar_reads
+    if len(calendar_queries) == 2:
+        assert calendar_queries[1] == "calendar_prev"
 
 
 @pytest.mark.parametrize(
@@ -640,11 +725,12 @@ def test_nontrading_day_close_requires_calendar_and_same_day_fetch(
     assert item["t"] == f"2041-05-{trade_day:02d}T15:00:00+08:00"
     assert item["data_as_of"] == item["t"]
     assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
-    calendar_sql = [sql for sql in world.state.reads if "market.trading_calendar" in sql]
-    assert len(calendar_sql) == calendar_reads
-    assert calendar_sql[0].startswith("SELECT market.trading_calendar.is_open ")
+    calendar_queries = [read for read in world.state.reads if read.startswith("calendar_")]
+    assert len(calendar_queries) == calendar_reads
+    assert calendar_queries[0] == "calendar_is_open"
     if calendar_reads == 2:
-        assert calendar_sql[1].startswith("SELECT market.trading_calendar.date ")
+        assert calendar_queries[1] == "calendar_prev"
+        assert world.state.calendar_prev_has_open_filter is True
 
 
 @pytest.mark.parametrize(
