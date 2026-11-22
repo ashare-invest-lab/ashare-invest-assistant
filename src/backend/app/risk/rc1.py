@@ -250,10 +250,16 @@ def load(
             facts.fetched_at = bar.fetched_at
     else:
         facts.endpoint = "market.realtime_quotes:raw"
+        from app.marketdata.daily_snapshot import active_licence_id
+
+        licence = active_licence_id(conn, owner, at)  # contract §1.1: licence UUID, not user id
         quote = conn.execute(
             select(realtime_quotes)
             .where(
                 realtime_quotes.c.code == code,
+                # I2 ownership: legacy compatibility rows are not owner-visible.
+                realtime_quotes.c.source_licence_id.is_not(None),
+                realtime_quotes.c.source_licence_id == licence,
                 realtime_quotes.c.ts <= at,
                 realtime_quotes.c.fetched_at <= at,
             )
