@@ -180,6 +180,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb213_realtime_collect.py", "group": "parallel", "keywords": ["fake transport and synthetic rows", "calendar/session gates", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb222_realtime_publish.py", "group": "parallel", "keywords": ["fake publish/fake redis client", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb223_quotes_session_fresh.py", "group": "parallel", "keywords": ["MagicMock connection and synthetic rows", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb229_quotes_daily_semantics.py", "group": "parallel", "keywords": ["pure functions on synthetic rows and datetimes", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb232_realtime_collect.py", "group": "parallel", "keywords": ["fake engine/fake connections", "no real PG/Redis/network", "synthetic committed rows"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata only", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}
