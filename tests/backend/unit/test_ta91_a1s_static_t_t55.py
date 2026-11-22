@@ -744,6 +744,15 @@ def test_a1s_s5_tree_registered_seams_only() -> None:
     assert not offenders, "A1s S5 tree:\n" + "\n".join(offenders)
 
 
+def test_a1s_s5_tree_daily_lists_seam_only() -> None:
+    """负例：仅登记 daily_lists 与 realtime_collect 的测试缝。
+
+    恢复旧名以对齐 assert_a1s_a32_ran.py 的 A1s 清单；校验与
+    test_a1s_s5_tree_registered_seams_only 相同（现行 seam 口径，未放宽）。
+    """
+    test_a1s_s5_tree_registered_seams_only()
+
+
 def test_a1s_s5_positive_inject_and_process_upstream_flagged() -> None:
     """正例：app 内 transport= / 字典键 transport / process(upstream=) / **{\"transport\":…} / **变量 即红。"""
     samples = {
