@@ -429,6 +429,15 @@ def _recheck(result: Any) -> Any:
     return _get(result, "recheck")
 
 
+def _parse_aware_datetime(value: Any) -> dt.datetime:
+    assert isinstance(value, str), "返回值必须是 ISO 8601 字符串"
+    parsed = dt.datetime.fromisoformat(value)
+    assert parsed.tzinfo is not None and parsed.utcoffset() is not None, (
+        "返回值必须带时区"
+    )
+    return parsed
+
+
 def _recheck_is_stubbed() -> bool:
     if DELETE_ENDPOINT is None:
         return True
@@ -445,7 +454,8 @@ def test_r1_list_is_owner_scoped_and_excludes_removed() -> None:
     result = _invoke(endpoint, engine)
     items = _items(result)
     assert [_get(item, "id") for item in items] == [RID]
-    assert _get(items[0], "until") == PAST
+    returned_until = _parse_aware_datetime(_get(items[0], "until"))
+    assert returned_until.astimezone(dt.UTC) == PAST.astimezone(dt.UTC)
     cursor = _get(result, "next_cursor")
     assert cursor is None or isinstance(cursor, str)
     other_ids = [_get(item, "id") for item in _items(_invoke(endpoint, engine, user_id=OTHER))]
