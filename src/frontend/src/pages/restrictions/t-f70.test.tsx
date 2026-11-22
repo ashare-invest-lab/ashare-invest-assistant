@@ -126,11 +126,38 @@ describe('T-F70 /restrictions R6', () => {
       http.delete(`${API}/restrictions/:id`, () => HttpResponse.json({ id: restriction.id, removed_at: '2026-11-21T10:01:00+08:00', recheck: { released_reason_ids: [], remaining_reason_ids: ['reason-1'] }, gaps: [gap] })),
     );
     renderPage();
-    expect(await screen.findByTestId('restriction-list-gaps')).toHaveTextContent('重查未完成');
+    expect(await screen.findByTestId('restriction-list-gaps')).toHaveTextContent('列表投影不完整');
+    expect(screen.getByTestId('restriction-list-gaps')).not.toHaveTextContent('重查未完成');
     await userEvent.setup().click(await screen.findByTestId(`restriction-delete-${restriction.id}`));
     expect(await screen.findByTestId('restriction-recheck-gaps')).toHaveTextContent('重查未完成');
     expect(screen.getByTestId('restriction-recheck')).toHaveTextContent('剩余原因 1 项');
     expect(screen.queryByText(/已解除|已可交易/)).not.toBeInTheDocument();
+  });
+
+  it('列表仅有 no_source 缺口时，删除重查结果仍可判定', async () => {
+    const listGap = { key: 'restriction.list.target-name', reason: 'no_source', message: '目标名称缺主数据' } as const;
+    server.use(
+      http.get(`${API}/restrictions`, () => HttpResponse.json({ items: [{ ...restriction, name: null }], next_cursor: null, gaps: [listGap] })),
+      http.delete(`${API}/restrictions/:id`, () => HttpResponse.json({
+        id: restriction.id, removed_at: '2026-11-21T10:01:00+08:00',
+        recheck: { released_reason_ids: ['reason-1'], remaining_reason_ids: [] }, gaps: [],
+      })),
+    );
+    renderPage();
+    const listGapNote = await screen.findByTestId('restriction-list-gaps');
+    expect(listGapNote).toHaveTextContent('列表投影不完整');
+    expect(listGapNote).toHaveTextContent('无数据源（目标名称缺主数据）');
+    expect(listGapNote).not.toHaveTextContent('重查未完成');
+    expect(listGapNote).not.toHaveTextContent('不能判定为解除');
+
+    await userEvent.setup().click(await screen.findByTestId(`restriction-delete-${restriction.id}`));
+    const recheckNote = await screen.findByTestId('restriction-recheck');
+    expect(recheckNote).toHaveTextContent('重查结果：');
+    expect(recheckNote).toHaveTextContent('释放记录 1 项');
+    expect(recheckNote).not.toHaveTextContent('不能判定为解除');
+    expect(screen.queryByTestId('restriction-recheck-gaps')).not.toBeInTheDocument();
+    expect(screen.getByText('删除后将由系统重查不可执行原因，删除成功不等于已可交易。')).toBeInTheDocument();
+    expect(screen.queryByText('删除后系统仍需完成不可执行原因重查。')).not.toBeInTheDocument();
   });
 
   it('删除成功刷新终端计数与今日解除列表，gap 不会伪造解除', async () => {
