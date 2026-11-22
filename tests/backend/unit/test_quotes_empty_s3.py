@@ -353,7 +353,7 @@ def test_bound_daily_close_is_stale_with_real_timestamps_and_stable_etag(world: 
     assert item["data_status"] == "stale" and item["gaps"] == []
     assert item["price"] == "7.8750" and Decimal(item["change_pct"]) == Decimal("5")
     assert item["t"] == "2041-05-05T15:00:00+08:00"
-    assert item["data_as_of"] == "2041-05-05T17:05:00+08:00"
+    assert item["data_as_of"] == item["t"]
     for field in ("t", "data_as_of"):
         assert dt.datetime.fromisoformat(item[field]) < NOW
     assert item["volume"] == "123" and item["amount"] == "456"
@@ -471,7 +471,10 @@ def test_etf_price_has_three_decimals_but_change_uses_original_close(
     world.state.bars = [bar(code=ETF, close=Decimal(close))]
     item = world.client.get("/api/v1/quotes", params={"codes": ETF}).json()["items"][0]
     assert item["price"] == price
-    assert Decimal(item["change_pct"]) == (Decimal(close) - Decimal("7.5")) / Decimal("7.5") * 100
+    expected = ((Decimal(close) - Decimal("7.5")) / Decimal("7.5") * 100).quantize(
+        Decimal("0.0001")
+    )
+    assert Decimal(item["change_pct"]) == expected
 
 
 @pytest.mark.parametrize("hour,minute,second", [(1, 31, 0), (6, 59, 59)])
@@ -491,7 +494,7 @@ def test_intraday_complete_bar_falls_back_to_closed_day(
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "stale"
     assert item["t"] == "2041-05-06T15:00:00+08:00"
-    assert item["data_as_of"] == "2041-05-07T09:00:00+08:00"
+    assert item["data_as_of"] == item["t"]
     assert dt.datetime.fromisoformat(item["t"]) <= world.state.now
     world.state.reads.clear()
     world.state.bars.remove(historical)
@@ -525,7 +528,7 @@ def test_intraday_fetch_is_not_a_close_even_after_beijing_1500(
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "stale" and item["price"] == "7.8750"
     assert item["t"] == "2041-05-06T15:00:00+08:00"
-    assert item["data_as_of"] == "2041-05-06T17:05:00+08:00"
+    assert item["data_as_of"] == item["t"]
     world.state.reads.clear()
     world.state.bars.remove(previous)
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
@@ -554,7 +557,7 @@ def test_today_close_is_eligible_at_or_after_beijing_1500(
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
     assert item["data_status"] == "fresh" and item["price"] == "8.1250"
     assert item["t"] == "2041-05-07T15:00:00+08:00"
-    assert item["data_as_of"] == f"2041-05-07T15:{fetch_minute:02d}:00+08:00"
+    assert item["data_as_of"] == item["t"]
     assert dt.datetime.fromisoformat(item["t"]) <= world.state.now
 
 
@@ -584,7 +587,7 @@ def test_open_day_close_freshness_before_and_after_beijing_1500(
     assert item["data_status"] == status and item["gaps"] == []
     assert item["price"] == price
     assert item["t"] == f"2041-05-{trade_day:02d}T15:00:00+08:00"
-    assert item["data_as_of"] == f"2041-05-{trade_day:02d}T15:01:00+08:00"
+    assert item["data_as_of"] == item["t"]
     assert item["volume"] == "123.00" and item["amount"] == "456.000"
     assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
     calendar_sql = [sql for sql in world.state.reads if "market.trading_calendar" in sql]
@@ -635,7 +638,7 @@ def test_nontrading_day_close_requires_calendar_and_same_day_fetch(
     assert item["price"] == "7.8750" and Decimal(item["change_pct"]) == Decimal("5")
     assert item["volume"] == "123" and item["amount"] == "456"
     assert item["t"] == f"2041-05-{trade_day:02d}T15:00:00+08:00"
-    assert item["data_as_of"] == f"2041-05-{fetch_day:02d}T{fetch_hour + 8:02d}:05:00+08:00"
+    assert item["data_as_of"] == item["t"]
     assert dt.datetime.fromisoformat(item["data_as_of"]) <= world.state.now
     calendar_sql = [sql for sql in world.state.reads if "market.trading_calendar" in sql]
     assert len(calendar_sql) == calendar_reads

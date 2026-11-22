@@ -139,7 +139,7 @@ def test_missing_realtime_falls_back_to_existing_daily_projection(
     assert item.data_status == "stale"
     assert item.price == "9.875"
     assert item.t == "2026-11-20T15:00:00+08:00"
-    assert item.data_as_of == "2026-11-20T17:00:00+08:00"
+    assert item.data_as_of == item.t
     assert item.gaps == []
 
 

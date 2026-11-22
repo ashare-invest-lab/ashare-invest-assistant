@@ -181,7 +181,7 @@ def test_ta173_quotes_active_licence_keeps_stale_close(
     assert item["price"] == "7.8750"
     assert Decimal(item["change_pct"]) == Decimal(5)
     assert item["t"] == "2041-05-05T15:00:00+08:00"
-    assert item["data_as_of"] == "2041-05-05T17:05:00+08:00"
+    assert item["data_as_of"] == item["t"]
     for field in ("t", "data_as_of"):
         assert dt.datetime.fromisoformat(item[field]) < NOW
     assert sum("market.daily_bars" in sql for sql in owned_world.state.reads) == 1

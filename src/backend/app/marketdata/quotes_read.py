@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import date as date_type
 from datetime import datetime as datetime_type
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -270,9 +271,13 @@ def read_quotes(
         if row is not None:
             item.price = format(row.close, ".3f" if identity.type == SecurityType.ETF else "f")
             if row.pre_close is not None and row.pre_close > 0:
-                item.change_pct = format((row.close - row.pre_close) / row.pre_close * 100, "f")
+                change_pct = (row.close - row.pre_close) / row.pre_close * 100
+                item.change_pct = format(
+                    change_pct.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+                    "f",
+                )
             item.t = dt.datetime.combine(row.trade_date, dt.time(15), BEIJING).isoformat()
-            item.data_as_of = row.fetched_at.astimezone(BEIJING).isoformat()
+            item.data_as_of = item.t
             item.volume = None if row.volume is None else format(row.volume, "f")
             item.amount = None if row.amount is None else format(row.amount, "f")
             # Cross-day backfills do not prove a close fetched on its own session.
