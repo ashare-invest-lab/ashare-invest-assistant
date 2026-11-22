@@ -370,7 +370,8 @@ def collect_realtime_quotes(
         from app.marketdata.realtime_publish import publish_quote
 
         try:
-            response = read_quotes(conn, owner, tuple(codes), settings)
+            with engine.connect() as read_conn:
+                response = read_quotes(read_conn, owner, tuple(codes), settings)
             publish_quote(redis_client, owner, response, stamp)
         except Exception as exc:  # noqa: BLE001 - publication must not change write result
             log.warning("实时行情 SSE 发布准备失败：%s", type(exc).__name__)
