@@ -496,6 +496,42 @@ services:
       retries: 10
       start_period: 5s
 
+  # 盘中行情只读健康检查，默认不启动。Redis 键名未验证，待 I4 定稿，可由环境变量覆盖。
+  intraday-health:
+    logging: *default-logging
+    networks:
+      aia_internal:
+    image: redis:7.4.12-alpine3.21@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+    profiles: ["monitor"]
+    command: ["sh", "-c", "while :; do /usr/local/bin/intraday-health.sh; sleep 60; done"]
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      INTRADAY_ENABLED: ${INTRADAY_ENABLED:-false}
+      REDIS_URL: redis://redis:6379/0
+      TZ: Asia/Shanghai
+      INTRADAY_HEARTBEAT_KEY: ${INTRADAY_HEARTBEAT_KEY:-${INGEST_HEARTBEAT_KEY:-ingest:heartbeat}}
+      INTRADAY_QUEUE_KEY: ${INTRADAY_QUEUE_KEY:-}
+      INTRADAY_STALE_AFTER_S: ${INTRADAY_STALE_AFTER_S:-120}
+      INTRADAY_QUEUE_ZERO_ALERT_S: ${INTRADAY_QUEUE_ZERO_ALERT_S:-900}
+      INTRADAY_HEALTH_LOG: ${INTRADAY_HEALTH_LOG:-/tmp/intraday-health.log}
+      INTRADAY_HEALTH_STATE: ${INTRADAY_HEALTH_STATE:-/tmp/intraday-health.state}
+    volumes:
+      - ../scripts/intraday-health.sh:/usr/local/bin/intraday-health.sh:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "tail -n 1 \"$${INTRADAY_HEALTH_LOG}\" 2>/dev/null | grep -Eq '状态=(正常|未启用|非交易时段)( |$)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 # 数据卷显式命名 <AIA_VOLUME_PREFIX>_*（T-O03）：前缀由 compose.sh 从 .env 解析（缺省 = 项目名），
 # 项目改名时把前缀设成旧项目名即可沿用原卷；down -v 只会删除本项目解析出的这几个卷。
 volumes:
