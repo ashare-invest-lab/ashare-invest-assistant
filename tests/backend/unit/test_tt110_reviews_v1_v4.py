@@ -16,7 +16,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.sql import operators
 
@@ -429,7 +428,7 @@ class World:
         response = self.client.request(method.upper(), f"/api/v1{concrete}", json={})
         if self.routes is None and response.status_code in {404, 405}:
             pytest.xfail(
-                f"T-B201 未实现（#349@3d93af9c §7.8.1–§7.8.4）："
+                f"T-B201 未实现（#349@daefbbe7 §7.8.1–§7.8.4）："
                 f"{method} {path} 在官方 /api/v1 入口未接线（HTTP {response.status_code}）"
             )
         if self.routes is None:
@@ -448,21 +447,17 @@ def _load_routes() -> Any:
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> World:
     routes = _load_routes()
-    from app.api.v1 import router as v1_router
-
     from app.auth import deps
-    from app.common.errors import install_exception_handlers
-    from app.config import get_settings
+    from app.config import Settings, get_settings
+    from app.main import create_app
 
     db = SyntheticDB()
     engine = SyntheticEngine(db)
     auth = SimpleNamespace(user_id=OWNER, user=SimpleNamespace(id=OWNER))
-    settings = SimpleNamespace(
+    settings = Settings(
         app_env="test",
-        app_master_key=None,
-        page_limit_default=50,
-        page_limit_max=200,
-        cursor_ttl_s=3600,
+        database_url=None,
+        redis_url=None,
     )
 
     class MemoryRedis:
@@ -482,9 +477,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
             self.data.pop(key, None)
 
     redis = MemoryRedis()
-    app = FastAPI()
-    install_exception_handlers(app)
-    app.include_router(v1_router, prefix="/api/v1")
+    app = create_app(settings)
     app.dependency_overrides[deps.get_engine] = lambda: engine
     app.dependency_overrides[deps.current_auth] = lambda: auth
     app.dependency_overrides[deps.get_redis] = lambda: redis
@@ -861,6 +854,12 @@ def test_v4_future_period_has_no_terminal_value(world: World) -> None:
         assert "gaps" not in metric
     assert_metric_gaps(payload["gaps"], reason="no_source")
     assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
+    assert payload["data_status"] != "pending"
+    assert all(item["reason"] != "not_yet_published" for item in payload["gaps"])
+    assert all(
+        item["reason"] != "not_yet_published"
+        for item in payload["current_version"]["gaps"]
+    )
     assert_no_calculation_as_of(payload)
 
 
