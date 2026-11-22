@@ -7,6 +7,7 @@ import { DataGrid, type DataColumn } from '../../components/DataGrid';
 import { ActionBadge, ConsensusBadge, DataStatusTag } from '../../components/common';
 import { EXECUTABILITY, REGIME, RISK_LEVEL } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtPrice, pctClass, signed } from '../../lib/format';
+import { quoteCloseTagText } from '../../lib/quoteDisplay';
 
 const SCOPES: { label: string; value: TerminalScope }[] = [
   { label: '全部', value: 'all' },
@@ -57,8 +58,26 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       ),
     },
     {
-      key: 'price', header: '现价', width: 64, numeric: true, value: (r) => (r.quote ? Number(r.quote.price) : null),
-      render: (r) => (r.quote ? <span className={pctClass(r.quote.change_pct)}>{fmtPrice(r.quote.price, securityTypeOf(r))}</span> : <span className="muted">—</span>),
+      key: 'price', header: '现价', width: 118, numeric: true, value: (r) => (r.quote?.price != null && r.quote.price !== '' ? Number(r.quote.price) : null),
+      render: (r) => {
+        const q = r.quote;
+        if (!q) return <span className="muted">—</span>;
+        const closeTag = quoteCloseTagText(r.data_status, q.t);
+        if (q.price === null || q.price === undefined || q.price === '') {
+          return (
+            <>
+              <span className="muted">—</span>
+              {closeTag ? <span data-testid="quote-stale-tag" className="muted small">{closeTag}</span> : null}
+            </>
+          );
+        }
+        return (
+          <>
+            <span className={pctClass(q.change_pct)}>{fmtPrice(q.price, securityTypeOf(r))}</span>
+            {closeTag ? <span data-testid="quote-stale-tag" className="muted small">{closeTag}</span> : null}
+          </>
+        );
+      },
     },
     {
       key: 'chg', header: '涨跌%', width: 66, numeric: true, value: (r) => (r.quote?.change_pct != null ? Number(r.quote.change_pct) : null),
@@ -103,7 +122,7 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       key: 'risk', header: '风控', width: 50, sortable: false,
       render: (r) => (r.max_risk_level ? <span style={{ color: tagOf(RISK_LEVEL, r.max_risk_level).color === 'red' ? '#ff7b72' : tagOf(RISK_LEVEL, r.max_risk_level).color === 'orange' ? '#f0b429' : labelOf(RISK_LEVEL, r.max_risk_level) ? '#58a6ff' : '#7d8794' }}>{tagOf(RISK_LEVEL, r.max_risk_level).text}</span> : <span className="muted">—</span>),
     },
-    { key: 'ds', header: '数据', width: 72, sortable: false, render: (r) => <DataStatusTag status={r.data_status} asOf={r.quote?.t} /> },
+    { key: 'ds', header: '数据', width: 72, sortable: false, render: (r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
   ], []);
 
   return (
