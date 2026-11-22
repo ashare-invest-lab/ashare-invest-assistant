@@ -5,36 +5,62 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    printf '%s\n' '用法：db-dryrun-0039.sh --pre' '      db-dryrun-0039.sh --post FILE|-'
+    printf '%s\n' '用法：db-dryrun-0039.sh --pre [--dbname NAME]' '      db-dryrun-0039.sh --post FILE|- [--dbname NAME]'
 }
 
-mode=${1-}
+# 名称只许字母、数字、下划线和连字符，且不以连字符开头，防止选项或连接串注入。
+safe_name() {
+    case "$1" in
+        '' | -* | *[!A-Za-z0-9_-]*) return 1 ;;
+    esac
+    return 0
+}
+
+[ "$#" -ge 1 ] || { usage >&2; exit 4; }
+mode=$1
+shift
 baseline=
 case "$mode" in
     --pre) ;;
     --post)
-        [ "$#" -eq 2 ] || { usage >&2; exit 4; }
-        baseline=$2
+        [ "$#" -ge 1 ] || { usage >&2; exit 4; }
+        baseline=$1
+        shift
         ;;
     *) usage >&2; exit 4 ;;
 esac
 
-shift
 dbname=
-arg=${1-}
-if [ "${1-}" = "--dbname" ]; then
-    [ "$#" -ge 2 ] || { usage >&2; exit 4; }
-    dbname=$2
-elif [ "${arg#--dbname=}" != "$arg" ]; then
-    dbname=${arg#--dbname=}
+case "$#" in
+    0) ;;
+    1)
+        case "$1" in
+            --dbname=*) dbname=${1#--dbname=}; safe_name "$dbname" || { usage >&2; exit 4; } ;;
+            *) usage >&2; exit 4 ;;
+        esac
+        ;;
+    2)
+        [ "$1" = "--dbname" ] || { usage >&2; exit 4; }
+        dbname=$2
+        safe_name "$dbname" || { usage >&2; exit 4; }
+        ;;
+    *) usage >&2; exit 4 ;;
+esac
+
+pg_user=${POSTGRES_USER-}
+if [ -z "$dbname" ]; then
+    [ -n "$pg_user" ] && [ -n "${POSTGRES_DB-}" ] || exit 4
+    dbname=$POSTGRES_DB
+    safe_name "$dbname" || exit 4
+fi
+if [ -n "$pg_user" ]; then
+    safe_name "$pg_user" || exit 4
 fi
 
-if [ -n "$dbname" ]; then
-    psql_args="-d${dbname}"
-else
-    [ -n "${POSTGRES_USER-}" ] && [ -n "${POSTGRES_DB-}" ] || exit 4
-    psql_args="-U${POSTGRES_USER} -d${POSTGRES_DB}"
-fi
+# 固定连到本容器 Unix socket，屏蔽继承的连接覆盖变量。
+unset PGHOSTADDR PGPORT PGSERVICE PGSERVICEFILE PGDATABASE PGUSER PGOPTIONS PGSSLMODE PGREQUIRESSL PGTARGETSESSIONATTRS 2>/dev/null || true
+PGHOST=/var/run/postgresql
+export PGHOST
 
 tmp=${TMPDIR:-/tmp}/dryrun-0039.$$
 mkdir "$tmp" 2>/dev/null || exit 4
@@ -43,7 +69,7 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 run_sql() {
     # 参数是 SQL 片段，连接参数不会写入输出。
     PGOPTIONS='-c default_transaction_read_only=on' \
-        psql -X -q -A -t -v ON_ERROR_STOP=1 $psql_args <<EOF
+        psql -X -q -A -t -v ON_ERROR_STOP=1 -h "$PGHOST" -d "$dbname" ${pg_user:+"-U$pg_user"} <<EOF
 BEGIN READ ONLY;
 $1
 ROLLBACK;

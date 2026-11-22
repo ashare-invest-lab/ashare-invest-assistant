@@ -18,7 +18,7 @@ docker exec $pg sh /tmp/db-dryrun-0039.sh --pre | Tee-Object pre.txt
 Get-Content pre.txt | docker exec -i $pg sh /tmp/db-dryrun-0039.sh --post - | Tee-Object post.txt
 ```
 
-连接串可通过容器内环境变量 `POSTGRES_USER`、`POSTGRES_DB` 确定，也可在容器内显式传入 `--dbname`。脚本不会打印连接串或口令。状态为 `ok` 才能继续迁移，`blocked` 需按每条 `reason=` 处理。压缩分块必须先停写并按运维流程解压，脚本不会替代该操作。
+连接串可通过容器内环境变量 `POSTGRES_USER`、`POSTGRES_DB` 确定，也可在容器内显式传入 `--dbname NAME`（`--pre` 与 `--post FILE|-` 均可加在末尾；名称只许字母、数字、下划线、连字符，连接串或含空格的值直接 rc=4）。脚本固定连接容器内 `/var/run/postgresql` Unix socket，并清除继承的 `PGHOST`/`PGSERVICE`/`PGPORT` 等覆盖变量。脚本不会打印连接串或口令。状态为 `ok` 才能继续迁移，`blocked` 需按每条 `reason=` 处理。压缩分块必须先停写并按运维流程解压，脚本不会替代该操作。
 
 ## 结果键
 

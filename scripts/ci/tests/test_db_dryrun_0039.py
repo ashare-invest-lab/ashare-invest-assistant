@@ -15,6 +15,7 @@ SCRIPT = ROOT / "deploy/scripts/db-dryrun-0039.sh"
 FAKE = r"""#!/bin/sh
 s=$(cat)
 printf '%s\n' "$s" >>"$FAKE_LOG"
+printf 'argv=%s|PGHOST=%s|PGSERVICE=%s|PGPORT=%s\n' "$*" "${PGHOST-}" "${PGSERVICE-}" "${PGPORT-}" >>"$FAKE_LOG.argv"
 case "$s" in
   *version_num*) printf '%s\n' "${FAKE_HEAD:-0038}" ;;
   *pg_extension*) printf '%s\n' 0 ;;
@@ -76,8 +77,8 @@ def run(fake: Path, *args: str, **extra: str) -> subprocess.CompletedProcess[str
         POSTGRES_USER="fake",
         POSTGRES_DB="fake",
         FAKE_LOG=str(fake / "sql.log"),
-        **extra,
     )
+    env.update(extra)
     return subprocess.run(
         ["sh", str(SCRIPT), *args],
         check=False,
@@ -167,3 +168,60 @@ def test_post_blocks_on_row_drift_without_suggesting_delete(
     assert result.returncode == 2
     assert "reason=minute_bars:rows_changed:3->2" in result.stdout
     assert "delete" not in result.stdout.lower() and "删除" not in result.stdout
+
+
+def _baseline(tmp_path: Path) -> Path:
+    baseline = tmp_path / "pre.txt"
+    lines = []
+    for t in ("quotes_snapshot", "realtime_quotes", "minute_bars", "minute5_bars"):
+        lines += [f"table.{t}.rows=2", f"table.{t}.licence_null_rows=1"]
+    baseline.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return baseline
+
+
+def test_post_accepts_dbname_and_pins_local_socket(fake: Path, tmp_path: Path) -> None:
+    result = run(
+        fake,
+        "--post",
+        str(_baseline(tmp_path)),
+        "--dbname",
+        "aia",
+        FAKE_HEAD="0039",
+        PGHOST="external.example",
+        PGSERVICE="evil",
+        PGPORT="6543",
+    )
+    assert result.returncode == 0, result.stderr
+    calls = (fake / "sql.log.argv").read_text(encoding="utf-8").splitlines()
+    assert calls
+    for call in calls:
+        assert "-h /var/run/postgresql" in call and "-d aia" in call
+        assert "PGHOST=/var/run/postgresql|PGSERVICE=|PGPORT=" in call
+        assert "external.example" not in call
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("--pre", "--dbname", "safe -h external.example"),
+        ("--pre", "--dbname=-hexternal"),
+        ("--pre", "--dbname", "postgresql://x@external/aia"),
+        ("--pre", "--dbname", ""),
+        ("--pre", "--dbname"),
+        ("--pre", "extra"),
+        ("--post",),
+        ("--post", "-", "--dbname", "aia", "extra"),
+    ],
+)
+def test_rejects_unsafe_or_malformed_args_before_connecting(
+    fake: Path, args: tuple[str, ...]
+) -> None:
+    result = run(fake, *args)
+    assert result.returncode == 4
+    assert not (fake / "sql.log.argv").exists()
+
+
+def test_rejects_unsafe_env_names_before_connecting(fake: Path) -> None:
+    result = run(fake, "--pre", POSTGRES_DB="aia -h external.example")
+    assert result.returncode == 4
+    assert not (fake / "sql.log.argv").exists()
