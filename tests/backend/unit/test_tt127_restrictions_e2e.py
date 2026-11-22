@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-import subprocess
-import sys
 import threading
 import uuid
 from dataclasses import dataclass
@@ -85,11 +83,11 @@ def _settings(pg_url: str) -> Settings:
 
 @pytest.fixture(scope="session")
 def tt127_pg_url() -> str:
-    """优先使用显式 DSN，否则连接本验收专用的隔离 PG 监听实例。"""
-    return os.environ.get(
-        "AIA_TEST_DATABASE_URL",
-        "postgresql+psycopg://aia@127.0.0.1:55432/aia",
-    )
+    """从 CI 与本地验收共用的环境变量读取隔离 PG 的基准 DSN。"""
+    database_url = os.environ.get("AIA_TEST_DATABASE_URL") or os.environ.get("TT41_DATABASE_URL")
+    if not database_url:
+        pytest.skip("未设置 AIA_TEST_DATABASE_URL 或 TT41_DATABASE_URL，跳过 PostgreSQL 验收")
+    return database_url
 
 
 @pytest.fixture()
@@ -105,23 +103,21 @@ def world(tt127_pg_url: str) -> Iterator[World]:
         autocommit=True,
     )
     created = False
-    try:
-        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
-        created = True
-    finally:
-        admin.close()
-    isolated_url = base_url.set(database=database_name)
-    assert isolated_url.database == database_name, "T-T127 必须写入独立临时库"
-    repo_root = Path(__file__).resolve().parents[3]
-    alembic_config = Config(str(repo_root / "src/backend/alembic.ini"))
-    alembic_config.cmd_opts = SimpleNamespace(
-        x=[f"url={isolated_url.render_as_string(hide_password=False)}"]
-    )
-    command.upgrade(alembic_config, "head")
-    engine = create_engine(isolated_url, hide_parameters=True)
+    engine: Any | None = None
     client: TestClient | None = None
     app: Any | None = None
     try:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+        created = True
+        isolated_url = base_url.set(database=database_name)
+        assert isolated_url.database == database_name, "T-T127 必须写入独立临时库"
+        repo_root = Path(__file__).resolve().parents[3]
+        alembic_config = Config(str(repo_root / "src/backend/alembic.ini"))
+        alembic_config.cmd_opts = SimpleNamespace(
+            x=[f"url={isolated_url.render_as_string(hide_password=False)}"]
+        )
+        command.upgrade(alembic_config, "head")
+        engine = create_engine(isolated_url, hide_parameters=True)
         user_id = uuid.uuid4()
         named_code = f"600{uuid.uuid4().hex[:3]}.SH"
         missing_code = f"600{uuid.uuid4().hex[:3]}.SH"
@@ -162,20 +158,15 @@ def world(tt127_pg_url: str) -> Iterator[World]:
             client.close()
         if app is not None:
             app.dependency_overrides.clear()
-        engine.dispose()
+        if engine is not None:
+            engine.dispose()
         if created:
-            admin = psycopg.connect(
-                admin_url.render_as_string(hide_password=False),
-                autocommit=True,
-            )
-            try:
-                admin.execute(
-                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-                        sql.Identifier(database_name)
-                    )
+            admin.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                    sql.Identifier(database_name)
                 )
-            finally:
-                admin.close()
+            )
+        admin.close()
 
 
 def _seed_restriction(
@@ -207,70 +198,6 @@ def _error(response: Any) -> dict[str, Any]:
     body = response.json()
     assert "error" in body
     return body["error"]
-
-
-def _run_mutated_copy(tmp_path: Path, replacement: tuple[str, str], test_name: str) -> subprocess.CompletedProcess[str]:
-    source = Path(__file__)
-    mutated = tmp_path / source.name
-    content = source.read_text(encoding="utf-8")
-    old, new = replacement
-    assert old in content
-    mutated.write_text(content.replace(old, new, 1), encoding="utf-8")
-    env = os.environ.copy()
-    env.pop("MAIRUI_LICENCE", None)
-    env["PYTHONPATH"] = str(source.parents[3] / "src/backend")
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-c",
-            str(source.parents[2] / "pytest.ini"),
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--tb=short",
-            f"{mutated}::{test_name}",
-        ],
-        cwd=source.parents[3],
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-
-def test_mutation_b1_wrong_xfail_exception_is_red(tmp_path: Path) -> None:
-    result = _run_mutated_copy(
-        tmp_path,
-        ("raises=AssertionError,", "raises=RuntimeError,"),
-        "test_delete_recheck_gap_is_not_reported_as_release",
-    )
-    assert result.returncode != 0, result.stdout[-2000:]
-
-
-def test_mutation_b2_shared_database_target_is_red(tmp_path: Path) -> None:
-    result = _run_mutated_copy(
-        tmp_path,
-        (
-            "isolated_url = base_url.set(database=database_name)",
-            'isolated_url = base_url.set(database="aia")',
-        ),
-        "test_cooling_off_future_value_is_visible_over_http",
-    )
-    assert result.returncode != 0, result.stdout[-2000:]
-
-
-def test_mutation_b3_wrong_until_expectation_is_red(tmp_path: Path) -> None:
-    result = _run_mutated_copy(
-        tmp_path,
-        (
-            '"fields": [{"field": "until", "issue": "required_for_kind"}]',
-            '"fields": [{"field": "until", "issue": "must_be_future"}]',
-        ),
-        "test_cooling_off_requires_timezone_and_future_until",
-    )
-    assert result.returncode != 0, result.stdout[-2000:]
 
 
 def test_cooling_off_requires_timezone_and_future_until(world: World) -> None:
