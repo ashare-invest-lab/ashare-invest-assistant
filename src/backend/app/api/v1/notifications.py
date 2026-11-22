@@ -8,6 +8,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Header, Request, Response
 from fastapi.responses import StreamingResponse
@@ -27,6 +28,13 @@ from app.notify.transport import flush, replay, reset_reason
 from app.plans.api import Paging, page
 
 router = APIRouter(tags=["notifications"])
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+
+def _bj_iso(value: dt.datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.UTC)
+    return value.astimezone(BEIJING).isoformat()
 
 
 class UnreadCount(BaseModel):
@@ -226,7 +234,7 @@ async def stream(
             if (now - last_heartbeat).total_seconds() >= 15:
                 if not live():
                     return
-                yield "event: heartbeat\ndata: " + json.dumps({"at": now.isoformat()}) + "\n\n"
+                yield "event: heartbeat\ndata: " + json.dumps({"at": _bj_iso(now)}) + "\n\n"
                 last_heartbeat = now
             await asyncio.sleep(1)
 
