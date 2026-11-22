@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Row, insert, select, update
 
@@ -34,6 +35,12 @@ OUTCOME_METRICS_ENABLED = False  # #349 §7.8.4 口径定稿前关闭
 
 # fmt: off
 
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+def _bj_iso(value: dt.datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.UTC)
+    return value.astimezone(BEIJING).isoformat()
 
 def _bad(field: str, issue: str) -> AppError:
     return AppError(ErrorCode.VALIDATION_ERROR, details={"fields": [{"field": field, "issue": issue}]})
@@ -831,7 +838,7 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
         "attribution": row.attribution or snap.get("attribution", {"judgement": [], "execution": [], "market": []}),
         "outcome_metrics": metrics,
         "evidence": list(snap.get("evidence", [])),
-        "created_at": row.created_at.isoformat(),
+        "created_at": _bj_iso(row.created_at),
         "data_status": status.get("data_status", "unavailable"),
         "data_as_of": status.get("data_as_of"),
         "gaps": status.get("gaps", []),
@@ -850,11 +857,11 @@ def _timeline_data(
             if item.get("id"):
                 all_evidence[str(item["id"])] = item
         ids = [str(item.get("id")) for item in snap.get("evidence", []) if item.get("id")]
-        result.append({"kind": "review_version", "at": version.created_at.isoformat(), "resource_id": str(version.id), "version_no": version.version_no, "evidence_ids": ids})
+        result.append({"kind": "review_version", "at": _bj_iso(version.created_at), "resource_id": str(version.id), "version_no": version.version_no, "evidence_ids": ids})
     if current is not None and current.plan_version_ids:
         plan_rows = conn.execute(select(plan_versions).where(plan_versions.c.id.in_(current.plan_version_ids))).all()
         plan_evidence = {str(item.get("value")): str(item.get("id")) for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", []) if item.get("key") == "plan_version"}
-        result.extend({"kind": "plan_version", "at": r.created_at.isoformat(), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
+        result.extend({"kind": "plan_version", "at": _bj_iso(r.created_at), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
     if current is not None and current.trade_ids:
         trade_rows = conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
         current_snapshot = _snapshot(conn, owner, current.snapshot_id)
@@ -884,7 +891,7 @@ def _timeline_data(
             result.append(
                 {
                     "kind": "trade",
-                    "at": available_at.isoformat(),
+                    "at": _bj_iso(available_at),
                     "resource_id": str(row.id),
                     "version_no": None,
                     "evidence_ids": [str(evidence.get("id"))],
@@ -914,7 +921,7 @@ def full(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID) -> dict[str,
         "period_start": review.period_start.isoformat(),
         "period_end": review.period_end.isoformat(),
         "current_version_no": current.version_no if current is not None else None,
-        "created_at": review.created_at.isoformat(),
+        "created_at": _bj_iso(review.created_at),
         "current_version": version_body(conn, owner, current, period_end=review.period_end) if current is not None else None,
         "timeline": timeline,
         "evidence": evidence,
@@ -935,6 +942,6 @@ def summary(conn: Connection, row: Row[Any]) -> dict[str, Any]:
         "period_start": row.period_start.isoformat(),
         "period_end": row.period_end.isoformat(),
         "current_version_no": version.version_no if version is not None else None,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _bj_iso(row.created_at),
         **status,
     }
