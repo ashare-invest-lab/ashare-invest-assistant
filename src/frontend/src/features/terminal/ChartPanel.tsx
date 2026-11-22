@@ -5,7 +5,7 @@ import type { Time } from 'lightweight-charts';
 import { useBars, useCandidateSignals, useSecuritySignals } from '../../api/queries';
 import { useBarsWindow } from '../../api/marketQueries';
 import { chartStops, markerSignals } from './chartStops';
-import type { Suggestion, TerminalRow } from '../../api/types';
+import { securityTypeOf, type Suggestion, type TerminalRow } from '../../api/types';
 import { DataStatusTag } from '../../components/common';
 import { KlineChart } from '../../components/charts/KlineChart';
 import { KlineWindowInfo } from '../../components/charts/KlineWindowInfo';
@@ -14,6 +14,7 @@ import type { ChartMarker } from '../../components/charts/chartBase';
 import { SIGNAL_KIND } from '../../i18n/labels';
 import { bjToChartTime, fmtAmount, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { dayMinutes } from '../../lib/market';
+import { quoteCloseTagText } from '../../lib/quoteDisplay';
 
 export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null }: { row: TerminalRow | undefined; suggestion: Suggestion | undefined; tradeDate?: string | null }) {
   const code = row?.security_code;
@@ -42,6 +43,8 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
   if (!row) return <div className="loading-box">请选择左侧的一只证券</div>;
   const q = row.quote;
   const pre = minute.data?.pre_close ?? null;
+  const closeTag = q ? quoteCloseTagText(row.data_status, q.t) : null;
+  const hasPrice = q?.price !== null && q?.price !== undefined && q?.price !== '';
   return (
     <>
       <div className="quote-head" data-testid="quote-head">
@@ -49,12 +52,13 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
         <span className="mono muted">{row.security_code}</span>
         {q ? (
           <>
-            <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, row.holding?.security_type)}</span>
+            <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, securityTypeOf(row))}</span>
+            {closeTag ? <span data-testid="quote-stale-tag" className="muted small">{closeTag}</span> : null}
             <span className={`mono ${pctClass(q.change_pct)}`}>
-              {pre ? `${signed(Number(q.price) - Number(pre))} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
+              {hasPrice && pre ? `${signed(Number(q.price) - Number(pre))} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
             </span>
             <span className="muted small mono">成交额 {fmtAmount(q.amount)}</span>
-            <span className="muted small mono">{fmtTime(q.t).slice(11)}</span>
+            {!closeTag && q.t ? <span className="muted small mono">{fmtTime(q.t).slice(11)}</span> : null}
           </>
         ) : <span className="muted">无实时行情</span>}
         <DataStatusTag status={row.data_status} asOf={row.data_as_of} gaps={minute.data?.gaps} />

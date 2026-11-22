@@ -10,7 +10,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Connection, func, insert, select, text, update
+from sqlalchemy import Connection, and_, func, insert, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.common.errors import AppError, ErrorCode
@@ -55,6 +55,11 @@ from app.strategy.universe_norm import board_in_universe, normalize_universe
 
 BJT = dt.timezone(dt.timedelta(hours=8))
 TERMINAL = {"confirmed", "dismissed", "expired", "invalidated", "superseded"}
+RESTRICTION_REASON_CODES = {
+    "blocklist": "BLOCKLISTED",
+    "mute": "USER_MUTED",
+    "cooling_off": "COOLING_OFF",
+}
 
 
 def owned_signal(
@@ -190,6 +195,219 @@ def add_reason(
         )
     )
     return identifier
+
+
+def recheck_restriction(
+    conn: Connection,
+    *,
+    user_id: uuid.UUID,
+    restriction: Any,
+    at: dt.datetime,
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[dict[str, Any]]]:
+    """Release reasons whose deleted restriction is their last active blocker.
+
+    The restriction table has no foreign key to reasons.  The existing reason
+    code and candidate ownership/target fields are therefore the association
+    used by the admission path.  All rows are locked in the caller's write
+    transaction before status events and signal transitions are written.
+    """
+    code = RESTRICTION_REASON_CODES.get(restriction.kind)
+    if code is None:
+        return [], [], []
+
+    restriction_created_at = restriction.created_at
+    candidate_conditions = [
+        signals.c.user_id == user_id,
+        signals.c.created_at < at,
+    ]
+    candidate_conditions.append(signals.c.created_at >= restriction_created_at)
+    restriction_until = restriction.until
+    if restriction_until is not None:
+        candidate_conditions.append(signals.c.created_at < restriction_until)
+    candidate_query = select(signals)
+    if restriction.target_type == "security":
+        candidate_conditions.append(signals.c.security_code == restriction.target_id)
+    elif restriction.target_type == "instance":
+        candidate_conditions.append(signals.c.instance_id == restriction.target_id)
+    elif restriction.target_type == "strategy":
+        try:
+            strategy_id = uuid.UUID(str(restriction.target_id))
+        except ValueError:
+            return (
+                [],
+                [],
+                [
+                    {
+                        "key": f"restriction:{restriction.id}",
+                        "reason": "no_source",
+                        "message": "关联策略标识无效，无法重查",
+                    }
+                ],
+            )
+        candidate_query = candidate_query.join(
+            versions, versions.c.id == signals.c.strategy_version_id
+        )
+        candidate_conditions.append(versions.c.strategy_id == strategy_id)
+    else:
+        return (
+            [],
+            [],
+            [
+                {
+                    "key": f"restriction:{restriction.id}",
+                    "reason": "no_source",
+                    "message": "限制目标类型未知，无法重查",
+                }
+            ],
+        )
+
+    # Lock candidates before locking their reasons.  The delete endpoint has
+    # already marked the restriction removed in this same transaction, while
+    # candidate.created_at keeps the historical point-in-time boundary.
+    candidate_rows = conn.execute(
+        candidate_query.where(*candidate_conditions).with_for_update()
+    ).all()
+    candidate_by_id = {row.id: row for row in candidate_rows}
+    candidate_ids = set(candidate_by_id)
+    if not candidate_ids:
+        return [], [], []
+    reason_conditions = [
+        reasons.c.user_id == user_id,
+        reasons.c.code == code,
+        reasons.c.status == "active",
+    ]
+    reason_conditions.append(reasons.c.signal_id.in_(candidate_ids))
+    reason_rows = conn.execute(
+        select(reasons).where(*reason_conditions).order_by(reasons.c.id).with_for_update()
+    ).all()
+    if not reason_rows:
+        return [], [], []
+
+    strategy_ids = {
+        row.strategy_version_id for row in candidate_rows if row.strategy_version_id is not None
+    }
+    strategy_rows = (
+        conn.execute(
+            select(versions.c.id, versions.c.strategy_id).where(versions.c.id.in_(strategy_ids))
+        ).all()
+        if strategy_ids
+        else []
+    )
+    strategies_by_version = {row.id: row.strategy_id for row in strategy_rows}
+    remaining_restrictions = conn.execute(
+        select(user_restrictions)
+        .where(
+            user_restrictions.c.user_id == user_id,
+            user_restrictions.c.id != restriction.id,
+            user_restrictions.c.removed_at.is_(None),
+        )
+        .with_for_update()
+    ).all()
+
+    def matches_target(candidate: Any, r: Any = restriction) -> bool:
+        target_type = r.target_type
+        if target_type == "security":
+            return bool(candidate.security_code == r.target_id)
+        if target_type == "instance":
+            return bool(str(candidate.instance_id) == r.target_id)
+        if target_type == "strategy":
+            return bool(
+                str(strategies_by_version.get(candidate.strategy_version_id)) == str(r.target_id)
+            )
+        return False
+
+    def covered_by_other_restriction(candidate: Any) -> bool:
+        candidate_created_at = candidate.created_at
+        for other in remaining_restrictions:
+            if other.kind != restriction.kind or not matches_target(candidate, other):
+                continue
+            if other.created_at > candidate_created_at:
+                continue
+            if other.until is not None and candidate_created_at >= other.until:
+                continue
+            return True
+        return False
+
+    released: list[uuid.UUID] = []
+    remaining: list[uuid.UUID] = []
+    gaps: list[dict[str, Any]] = []
+    released_signal_ids: set[uuid.UUID] = set()
+    for reason in reason_rows:
+        reason_id = reason.id
+        candidate = candidate_by_id.get(reason.signal_id)
+        if candidate is None:
+            remaining.append(reason_id)
+            gaps.append(
+                {
+                    "key": f"reason:{reason_id}",
+                    "reason": "no_source",
+                    "message": "关联候选信号缺失，无法重查",
+                }
+            )
+            continue
+        if restriction.target_type == "strategy" and candidate.strategy_version_id not in (
+            strategies_by_version
+        ):
+            gaps.append(
+                {
+                    "key": f"reason:{reason_id}",
+                    "reason": "no_source",
+                    "message": "关联策略版本缺失，无法重查",
+                }
+            )
+            continue
+        if not matches_target(candidate):
+            continue
+        if covered_by_other_restriction(candidate):
+            remaining.append(reason_id)
+            continue
+        evidence = {
+            "restriction_id": str(restriction.id),
+            "rechecked_at": at.isoformat(),
+        }
+        conn.execute(
+            update(reasons)
+            .where(reasons.c.id == reason_id, reasons.c.status == "active")
+            .values(
+                status="released",
+                released_at=at,
+                released_by="system",
+                release_evidence=evidence,
+            )
+        )
+        conn.execute(
+            insert(reason_status_events).values(
+                id=uuid.uuid4(),
+                reason_id=reason_id,
+                from_status="active",
+                to_status="released",
+                at=at,
+                evaluated_value=evidence,
+            )
+        )
+        released.append(reason_id)
+        released_signal_ids.add(candidate.id)
+
+    for signal_id in released_signal_ids:
+        signal = conn.execute(
+            select(signals)
+            .where(signals.c.id == signal_id, signals.c.user_id == user_id)
+            .with_for_update()
+        ).one_or_none()
+        if signal is None or signal.state != "blocked":
+            continue
+        if (
+            conn.execute(
+                select(reasons.c.id).where(
+                    reasons.c.signal_id == signal_id,
+                    reasons.c.user_id == user_id,
+                    reasons.c.status == "active",
+                )
+            ).first()
+            is None
+        ):
+            transition(conn, signal, "released", "reason_released", at)
+    return released, remaining, gaps
 
 
 def snapshot_items(content: SignalInput, facts: MarketFacts) -> dict[str, Any]:
@@ -411,8 +629,24 @@ def write_candidate(
         for restriction in locked.execute(
             select(user_restrictions).where(
                 user_restrictions.c.user_id == user_id,
-                user_restrictions.c.target_id.in_(
-                    [content.security_code, str(instance_id), str(version.strategy_id)]
+                user_restrictions.c.created_at <= content.created_at,
+                or_(
+                    user_restrictions.c.removed_at.is_(None),
+                    user_restrictions.c.removed_at > content.created_at,
+                ),
+                or_(
+                    and_(
+                        user_restrictions.c.target_type == "security",
+                        user_restrictions.c.target_id == content.security_code,
+                    ),
+                    and_(
+                        user_restrictions.c.target_type == "instance",
+                        user_restrictions.c.target_id == str(instance_id),
+                    ),
+                    and_(
+                        user_restrictions.c.target_type == "strategy",
+                        user_restrictions.c.target_id == str(version.strategy_id),
+                    ),
                 ),
             )
         ):
