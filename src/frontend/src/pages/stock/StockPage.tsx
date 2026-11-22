@@ -139,7 +139,9 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   // 评审 T-F22a m12：日 K 还没有当日 bar 时，用 1m 响应的 pre_close 作昨收（与分时图共用缓存）
   const intraday = useBarsOf(code, '1m', 240);
   const q = quote.data;
-  const displayQuote = q?.data_status === 'unavailable' ? null : q;
+  const licenceUnavailable = q?.data_status === 'unavailable'
+    && (q.gaps ?? []).some((gap) => Object.hasOwn(gap, 'reason') && gap.reason === 'data_licence_unavailable');
+  const displayQuote = licenceUnavailable ? null : q;
   const tb = todayBar(daily.first ? daily.bars : undefined, displayQuote);
   // v0.2.7：停牌不是上市状态，用 suspended 表示
   const suspended = profile.suspended === true;

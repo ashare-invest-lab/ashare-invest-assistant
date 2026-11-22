@@ -123,6 +123,11 @@ describe('T-F82 fallback status', () => {
     expect(screen.getByTestId('quote-stream-fallback')).toHaveTextContent('实时推送已断开，正在重连');
   });
 
+  it('未启用推送且轮询开启时不显示断线提示', () => {
+    renderFallback('off', true, '/terminal');
+    expect(screen.queryByTestId('quote-stream-fallback')).not.toBeInTheDocument();
+  });
+
   it.each(['unknown', '__proto__', 'constructor'])('状态 %s 显示未知', (status) => {
     renderFallback(status, true, '/terminal');
     expect(screen.getByTestId('quote-stream-fallback')).toHaveTextContent('未知');
@@ -166,7 +171,8 @@ describe('T-F82 行情展示口径', () => {
   });
 
   it('unavailable 不展示旧价', async () => {
-    renderStockQuote(quoteWithExtraFields({ data_status: 'unavailable', price: '86.90', change_pct: '-1.81', t: '2026-10-30T15:00:00+08:00', data_as_of: null }));
+    renderStockQuote(quoteWithExtraFields({ data_status: 'unavailable', price: '86.90', change_pct: '-1.81', t: '2026-10-30T15:00:00+08:00', data_as_of: null,
+      gaps: [{ key: 'quotes', reason: 'data_licence_unavailable', message: '本人数据证书不可用' }] }));
     const head = await screen.findByTestId('stock-head');
     await waitFor(() => expect(head.querySelector('.q-price')).not.toBeNull());
     expect(head.querySelector('.q-price')).toHaveTextContent('—');

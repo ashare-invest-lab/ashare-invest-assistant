@@ -17,8 +17,9 @@ export function QuoteStreamFallback({ path }: { path?: keyof typeof KNOWN_PATH }
   const status = useStreamStatus() as string;
   const polling = useStreamPolling();
   const disconnected = status === 'retrying' || status === 'closed';
+  const shouldShow = disconnected || (polling && !['off', 'connecting', 'open'].includes(status));
   const known = Object.hasOwn(KNOWN_STATUS, status);
-  if (!polling && !disconnected && known) return null;
+  if (!shouldShow) return null;
 
   const validPath = path !== undefined && Object.hasOwn(KNOWN_PATH, path) ? path : undefined;
   const text = !known ? '未知' : polling
