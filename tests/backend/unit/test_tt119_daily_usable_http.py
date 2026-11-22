@@ -23,6 +23,7 @@ OWNER = uuid.UUID("00000000-0000-4000-8000-000000000101")
 OTHER = uuid.UUID("00000000-0000-4000-8000-000000000102")
 LICENCE = uuid.UUID("00000000-0000-4000-8000-000000000111")
 OTHER_LICENCE = uuid.UUID("00000000-0000-4000-8000-000000000112")
+ACCOUNT = uuid.UUID("00000000-0000-4000-8000-000000000121")
 CODE = "999991.SH"
 OTHER_CODE = "999992.SZ"
 NOW = dt.datetime(2041, 5, 6, 8, 5, tzinfo=dt.UTC)
@@ -131,6 +132,8 @@ class State:
     reviews: list[Any] = field(default_factory=list)
     review_versions: list[Any] = field(default_factory=list)
     data_snapshots: list[Any] = field(default_factory=list)
+    trades: list[Any] = field(default_factory=list)
+    import_batches: list[Any] = field(default_factory=list)
 
 
 _ACTIVE_REQUEST: pytest.FixtureRequest | None = None
@@ -210,6 +213,10 @@ class Connection:
             return Result([SimpleNamespace(date=dt.date(2041, 5, 6))])
         if "app.watchlist_items" in rendered:
             return Result(list(self.state.watchlist))
+        if "app.import_batches" in rendered:
+            return Result(list(self.state.import_batches))
+        if "app.trades" in rendered:
+            return Result(list(self.state.trades))
         if "app.user_restrictions" in rendered:
             if rendered.lstrip().upper().startswith("INSERT"):
                 values = params
@@ -592,42 +599,46 @@ def test_tt119_reviews_create_http_matrix_cell(world: Any) -> None:
     assert response.status_code == 201, response.text
 def test_tt119_reviews_available_at_pit_pending_mainline(world: Any) -> None:
     _require_review_route(world, "POST", "/reviews")
+    created_at = NOW
+    visible_batch_id = uuid.UUID("00000000-0000-4000-8000-000000000121")
+    late_batch_id = uuid.UUID("00000000-0000-4000-8000-000000000122")
+    visible_trade_id = uuid.UUID("00000000-0000-4000-8000-000000000131")
+    late_trade_id = uuid.UUID("00000000-0000-4000-8000-000000000132")
+    world.state.import_batches = [
+        Row(id=visible_batch_id, user_id=OWNER, account_id=ACCOUNT, committed_at=created_at - dt.timedelta(minutes=1)),
+        Row(id=late_batch_id, user_id=OWNER, account_id=ACCOUNT, committed_at=created_at + dt.timedelta(minutes=1)),
+    ]
+    world.state.trades = [
+        Row(id=visible_trade_id, user_id=OWNER, account_id=ACCOUNT, security_code=CODE, import_batch_id=visible_batch_id, created_at=created_at - dt.timedelta(minutes=1)),
+        Row(id=late_trade_id, user_id=OWNER, account_id=ACCOUNT, security_code=CODE, import_batch_id=late_batch_id, created_at=created_at + dt.timedelta(minutes=1)),
+    ]
     world.login()
+    payload = _review_create_payload()
+    payload["trade_ids"] = [str(visible_trade_id), str(late_trade_id)]
     response = world.client.post(
         "/api/v1/reviews",
-        json=_review_create_payload(),
+        json=payload,
         headers={"X-CSRF-Token": "owner-csrf"},
     )
-    if response.status_code == 404:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     assert response.status_code == 201, response.text
     body = response.json()
-    review_id = body["id"] if "id" in body else None
-    if review_id is None:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
-    trade_rows = getattr(world.state, "trades", None)
-    batch_rows = getattr(world.state, "import_batches", None)
-    if trade_rows is None or batch_rows is None:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
-    if not trade_rows or not batch_rows:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+    review_id = body["id"]
+    assert body["security_code"] == payload["security_code"]
+    assert body["period_start"] == payload["period_start"]
+    assert body["period_end"] == payload["period_end"]
+    assert "evidence" in body and body["evidence"] is not None
+    uuid.UUID(str(review_id))
+    trade_rows = world.state.trades
+    batch_rows = world.state.import_batches
     detail = world.client.get(f"/api/v1/reviews/{review_id}")
-    if detail.status_code == 404:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
     assert detail.status_code == 200, detail.text
     detail_body = detail.json()
-    if "evidence" not in detail_body or detail_body["evidence"] is None:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
-    if any(not hasattr(row, "id") or not hasattr(row, "import_batch_id") for row in trade_rows):
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
-    if any(not hasattr(row, "id") or not hasattr(row, "committed_at") for row in batch_rows):
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+    assert "evidence" in detail_body and detail_body["evidence"] is not None
     saved_at_value = body.get("created_at")
     if saved_at_value is None:
         version_body = body.get("version")
         saved_at_value = version_body.get("created_at") if isinstance(version_body, dict) else None
-    if saved_at_value is None:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+    assert saved_at_value is not None
     saved_at = saved_at_value if isinstance(saved_at_value, dt.datetime) else dt.datetime.fromisoformat(str(saved_at_value).replace("Z", "+00:00"))
     late_batches = {
         row.id
@@ -636,15 +647,17 @@ def test_tt119_reviews_available_at_pit_pending_mainline(world: Any) -> None:
         and (row.committed_at if isinstance(row.committed_at, dt.datetime) else dt.datetime.fromisoformat(str(row.committed_at).replace("Z", "+00:00")))
         > saved_at
     }
-    if not late_batches:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+    assert late_batches
     late_trade_ids = {row.id for row in trade_rows if row.import_batch_id in late_batches}
-    if not late_trade_ids:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
+    assert late_trade_ids
     version = detail_body["current_version"] if "current_version" in detail_body else None
-    if not isinstance(version, dict) or "trade_ids" not in version:
-        _strict_xfail("待 #349+#379：reviews available_at 的 PIT 过滤尚未在主线实现")
-    assert not late_trade_ids & set(version["trade_ids"])
+    assert isinstance(version, dict) and "trade_ids" in version
+    visible_trade_ids = {str(row.id) for row in trade_rows if row.import_batch_id not in late_batches}
+    visible_ids = {str(value) for value in version["trade_ids"]}
+    assert visible_trade_ids <= visible_ids
+    assert not {str(value) for value in late_trade_ids} & visible_ids
+    assert str(late_trade_id) not in str(body["evidence"])
+    assert str(late_trade_id) not in str(detail_body["evidence"])
 
 def test_tt119_reviews_other_user_isolation_pending_route(world: Any) -> None:
     _require_review_route(world, "GET", "/reviews/00000000-0000-4000-8000-000000000999")
