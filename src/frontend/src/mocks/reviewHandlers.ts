@@ -24,7 +24,8 @@ const seed = (): ReviewDetail[] => {
   const pending: ReviewVersion = {
     ...complete, id: 'review-version-example-2', plan_version_ids: [],
     lessons: null, tags: ['等待结果期'], attribution: { judgement: [], execution: [], market: [] },
-    outcome_metrics: emptyMetrics('2026-11-10', '2026-12-31'), data_status: 'pending', gaps: outcomeMetricGaps('not_yet_published', '结果期尚未结束，暂不发布指标'),
+    outcome_metrics: emptyMetrics('2026-11-10', '2026-12-31'),
+    data_status: 'pending', gaps: outcomeMetricGaps('not_yet_published', '结果期尚未结束，暂不发布指标'),
   };
   const base = (id: string, planId: string | null, code: string | null, start: string, end: string, version: ReviewVersion): ReviewDetail => ({
     id, plan_id: planId, security_code: code, name: code ? '示例银行' : null, period_start: start, period_end: end,
@@ -35,7 +36,8 @@ const seed = (): ReviewDetail[] => {
   const legacy: ReviewDetail = {
     id: 'review-example-legacy', plan_id: null, security_code: '000001.SZ', name: '演示电子',
     period_start: '2026-09-01', period_end: '2026-09-30', current_version_no: null, created_at: now,
-    data_status: 'unavailable', data_as_of: null, gaps: [], current_version: null, evidence: [], timeline: [],
+    data_status: 'unavailable', data_as_of: null,
+    gaps: [gap('outcome_metrics', 'no_source', '没有当前版本，结果指标暂无来源')], current_version: null, evidence: [], timeline: [],
   };
   return [base('review-example-1', 'plan-example-1', '600000.SH', '2026-10-01', '2026-11-01', complete), base('review-example-2', null, '600000.SH', '2026-11-10', '2026-12-31', pending), legacy];
 };
@@ -92,7 +94,7 @@ export const reviewHandlers = [
     const created: ReviewDetail = {
       id, plan_id: body.plan_id ?? null, security_code: body.security_code ?? null, name: body.security_code ? '示例证券' : null,
       period_start: body.period_start, period_end: body.period_end, current_version_no: 1, created_at: now,
-      data_status: version.data_status, data_as_of: null, gaps: version.gaps, current_version: version, evidence: [],
+      data_status: version.data_status, data_as_of: version.data_as_of, gaps: version.gaps, current_version: version, evidence: [],
       timeline: [{ kind: 'review_version', at: now, resource_id: id, version_no: 1, evidence_ids: [] }],
     };
     reviews = [created, ...reviews];
