@@ -21,9 +21,12 @@
 
 ## 开启与关闭
 
-1. 修改 `.env` 中的 `REALTIME_QUOTES_SOURCE`。
-2. 重建 `ingest`。若 api 读取开关用于展示，一并重建 `api`。
-3. 关闭时将该变量改为 `off`，再重建 `ingest`。若 api 读取开关用于展示，一并重建 `api`。
+1. 开启前确认前置条件全部满足，并取得批准。仅在用户本机的 `.env`（不是 `.env.example`）设置 `MAIRUI_MODE=live` 与 `REALTIME_QUOTES_SOURCE=mairui`。`DAILY_BARS_SOURCE` 保持 `off`，与本开关无关。
+2. 用 live profile 重建 ingest：`AIA_PROFILE=live deploy/scripts/up.sh --no-deps ingest`。`up.sh` 默认带 `--build`，服务名选择和 `--no-deps` 可只重建指定服务。需要 api 展示时使用 `AIA_PROFILE=live deploy/scripts/up.sh --no-deps ingest api`。live 不叠加 dev 覆盖层。基础 compose 注释要求 live/生产使用 `SESSION_COOKIE_SECURE=true`，脚本未校验该值，应用启动是否拒绝未验证。
+3. 普通 `restart` 不会重新读取环境变量，改 `.env` 后必须走上述重建路径。核对时只查看两个开关值，例如 `AIA_PROFILE=live deploy/scripts/compose.sh config | grep -E 'MAIRUI_MODE|REALTIME_QUOTES_SOURCE'`。
+4. 关闭或回退时，在用户本机 `.env` 设置 `REALTIME_QUOTES_SOURCE=off` 与 `MAIRUI_MODE=replay`，回到默认 dev 路径重建 ingest 和 api：`AIA_PROFILE=dev deploy/scripts/up.sh --no-deps ingest api`。该路径叠加 `docker-compose.dev.yml`，会固定 ingest 为 replay。核对可用 `AIA_PROFILE=dev deploy/scripts/compose.sh config | grep -E 'MAIRUI_MODE|REALTIME_QUOTES_SOURCE'`，或对 ingest 容器执行只输出这两个变量名和值的 `env` 查询。
+
+仓库内 compose 默认、dev 覆盖层、`.env.example` 与 CI workflow 按 #361 守卫保持 `MAIRUI_MODE=replay`、`DAILY_BARS_SOURCE=off`。切 live 只能改本机 `.env`，不得改仓库默认值或提交 `.env`。
 
 ## 字段与监控
 
