@@ -2,26 +2,24 @@ import { Button, Select, Tag } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useCreateReviewVersion, useReview, useReviewVersions } from '../../api/reviewQueries';
-import type { Evidence, ReviewCreate, ReviewOutcomeMetrics, ReviewVersion } from '../../api/types';
+import type { Evidence, ReviewCreate, ReviewVersion } from '../../api/types';
 import { ApiError } from '../../api/client';
 import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
 import { labelOf } from '../../lib/explanations';
 import { fmtTime } from '../../lib/format';
+import { metricLabel, metricValueText, REVIEW_BENCHMARK_NOTE, REVIEW_METRIC_KEYS } from '../../lib/reviewMetrics';
 
 const TIMELINE_LABELS = { review_version: '复盘版本', plan_version: '计划版本', trade: '成交' } as const;
-const metricLabels: Record<keyof ReviewOutcomeMetrics, string> = {
-  holding_return: '持有收益', benchmark_return: '基准收益', excess_return: '超额收益', max_drawdown: '最大回撤',
-};
-
 function MetricBlock({ version }: { version: ReviewVersion }) {
   const metricGap = version.gaps.find((gap) => gap.key.startsWith('outcome_metrics.'));
+  const outcomeMetrics = version.outcome_metrics && typeof version.outcome_metrics === 'object' ? version.outcome_metrics : null;
   return (
     <section className="panel" data-testid="review-metrics">
-      <div className="panel-head"><span className="panel-title">结果指标</span></div>
+      <div className="panel-head"><span className="panel-title">结果指标</span><span className="muted small" data-testid="review-benchmark">{REVIEW_BENCHMARK_NOTE}</span></div>
       <div className="muted small">指标缺口：{metricGap ? (metricGap.message || '未知') : '无'} · 数据截至：{version.data_as_of ? fmtTime(version.data_as_of) : '未知'}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(100px, 1fr))', gap: 8, marginTop: 8 }}>
-        {(Object.keys(metricLabels) as (keyof ReviewOutcomeMetrics)[]).map((key) => <div key={key}><div className="muted small">{metricLabels[key]}</div><b data-testid={`metric-${key}`}>{version.outcome_metrics[key]?.value ?? '—'}</b></div>)}
+        {REVIEW_METRIC_KEYS.map((key) => <div key={key}><div className="muted small">{metricLabel(key) ?? '未知指标'}</div><b data-testid={`metric-${key}`}>{metricValueText(outcomeMetrics && Object.hasOwn(outcomeMetrics, key) ? outcomeMetrics[key] : null)}</b></div>)}
       </div>
       <GapNote status={version.data_status} gaps={version.gaps} asOf={version.data_as_of} testId="review-metric-gap" />
     </section>
