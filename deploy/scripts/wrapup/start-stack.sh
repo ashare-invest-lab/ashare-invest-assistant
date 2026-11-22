@@ -20,7 +20,7 @@ wrapup_pg_query() {
   port="$(wrapup_pg_port "$c")"
   wrapup_docker exec -e PGPORT="$port" -e PGHOST=/var/run/postgresql \
     -e AIA_TARGET_DB="$db" "$c" sh -c \
-    'exec psql -X -q -At -U "$POSTGRES_USER" -d "${AIA_TARGET_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1 -c "$1"' \
+    ': "${POSTGRES_USER:?POSTGRES_USER is required}"; exec psql -X -q -At -U "$POSTGRES_USER" -d "${AIA_TARGET_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1 -c "$1"' \
     sh "$sql"
 }
 

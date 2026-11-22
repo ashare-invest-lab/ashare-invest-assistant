@@ -34,6 +34,10 @@ case "$cmd" in
     case "$sub" in
       sh) exit 0 ;; # wrapup_pg_port probe
       psql)
+        if [[ "${FAKE_DB_EXISTS:-0}" = 1 ]] && [[ "$*" == *"pg_database"* ]]; then
+          printf '1\n'
+          exit 0
+        fi
         if [[ "$*" == *"CREATE DATABASE"* ]] && [[ "$*" =~ aia_rollback_[0-9]{8}T[0-9]{6} ]]; then
           echo "uppercase T rejected by fixture" >&2
           exit 91
@@ -63,7 +67,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _run(
-    tmp_path: Path, *, mutate: bool = False
+    tmp_path: Path, *, mutate: bool = False, db_exists: bool = False
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -97,6 +101,7 @@ def _run(
         "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
         "HOME": str(tmp_path),
         "FAKE_DOCKER_LOG": str(log),
+        "FAKE_DB_EXISTS": "1" if db_exists else "0",
     }
     result = subprocess.run(
         [
@@ -140,3 +145,10 @@ def test_uppercase_timestamp_mutation_is_rejected(tmp_path: Path) -> None:
     assert not re.search(
         r"aia_rollback_[0-9]{8}[tT][0-9]{6}", log.read_text(encoding="utf-8")
     )
+
+
+def test_existing_rollback_db_is_rejected_without_create(tmp_path: Path) -> None:
+    result, log = _run(tmp_path, db_exists=True)
+    assert result.returncode != 0
+    assert "已存在" in result.stderr
+    assert "CREATE DATABASE" not in log.read_text(encoding="utf-8")

@@ -9,6 +9,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "deploy/scripts/sync-main-worktree.sh"
 
@@ -27,6 +29,14 @@ if [ "$name" = start-stack.sh ]; then
   env_file="$(cd "$(dirname "$0")/../.." && pwd)/env/.env"
   if [ ! -f "$env_file" ]; then
     echo "start-stack missing deploy/env/.env" >&2
+    exit 1
+  fi
+  if [ "${SYNC_APPLY_CHECK:-0}" = 1 ] && [ "$(stat -c '%a' "$env_file")" != 600 ]; then
+    echo "start-stack .env is not mode 600" >&2
+    exit 1
+  fi
+  if [ -n "${EXPECT_TARGET_ENV:-}" ] && [ "$(cat "$env_file")" != "$EXPECT_TARGET_ENV" ]; then
+    echo "start-stack .env content mismatch" >&2
     exit 1
   fi
 fi
@@ -95,7 +105,7 @@ def _init_tree(tmp_path: Path) -> tuple[Path, str]:
     (repo / "deploy/env/.env").write_text(
         "COMPOSE_PROJECT_NAME=running\n", encoding="utf-8"
     )
-    (repo / "deploy/env/.env").chmod(0o640)
+    (repo / "deploy/env/.env").chmod(0o644)
     short = _git(repo, "rev-parse", "--short=7", "HEAD").stdout.strip()
     (tmp_path / "calls.log").write_text("", encoding="utf-8")
     return repo, short
@@ -116,8 +126,16 @@ def _env(repo: Path, tmp_path: Path, **extra: str) -> dict[str, str]:
 
 
 def _run(
-    repo: Path, tmp_path: Path, *args: str, **extra: str
+    repo: Path,
+    tmp_path: Path,
+    *args: str,
+    umask_value: int | None = None,
+    **extra: str,
 ) -> subprocess.CompletedProcess[str]:
+    extra.setdefault("SYNC_APPLY_CHECK", "1" if "--apply" in args else "0")
+    run_options: dict[str, object] = {}
+    if umask_value is not None:
+        run_options["preexec_fn"] = lambda: os.umask(umask_value)
     return subprocess.run(
         ["bash", str(repo / "deploy/scripts/sync-main-worktree.sh"), *args],
         check=False,
@@ -125,6 +143,7 @@ def _run(
         text=True,
         env=_env(repo, tmp_path, **extra),
         timeout=30,
+        **run_options,
     )
 
 
@@ -290,13 +309,40 @@ def test_halt_failure_also_runs_rollback(tmp_path: Path) -> None:
 def test_apply_copies_source_env_into_tracked_env_dir(tmp_path: Path) -> None:
     repo, short = _init_tree(tmp_path)
     source = repo / "deploy/env/.env"
-    r = _run(repo, tmp_path, "--apply")
+    r = _run(repo, tmp_path, "--apply", umask_value=0o22)
     assert r.returncode == 0, r.stderr
     target = repo / ".worktrees" / short / "deploy/env/.env"
     assert target.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
     assert target.stat().st_mode & 0o777 == 0o600
     assert "COMPOSE_PROJECT_NAME=running" not in r.stdout + r.stderr
     assert "符号链接" not in r.stderr
+
+
+def test_placeholder_env_is_replaced(tmp_path: Path) -> None:
+    repo, short = _init_tree(tmp_path)
+    first = _run(repo, tmp_path, "--apply")
+    assert first.returncode == 0, first.stderr
+    target = repo / ".worktrees" / short / "deploy/env/.env"
+    example = repo / ".worktrees" / short / "deploy/env/.env.example"
+    target.write_bytes(example.read_bytes())
+    target.chmod(0o644)
+    second = _run(repo, tmp_path, "--apply")
+    assert second.returncode == 0, second.stderr
+    assert target.read_text(encoding="utf-8") == "COMPOSE_PROJECT_NAME=running\n"
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_existing_real_env_is_preserved_and_restricted(tmp_path: Path) -> None:
+    repo, short = _init_tree(tmp_path)
+    first = _run(repo, tmp_path, "--apply")
+    assert first.returncode == 0, first.stderr
+    target = repo / ".worktrees" / short / "deploy/env/.env"
+    target.write_text("COMPOSE_PROJECT_NAME=real\n", encoding="utf-8")
+    target.chmod(0o644)
+    second = _run(repo, tmp_path, "--apply")
+    assert second.returncode == 0, second.stderr
+    assert target.read_text(encoding="utf-8") == "COMPOSE_PROJECT_NAME=real\n"
+    assert target.stat().st_mode & 0o777 == 0o600
 
 
 def test_missing_source_env_requires_source_env_override(tmp_path: Path) -> None:
@@ -320,12 +366,69 @@ def test_source_env_override_is_used(tmp_path: Path) -> None:
     assert target.stat().st_mode & 0o777 == 0o600
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected_env"),
+    [
+        (
+            "install -m 600",
+            "COMPOSE_PROJECT_NAME=running\n",
+        ),
+        (
+            "placeholder-or-real-branch",
+            "COMPOSE_PROJECT_NAME=real\n",
+        ),
+    ],
+)
+def test_sync_security_mutations_are_red(
+    tmp_path: Path, mutation: str, expected_env: str
+) -> None:
+    repo, short = _init_tree(tmp_path)
+    script = repo / "deploy/scripts/sync-main-worktree.sh"
+    text = script.read_text(encoding="utf-8")
+    if mutation == "install -m 600":
+        mutated = text.replace(
+            'install -m 600 -- "$SOURCE_ENV" "$target_env"',
+            'install -- "$SOURCE_ENV" "$target_env"',
+            1,
+        )
+        assert mutated != text
+        script.write_text(mutated, encoding="utf-8")
+        r = _run(repo, tmp_path, "--apply", umask_value=0o22)
+        assert r.returncode != 0
+        assert "mode 600" in r.stderr
+        return
+
+    first = _run(repo, tmp_path, "--apply")
+    assert first.returncode == 0, first.stderr
+    target = repo / ".worktrees" / short / "deploy/env/.env"
+    target.write_text(expected_env, encoding="utf-8")
+    target.chmod(0o600)
+    mutated = text.replace(
+        'if [ ! -e "$target_env" ] || {',
+        "if true || {",
+        1,
+    )
+    assert mutated != text
+    script.write_text(mutated, encoding="utf-8")
+    r = _run(
+        repo,
+        tmp_path,
+        "--apply",
+        EXPECT_TARGET_ENV=expected_env.rstrip("\n"),
+    )
+    assert r.returncode != 0
+    assert "content mismatch" in r.stderr
+
+
 def test_mutation_restoring_env_symlink_is_caught(tmp_path: Path) -> None:
     repo, _ = _init_tree(tmp_path)
     script = repo / "deploy/scripts/sync-main-worktree.sh"
     text = script.read_text(encoding="utf-8")
     old = """target_env="$WT/deploy/env/.env"
-if [ ! -e "$target_env" ]; then
+target_example="$WT/deploy/env/.env.example"
+if [ ! -e "$target_env" ] || {
+  [ -f "$target_env" ] && [ -f "$target_example" ] && cmp -s "$target_env" "$target_example"
+}; then
   if [ ! -f "$SOURCE_ENV" ]; then"""
     mutated = text.replace(
         old,
@@ -336,7 +439,7 @@ if [ ! -e "$target_env" ]; then
     script.write_text(mutated, encoding="utf-8")
     r = _run(repo, tmp_path, "--apply")
     assert r.returncode != 0
-    assert "missing deploy/env/.env" in r.stderr
+    assert "missing deploy/env/.env" in r.stderr or "unbound variable" in r.stderr
     target = (
         repo
         / ".worktrees"

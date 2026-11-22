@@ -170,18 +170,23 @@ fi
 # 沿用原树 .env（含项目名与卷前缀），不打印 .env 内容。新工作树的
 # deploy/env 目录可能已由版本控制创建，因此只处理 .env 文件本身。
 target_env="$WT/deploy/env/.env"
-if [ ! -e "$target_env" ]; then
+target_example="$WT/deploy/env/.env.example"
+if [ ! -e "$target_env" ] || {
+  [ -f "$target_env" ] && [ -f "$target_example" ] && cmp -s "$target_env" "$target_example"
+}; then
   if [ ! -f "$SOURCE_ENV" ]; then
     die "源 .env 不存在：$SOURCE_ENV；请用 --source-env 指定"
   fi
   mkdir -p "$(dirname "$target_env")"
-  if ! cp -- "$SOURCE_ENV" "$target_env"; then
-    die "复制源 .env 失败：$SOURCE_ENV"
+  if ! install -m 600 -- "$SOURCE_ENV" "$target_env"; then
+    die "安装源 .env 失败：$SOURCE_ENV"
   fi
-  if ! chmod 600 "$target_env"; then
-    die "无法设置新工作树 .env 权限为 600：$target_env"
+  log "已复制原工作树 .env 到新工作树（缺失或占位文件，权限 600，不打印内容）"
+elif [ -f "$target_env" ]; then
+  if ! chmod 600 -- "$target_env"; then
+    die "无法收紧已有 .env 权限为 600：$target_env"
   fi
-  log "已复制原工作树 .env 到新工作树（权限 600，不打印内容）"
+  log "已保留新工作树已有真实 .env，并收紧权限为 600"
 fi
 
 log "先备份"

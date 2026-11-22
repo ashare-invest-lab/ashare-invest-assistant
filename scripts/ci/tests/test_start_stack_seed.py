@@ -59,6 +59,7 @@ exit 98
 """
 
 FAKE_DOCKER = r"""#!/usr/bin/env bash
+set -uo pipefail
 echo "DOCKER $*" >>"$FAKE_DIR/docker.log"
 cmd="$1"
 shift
@@ -68,31 +69,57 @@ if [ "$cmd" = "compose" ]; then
   echo "RESULT compose rc=$rc" >>"$FAKE_DIR/docker.log"
   exit "$rc"
 fi
-# docker info
 if [ "$cmd" = "info" ]; then exit 0; fi
 if [ "$cmd" != "exec" ]; then exit 0; fi
-# skip -e KEY=val
+
+# Parse docker exec -e KEY=VALUE container sh -c script argv0 sql.
+target_db=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    -e) shift 2 ;;
+    -e)
+      [ $# -ge 2 ] || exit 90
+      case "$2" in
+        AIA_TARGET_DB=*) target_db="${2#AIA_TARGET_DB=}" ;;
+      esac
+      shift 2
+      ;;
     *) break ;;
   esac
 done
-# remaining: container + command
-if [[ "$*" == *"SELECT version_num FROM alembic_version"* ]]; then
-  echo "QUERY $*" >>"$FAKE_DIR/docker.log"
-  # The production query must leave the container role and target-db fallback
-  # expression for the container shell to expand.  Host-side defaults are the
-  # regressions this shim rejects.
-  if [[ "$*" != *'"$POSTGRES_USER"'* ]] || [[ "$*" != *'"${AIA_TARGET_DB:-$POSTGRES_DB}"'* ]]; then
-    echo 'role "postgres" does not exist' >&2
-    exit 1
-  fi
-  printf '0028\n'
-  exit 0
+[ $# -ge 5 ] || exit 90
+container="$1"
+[ "$2" = sh ] && [ "$3" = -c ] || exit 90
+script="$4"
+argv0="$5"
+sql="${6-}"
+echo "EXEC container=$container argv0=$argv0" >>"$FAKE_DIR/docker.log"
+if [[ "$script" == *"psql"* ]]; then
+  echo "QUERY $script" >>"$FAKE_DIR/docker.log"
+  POSTGRES_USER="fixture_role" POSTGRES_DB="fixture_db" AIA_TARGET_DB="$target_db" \
+    bash -c "$script" "$argv0" "$sql"
+  exit $?
 fi
 exit 0
 """
+
+FAKE_PSQL = r"""#!/usr/bin/env bash
+set -euo pipefail
+user=""
+db=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -U) [ $# -ge 2 ] || exit 91; user="$2"; shift 2 ;;
+    -d) [ $# -ge 2 ] || exit 92; db="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ "$user" != "${POSTGRES_USER:?}" ] || [ "$db" != "${AIA_TARGET_DB:?}" ]; then
+  echo 'role or database connection arguments are wrong' >&2
+  exit 1
+fi
+printf '0028\\n'
+"""
+
 
 FAKE_PRECHECK = r"""#!/usr/bin/env bash
 echo "PRECHECK $*" >>"$FAKE_DIR/precheck.log"
@@ -119,6 +146,9 @@ def fake(tmp_path: Path) -> Path:
     docker = bindir / "docker"
     docker.write_text(FAKE_DOCKER, encoding="utf-8")
     docker.chmod(0o755)
+    psql = bindir / "psql"
+    psql.write_text(FAKE_PSQL, encoding="utf-8")
+    psql.chmod(0o755)
     pre = bindir / "db-precheck.sh"
     pre.write_text(FAKE_PRECHECK, encoding="utf-8")
     pre.chmod(0o755)
@@ -164,16 +194,20 @@ def _run(
     )
 
 
-def _copy_script(fake: Path, *, mutate_credentials: bool = False) -> Path:
+def _copy_script(fake: Path, *, mutation: str | None = None) -> Path:
     wrapup = fake / "wrapup"
     wrapup.mkdir(exist_ok=True)
     script = wrapup / "start-stack.sh"
     text = SCRIPT.read_text(encoding="utf-8")
-    if mutate_credentials:
-        old = 'psql -X -q -At -U "$POSTGRES_USER" -d "${AIA_TARGET_DB:-$POSTGRES_DB}"'
+    if mutation is not None:
+        old = ': "${POSTGRES_USER:?POSTGRES_USER is required}"; exec psql -X -q -At -U "$POSTGRES_USER" -d "${AIA_TARGET_DB:-$POSTGRES_DB}"'
+        replacement = {
+            "delete_u": ': "${POSTGRES_USER:?POSTGRES_USER is required}"; exec psql -X -q -At -d "${AIA_TARGET_DB:-$POSTGRES_DB}"',
+            "delete_d": ': "${POSTGRES_USER:?POSTGRES_USER is required}"; exec psql -X -q -At -U "$POSTGRES_USER"',
+        }[mutation]
         text = text.replace(
             old,
-            'psql -X -q -At -U "${POSTGRES_USER:-postgres}" -d "${AIA_TARGET_DB:-$POSTGRES_DB}"',
+            replacement,
         )
         assert text != SCRIPT.read_text(encoding="utf-8")
     script.write_text(text, encoding="utf-8")
@@ -411,9 +445,9 @@ def test_alembic_query_uses_container_credentials(fake: Path) -> None:
     assert "-e AIA_TARGET_DB=aia" in docker
 
 
-def test_alembic_query_credential_mutation_is_red(fake: Path) -> None:
-    mutated = _copy_script(fake, mutate_credentials=True)
+@pytest.mark.parametrize("mutation", ["delete_u", "delete_d"])
+def test_alembic_query_credential_mutations_are_red(fake: Path, mutation: str) -> None:
+    mutated = _copy_script(fake, mutation=mutation)
     r = _run(fake, "--apply", script=mutated)
     assert r.returncode != 0
-    assert 'role "postgres" does not exist' in r.stderr
     assert "拒绝 migrate" in r.stderr
