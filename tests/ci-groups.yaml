@@ -159,6 +159,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb200_restrictions.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb202_restrictions_pit.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb239b_restriction_recheck.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb244_same_template_cooldown.py", "group": "parallel", "keywords": ["synthetic calendar and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb200c_restrictions_contract.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb228_consistency.py", "group": "parallel", "keywords": ["pure functions on synthetic gaps and datetimes", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
