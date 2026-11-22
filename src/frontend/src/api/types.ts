@@ -538,13 +538,29 @@ export interface HealthReady {
   version: string;
 }
 
-// ---------- v0.2.3 §7.3 /market/overview（最小结构） ----------
+// ---------- v0.2.11 §7.3 /market/overview ----------
 export interface MarketIndexQuote { security_code: string; name: string; price: Decimal | null; change_pct: Decimal | null; amount: Decimal | null; t: DateTime | null }
+/** v0.2.11 §5.1 MarketBasis；没有市场快照证据时响应返回 null，前端不推造批次。 */
+export interface MarketBasis {
+  snapshot_id: Uuid | null; observed_date: DateStr | null; mode: 'intraday' | 'close' | null; scope: string;
+  eligible: number | null; observed: number | null; trading: number | null; suspended: number | null; missing: number | null;
+  source: string | null;
+}
 export interface MarketOverview extends DataStatusBlock {
+  basis: MarketBasis | null;
   trade_date: DateStr;
   session: MarketSession;
   indices: MarketIndexQuote[];
-  breadth: { up: number; down: number; flat: number; limit_up: number; limit_down: number } | null;
+  breadth: {
+    up: number | null;
+    down: number | null;
+    flat: number | null;
+    limit_up: number | null;
+    limit_down: number | null;
+    up_ratio: Decimal | null;
+    down_ratio: Decimal | null;
+    flat_ratio: Decimal | null;
+  } | null;
   regime: MarketRegime | null;
   regime_position_range: RegimePositionRange | null;
   turnover_total: Decimal | null;

@@ -10,6 +10,15 @@ title = "ashare-invest-assistant S1-S9"
 [extend]
 useDefault = true
 
+# 默认 generic-api-key 的精确虚构夹具豁免；规则级清单会与默认规则合并。
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^src/frontend/src/mocks/marketFixtures\.ts$''']
+regexes = ['''^market\.indices\.000300\.SH$''']
+
 # ---------------------------------------------------------------- S1 麦蕊 licence
 [[rules]]
 id = "S1-mairui-licence-url"
