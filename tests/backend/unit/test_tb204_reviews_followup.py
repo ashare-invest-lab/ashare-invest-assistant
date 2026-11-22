@@ -282,3 +282,85 @@ def test_f_summary_allows_missing_current_version_without_nested_version() -> No
     result = service.summary(Connection(), row)
     assert result["current_version_no"] is None
     assert "current_version" not in result
+
+
+def test_g_project_metrics_excludes_simulated_tracking_and_merges_gaps() -> None:
+    metrics = {
+        "holding_return": {
+            "value": "9",
+            "n": 10,
+            "source": "simulated_tracking",
+            "gaps": ["no_source"],
+        },
+        "benchmark_return": {"value": None, "gaps": {"reason": "no_source"}},
+    }
+    projected = project_metrics(
+        metrics,
+        period_end=dt.date(2026, 1, 2),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert projected["holding_return"]["value"] is None
+    assert projected["holding_return"]["gaps"] == ["no_source"]
+    assert "source" not in projected["holding_return"]
+    assert projected["benchmark_return"]["gaps"] == ["no_source"]
+
+
+def test_g_period_pending_uses_beijing_cutoff_and_future_dates() -> None:
+    end = dt.date(2026, 1, 5)
+    before_close = dt.datetime(2026, 1, 5, 6, 59, tzinfo=dt.UTC)
+    after_close = dt.datetime(2026, 1, 5, 7, 1, tzinfo=dt.UTC)
+    assert period_pending(end, now=before_close)
+    assert not period_pending(end, now=after_close)
+    assert period_pending(dt.date(2026, 1, 6), now=after_close)
+
+
+def test_g_fifo_groups_security_codes_and_ignores_malformed_rows() -> None:
+    rows = [
+        _trade(
+            71,
+            side="buy",
+            quantity="2",
+            net_amount="-20",
+            traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        ),
+        _trade(
+            72,
+            side="sell",
+            quantity="1",
+            net_amount="12",
+            traded_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
+        ),
+        _trade(
+            73,
+            side="sell",
+            quantity="1",
+            net_amount="12",
+            traded_at=dt.datetime(2026, 1, 4, tzinfo=dt.UTC),
+        ),
+        SimpleNamespace(
+            id=uuid.UUID(int=74),
+            security_code="000001.SZ",
+            side="buy",
+            quantity="bad",
+            net_amount="-1",
+            traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+            voided_at=None,
+            epistemic_type="execution",
+        ),
+    ]
+    holding, open_positions = service._fifo_holding(rows)
+    assert holding == [Decimal(20), Decimal(20)]
+    assert not open_positions
+
+
+def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
+    snap = {
+        "data_status": "partial",
+        "data_as_of": None,
+        "gaps": [{"key": "outcome_metrics", "reason": "no_source"}],
+        "outcome_metrics": {"holding_return": {"gaps": ["user_input_missing"]}},
+    }
+    status = service._status_for(snap, dt.date(2026, 1, 2))
+    assert [gap["reason"] for gap in status["gaps"]] == ["no_source"]
+    metric_status = service._status_for({**snap, "gaps": []}, dt.date(2026, 1, 2))
+    assert [gap["reason"] for gap in metric_status["gaps"]] == ["user_input_missing"]

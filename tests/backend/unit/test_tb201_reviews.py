@@ -9,10 +9,10 @@ from typing import Any, cast
 
 import pytest
 from app.api.v1 import reviews as api
-from app.api.v1.reviews import ReviewCreate
+from app.api.v1.reviews import ReviewCreate, ReviewVersionCreate
 from app.auth import deps
 from app.common.errors import AppError, ErrorCode, install_exception_handlers
-from app.common.pagination import PageParams, build_page, decode_cursor
+from app.common.pagination import PageParams, build_page, decode_cursor, encode_cursor
 from app.config import get_settings
 from app.reviews import service
 from app.reviews.metrics import _stat, empty_metrics
@@ -240,3 +240,138 @@ def test_missing_current_version_projection() -> None:
     assert detail["current_version"] is None and detail["data_status"] == "unavailable"
     assert "current_version" not in summary and summary["data_status"] == "unavailable"
     assert detail["gaps"][0]["reason"] == "no_source"
+    for result in (detail, summary):
+        assert result["gaps"][0]["reason"] == "no_source"
+
+
+def test_service_link_validation_owner_and_empty_links() -> None:
+    plan = SimpleNamespace(id=PID, user_id=U, security_code=CODE)
+    pv = SimpleNamespace(id=VID, plan_id=PID, security_code=CODE)
+    trade = SimpleNamespace(id=TID, security_code=CODE, plan_version_id=VID)
+
+    class Conn:
+        def __init__(self, *, plan_row: Any = plan, pv_rows: list[Any] | None = None, trade_rows: list[Any] | None = None, valid: list[Any] | None = None) -> None:
+            self.plan_row, self.pv_rows, self.trade_rows, self.valid = plan_row, pv_rows or [], trade_rows or [], valid or []
+
+        def execute(self, statement: Any) -> Any:
+            text = str(statement)
+            if "app.action_plans" in text and "app.plan_versions" not in text:
+                return SimpleNamespace(first=lambda: self.plan_row)
+            if "app.trades" in text:
+                return SimpleNamespace(all=lambda: self.trade_rows)
+            if "app.plan_versions" in text:
+                return SimpleNamespace(all=lambda: self.pv_rows or self.valid)
+            raise AssertionError(text)
+
+    assert service._validate_links(Conn(pv_rows=[pv]), U, plan_id=PID, security_code=CODE, plan_version_ids=[VID], trade_ids=[]) == (CODE, plan)
+    assert service._validate_links(Conn(pv_rows=[pv], trade_rows=[trade]), U, plan_id=PID, security_code=CODE, plan_version_ids=[], trade_ids=[TID]) == (CODE, plan)
+    assert service._validate_links(Conn(pv_rows=[pv]), U, plan_id=None, security_code=CODE, plan_version_ids=[VID], trade_ids=[]) == (CODE, None)
+    for kwargs in (
+        {"plan_id": PID, "security_code": "000001.SZ", "plan_version_ids": [], "trade_ids": []},
+        {"plan_id": PID, "security_code": CODE, "plan_version_ids": [VID], "trade_ids": []},
+        {"plan_id": PID, "security_code": CODE, "plan_version_ids": [], "trade_ids": [TID]},
+    ):
+        with pytest.raises(AppError) as exc:
+            service._validate_links(Conn(pv_rows=[SimpleNamespace(id=VID, plan_id=uuid.UUID(int=999), security_code=CODE)], trade_rows=[SimpleNamespace(id=TID, security_code="000001.SZ", plan_version_id=None)]), U, **kwargs)
+        assert exc.value.code == ErrorCode.VALIDATION_ERROR
+
+
+def test_service_create_snapshot_and_revise_guards(monkeypatch: pytest.MonkeyPatch) -> None:
+    body_value = ReviewCreate.model_validate(body(lessons="lesson", tags=["tag"], judgement=[{"condition_text": "ok", "fulfilled": True}]))
+    inserted: list[str] = []
+
+    class Conn:
+        def execute(self, statement: Any) -> Any:
+            text = str(statement)
+            inserted.append(text)
+            if "review_versions" in text and "SELECT" in text.upper():
+                return SimpleNamespace(one=lambda: SimpleNamespace(id=VID))
+            return SimpleNamespace(first=lambda: None, one=lambda: SimpleNamespace(id=VID), scalar=lambda: None, all=list)
+
+    monkeypatch.setattr(service, "_validate_links", lambda *_args, **_kwargs: (CODE, None))
+    monkeypatch.setattr(service.uuid, "uuid4", lambda: RID)
+    assert service.create(Conn(), U, body_value) == RID
+    assert any("data_snapshots" in sql for sql in inserted)
+    assert any("review_versions" in sql for sql in inserted)
+    assert service._snapshot_items(dt.date(2026, 1, 1), dt.date(2026, 1, 5), None, [], [], True)["data_status"] == "unavailable"
+
+    missing = SimpleNamespace(current_version_id=None)
+    monkeypatch.setattr(service, "_owned", lambda *_args, **_kwargs: missing)
+    with pytest.raises(AppError) as exc:
+        service.revise(Conn(), U, RID, ReviewVersionCreate.model_validate({**body(), "base_version_no": 1}))
+    assert exc.value.code == ErrorCode.NOT_FOUND
+
+    stale = SimpleNamespace(current_version_id=VID)
+    monkeypatch.setattr(service, "_owned", lambda *_args, **_kwargs: stale)
+    class StaleConn(Conn):
+        def execute(self, statement: Any) -> Any:
+            if "review_versions" in str(statement):
+                return SimpleNamespace(first=lambda: None)
+            return super().execute(statement)
+    with pytest.raises(AppError) as exc:
+        service.revise(StaleConn(), U, RID, ReviewVersionCreate.model_validate({**body(), "base_version_no": 1}))
+    assert exc.value.code == ErrorCode.NOT_FOUND
+
+
+def test_snapshot_projection_and_timeline_sources() -> None:
+    snap_items = {"data_status": "partial", "data_as_of": None, "gaps": [], "outcome_metrics": {"holding_return": {"value": "1", "n": 5}}, "attribution": {"judgement": []}}
+    pv_row = SimpleNamespace(id=VID, created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC), version_no=3)
+    trade_row = SimpleNamespace(id=TID, created_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC), traded_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC))
+    version = SimpleNamespace(id=RID, version_no=2, plan_version_ids=[VID], trade_ids=[TID], snapshot_id=VID, lessons=None, tags=None, attribution=None, outcome_metrics=None, created_at=dt.datetime(2026, 1, 4, tzinfo=dt.UTC))
+    class Conn:
+        def execute(self, statement: Any) -> Any:
+            text = str(statement)
+            if "data_snapshots" in text:
+                return SimpleNamespace(first=lambda: SimpleNamespace(_mapping={"items": snap_items}))
+            if "plan_versions" in text:
+                return SimpleNamespace(all=lambda: [pv_row])
+            if "trades" in text:
+                return SimpleNamespace(all=lambda: [trade_row])
+            return SimpleNamespace(all=lambda: [version], first=lambda: version, scalar=lambda: None)
+    projected = service.version_body(Conn(), U, version)
+    assert projected["data_status"] == "partial" and projected["outcome_metrics"]["holding_return"]["value"] == "1" and projected["tags"] == []
+    timeline = service._timeline(Conn(), U, RID, version)
+    assert [item["kind"] for item in timeline] == ["plan_version", "trade", "review_version"]
+
+
+def test_route_invalid_cursors_and_version_not_found(http: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = get_settings()
+    scope = f"reviews:{U}:{RID}:versions"
+    bad = encode_cursor(["wrong"], scope=scope, settings=cfg)
+    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
+    response = http[0].get(f"/api/v1/reviews/{RID}/versions", params={"cursor": bad})
+    assert response.status_code == 400 and response.json()["error"]["code"] == "INVALID_CURSOR"
+    monkeypatch.setattr(api.service, "version_body", lambda *_: {"version_no": 1})
+    http[1].execute = lambda _s: SimpleNamespace(first=lambda: None)
+    response = http[0].get(f"/api/v1/reviews/{RID}/versions/99")
+    assert response.status_code == 404 and response.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_paging_helpers_and_revise_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = get_settings()
+    current = SimpleNamespace(version_no=1, id=VID)
+    rows = [SimpleNamespace(id=RID, created_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC))]
+    class Conn:
+        def execute(self, statement: Any) -> Any:
+            text = str(statement)
+            if "review_versions" in text:
+                return SimpleNamespace(all=lambda: [SimpleNamespace(version_no=1)], first=lambda: current)
+            return SimpleNamespace(all=lambda: rows, first=lambda: current, one=lambda: SimpleNamespace(id=VID))
+    page = api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=None), CODE, None)
+    assert len(page.items) == 1
+    cursor = encode_cursor([rows[0].created_at.isoformat(), str(RID)], scope=f"reviews:{U}:{CODE}:None", settings=cfg)
+    assert api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=cursor), CODE, None).items == rows
+    bad_cursor = encode_cursor(["not-a-date", str(RID)], scope=f"reviews:{U}:{CODE}:None", settings=cfg)
+    with pytest.raises(AppError) as exc:
+        api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=bad_cursor), CODE, None)
+    assert exc.value.code == ErrorCode.INVALID_CURSOR
+
+    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
+    monkeypatch.setattr(api.service, "version_body", lambda *_: {"version_no": 1})
+    assert api._version_page(Conn(), U, RID, cfg, PageParams(limit=1, cursor=encode_cursor([1], scope=f"reviews:{U}:{RID}:versions", settings=cfg))).items == [{"version_no": 1}]
+
+    review = SimpleNamespace(current_version_id=VID)
+    monkeypatch.setattr(service, "_owned", lambda *_args, **_kwargs: review)
+    monkeypatch.setattr(service, "_validate_links", lambda *_args, **_kwargs: (CODE, None))
+    monkeypatch.setattr(service, "_new_version", lambda *_args, **_kwargs: SimpleNamespace(id=uuid.UUID(int=207)))
+    assert service.revise(Conn(), U, RID, ReviewVersionCreate.model_validate({**body(lessons="replacement"), "base_version_no": 1})) == RID
