@@ -6,7 +6,7 @@ import type { Bar, MarketBasis, MarketOverview } from '../../api/types';
 import { AppProviders } from '../../app/AppProviders';
 import { makeQueryClient } from '../../app/queryClient';
 import { routes } from '../../app/routes';
-import { MARKET_OVERVIEW } from '../../mocks/marketFixtures';
+import { MARKET_OVERVIEW, MARKET_OVERVIEW_NO_CERTIFICATE, MARKET_OVERVIEW_REGIME_GATED } from '../../mocks/marketFixtures';
 import { server } from '../../mocks/server';
 import { preloadRoutes } from '../../test/preloadRoutes';
 
@@ -62,6 +62,7 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     if (body.gaps.length) expect(screen.getByTestId('market-gap-note')).toHaveTextContent(body.gaps[0].message);
     const breadth = screen.getByTestId('breadth-panel');
     if (!body.breadth) expect(breadth).toHaveTextContent('涨跌家数暂不可用');
+    if (body.turnover_total === null) expect(breadth).toHaveTextContent('两市成交额—');
     if (responseBasis?.eligible === 0) {
       expect(breadth.querySelector('.breadth-bar')).toBeNull();
       expect(breadth).toHaveTextContent('上涨占比—');
@@ -122,6 +123,44 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     const panel = await screen.findByTestId('breadth-panel');
     expect(panel).toHaveTextContent('上涨占比—');
     expect(panel.querySelector('.breadth-bar')).toBeNull();
+  });
+
+  it('缺证指标保持空态，不以零值或仓位区间补结论', async () => {
+    const { container } = mount(path, MARKET_OVERVIEW_NO_CERTIFICATE);
+    const index = await screen.findByRole('listitem');
+    expect(index).toHaveTextContent('—');
+    expect(index).toHaveTextContent(/成交\s*—/);
+
+    const breadth = screen.getByTestId('breadth-panel');
+    expect(breadth).toHaveTextContent('涨跌家数暂不可用');
+    expect(breadth).toHaveTextContent(/上涨\s*—/);
+    expect(breadth).toHaveTextContent(/平盘\s*—/);
+    expect(breadth).toHaveTextContent(/下跌\s*—/);
+    expect(breadth).toHaveTextContent(/涨停—/);
+    expect(breadth).toHaveTextContent(/跌停—/);
+    expect(breadth).toHaveTextContent(/两市成交额—/);
+    expect(breadth).toHaveTextContent(/上涨占比—/);
+
+    const regime = screen.getByTestId('regime-panel');
+    expect(regime).toHaveTextContent(/市场状态\s*—/);
+    expect(regime).toHaveTextContent('参考仓位区间暂不可用');
+    expect(regime).not.toHaveTextContent(/参考仓位区间\s*0/);
+
+    const gap = screen.getByTestId('market-gap-note');
+    expect(gap).toHaveTextContent('无本人行情来源（虚构夹具）');
+    expect(gap).toHaveTextContent('无本人成交额来源（虚构夹具）');
+    expect(gap).toHaveTextContent('未生成市场环境结论（虚构夹具）');
+    expect(container.innerHTML).not.toMatch(/NaN|Infinity|undefined/);
+  });
+
+  it('未批准 regime 保持 null 与 market.regime/no_source 缺口', async () => {
+    mount(path, MARKET_OVERVIEW_REGIME_GATED);
+    const regime = await screen.findByTestId('regime-panel');
+    expect(regime).toHaveTextContent(/市场状态\s*—/);
+    expect(regime).toHaveTextContent('参考仓位区间暂不可用');
+    const gap = screen.getByTestId('market-gap-note');
+    expect(gap).toHaveTextContent('F25/G-02 参数未批准，未生成市场环境结论（虚构夹具）');
+    expect(gap.querySelector('[data-reason="no_source"]')).not.toBeNull();
   });
 
   it('稀疏 1m 原样传图，不插值或补零', async () => {
