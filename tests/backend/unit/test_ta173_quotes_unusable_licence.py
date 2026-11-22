@@ -15,7 +15,6 @@ import pytest
 from app.auth import deps
 from app.auth.sessions import Session
 from sqlalchemy import create_engine, event, select
-from sqlalchemy.dialects import postgresql
 
 from tests.backend.unit.test_quotes_empty_s3 import (
     CODE,
@@ -71,14 +70,9 @@ def owned_world(world: Any, no_enqueue: None) -> Any:  # noqa: F811
         original_execute = conn.execute
 
     def execute(statement: Any) -> Result:
-        sql = str(statement.compile(dialect=postgresql.dialect()))
-        if "app.user_data_licence_status" not in sql:
-            return original_execute(statement)
-        state.reads.append(sql)
-        # Use scenario facts as the fake source; SQL only routes the query.
         today = state.now.astimezone(BEIJING).date()
-        eligible = [
-            row.id
+        eligible = {
+            row.user_id
             for row in state.licences
             if (
                 row.user_id == OWNER
@@ -88,9 +82,10 @@ def owned_world(world: Any, no_enqueue: None) -> Any:  # noqa: F811
                 and (row.paused_until is None or row.paused_until <= state.now)
                 and (row.expires_on is None or row.expires_on >= today)
             )
-        ]
+        }
         assert len(eligible) <= 1
-        return Result(eligible)
+        state.active = eligible
+        return original_execute(statement)
 
     engine.connect = lambda: nullcontext(SimpleNamespace(execute=execute))
     return world
@@ -123,7 +118,7 @@ def assert_cache_untouched(harness: Any, retained: list[Any]) -> None:
     assert harness.state.bars[0].source_licence_id == LICENCE
     assert harness.state.bars[0].close == Decimal("7.8750")
     assert len(harness.state.reads) == 2
-    assert all("daily_bars" not in sql for sql in harness.state.reads)
+    assert "daily_bars" not in harness.state.reads
 
 
 @pytest.mark.parametrize(
@@ -184,7 +179,12 @@ def test_ta173_quotes_active_licence_keeps_stale_close(
     assert item["data_as_of"] == "2041-05-05T17:05:00+08:00"
     for field in ("t", "data_as_of"):
         assert dt.datetime.fromisoformat(item[field]) < NOW
-    assert sum("market.daily_bars" in sql for sql in owned_world.state.reads) == 1
+    reads = owned_world.state.reads
+    assert reads.count("daily_bars") == 1
+    assert reads.count("securities") == 1
+    assert reads.count("licence") == 1
+    assert sum(read.startswith("calendar_") for read in reads) <= 2
+    assert len(reads) <= 5
 
 
 def test_ta173_quotes_cannot_borrow_other_users_cached_close(owned_world: Any) -> None:
