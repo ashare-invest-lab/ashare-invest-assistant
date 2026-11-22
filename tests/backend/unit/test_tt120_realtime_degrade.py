@@ -152,6 +152,15 @@ def _strict_xfail(request: pytest.FixtureRequest, reason: str) -> None:
     pytest.xfail(reason)
 
 
+def _realtime_snapshot_read_entry() -> Any | None:
+    try:
+        import app.marketdata.quotes_read as quotes_read
+    except ImportError:
+        return None
+    entry = getattr(quotes_read, "_realtime_latest", None)
+    return entry if callable(entry) else None
+
+
 def _breaker_runtime(
     request: pytest.FixtureRequest,
 ) -> tuple[Any, Any, type[BaseException], Any]:
@@ -280,14 +289,12 @@ def test_session_freshness_uses_beijing_calendar_and_30s_threshold(
         assert result["data_as_of"] == "2041-05-05T15:10:00+08:00"
         if result["data_status"] != "fresh":
             _strict_xfail(request, "待 T-B223/#390：盘前上一开市日收盘 fresh 判定未接线")
-    elif result.get("price") in (None, "7.8750"):
+    elif _realtime_snapshot_read_entry() is None:
         _strict_xfail(request, "待 T-B213b/#377：午休实时快照读链未接线")
     else:
         assert result["price"] == "8.1250"
         assert result["t"] == "2041-05-06T11:29:55+08:00"
         assert result["data_as_of"] == "2041-05-06T11:29:55+08:00"
-        if result["data_status"] != "fresh":
-            _strict_xfail(request, "待 T-B223/#390：午休按上午收盘时点判 fresh 未接线")
     assert result["data_status"] == "fresh"
 
 def test_post_close_uses_last_trading_session_close(world: Any) -> None:
