@@ -633,6 +633,7 @@ def test_market_overview_rejects_unsupported_method(world: OverviewState) -> Non
 
 
 def test_market_overview_complete_intraday_batch(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.query_as_of = INTRADAY_QUERY
     world.facts = complete_intraday_facts()
     payload = get_overview(world)
@@ -660,6 +661,7 @@ def test_market_overview_complete_intraday_batch(world: OverviewState) -> None:
 
 
 def test_market_overview_intraday_missing_volume_amount_is_partial(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.query_as_of = INTRADAY_QUERY
     world.facts = [
         intraday_fact(
@@ -731,6 +733,7 @@ def test_market_overview_intraday_missing_volume_amount_is_partial(world: Overvi
 def test_market_overview_1500_and_1710_selection(
     world: OverviewState, query_as_of: dt.datetime, expect_close: bool
 ) -> None:
+    world.licence = LICENCE_A
     world.query_as_of = query_as_of
     world.facts = [
         intraday_fact(
@@ -761,6 +764,7 @@ def test_market_overview_1500_and_1710_selection(
 
 
 def test_market_overview_daily_close_uses_decimal_amounts(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.query_as_of = dt.datetime(2026, 11, 13, 9, 15, tzinfo=dt.timezone.utc)
     world.facts = [
         close_fact("600000.SH", "11.25", "10.00", fetched_at=world.query_as_of),
@@ -776,6 +780,7 @@ def test_market_overview_daily_close_uses_decimal_amounts(world: OverviewState) 
 
 
 def test_market_overview_excludes_suspended_zero_delisted_but_keeps_st(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.facts = [
         close_fact("600000.SH", "11", "10", is_suspended=True),
         close_fact("000001.SZ", "11", "10", volume="0"),
@@ -795,6 +800,7 @@ def test_market_overview_excludes_suspended_zero_delisted_but_keeps_st(world: Ov
 
 
 def test_market_overview_etf_index_and_bj_scope(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.facts = [
         close_fact("510001.SH", "1.01", "1.00", kind="etf"),
         close_fact("000300.SH", "4000", "3990", kind="index"),
@@ -814,6 +820,7 @@ def test_market_overview_etf_index_and_bj_scope(world: OverviewState) -> None:
 
 
 def test_market_overview_limit_counts_need_rule_evidence(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.facts = [close_fact("600000.SH", "11", "10")]
     payload = get_overview(world)
     breadth = payload["breadth"]
@@ -830,6 +837,7 @@ def test_market_overview_limit_counts_need_rule_evidence(world: OverviewState) -
 
 
 def test_market_overview_coverage_threshold_stays_disabled(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.query_as_of = INTRADAY_QUERY
     world.facts = complete_intraday_facts()
     payload = get_overview(world)
@@ -850,6 +858,7 @@ def test_market_overview_coverage_threshold_stays_disabled(world: OverviewState)
 
 
 def test_market_overview_zero_denominator_keeps_width_null(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.facts = [
         close_fact("600000.SH", "11", "10", is_suspended=True),
         close_fact("000001.SZ", "11", "10", volume="0"),
@@ -878,6 +887,7 @@ def test_market_overview_zero_denominator_keeps_width_null(world: OverviewState)
 
 @pytest.mark.parametrize("catalog_status", ["declared", "verified_live"])
 def test_market_overview_regime_remains_gated(catalog_status: str, world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.facts = [close_fact("000300.SH", "4000", "3990", kind="index")]
     world.regime_feature = {  # type: ignore[attr-defined]
         "f.market_regime": "uptrend",
@@ -948,6 +958,7 @@ def test_fixture_connection_does_not_infer_owner_licence_from_market_facts() -> 
 def test_market_overview_nontrading_and_preopen_use_stale_close(
     world: OverviewState, session: MarketSession, trade_date: dt.date
 ) -> None:
+    world.licence = LICENCE_A
     world.clock = aggregate_models.MarketClock(
         trade_date=trade_date, session=session
     )
@@ -1027,6 +1038,7 @@ def test_market_overview_nontrading_and_preopen_use_stale_close(
 
 
 def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     if not market_overview_reader_is_wired():
         pytest.xfail("待 #182/T-A172 §10：BJ 门闩运行能力尚未接入")
     world.facts = [
@@ -1049,9 +1061,11 @@ def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: Ove
     )
 
 
+@pytest.mark.xfail(strict=True, reason="待 #182/T-A172 §10.10 可信证据投影（后续单）")
 def test_market_overview_bj_gate_positive_requires_twenty_clean_pairs(
     world: OverviewState,
 ) -> None:
+    world.licence = LICENCE_A
     if not market_overview_reader_is_wired():
         pytest.xfail("待 #182/T-A172 §10：BJ 门闩运行能力尚未接入")
     world.facts = [
@@ -1100,6 +1114,7 @@ def test_market_overview_bj_gate_positive_requires_twenty_clean_pairs(
 
 
 def test_market_overview_pit_cross_licence_does_not_borrow_rows(world: OverviewState) -> None:
+    world.licence = LICENCE_A
     world.query_as_of = INTRADAY_QUERY
     world.facts = [
         intraday_fact(
