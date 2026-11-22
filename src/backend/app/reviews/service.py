@@ -764,6 +764,9 @@ def _status_for(
                 }
                 for name in METRIC_NAMES
             )
+        for gap in normalise_gaps(snap.get("gaps"), "outcome_metrics"):
+            if not str(gap.get("key", "")).startswith("outcome_metrics") and gap not in block["gaps"]:
+                block["gaps"].append(gap)
         return block
     gaps: list[dict[str, Any]] = []
     for gap in normalise_gaps(snap.get("gaps"), "outcome_metrics"):

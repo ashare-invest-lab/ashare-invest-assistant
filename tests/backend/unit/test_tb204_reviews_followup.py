@@ -981,3 +981,21 @@ def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
     assert [gap["reason"] for gap in status["gaps"][:4]] == ["no_source"] * 4
     metric_status = service._status_for({**snap, "gaps": []}, dt.date(2026, 1, 2))
     assert [gap["reason"] for gap in metric_status["gaps"]] == ["user_input_missing"]
+
+
+def test_g_status_for_pending_keeps_non_outcome_snapshot_gaps() -> None:
+    snap = {
+        "period_end": "2099-01-05",
+        "gaps": [
+            {
+                "key": "trades.import_commit_unproven",
+                "reason": "no_source",
+            }
+        ],
+        "outcome_metrics": {},
+    }
+    status = service._status_for(snap, dt.date(2099, 1, 5))
+    assert {(gap["key"], gap["reason"]) for gap in status["gaps"]} >= {
+        ("outcome_metrics.holding_return", "not_yet_published"),
+        ("trades.import_commit_unproven", "no_source"),
+    }
