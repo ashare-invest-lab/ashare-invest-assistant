@@ -66,7 +66,7 @@ def security(code: str, kind: str, exchange: str) -> SimpleNamespace:
 def quote(
     code: str,
     change: str,
-    amount: str,
+    amount: str | None,
     stamp: dt.datetime,
     *,
     batch_id: uuid.UUID = BATCH,
@@ -200,6 +200,74 @@ def test_http_basis_partial_batch_keeps_null_components(monkeypatch: pytest.Monk
     assert {gap["key"] for gap in body["gaps"]} == {
         "market.regime",
         "market.turnover_total",
+    }
+
+
+def test_http_observed_stock_with_missing_amount_keeps_partial_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = State(
+        quotes=[
+            quote("600000.SH", "1.2", "1200.00", NOW),
+            quote("000001.SZ", "-0.3", None, NOW),
+            quote("000300.SH", "0.5", "800.00", NOW),
+        ]
+    )
+    with make_client(monkeypatch, state, MarketSession.MORNING) as client:
+        response = client.get("/api/v1/market/overview")
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "basis": {
+            "snapshot_id": None,
+            "observed_date": DAY.isoformat(),
+            "mode": "intraday",
+            "scope": "沪深股票口径",
+            "eligible": 2,
+            "observed": 2,
+            "trading": 2,
+            "suspended": 0,
+            "missing": 0,
+            "source": "mairui",
+        },
+        "trade_date": DAY.isoformat(),
+        "session": "morning",
+        "indices": [
+            {
+                "security_code": "000300.SH",
+                "name": "虚构000300.SH",
+                "price": "0.5",
+                "change_pct": "0.5",
+                "amount": "800.00",
+                "t": "2026-11-13T02:00:00Z",
+            }
+        ],
+        "breadth": {
+            "up": 1,
+            "down": 1,
+            "flat": 0,
+            "up_ratio": "0.5000",
+            "down_ratio": "0.5000",
+            "flat_ratio": "0.0000",
+            "limit_up": 0,
+            "limit_down": 0,
+        },
+        "regime": None,
+        "regime_position_range": None,
+        "turnover_total": None,
+        "data_status": "partial",
+        "data_as_of": "2026-11-13T02:00:00Z",
+        "gaps": [
+            {
+                "key": "market.regime",
+                "reason": "no_source",
+                "message": "F25/G-02 参数未批准，未生成市场环境结论。",
+            },
+            {
+                "key": "market.turnover_total",
+                "reason": "no_source",
+                "message": "成交额批次覆盖或单位未验证。",
+            },
+        ],
     }
 
 

@@ -53,7 +53,8 @@ test('T-T129 market page exposes Beijing timing, basis state and gap reason', as
     basis: { ...MARKET_OVERVIEW.basis!, observed_date: '2026-11-12', mode: 'close', missing: 1 },
     gaps: [{ key: 'market.breadth', reason: 'no_source', message: '虚构宽度批次缺失' }],
   });
-  const page = await screen.findByTestId('market-page');
+  await screen.findByTestId('market-basis');
+  const page = screen.getByTestId('market-page');
   expect(page).toHaveTextContent('2026-11-13');
   expect(page).toHaveTextContent('已收盘');
   expect(page).toHaveTextContent('更新于 2026-11-12 15:00');
@@ -73,7 +74,8 @@ test('T-T129 market page keeps null indicators and basis empty state explicit', 
     data_as_of: null,
     gaps: [{ key: 'market.breadth', reason: 'no_source', message: '虚构市场来源缺失' }],
   });
-  const page = await screen.findByTestId('market-page');
+  await screen.findByTestId('market-basis');
+  const page = screen.getByTestId('market-page');
   expect(page).toHaveTextContent('数据不可用（无数据时点）');
   expect(screen.getByTestId('market-basis')).toHaveTextContent('basis：—');
   expect(screen.getByTestId('market-basis')).toHaveTextContent('无市场快照证据');
