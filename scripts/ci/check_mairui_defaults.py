@@ -122,18 +122,24 @@ def _check_env_example(repo: Path, errs: list[str]) -> None:
     except (OSError, UnicodeDecodeError) as exc:
         errs.append(f"{rel}:MAIRUI_MODE: 无法读取文件（{type(exc).__name__}）")
         return
-    mode_seen = False
+    values: dict[str, list[str]] = {}
     for line in lines:
         stripped = line.strip()
-        key, _, value = stripped.partition("=")
-        if _allowed_key(key) == MODE:
-            mode_seen = True
-            if value != "replay":
-                errs.append(f"{rel}:{MODE}: 值必须为 replay（发现 {value!r}）")
-        elif _allowed_key(key) == SOURCE and value != "off":
-            errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {value!r}）")
-    if not mode_seen:
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, separator, value = stripped.partition("=")
+        normalized = _allowed_key(key)
+        if separator and normalized in ALLOWED:
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            values.setdefault(normalized, []).append(value)
+    if MODE not in values:
         errs.append(f"{rel}:{MODE}: 必须有一行 MAIRUI_MODE=replay")
+    for bad in [v for v in values.get(MODE, []) if v != "replay"]:
+        errs.append(f"{rel}:{MODE}: 值必须为 replay（发现 {bad!r}）")
+    for bad in [v for v in values.get(SOURCE, []) if v != "off"]:
+        errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {bad!r}）")
 
 
 def _check_workflow_environment(

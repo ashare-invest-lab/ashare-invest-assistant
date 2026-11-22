@@ -87,6 +87,71 @@ def test_env_live_is_rejected(tmp_path: Path) -> None:
     assert any(".env.example:MAIRUI_MODE" in error for error in errors)
 
 
+def test_env_get_normalization_and_last_value(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(
+        tmp_path,
+        "deploy/env/.env.example",
+        'MAIRUI_MODE="replay"\nMAIRUI_MODE= replay\n',
+    )
+    assert cmd.check(tmp_path) == []
+    write(
+        tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=replay\nMAIRUI_MODE = live\n"
+    )
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_env_any_unsafe_line_or_interpolation_is_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=live\nMAIRUI_MODE=replay\n")
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=${MAIRUI_MODE:-replay}\n")
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_env_comments_and_inline_comment_cannot_hide_live(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=live # replay\n")
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+    write(
+        tmp_path, "deploy/env/.env.example", "# MAIRUI_MODE=replay\nMAIRUI_MODE=live\n"
+    )
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_workflow_comment_decoy_does_not_hide_live(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        "# MAIRUI_MODE: replay\nenv:\n  MAIRUI_MODE: live\n",
+    )
+    assert any(
+        ".github/workflows/ci.yml:env/MAIRUI_MODE" in error
+        for error in cmd.check(tmp_path)
+    )
+
+
+def test_workflow_mode_aliases_are_rejected_at_each_scope(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        """env:
+  ' mairui_mode ': "live"
+jobs:
+  backend:
+    env:
+      mairui_mode: live
+    steps:
+      - env:
+          'MAIRUI_MODE ': live
+""",
+    )
+    errors = cmd.check(tmp_path)
+    assert sum("MAIRUI_MODE" in error for error in errors) >= 3
+
+
 def test_config_mairui_default_is_rejected(tmp_path: Path) -> None:
     baseline(tmp_path)
     write(
