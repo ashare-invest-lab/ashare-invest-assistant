@@ -3,6 +3,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useDailyReport, useToday } from '../../api/queries';
+import { QuoteStreamFallback } from '../../components/QuoteStreamFallback';
 import { securityTypeOf, type TodayFocusRow, type TodayResponse } from '../../api/types';
 import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
@@ -98,6 +99,7 @@ export function TodayPage() {
     <div className="page-scroll today" data-testid="today-page">
       <div className="detail-head">
         <span className="q-name">今日关注</span>
+        <QuoteStreamFallback path="/today" />
         <span className="small">交易日 <span className="mono">{t.trade_date}</span></span>
         <Tag data-testid="today-session">{Object.hasOwn(SESSION, t.session) ? SESSION[t.session] : '未知时段'}</Tag>
         <span className="small" data-testid="today-regime">
