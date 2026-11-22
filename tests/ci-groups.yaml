@@ -164,6 +164,7 @@ tests:
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb201_reviews.py", "group": "parallel", "keywords": ["pure metrics", "synthetic request validation", "no real DB/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt99_market_clock_fixed.py", "group": "serial_pg", "keywords": ["conn->pg_url", "market.trading_calendar on isolated PG; per-case truncate and rollback", "fixed aware instants and repository market_rules"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt99b_rc1_load_clock_fixed.py", "group": "serial_pg", "keywords": ["pg_url 隔离 PG / 每例事务回滚", "固定时刻 rc1.load / 冻结墙钟", "合成行情 / 无外网"], "unverified": false}
   - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "parallel", "keywords": ["socket.connect/create_connection monkeypatch denies all connections", "synthetic /tmp paths", "no real PG/redis or docker/services"], "unverified": false}
