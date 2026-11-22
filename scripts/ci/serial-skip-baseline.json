@@ -1,0 +1,7 @@
+{
+  "serial_pg": {
+    "max_skipped": 99,
+    "min_passed": 1290
+  },
+  "source": "max_skipped 取 main f0acc636 run 44965913926（passed=1317 skipped=99）；min_passed 取 #350@fb8dbaf0 run 44957367134（passed=1290 skipped=72）的较低值，新增 serial_pg 跳过须改此文件并在 PR 说明"
+}
