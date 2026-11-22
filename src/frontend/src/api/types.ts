@@ -11,6 +11,7 @@ import type {
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
   DataGapScope, SecurityType,
+  RestrictionKind, RestrictionTargetType,
 } from './enums';
 import type { DailyDimensionAnalysis } from './phase2Types';
 
@@ -405,6 +406,20 @@ export interface NonExecutableReason {
   released_at: DateTime | null;
   release_evidence: Record<string, unknown> | null;
   released_by: 'system' | 'user';
+}
+
+/** /restrictions 资源，契约 #337（api-contract §7.5）。运行时 status 可能包含未知字符串。 */
+export interface Restriction {
+  id: Uuid;
+  kind: RestrictionKind;
+  target_type: RestrictionTargetType;
+  target_id: string;
+  until: DateTime | null;
+  reason: string | null;
+  created_at: DateTime;
+  name: string | null;
+  status: string;
+  removed_at: DateTime | null;
 }
 
 // ---------- §7.1 / 7.2 / 7.3 / 7.10 ----------

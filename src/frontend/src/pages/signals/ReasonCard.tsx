@@ -1,9 +1,10 @@
 import { tagOf, labelOf } from '../../lib/explanations';
 import { Button, Tag } from 'antd';
+import { Link } from 'react-router';
 import type { NonExecutableReason } from '../../api/types';
 import { REASON_CODE, RELEASE_KIND } from '../../i18n/labels';
 import { REASON_STATUS } from '../../i18n/signalLabels';
-import { manuallyReleasable, reevalText } from '../../lib/signals';
+import { manuallyReleasable, reevalText, VIA_RESTRICTIONS } from '../../lib/signals';
 import { fmtTime } from '../../lib/format';
 
 export function ReasonCard({ r, onRelease }: { r: NonExecutableReason; onRelease?: (r: NonExecutableReason) => void }) {
@@ -24,6 +25,7 @@ export function ReasonCard({ r, onRelease }: { r: NonExecutableReason; onRelease
       <div className="muted small" data-testid="reeval">
         自动重评状态：{reevalText(r)} · 检出 {fmtTime(r.detected_at)}{note ? ` · 备注：${note}` : ''}
       </div>
+      {r.status === 'active' && VIA_RESTRICTIONS.has(r.code) ? <Link to="/restrictions" data-testid={`restriction-link-${r.id}`}>去限制名单</Link> : null}
       {onRelease && manuallyReleasable(r) ? (
         <Button size="small" style={{ marginTop: 4 }} onClick={() => onRelease(r)} data-testid={`release-${r.id}`}>手动解除</Button>
       ) : null}
