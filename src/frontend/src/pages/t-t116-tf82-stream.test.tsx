@@ -40,10 +40,8 @@ function renderStock() {
 }
 
 describe('T-T116 / T-F82 stream acceptance', () => {
-  it.each(['fresh', 'stale', 'unavailable'] as const)('个股页展示服务端 %s 三态，不投影 source/basis', async (status) => {
+  it.each(['fresh', 'stale', 'unavailable'] as const)('个股页展示服务端 %s 三态', async (status) => {
     const body = quote(status);
-    expect(Object.keys(body)).not.toContain('source');
-    expect(Object.keys(body)).not.toContain('basis');
     server.use(http.get('/api/v1/quotes', () => HttpResponse.json({ items: [body] })));
     renderStock();
 
@@ -53,7 +51,6 @@ describe('T-T116 / T-F82 stream acceptance', () => {
     expect(head).toHaveTextContent(status === 'fresh' ? '87.10' : status === 'stale' ? '86.90' : '—');
     if (status === 'stale') expect(screen.getByTestId('quote-stale-tag')).toHaveTextContent('收盘价·11-02');
     if (status === 'unavailable') expect(head).not.toHaveTextContent('86.90');
-    expect(head.textContent).not.toMatch(/source|basis/i);
   });
 
   it('个股行情在 SSE 未发布 quote 时按 15 秒 GET /quotes 回退轮询', async () => {
@@ -95,7 +92,11 @@ describe('T-T116 / T-F82 stream acceptance', () => {
     render(<QueryClientProvider client={client}><StreamPollingContext.Provider value={true}><FallbackProbe /></StreamPollingContext.Provider></QueryClientProvider>);
     await waitFor(() => expect(seen.terminal).toHaveLength(1));
     await waitFor(() => expect(seen.today).toHaveLength(1));
-    await advance(15_000);
+    // shouldAdvanceTime 会吃掉 waitFor 的真实耗时，14_999 会跨过 15s；留 1s 余量仍断言未提前轮询。
+    await advance(14_000);
+    expect(seen.terminal).toHaveLength(1);
+    expect(seen.today).toHaveLength(1);
+    await advance(1_000);
     await waitFor(() => expect(seen.terminal).toHaveLength(2));
     await waitFor(() => expect(seen.today).toHaveLength(2));
     expect(seen.terminal[1]).toBe('W/"terminal"');

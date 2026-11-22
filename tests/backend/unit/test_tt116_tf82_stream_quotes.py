@@ -26,8 +26,6 @@ def test_quotes_public_response_has_only_contract_status_fields(world):
         "data_as_of",
         "gaps",
     }
-    assert "source" not in item
-    assert "basis" not in item
     assert item["data_status"] == "unavailable"
     assert all(item[field] is None for field in ("price", "change_pct", "volume", "amount", "t", "data_as_of"))
     assert item["gaps"][0]["reason"] == "no_source"
