@@ -235,8 +235,12 @@ def test_missing_current_version_projection() -> None:
     class Conn:
         def execute(self, statement: Any) -> Any:
             return SimpleNamespace(first=lambda: row, scalar=lambda: None, all=list)
-    for result in (service.full(Conn(), U, RID), service.summary(Conn(), row)):
-        assert result["current_version"] is None and result["data_status"] == "unavailable"
+    detail = service.full(Conn(), U, RID)
+    summary = service.summary(Conn(), row)
+    assert detail["current_version"] is None and detail["data_status"] == "unavailable"
+    assert "current_version" not in summary and summary["data_status"] == "unavailable"
+    assert detail["gaps"][0]["reason"] == "no_source"
+    for result in (detail, summary):
         assert result["gaps"][0]["reason"] == "no_source"
 
 
@@ -310,9 +314,9 @@ def test_service_create_snapshot_and_revise_guards(monkeypatch: pytest.MonkeyPat
 
 
 def test_snapshot_projection_and_timeline_sources() -> None:
-    snap_items = {"data_status": "partial", "data_as_of": None, "gaps": [], "outcome_metrics": {"x": 1}, "attribution": {"judgement": []}}
+    snap_items = {"data_status": "partial", "data_as_of": None, "gaps": [], "outcome_metrics": {"holding_return": {"value": "1", "n": 5}}, "attribution": {"judgement": []}}
     pv_row = SimpleNamespace(id=VID, created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC), version_no=3)
-    trade_row = SimpleNamespace(id=TID, created_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC))
+    trade_row = SimpleNamespace(id=TID, created_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC), traded_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC))
     version = SimpleNamespace(id=RID, version_no=2, plan_version_ids=[VID], trade_ids=[TID], snapshot_id=VID, lessons=None, tags=None, attribution=None, outcome_metrics=None, created_at=dt.datetime(2026, 1, 4, tzinfo=dt.UTC))
     class Conn:
         def execute(self, statement: Any) -> Any:
@@ -325,7 +329,7 @@ def test_snapshot_projection_and_timeline_sources() -> None:
                 return SimpleNamespace(all=lambda: [trade_row])
             return SimpleNamespace(all=lambda: [version], first=lambda: version, scalar=lambda: None)
     projected = service.version_body(Conn(), U, version)
-    assert projected["data_status"] == "partial" and projected["outcome_metrics"] == {"x": 1} and projected["tags"] == []
+    assert projected["data_status"] == "partial" and projected["outcome_metrics"]["holding_return"]["value"] == "1" and projected["tags"] == []
     timeline = service._timeline(Conn(), U, RID, version)
     assert [item["kind"] for item in timeline] == ["plan_version", "trade", "review_version"]
 
