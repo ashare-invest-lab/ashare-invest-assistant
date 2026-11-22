@@ -11,6 +11,19 @@ WRAPUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() { echo "用法：start-stack.sh [--apply] [--backup-dir 本轮DEST时间戳目录]"; echo "顺序：核对本轮 DEST（manifest+dump）→ postgres/redis → 只读 alembic_version → migrate → timescale-apply → db-roles → engine_policy seed → 其余服务（含 worker）。不启动 master-bootstrap profile。--apply 的 --backup-dir 必须是 backup.sh 本轮打印的 DEST，不能是父目录。"; }
 wrapup_parse_common "$@" || { [ $? -eq 99 ] && usage && exit 0; exit 1; }
 
+# The shared helper used to expand POSTGRES_USER on the host before invoking
+# docker exec.  That silently selected the host default role when the compose
+# container used a different role.  Keep the query read-only, but expand both
+# connection variables inside the postgres container.
+wrapup_pg_query() {
+  local c="$1" db="$2" sql="$3" port
+  port="$(wrapup_pg_port "$c")"
+  wrapup_docker exec -e PGPORT="$port" -e PGHOST=/var/run/postgresql \
+    -e AIA_TARGET_DB="$db" "$c" sh -c \
+    ': "${POSTGRES_USER:?POSTGRES_USER is required}"; exec psql -X -q -At -U "$POSTGRES_USER" -d "${AIA_TARGET_DB:-$POSTGRES_DB}" -v ON_ERROR_STOP=1 -c "$1"' \
+    sh "$sql"
+}
+
 wrapup_log "模式=$(wrapup_mode)。新网络层（internal / egress / edge）随 compose up 创建，不要 down -v，不要 prune。"
 wrapup_log "启动顺序：先 migrate，再 timescale-apply，再 db-roles，再 engine_policy seed，然后各应用服务与 nginx（seed 在启动 worker 之前）。"
 wrapup_log "主数据首导不要在本脚本里跑；engine_policy seed 由本脚本在 db-roles 之后、worker 之前执行。栈起来且需要导入时再用 deploy/scripts/master-bootstrap.sh。"
