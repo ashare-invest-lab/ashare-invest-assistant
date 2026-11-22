@@ -443,10 +443,81 @@ quotes_snapshot = Table(
     money("price"),
     num("pct_change"),
     jsonb("payload"),
+    txt("source"),
+    uuid_col("source_licence_id"),
+    uuid_col("row_id", nullable=False, server_default=text("gen_random_uuid()")),
+    Column("revision", BigInteger, nullable=False, server_default=text("0")),
+    txt("content_fingerprint"),
+    num("volume"),
+    money("amount"),
+    boolean("is_suspended"),
+    boolean("limit_up"),
+    boolean("limit_down"),
+    uuid_col("batch_id"),
     _now("fetched_at"),
-    PrimaryKeyConstraint("code", "ts"),
+    PrimaryKeyConstraint("row_id"),
+    one_of("source", ["mairui"]),
+    CheckConstraint(
+        "(source IS NULL AND source_licence_id IS NULL) OR "
+        "(source = 'mairui' AND source_licence_id IS NOT NULL) OR "
+        "(source IS NOT NULL AND source <> 'mairui' AND source_licence_id IS NULL)",
+        name="source_licence_relation",
+    ),
+    CheckConstraint("revision >= 0", name="revision_nonnegative"),
     schema=MARKET,
     comment="只保留当日 + 近 5 日（清理由后端定时任务做）",
+)
+Index(
+    "uq_quotes_snapshot_ownership_licence_revision",
+    quotes_snapshot.c.code,
+    quotes_snapshot.c.ts,
+    quotes_snapshot.c.source,
+    quotes_snapshot.c.source_licence_id,
+    quotes_snapshot.c.revision,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_quotes_snapshot_ownership_offline_revision",
+    quotes_snapshot.c.code,
+    quotes_snapshot.c.ts,
+    quotes_snapshot.c.source,
+    quotes_snapshot.c.revision,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
+)
+Index(
+    "uq_quotes_snapshot_ownership_legacy",
+    quotes_snapshot.c.code,
+    quotes_snapshot.c.ts,
+    unique=True,
+    postgresql_where=text("source IS NULL AND source_licence_id IS NULL"),
+)
+Index(
+    "uq_quotes_snapshot_fingerprint_licence",
+    quotes_snapshot.c.code,
+    quotes_snapshot.c.ts,
+    quotes_snapshot.c.source,
+    quotes_snapshot.c.source_licence_id,
+    quotes_snapshot.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_quotes_snapshot_fingerprint_offline",
+    quotes_snapshot.c.code,
+    quotes_snapshot.c.ts,
+    quotes_snapshot.c.source,
+    quotes_snapshot.c.source_licence_id,
+    quotes_snapshot.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
 )
 
 financial_reports = Table(
@@ -560,11 +631,74 @@ realtime_quotes = Table(
     money("amount"),
     num("pct_change"),
     txt("source"),
+    uuid_col("source_licence_id"),
+    uuid_col("row_id", nullable=False, server_default=text("gen_random_uuid()")),
+    Column("revision", BigInteger, nullable=False, server_default=text("0")),
+    txt("content_fingerprint"),
     _now("fetched_at"),
-    PrimaryKeyConstraint("code", "ts"),
+    PrimaryKeyConstraint("ts", "row_id"),
     one_of("source", ["ssjy_more", "ssjy_all", "real_all"]),
+    CheckConstraint(
+        "(source IS NULL AND source_licence_id IS NULL) OR "
+        "(source = 'mairui' AND source_licence_id IS NOT NULL) OR "
+        "(source IS NOT NULL AND source <> 'mairui' AND source_licence_id IS NULL)",
+        name="source_licence_relation",
+    ),
+    CheckConstraint("revision >= 0", name="revision_nonnegative"),
     schema=MARKET,
     comment="hypertable（ts=行情时间，chunk 1 天）；按分钟降采样",
+)
+Index(
+    "uq_realtime_quotes_ownership_licence_revision",
+    realtime_quotes.c.code,
+    realtime_quotes.c.ts,
+    realtime_quotes.c.source,
+    realtime_quotes.c.source_licence_id,
+    realtime_quotes.c.revision,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_realtime_quotes_ownership_offline_revision",
+    realtime_quotes.c.code,
+    realtime_quotes.c.ts,
+    realtime_quotes.c.source,
+    realtime_quotes.c.revision,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
+)
+Index(
+    "uq_realtime_quotes_ownership_legacy",
+    realtime_quotes.c.code,
+    realtime_quotes.c.ts,
+    unique=True,
+    postgresql_where=text("source IS NULL AND source_licence_id IS NULL"),
+)
+Index(
+    "uq_realtime_quotes_fingerprint_licence",
+    realtime_quotes.c.code,
+    realtime_quotes.c.ts,
+    realtime_quotes.c.source,
+    realtime_quotes.c.source_licence_id,
+    realtime_quotes.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_realtime_quotes_fingerprint_offline",
+    realtime_quotes.c.code,
+    realtime_quotes.c.ts,
+    realtime_quotes.c.source,
+    realtime_quotes.c.source_licence_id,
+    realtime_quotes.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
 )
 
 # intraday-bars §1.3：新写入只用 mairui、tdx_local；pro_* 只为兼容基线保留（0034）。
@@ -584,10 +718,73 @@ minute_bars = Table(
     txt("source"),
     _now("fetched_at"),
     uuid_col("source_licence_id"),
-    PrimaryKeyConstraint("code", "ts"),
+    uuid_col("row_id", nullable=False, server_default=text("gen_random_uuid()")),
+    Column("revision", BigInteger, nullable=False, server_default=text("0")),
+    txt("content_fingerprint"),
+    boolean("is_final"),
+    PrimaryKeyConstraint("ts", "row_id"),
     one_of("source", MINUTE_BAR_SOURCES),
+    CheckConstraint(
+        "(source IS NULL AND source_licence_id IS NULL) OR "
+        "(source = 'mairui' AND source_licence_id IS NOT NULL) OR "
+        "(source IS NOT NULL AND source <> 'mairui' AND source_licence_id IS NULL)",
+        name="source_licence_relation",
+    ),
+    CheckConstraint("revision >= 0", name="revision_nonnegative"),
     schema=MARKET,
     comment="hypertable（ts，chunk 1 天）；ts 为 bar 结束时间",
+)
+Index(
+    "uq_minute_bars_ownership_licence_revision",
+    minute_bars.c.code,
+    minute_bars.c.ts,
+    minute_bars.c.source,
+    minute_bars.c.source_licence_id,
+    minute_bars.c.revision,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_minute_bars_ownership_offline_revision",
+    minute_bars.c.code,
+    minute_bars.c.ts,
+    minute_bars.c.source,
+    minute_bars.c.revision,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
+)
+Index(
+    "uq_minute_bars_ownership_legacy",
+    minute_bars.c.code,
+    minute_bars.c.ts,
+    unique=True,
+    postgresql_where=text("source IS NULL AND source_licence_id IS NULL"),
+)
+Index(
+    "uq_minute_bars_fingerprint_licence",
+    minute_bars.c.code,
+    minute_bars.c.ts,
+    minute_bars.c.source,
+    minute_bars.c.source_licence_id,
+    minute_bars.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_minute_bars_fingerprint_offline",
+    minute_bars.c.code,
+    minute_bars.c.ts,
+    minute_bars.c.source,
+    minute_bars.c.source_licence_id,
+    minute_bars.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
 )
 
 # T-B133 / 0034：只存通达信 .lc5 历史；以后的 5 分钟线读取时由 1 分钟聚合（intraday-bars §2.2）。
@@ -605,10 +802,73 @@ minute5_bars = Table(
     txt("source"),
     uuid_col("source_licence_id"),
     _now("fetched_at"),
-    PrimaryKeyConstraint("code", "ts"),
+    uuid_col("row_id", nullable=False, server_default=text("gen_random_uuid()")),
+    Column("revision", BigInteger, nullable=False, server_default=text("0")),
+    txt("content_fingerprint"),
+    boolean("is_final"),
+    PrimaryKeyConstraint("ts", "row_id"),
     one_of("source", MINUTE_BAR_SOURCES),
+    CheckConstraint(
+        "(source IS NULL AND source_licence_id IS NULL) OR "
+        "(source = 'mairui' AND source_licence_id IS NOT NULL) OR "
+        "(source IS NOT NULL AND source <> 'mairui' AND source_licence_id IS NULL)",
+        name="source_licence_relation",
+    ),
+    CheckConstraint("revision >= 0", name="revision_nonnegative"),
     schema=MARKET,
     comment="hypertable（ts，chunk 7 天）；ts 为 bar 结束时间；只存通达信 .lc5 历史",
+)
+Index(
+    "uq_minute5_bars_ownership_licence_revision",
+    minute5_bars.c.code,
+    minute5_bars.c.ts,
+    minute5_bars.c.source,
+    minute5_bars.c.source_licence_id,
+    minute5_bars.c.revision,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_minute5_bars_ownership_offline_revision",
+    minute5_bars.c.code,
+    minute5_bars.c.ts,
+    minute5_bars.c.source,
+    minute5_bars.c.revision,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
+)
+Index(
+    "uq_minute5_bars_ownership_legacy",
+    minute5_bars.c.code,
+    minute5_bars.c.ts,
+    unique=True,
+    postgresql_where=text("source IS NULL AND source_licence_id IS NULL"),
+)
+Index(
+    "uq_minute5_bars_fingerprint_licence",
+    minute5_bars.c.code,
+    minute5_bars.c.ts,
+    minute5_bars.c.source,
+    minute5_bars.c.source_licence_id,
+    minute5_bars.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text("source_licence_id IS NOT NULL AND source IN ('mairui')"),
+)
+Index(
+    "uq_minute5_bars_fingerprint_offline",
+    minute5_bars.c.code,
+    minute5_bars.c.ts,
+    minute5_bars.c.source,
+    minute5_bars.c.source_licence_id,
+    minute5_bars.c.content_fingerprint,
+    unique=True,
+    postgresql_where=text(
+        "source_licence_id IS NULL AND source IN "
+        "('tdx_local', 'pro_latest', 'pro_history', 'ssjy_more', 'ssjy_all', 'real_all')"
+    ),
 )
 
 feature_bars_daily = Table(
