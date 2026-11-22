@@ -769,7 +769,12 @@ def _status_for(
             add_gap({**gap, "key": f"outcome_metrics.{name}"})
 
     metric_values = {name: outcome_metrics.get(name, {}).get("value") for name in METRIC_NAMES}
-    all_metrics_missing = all(value is None for value in metric_values.values())
+    # The read projection clears all four values while the outcome contract is
+    # unfinished.  Treat that projected state as missing even when an older
+    # snapshot still contains a frozen value.
+    all_metrics_missing = not OUTCOME_METRICS_ENABLED or all(
+        value is None for value in metric_values.values()
+    )
     data_status = snap.get("data_status", "unavailable")
     if data_status == "pending" or all_metrics_missing:
         data_status = "unavailable"

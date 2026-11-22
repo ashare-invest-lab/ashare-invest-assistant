@@ -339,9 +339,12 @@ def test_snapshot_projection_and_timeline_sources() -> None:
                 return SimpleNamespace(all=lambda: [trade_row])
             return SimpleNamespace(all=lambda: [version], first=lambda: version, scalar=lambda: None)
     projected = service.version_body(Conn(), U, version)
-    assert projected["data_status"] == "partial"
+    assert projected["data_status"] == "unavailable"
     assert projected["outcome_metrics"]["holding_return"]["value"] is None
     assert projected["outcome_metrics"]["holding_return"]["n"] == 0
+    assert {(gap["key"], gap["reason"]) for gap in projected["gaps"]} == {
+        (f"outcome_metrics.{name}", "no_source") for name in service.METRIC_NAMES
+    }
     assert projected["tags"] == []
     assert "calculation_as_of" not in projected
     timeline = service._timeline(Conn(), U, RID, version)

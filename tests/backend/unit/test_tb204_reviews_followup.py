@@ -1020,6 +1020,22 @@ def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
     ]
 
 
+def test_g_status_for_treats_frozen_values_as_missing_before_projection() -> None:
+    status = service._status_for(
+        {
+            "data_status": "partial",
+            "gaps": [],
+            "outcome_metrics": {"holding_return": {"value": "1", "n": 5}},
+        },
+        dt.date(2026, 1, 2),
+    )
+
+    assert status["data_status"] == "unavailable"
+    assert {(gap["key"], gap["reason"]) for gap in status["gaps"]} == {
+        (f"outcome_metrics.{name}", "no_source") for name in service.METRIC_NAMES
+    }
+
+
 def test_g_status_for_pending_keeps_non_outcome_snapshot_gaps() -> None:
     snap = {
         "period_end": "2099-01-05",
