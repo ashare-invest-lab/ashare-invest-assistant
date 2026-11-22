@@ -37,7 +37,12 @@ from app.db.tables.signals import (
 from app.db.tables.strategy import strategies, strategy_versions
 from app.schemas.enums import CandidateSignalState, Horizon, ReasonCode
 from app.signals.models import SignalInput
-from app.signals.service import TERMINAL, owned_signal, transition
+from app.signals.service import (
+    TERMINAL,
+    owned_signal,
+    release_due_schedule_reasons,
+    transition,
+)
 
 router = APIRouter(tags=["candidate-signals"])
 
@@ -190,6 +195,7 @@ def reason_out(row: Any) -> dict[str, Any]:
         "description",
         "evidence",
         "release_condition",
+        "machine_checkable",
         "status",
         "detected_at",
         "released_at",
@@ -245,7 +251,8 @@ def list_signals(
     for key, value in filters.items():
         if value is not None:
             query = query.where(signals.c[key] == value)
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        release_due_schedule_reasons(conn, user_id=auth.user_id, at=dt.datetime.now(dt.UTC))
         rows, cursor = scoped_page(
             query,
             table=signals,
@@ -260,7 +267,8 @@ def list_signals(
 
 @router.get("/candidate-signals/{signal_id}")
 def get_signal(signal_id: uuid.UUID, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        release_due_schedule_reasons(conn, user_id=auth.user_id, at=dt.datetime.now(dt.UTC))
         return signal_out(conn, owned_signal(conn, auth.user_id, signal_id))
 
 
@@ -339,7 +347,8 @@ def list_reasons(
             ids = [uuid.UUID(value) for value in values]
         except ValueError:
             raise AppError(ErrorCode.VALIDATION_ERROR, details={"field": "signal_ids"}) from None
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        release_due_schedule_reasons(conn, user_id=auth.user_id, at=dt.datetime.now(dt.UTC))
         if suggestion_id is not None:
             suggestion = conn.execute(
                 select(suggestions.c.candidate_signal_ids).where(
@@ -390,7 +399,8 @@ def list_reasons(
 
 @router.get("/non-executable-reasons/{reason_id}")
 def get_reason(reason_id: uuid.UUID, auth: AuthDep, engine: EngineDep) -> dict[str, Any]:
-    with engine.connect() as conn:
+    with engine.begin() as conn:
+        release_due_schedule_reasons(conn, user_id=auth.user_id, at=dt.datetime.now(dt.UTC))
         row = conn.execute(
             reason_query(auth.user_id).where(reasons.c.id == reason_id)
         ).one_or_none()
@@ -408,6 +418,7 @@ def release_reason(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),
             {"owner": str(auth.user_id)},
         )
+        release_due_schedule_reasons(conn, user_id=auth.user_id, at=dt.datetime.now(dt.UTC))
         row = conn.execute(
             select(reasons)
             .where(reasons.c.id == reason_id, reasons.c.user_id == auth.user_id)
