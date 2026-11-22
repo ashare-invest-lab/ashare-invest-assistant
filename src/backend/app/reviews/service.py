@@ -99,7 +99,10 @@ def _validate_links(
         # source is deliberately not filtered here. The table's source enum has
         # only real-import values. Simulated rows are excluded in the metric
         # projection, where their epistemic type is visible.
-        rows = conn.execute(select(trades.c.id, trades.c.security_code, trades.c.plan_version_id).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner, trades.c.voided_at.is_(None))).all()
+        # trade_ids 绑定是否包含「当前已作废、但截止时点仍可见」的成交：等 #438 新头
+        # 对 §7.8.1 trade_ids 定义的修订（与 RV-06 旧版本冻结对齐）。此处暂不加
+        # voided_at.is_(None)，也不另编造纳入规则。
+        rows = conn.execute(select(trades.c.id, trades.c.security_code, trades.c.plan_version_id).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner)).all()
         if len(rows) != len(set(trade_ids)):
             raise _bad("trade_ids", "not_owned")
         if code is not None and any(r.security_code != code for r in rows):
@@ -219,7 +222,8 @@ def _visible_trade_rows(
     )
     for row in rows:
         traded_at = _executed_at(row)
-        if row.voided_at is not None or row.epistemic_type != "execution":
+        voided_at = _as_datetime(getattr(row, "voided_at", None))
+        if (voided_at is not None and voided_at <= calculation_as_of_normalized) or row.epistemic_type != "execution":
             continue
         row_date = _trade_date(row)
         if traded_at is None or row_date is None:
@@ -465,6 +469,7 @@ def _trade_evidence(
     if available_at is None:
         return None
     stamp = available_at.isoformat()
+    fee_snapshot = _fee_snapshot(row)
     return {
         "id": "trade:" + str(row.id),
         "key": "trade",
@@ -475,6 +480,27 @@ def _trade_evidence(
         "data_as_of": stamp,
         "fetched_at": stamp,
         "epistemic_type": row.epistemic_type,
+        # Fee/rate shape is intentionally provisional and marked 未验证 until
+        # the review contract freezes it.  Values come only from this trade.
+        "fee_snapshot": fee_snapshot,
+    }
+
+
+def _fee_snapshot(row: Any) -> dict[str, Any]:
+    fields = ("commission", "stamp_tax", "transfer_fee", "other_fee")
+    fields_present = all(hasattr(row, field) for field in fields)
+    values = {field: _decimal(getattr(row, field, None)) for field in fields}
+    complete = all(value is not None for value in values.values())
+    return {
+        **{field: (str(value) if value is not None else None) for field, value in values.items()},
+        "fee_total": str(sum(values.values(), Decimal(0))) if complete else None,
+        "net_amount": (
+            str(net_amount) if (net_amount := _decimal(getattr(row, "net_amount", None))) is not None else None
+        ),
+        "applicable_rate": None,
+        "label": "未验证",
+        "fee_evidence_available": fields_present and complete,
+        "fee_fields_present": fields_present,
     }
 
 
@@ -563,6 +589,23 @@ def _compute_outcome_metrics(
         item = _trade_evidence(row, committed_at=batch_committed_at.get(row.id))
         if item is not None:
             evidence.append(item)
+    fee_snapshots = [
+        {"trade_id": item["value"], **item["fee_snapshot"]}
+        for item in evidence
+        if item.get("key") == "trade" and item.get("fee_snapshot") is not None
+    ]
+    if any(
+        item["fee_fields_present"]
+        and (not item["fee_evidence_available"] or item["net_amount"] is None)
+        for item in fee_snapshots
+    ):
+        # Holding and excess returns depend on frozen fee evidence.  Never
+        # substitute simulated tracking or a current fee table.
+        for name in ("holding_return", "excess_return"):
+            metrics[name]["value"] = None
+            metrics[name]["n"] = 0
+            metrics[name]["small_sample"] = True
+            metric_gaps[name] = ["no_source"]
     if not benchmark:
         metric_gaps["benchmark_return"] = ["no_source"]
     if not drawdowns:
@@ -600,8 +643,14 @@ def _snapshot_items(
         metrics, evidence, data_as_of, metric_reasons = _compute_outcome_metrics(
             conn, owner, start, end, trade_ids, calculation_as_of
         )
+        fee_snapshots = [
+            {"trade_id": item["value"], **item["fee_snapshot"]}
+            for item in evidence
+            if item.get("key") == "trade" and item.get("fee_snapshot") is not None
+        ]
     else:
         metrics, evidence, data_as_of = empty_metrics(start, end), [], None
+        fee_snapshots = []
         reason = "no_source" if has_trades else "user_input_missing"
         metric_reasons = {name: [reason] for name in METRIC_NAMES}
     plan_evidence = _plan_evidence(conn, owner, plan_version_ids)
@@ -659,6 +708,9 @@ def _snapshot_items(
         "tags": tags,
         "plan_snapshot": plan_snapshot,
         "outcome_snapshot": outcome_snapshot,
+        # Fee/rate snapshot shape is 未验证 and remains inside the existing
+        # immutable JSON snapshot until the response contract is finalized.
+        "fee_snapshots": fee_snapshots,
         "plan": plan_snapshot,
         "outcome": outcome_snapshot,
         "calculation_as_of": calculation_as_of.isoformat(),
@@ -789,6 +841,8 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
         "attribution": row.attribution or snap.get("attribution", {"judgement": [], "execution": [], "market": []}),
         "outcome_metrics": metrics,
         "evidence": list(snap.get("evidence", [])),
+        # Fee/rate snapshot shape is 未验证; GET only echoes the frozen snapshot.
+        "fee_snapshots": list(snap.get("fee_snapshots", [])),
         "created_at": _bj_iso(row.created_at),
         "data_status": status.get("data_status", "unavailable"),
         "data_as_of": status.get("data_as_of"),

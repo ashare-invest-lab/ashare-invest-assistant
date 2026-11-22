@@ -360,6 +360,8 @@ def assess(
                 if stops.stop_loss is not None and low is not None and low <= stops.stop_loss:
                     flag(
                         "stop_loss",
+                        # RC1 event_at is the observed price timestamp (or the
+                        # 15:00 close), independent of the T+1 simulated exit.
                         facts.observed_at,
                         {"raw_low_or_last": low, "stop_loss": stops.stop_loss},
                     )

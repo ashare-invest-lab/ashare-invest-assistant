@@ -421,6 +421,11 @@ def assessed(
         }
     )
     controls = []
+    rc6_disconnected = {
+        "plan_check_not_connected:held_after_invalidation",
+        "plan_check_not_connected:buy_without_stop",
+        "plan_check_not_connected:buy_during_wait",
+    }
     for control, field in CONTROL_FIELDS.items():
         enabled = getattr(config, field).enabled
         selected = [f for f in flags if f.control == control]
@@ -442,8 +447,21 @@ def assessed(
             or (control == "plan_violation" and source.rc6 is None)
         ):
             keys.append("business_facts_not_connected")
+        disconnected = (
+            enabled and control == "plan_violation" and bool(rc6_disconnected & set(keys))
+        )
+        # Disconnected RC6 checks may not be reported as ok/triggered, but a
+        # disabled control stays disabled.
         state = (
-            "disabled" if not enabled else "triggered" if selected else "unknown" if keys else "ok"
+            "unknown"
+            if disconnected
+            else "disabled"
+            if not enabled
+            else "triggered"
+            if selected
+            else "unknown"
+            if keys
+            else "ok"
         )
         controls.append(
             {
@@ -452,7 +470,7 @@ def assessed(
                 "state": state,
                 "flags": [f.model_dump(mode="json") for f in selected],
                 "gaps": [gap(k).model_dump(mode="json") for k in sorted(set(keys))]
-                if enabled
+                if enabled or disconnected
                 else [],
             }
         )

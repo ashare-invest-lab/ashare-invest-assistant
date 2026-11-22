@@ -146,6 +146,8 @@ def _evaluate(
         # The service leaves this row absent with calendar+gap; unknown due is
         # neither "not yet due" nor proof it is already due.
         raise ValueError("tracking_calendar_not_covered")
+    # T+1 bounds simulated exit_at.  An independent sellable_at field remains
+    # 未验证 and is intentionally absent from the existing response shape.
     result.exit_at = close_at(due)
     opened = {d for d, yes in calendar.items() if yes}
     next_day = due_date(created, 1, calendar)
