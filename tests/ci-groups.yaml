@@ -177,6 +177,7 @@ tests:
   - {"file": "tests/backend/unit/test_ta157_bj_writers.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
   - {"file": "tests/backend/unit/test_aggregates_calendar_clock.py", "group": "parallel", "keywords": ["fixed aware datetime", "MagicMock connection", "read-only market_rules.yaml; no DB/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb213_realtime_collect.py", "group": "parallel", "keywords": ["fake transport and synthetic rows", "calendar/session gates", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt121_realtime_pg.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "isolated PostgreSQL", "synthetic quotes_snapshot write/conflict/licence"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata only", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata and purge wiring", "no IO"], "unverified": false}
