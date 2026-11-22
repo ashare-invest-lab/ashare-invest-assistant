@@ -15,9 +15,9 @@
 | 盘中增量 | `/hsstock/pro/latest/{code}.{mkt}/1/n?lt=1..5` | 单股；lt 最多 5 根；Redis 集群盘中增量 | 「限流同证书档位」，钻石版按 6,000 次/分钟理解 |
 | 盘后补齐 | `/hsstock/pro/history/{code}.{mkt}/1/n?st&et&lt` | 单股；文档称深度约 5 年 | 同上；`history/full` 全量接口 60 次/分钟 |
 
-- 字段：按契约 `Bar`（t、open、high、low、close、volume、amount），t 为 bar 结束时间（`market.minute_bars` 列注释：09:31 表示 09:30–09:31）。
+- 字段：按契约 `Bar`（t、open、high、low、close、volume、amount），t 为 bar 结束时间（`market.minute_bars` 列注释：09:31 表示 09:30–09:31）。这是本系统目标映射；T003 §2、§16 未提供麦蕊 1m 返回字段或结束标签的实测证据。
 - 复权：分钟线只有不复权（T003：分钟级传复权 f 报 503；`api-contract` 的 `bar_adjust` 规定 1m 只支持 none）。
-- 成交量单位：麦蕊日线是手；分钟线单位**未实测**。契约统一为股，单 D 分钟线部分的首次实调必须核对一次「额 ÷ 量 ≈ 价」。
+- 成交量单位：麦蕊日线是手；分钟线单位**未实测**。T003 §16 只关闭了 `real/time` 与网络 `ssjy` 快照的抽样单位，不能外推到 Pro 1m。契约统一为股，单 D 分钟线部分的首次实调必须核对一次「额 ÷ 量 ≈ 价」。
 - 通用限制（plan §0A）：同一证书 60 秒内最多 2 个来源 IP，超出报 103 或 429。串行时延两处记录不一致：T003 约 0.26 秒/次，T-A136 实测日线约 1.85 秒/次。下面的估算两个都列，**以 1.85 秒为保守口径**。
 
 ### 1.2 历史：通达信 minline / fzline（只取 A 股）
@@ -68,10 +68,7 @@
 ### 1.3 来源标注与不混写
 
 - 每行带 source。新写入只用两个取值：mairui、tdx_local。基线 CHECK 里已有的 pro_latest、pro_history 保留，只为兼容，新代码不再写。
-- 主键 (code, ts) 一键一行：
-  - 跨源一律 DO NOTHING，先写者留下；
-  - 通达信导入的截止日 D 取「库里该代码最早一根 mairui 分钟线所在日的前一开市日」；没有 mairui 行时取前一开市日。所以两源不重叠。
-- 同源的麦蕊盘后补齐，可以更新同源、同键的盘中行：只在已有行的 source 也是 mairui 时更新，其他源一律不动。
+- ~~主键 (code, ts) 一键一行；跨源一律 DO NOTHING，先写者留下；两源不重叠；同源 mairui 同键更新。~~ **I2 失效**：由 `intraday-ownership.md §2.1–§2.3` 取代，按归属作用域、内容指纹和 revision 处理并存、重放与迟到修订。
 
 ## 2. 存储
 
@@ -88,11 +85,14 @@
 
 ### 2.2 表结构（推荐：沿用 Timescale hypertable，不另做按月分区）
 
-- 1 分钟：沿用基线已有的 `market.minute_bars`。它是 hypertable，按 ts 每 1 天一个 chunk，主键 (code, ts)。新迁移 0034（排在 `daily-bars-tdx.md` 的 0033 之后）：
+盘中四表的归属列、双证书唯一键、旧无归属行、as-of 读取、指纹幂等和迁移回滚以 `docs/contracts/intraday-ownership.md §1–§8` 为准。
+本节的既有 `(code, ts)` 仅记录当前基线，I2 实现须先通过该归属契约和离线验收。
+
+- 1 分钟：沿用基线已有的 `market.minute_bars`。它是 hypertable，按 ts 每 1 天一个 chunk。~~主键 (code, ts)、不改主键。~~ **I2 失效**：由 `intraday-ownership.md §2.1` 取代。新迁移 0034（排在 `daily-bars-tdx.md` 的 0033 之后）：
   - source 的 CHECK 加入 mairui 与 tdx_local；
   - 加可空列 source_licence_id，口径同日线 0032；tdx_local 行为空；
-  - 不改主键，不改已有行。
-- 5 分钟：新表 `market.minute5_bars`，列与 minute_bars 相同，hypertable 每 7 天一个 chunk，主键 (code, ts)。只存 .lc5 历史（T-A153 C3：离线历史分钟改为文件层，见 `multi-source-ingest.md` §3.2、§3.3）：本表不再写入离线历史，保留给已有数据与日后聚合。以后的 5 分钟线在读取时由 1 分钟聚合，不另存。不能塞进 minute_bars：同一 ts 下 1 分钟 bar 和 5 分钟 bar 会撞主键。
+  - 旧行不改写，迁移后的键按 `intraday-ownership.md §2.1` 建立。
+- 5 分钟：新表 `market.minute5_bars`，列与 minute_bars 相同，hypertable 每 7 天一个 chunk。~~主键 (code, ts)。~~ **I2 失效**：由 `intraday-ownership.md §2.1` 取代。只存 .lc5 历史（T-A153 C3：离线历史分钟改为文件层，见 `multi-source-ingest.md` §3.2、§3.3）：本表不再写入离线历史，保留给已有数据与日后聚合。以后的 5 分钟线在读取时由 1 分钟聚合，不另存。
 - 不按月原生分区的理由：基线已是 hypertable（chunk 自动建、自动压缩，可按 chunk 删）。改成按月分区要重建表，没有收益。
 - 压缩：chunk 满 7 天后压缩（plan §3A 原定）。
 - 保留期：
@@ -415,7 +415,7 @@
 ### 4.3 真实调用
 
 - 等单 D 分钟线部分获用户本人批准。批准内容须写明：每分钟上限 30、覆盖哪些股票、首次实调的次数与时段，以及要核对的四件事：时延、成交量单位、lt 覆盖、盘后补齐深度。
-- 批准前，盘中采集与盘后补齐都只在打桩 transport 下开发与测试。
+- 批准前，盘中采集与盘后补齐都只在打桩 transport 下开发与测试。T003 §4 仅记录 `/hsstock/lup/auction` 的盘后竞价字段，不能据此放行盘中竞价或 1m 盘后补齐。
 
 ## 5. 拆单与验收
 
@@ -424,15 +424,15 @@
 ### 5.1 后端
 
 **M1 迁移 0034（现在）**
-- `test_migration_0034_minute_bars_source_and_licence`：Given 升到 0034 / Then minute_bars 可写 source 为 mairui 或 tdx_local，未知值失败；source_licence_id 存在且可空；主键仍为 (code, ts)。
-- `test_migration_0034_minute5_bars_hypertable`：Then minute5_bars 存在，是按 ts 7 天一个 chunk 的 hypertable，主键 (code, ts)。
+- `test_migration_0034_minute_bars_source_and_licence`：Given 升到 0034 / Then minute_bars 可写 source 为 mairui 或 tdx_local，未知值失败；source_licence_id 存在且可空。~~主键仍为 (code, ts)。~~ **I2 失效**，由 `intraday-ownership.md §2.1` 取代。
+- `test_migration_0034_minute5_bars_hypertable`：Then minute5_bars 存在，是按 ts 7 天一个 chunk 的 hypertable。~~主键 (code, ts)。~~ **I2 失效**，由 `intraday-ownership.md §2.1` 取代。
 - `test_migration_0034_downgrade_refuses_with_rows`：Given 有 tdx_local 分钟行或 minute5_bars 非空 / Then downgrade 拒绝。
 
 **M2 通达信分钟导入 `intraday-bars-import-tdx`（现在开发；真实导入在同意后）**
 - `test_lc_parse_record_layout`：Given 构造的 32 字节 .lc1、.lc5 记录 / Then 日期、分钟、OHLC、额、量解析正确。
 - `test_lc_import_a_share_only`：Given minline 内有 A 股、指数、ETF、880 板块文件 / Then 只导入 listed A 股；被过滤的文件不打开、不进清单。
 - `test_lc_import_manifest_generated_and_compared`：Then 审计目录生成清单；复跑时输出新增、删除、变化计数。
-- `test_lc_import_until_before_first_mairui_minute`：Given 某代码已有 mairui 分钟行起于 E 日 / Then 该代码只导入到 E 的前一开市日。
+- ~~`test_lc_import_until_before_first_mairui_minute`：Given 某代码已有 mairui 分钟行起于 E 日 / Then 该代码只导入到 E 的前一开市日。~~ **I2 失效**：由 `intraday-ownership.md §2.1–§2.3` 取代，不以跨源日期截断代替归属键隔离。
 - ~~`test_lc5_goes_to_minute5_bars_only`~~：作废（T-A153 C3：离线历史分钟改为文件层，见 `multi-source-ingest.md` §3.2、§3.3）。
 - `test_lc_import_rerun_idempotent`：Then 第二次 inserted 为 0。
 - `test_lc_import_readonly_root`：Given 只读根目录 / Then 成功，根目录不变。
@@ -457,7 +457,7 @@
 - `test_intraday_halts_on_stop_halt_103_429`：Then 盘中采集与批一起停，不重试，写 HALT。
 - `test_backfill_paused_during_session_when_intraday_on`：Given 开市日 10:00、盘中采集开启 / Then 日 K 回填与补历史批进 `jobs:delayed`，15:05 放出。
 - `test_postclose_completion_uses_batch_limit`：Given 上限 monkeypatch 为 3、持仓加自选 5 只 / Then 首批 3 次并续接；17:00 未完成的顺延到 17:45。
-- `test_postclose_same_source_update_cross_source_nothing`：Then 同为 mairui 的同键行被更新；已有 tdx_local 行不变。
+- ~~`test_postclose_same_source_update_cross_source_nothing`：Then 同为 mairui 的同键行被更新；已有 tdx_local 行不变。~~ **I2 失效**：由 `intraday-ownership.md §2.2–§2.3` 取代，按指纹重放或新 revision 处理。
 
 **M4 做 T 指标、T+1 与 `/today` 的 t_view（现在）**
 - `test_t_view_vwap_and_dev`：Given 构造的 3 根分钟线 / Then vwap 等于累计额除以累计量，dev_pct 按定义计算。
@@ -481,7 +481,7 @@
 
 - 隔离库复跑 M1–M5 的连库用例，以及：
   - `test_intraday_end_to_end_fake_source`：Given fake 分钟源、两只持仓 / When 盘中 tick 三次、盘后补齐、17:30 日报 / Then minute_bars 行数等于预期，t_view 与日报摘要一致，transport（真实）0 次。
-  - `test_minute_sources_never_mixed`：Given 同一 (code, ts) 先写 tdx_local、再写 mairui / Then 只有一行，source 为 tdx_local，计数中有一次冲突。
+  - ~~`test_minute_sources_never_mixed`：Given 同一 (code, ts) 先写 tdx_local、再写 mairui / Then 只有一行，source 为 tdx_local，计数中有一次冲突。~~ **I2 失效**，由 `intraday-ownership.md §2.2–§2.3` 的归属隔离、指纹幂等和 revision 并发验收取代。
 - 篡改自证：把 `INTRADAY_BARS_PER_MINUTE_LIMIT` 改成 31，或把 sellable_qty 的计算改成含今日买入，相应用例必须变红。
 
 ### 5.4 运维

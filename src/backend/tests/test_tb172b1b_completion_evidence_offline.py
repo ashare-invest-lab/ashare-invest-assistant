@@ -15,7 +15,8 @@ def test_migration_single_head_and_parent() -> None:
         "script_location", str(Path(__file__).resolve().parents[1] / "migrations")
     )
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0038"]
+    assert script.get_heads() == ["0039"]
+    assert script.get_revision("0039").down_revision == "0038"
     assert script.get_revision("0038").down_revision == "0037"
 
 
