@@ -23,17 +23,20 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.aggregates.calendar import BEIJING, market_clock
 from app.aggregates.models import MarketClock
+from app.aggregates.service import select_account
+from app.api.v1.portfolio import _account
 from app.common.errors import AppError
 from app.config import Settings
-from app.db.tables.market import quotes_snapshot
+from app.db.tables.market import quotes_snapshot, securities
+from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.ingest.daily_lists import HALT as DAILY_HALT
 from app.ingest.daily_lists import STOP, credential, limited
 from app.ingest.egress import EgressDenied, mairui_get, single_egress
+from app.ingest.mode import verification_is_offline
 from app.ingest.runtime import get_ingest_core
 from app.ingest.state import Priority
 from app.ingest.upstream import Signal, classify
-from app.marketdata.daily_bars import daily_universe
 from app.marketdata.daily_snapshot import active_licence_id
 
 log = logging.getLogger("app.marketdata.realtime_collect")
@@ -204,7 +207,34 @@ def _write_rows(conn: Connection, rows: Sequence[dict[str, object]], batch_id: u
 
 
 def _owned_codes(conn: Connection, owner: uuid.UUID, trade_date: dt.date) -> list[str]:
-    return daily_universe(conn, owner, trade_date)
+    raw: set[str] = set()
+    account_id = select_account(conn, owner, None)
+    if account_id is not None:
+        raw.update(_account(conn, account_id, trade_date).positions)
+    raw.update(
+        conn.execute(
+            select(watchlist_items.c.security_code).where(
+                watchlist_items.c.user_id == owner,
+                watchlist_items.c.removed_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not raw:
+        return []
+    listed = (
+        conn.execute(
+            select(securities.c.code).where(
+                securities.c.code.in_(sorted(raw)),
+                securities.c.type.in_({"stock", "etf"}),
+                securities.c.listing_status == "listed",
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return sorted(listed)
 
 
 def _approved_owners(conn: Connection) -> list[uuid.UUID]:
@@ -283,6 +313,9 @@ def collect_realtime_quotes(
     halt: Path = HALT,
 ) -> int:
     """采集一个用户持仓与自选的一轮行情，所有响应通过后才写库。"""
+    if verification_is_offline():
+        log.info("实时行情跳过：当前为 replay/离线模式")
+        return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
     stamp = _now(now)
@@ -339,6 +372,9 @@ def realtime_quotes_task(
     secret_loader: SecretLoader = credential,
 ) -> int:
     """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
+    if verification_is_offline():
+        log.info("实时行情跳过：当前为 replay/离线模式")
+        return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
     from app.workers.jobs import _engine
