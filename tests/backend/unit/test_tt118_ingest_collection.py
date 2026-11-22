@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -179,12 +180,16 @@ def _seed(engine: object) -> None:
 
 def _patch_replay(
     monkeypatch: pytest.MonkeyPatch,
-    module: object,
     calls: list[tuple[str, str]],
-) -> object:
+) -> tuple[object, dict[str, list[object]]]:
     from app.ingest.egress import EgressResult
     from app.ingest.upstream import Signal
 
+    audit: dict[str, list[object]] = {
+        "single_egress": [],
+        "leases": [],
+        "mairui_get": [],
+    }
     body = [
         {
             "code": CODES[0],
@@ -204,28 +209,53 @@ def _patch_replay(
         },
     ]
 
-    def transport(path: str, secret: str) -> tuple[int, object]:
+    def replay_transport(path: str, secret: str) -> tuple[int, object]:
         calls.append((path, secret))
         return 200, body
 
-    def replay_get(*args: object, **kwargs: object) -> EgressResult:
-        injected = kwargs.get("transport")
-        path = kwargs["path"] if "path" in kwargs else args[0]
-        secret = kwargs["secret"] if "secret" in kwargs else args[1]
-        runner = injected if callable(injected) else transport
+    def replay_get(
+        *,
+        lease: object,
+        core: object,
+        engine: object,
+        licence_id: UUID,
+        user_id: UUID,
+        path: str,
+        secret: str,
+        priority: object,
+        clock: object,
+        stop: Path,
+        halt: Path,
+        transport: object = replay_transport,
+        verify: bool = False,
+    ) -> EgressResult:
+        del lease, core, engine, licence_id, user_id, priority, clock, stop, halt, verify
+        audit["mairui_get"].append(path)
+        runner = transport if callable(transport) else replay_transport
         status, response = runner(str(path), str(secret))
         return EgressResult(status=status, body=response, signal=Signal.OK, transitions=[])
 
     egress = importlib.import_module("app.ingest.egress")
     monkeypatch.setattr(egress, "mairui_get", replay_get)
-    if getattr(module, "mairui_get", None) is not None:
-        monkeypatch.setattr(module, "mairui_get", replay_get)
     collect_module = sys.modules.get("app.marketdata.realtime_collect")
     if collect_module is not None and getattr(collect_module, "mairui_get", None) is not None:
         monkeypatch.setattr(collect_module, "mairui_get", replay_get)
-    if getattr(module, "verification_is_offline", None) is not None:
-        monkeypatch.setattr(module, "verification_is_offline", lambda: False)
-    return transport
+
+    original_single_egress = egress.single_egress
+
+    @contextmanager
+    def counting_single_egress(engine: object):
+        audit["single_egress"].append(engine)
+        with original_single_egress(engine) as lease:
+            audit["leases"].append(lease)
+            yield lease
+
+    monkeypatch.setattr(egress, "single_egress", counting_single_egress)
+    if collect_module is not None and getattr(collect_module, "single_egress", None) is not None:
+        monkeypatch.setattr(collect_module, "single_egress", counting_single_egress)
+    if collect_module is not None and getattr(collect_module, "verification_is_offline", None) is not None:
+        monkeypatch.setattr(collect_module, "verification_is_offline", lambda: False)
+    return replay_transport, audit
 
 
 def _call_entry(
@@ -237,11 +267,16 @@ def _call_entry(
 ) -> object:
     module, name, function = entry
     settings = _settings(monkeypatch)
+
+    def load_secret(engine: object, licence_id: UUID) -> str:
+        del engine, licence_id
+        return "synthetic-secret"
+
     kwargs = {
         "owner": OWNER,
         "now": NOW,
         "transport": transport,
-        "secret_loader": lambda *_args, **_kwargs: "synthetic-secret",
+        "secret_loader": load_secret,
         "engine": engine,
         "stop": tmp_path / "stop",
         "halt": tmp_path / "halt",
@@ -271,12 +306,45 @@ def test_realtime_collection_is_ingest_only() -> None:
 
 
 def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert not _worker_registered(), "T-B221 违约：worker 注册了实时采集任务"
+    assert _worker_tick() == [(TASK, "unknown")], "worker 不得成功执行实时采集"
     entry = _require_entry()
     egress = importlib.import_module("app.ingest.egress")
     calls: list[object] = []
 
-    def forbidden(*args: object, **kwargs: object) -> None:
-        calls.append((args, kwargs))
+    def forbidden(
+        *,
+        lease: object,
+        core: object,
+        engine: object,
+        licence_id: UUID,
+        user_id: UUID,
+        path: str,
+        secret: str,
+        priority: object,
+        clock: object,
+        stop: Path,
+        halt: Path,
+        transport: object = None,
+        verify: bool = False,
+    ) -> None:
+        calls.append(
+            (
+                lease,
+                core,
+                engine,
+                licence_id,
+                user_id,
+                path,
+                secret,
+                priority,
+                clock,
+                stop,
+                halt,
+                transport,
+                verify,
+            )
+        )
         raise AssertionError("worker 不得调用 mairui_get")
 
     monkeypatch.setattr(egress, "mairui_get", forbidden)
@@ -285,8 +353,6 @@ def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
     collect_module = sys.modules.get("app.marketdata.realtime_collect")
     if collect_module is not None and getattr(collect_module, "mairui_get", None) is not None:
         monkeypatch.setattr(collect_module, "mairui_get", forbidden)
-    assert not _worker_registered(), "T-B221 违约：worker 注册了实时采集任务"
-    assert _worker_tick() == [(TASK, "unknown")], "worker 不得成功执行实时采集"
     assert calls == []
 
 
@@ -302,12 +368,16 @@ def test_replay_injected_transport_has_zero_socket_calls(
     engine = _engine()
     _seed(engine)
     calls: list[tuple[str, str]] = []
-    transport = _patch_replay(monkeypatch, entry[0], calls)
+    transport, audit = _patch_replay(monkeypatch, calls)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
     try:
         _call_entry(entry, engine, tmp_path, transport, monkeypatch)
         rows = _rows(engine)
         assert calls, "注入 transport 未被调用"
+        assert audit["single_egress"], "采集未进入 single_egress 单一出口"
+        assert audit["leases"] and all(lease is not None for lease in audit["leases"])
+        assert all(not hasattr(lease, "held") or lease.held for lease in audit["leases"])
+        assert audit["mairui_get"], "采集未调用 mairui_get"
         assert rows, "行情响应未解析并写入 market.quotes_snapshot"
         assert SOCKET_ATTEMPTS == []
     finally:
@@ -326,7 +396,7 @@ def test_quote_batch_has_uuid_and_is_idempotent(
     engine = _engine()
     _seed(engine)
     calls: list[tuple[str, str]] = []
-    transport = _patch_replay(monkeypatch, entry[0], calls)
+    transport, audit = _patch_replay(monkeypatch, calls)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
     try:
         _call_entry(entry, engine, tmp_path, transport, monkeypatch)
@@ -334,6 +404,10 @@ def test_quote_batch_has_uuid_and_is_idempotent(
         assert first and len({row["batch_id"] for row in first}) == 1
         batch_id = UUID(first[0]["batch_id"])
         assert batch_id.int
+        assert audit["single_egress"], "采集未进入 single_egress 单一出口"
+        assert audit["leases"] and all(lease is not None for lease in audit["leases"])
+        assert all(not hasattr(lease, "held") or lease.held for lease in audit["leases"])
+        assert audit["mairui_get"], "采集未调用 mairui_get"
         _call_entry(entry, engine, tmp_path, transport, monkeypatch)
         second = _rows(engine)
         assert len(second) == len(first)
