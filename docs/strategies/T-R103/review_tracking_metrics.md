@@ -56,7 +56,28 @@ holding_return.value = 100 × (exit_price / entry_price − 1)
 
 实际成交的端点和费用必须来自版本快照中的成交证据。现有成交接口可核对 `trade_date`、`trade_time`、`qty`、`price`、`fee_total`、`side`、`security_code`、`created_at`、`voided` 和 `id`，但接口没有直接的 `available_at`、逐日价格路径或复权因子版本。缺少任一必需来源时，`holding_return.value=null`，顶层 `gaps` 记录 `outcome_metrics.holding_return` 与适用的 `no_source` 或 `user_input_missing`，不得用模拟值、邻日价格或零费用补齐。显式佣金可按适用日期的公开规则建模，[证监会关于调整证券交易佣金收取标准的通知](https://www.csrc.gov.cn/csrc/c100024/c1492350/1492350/files/928bdd362fa24b79bdadb0072d67acee.pdf)规定 A 股佣金上限 3‰ 且单笔不足 5 元按 5 元收取。历史税费必须按成交日期规则取值，[国家税务总局等关于减半征收证券交易印花税的公告汇编](https://www.chinatax.gov.cn/chinatax/c102414/c5216997/5216997/files/%E5%BB%B6%E7%BB%AD%E4%BC%98%E5%8C%96%E5%AE%8C%E5%96%84%E7%9A%84%E7%A8%8E%E8%B4%B9%E4%BC%98%E6%83%A0%E6%94%BF%E7%AD%96%E6%B1%87%E7%BC%96%EF%BC%882023%E5%B9%B4%E7%89%88%EF%BC%89-20231124113552902.pdf)给出 2023-08-28 起的历史税率变化。费用和滑点压力档位尚无 A 股普适验证，标记未验证（待回测）。
 
-**输入字段。** 仅登记现有成交接口字段及其可见性。`trade_date`、`trade_time`、`qty`、`price`、`fee_total`、`side`、`security_code`、`created_at`、`voided` 和 `id` 有接口来源。`available_at`、逐日 `close`、复权因子版本、现金流、分红和可成交队列证据均为无来源，不能写成必需可用输入。实际成交必须满足 §7.8 草案要求的 `available_at <= calculation_as_of`，并在版本快照中冻结。
+**输入字段。** 实际成交只能使用以下来源表中在计算时点可见的字段。实际成交必须满足 §7.8 草案要求的 `available_at <= calculation_as_of`，并在版本快照中冻结。逐日 `close`、基准端点、复权因子版本、现金流、分红和可成交队列证据仍无项目来源，保持 `enabled=false`、`value=null`，并记录对应 gap。
+
+**B3 逐字段来源登记。**
+
+| 接口或内部结构 | 数据库列 | 单位和时区 | `available_at` 计算 | 证据端点 | 验证状态 |
+|---|---|---|---|---|---|
+| `GET /trades.trade_time` | `traded_at` | `HH:MM[:SS]`，接口按 Asia/Shanghai 展示 | 手工成交取 `created_at`；导入成交取 `max(created_at, import_batches.committed_at)`，并要求不晚于 `calculation_as_of` | `src/backend/app/api/v1/trades.py:61-80`；`src/backend/app/domain/trades.py:90-108`；`src/backend/app/feedback/plan_source.py:143-168` | 字段映射已核对；完整可见性覆盖未验收 |
+| `GET /trades.qty` | `quantity` | 十进制股数，无时区 | 同上，按创建/导入提交时间冻结 | `src/backend/app/api/v1/trades.py:61-72`；`src/backend/app/db/tables/accounts.py:130-148` | 字段映射已核对；PIT 覆盖未验收 |
+| `GET /trades.price` | `price` | 十进制元/股，无时区 | 同上，按创建/导入提交时间冻结 | `src/backend/app/api/v1/trades.py:69-72`；`src/backend/app/db/tables/accounts.py:138-145` | 字段映射已核对；费用和价格链未验收 |
+| `GET /trades.fee_total` | `commission`、`stamp_tax`、`transfer_fee`、`other_fee` | 十进制元，无时区；各列非空值求和 | 同上；费用缺失保持 `null`，不得按零补齐 | `src/backend/app/domain/trades.py:23-24,83-87,113-115` | 派生规则已核对；逐笔费用可见性未验收 |
+| 成交事实 | `commission` | 十进制元，无时区 | 随成交行的 `known` 时点冻结 | `src/backend/app/db/tables/accounts.py:142-145`；`src/backend/app/domain/trades.py:83-87` | 数据库列已核对；可见性未验收 |
+| 成交事实 | `stamp_tax` | 十进制元，无时区 | 随成交行的 `known` 时点冻结 | `src/backend/app/db/tables/accounts.py:142-145`；`src/backend/app/domain/trades.py:83-87` | 数据库列已核对；可见性未验收 |
+| 成交事实 | `transfer_fee` | 十进制元，无时区 | 随成交行的 `known` 时点冻结 | `src/backend/app/db/tables/accounts.py:142-145`；`src/backend/app/domain/trades.py:83-87` | 数据库列已核对；可见性未验收 |
+| 成交事实 | `other_fee` | 十进制元，无时区 | 随成交行的 `known` 时点冻结 | `src/backend/app/db/tables/accounts.py:142-145`；`src/backend/app/domain/trades.py:83-87` | 数据库列已核对；可见性未验收 |
+| 成交事实 | `traded_at` | 带时区时间戳；展示时转 Asia/Shanghai | 交易执行时间不替代知识时点；`available_at` 仍取 `known` | `src/backend/app/db/tables/accounts.py:147-148`；`src/backend/app/domain/trades.py:93-108` | 执行时间映射已核对；PIT 规则未验收 |
+| 成交事实 | `voided_at` | 带时区时间戳 | 作废时间在 `calculation_as_of` 前才标记作废，并把它并入冻结知识时点 | `src/backend/app/db/tables/accounts.py:160-164`；`src/backend/app/feedback/plan_source.py:163-168` | 作废边界已核对；完整历史覆盖未验收 |
+| 成交事实 | `created_at` | 带时区时间戳 | 手工成交直接使用；导入成交与 `import_batches.committed_at` 取最大值 | `src/backend/app/db/tables/accounts.py:164`；`src/backend/app/feedback/plan_source.py:143-156` | 构造链已核对；端到端 PIT 未验收 |
+| `feedback.Fill.available_at` | 无直接列，属于反馈投影 | 带时区时间戳 | `Fill` 显式携带 `available_at`；成交投影按创建时间，导入投影按创建/提交时间构造，缺提交证明则记 gap | `src/backend/app/feedback/core.py:136-149`；`src/backend/app/feedback/plan_source.py:143-178` | 内部字段和构造链已登记；完整来源覆盖未验收 |
+| `CandidateSignal.stops` | 无直接成交列 | `stop_loss`/`take_profit` 为十进制元/股，`time_stop_days` 为天，无时区 | 以候选信号快照及其逐项 Evidence 的 `data_as_of` 作为来源时点；缺证据则 `null` 加 gap | `docs/api-contract.md:1063-1073`；`src/backend/app/signals/models.py:61-64,108-118` | 候选信号来源存在；与成交复盘的可见性链未验收 |
+| `CandidateSignal.evidence[]` | 无直接成交列 | `value` 按 `unit`，`data_as_of`/`fetched_at` 为带时区时间戳 | 每项 Evidence 使用自身 `data_as_of`，端点缺失或晚于计算时点则不能使用 | `docs/api-contract.md:627-638,1063-1073`；`src/backend/app/signals/models.py:31-39` | 逐项证据结构已核对；实际端点覆盖未验收 |
+| `tracking.Result` | 无成交列；模拟投影 | `return_pct` 等为百分数，时间字段为带时区时间戳；**不含 `stops`** | Result 没有独立 `available_at`，只能按其 evidence/状态作模拟研究可见性判断 | `src/backend/app/tracking/models.py:14-39`；`src/backend/app/tracking/service.py:173-197` | 模拟来源边界已核对；不得用于实际成交 Stat |
+| 逐日收盘、基准端点、复权因子、现金流 | 无来源列 | 价格为元/股，时点应为 Asia/Shanghai；当前无可验证链 | 无来源，`available_at=null` | 本卡 §5.1 来源登记 | `enabled=false`、`value=null`，对应 gap |
 
 **窗口与时点。** T+1、T+5、T+20 交易日收盘后计算。盘后生成的 T+1 入场不能使用生成日收盘价替代下一交易日可成交价。任何输入必须满足 `available_at ≤ calculation_as_of`，不能因当前已经收盘而放行旧盘中数据。
 
@@ -70,7 +91,7 @@ holding_return.value = 100 × (exit_price / entry_price − 1)
 
 模拟入场仍按信号之后的下一可成交时点计算，模拟退出按已登记窗口和可见价格计算。缺少价格、交易日历、复权因子或可成交证据时，模拟记录保留 `null` 并记录 `no_source` 或 `not_yet_published` 缺口。模拟结果不得写入实际成交复盘的 `outcome_metrics`，即使候选信号后来产生实际成交，也必须由实际成交快照独立计算。
 
-当前接口没有 `stops.stop_loss`、`stops.take_profit`、逐时点高低价、成交量或队列证据字段。依赖这些输入的模拟目标、止损和可成交判断保持 `enabled=false`，输出 `null` 并记录顶层缺口，不由邻近价格或收盘方向推断。
+`tracking.Result` 是不含 `stops` 的模拟投影，只有 `entry_*`、`exit_*`、收益、状态、证据和缺口等字段。候选信号接口本身有 `stops.stop_loss`、`stops.take_profit`、`time_stop_days` 及逐项 `Evidence`，来源见上表。逐时点高低价、成交量、队列证据仍无项目来源，依赖这些输入的模拟目标、止损和可成交判断保持 `enabled=false`，输出 `null` 并记录顶层缺口，不由邻近价格或收盘方向推断。
 
 ### 2.4 相对基准超额
 
@@ -131,15 +152,17 @@ max_drawdown.value = min_t(drawdown_t)
 
 ### 2.7 盈亏比与研究候选指标
 
-**盈亏比。** 对有效完成观测中 `action ∈ {buy, add, hold}` 的非零 `holding_return.value` 计算，盈利样本为 `holding_return.value > 0`，亏损样本为 `< 0`。
+**模拟跟踪盈亏比。** `simulated_tracking.profit_loss_ratio` 只使用模拟 `tracking.Result.return_pct`。`src/backend/app/tracking/service.py:173-197` 的 `profit_loss` 只筛选 `state=complete`、`action ∈ {buy, add, hold}`、非空且非零的 `return_pct`，`src/backend/app/tracking/api.py:97-122` 以 `profit_loss_ratio` 对外返回。公式为：
 
 ```text
-payoff_ratio = 平均盈利 / |平均亏损|
+simulated_tracking.profit_loss_ratio = 平均正 return_pct / |平均负 return_pct|
 ```
 
-这与现有 `profit_loss` 统计的平均盈利除以平均亏损绝对值一致。无亏损样本时为 `null` 并记 `no_losing_samples`。有亏损但没有盈利且样本达到计算门槛时为 0。`sell`、`reduce`、`wait` 不进入这个盈亏比，仍可进入方向命中率。
+无亏损样本时为 `null` 并记 `no_losing_samples`。有亏损但没有盈利且样本达到计算门槛时为 0。`sell`、`reduce`、`wait` 不进入该模拟统计，仍可进入方向命中率。该字段只属于模拟研究，不能写入 §7.8 的 `holding_return`、`benchmark_return`、`excess_return`、`max_drawdown` 四项 `Stat`，也不使用实际 `holding_return` 作为来源。
 
-**最少样本量。** 盈亏比的有效 `n` 为盈利数与亏损数之和。`n<5` 时返回空值，`5≤n<30` 标记样本少，`n≥30` 才进入正常汇总。零收益既不进入盈利分子，也不进入亏损分母。
+**实际成交 `payoff_ratio` 研究候选。** 若保留实际成交盈亏比，单列输出字段 `execution_research.payoff_ratio`，只使用 `trades`/`feedback` 已冻结的成交段、逐笔费用和 `available_at <= calculation_as_of` 的可见时点。当前没有完整闭合的成交段和费用来源，因此默认 `enabled=false`，输出 `value=null` 并记录 `execution_research.payoff_ratio`/`no_source`。该候选与 `simulated_tracking.profit_loss_ratio` 相互独立，均不写入 §7.8 四项 `Stat`。
+
+**最少样本量。** `simulated_tracking.profit_loss_ratio` 的有效 `n` 为正、负 `return_pct` 样本数之和。`n<5` 时返回空值，`5≤n<30` 标记样本少，`n≥30` 才进入正常汇总。零收益既不进入盈利分子，也不进入亏损分母。实际成交候选沿用同一展示门槛，但缺来源时保持 `null`。
 
 **`profit_factor` 研究候选指标，未入契约。** §7.8 没有该字段，因此本卡不把它放入 `outcome_metrics`，也不把它作为通过、观察或淘汰依据。默认 `enabled=false`。
 
