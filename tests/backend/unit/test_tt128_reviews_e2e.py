@@ -11,12 +11,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import create_engine, insert, update
+from psycopg import sql
+from sqlalchemy import create_engine, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine, make_url
 
@@ -57,30 +59,35 @@ class RedisStub:
         return int(self.values.pop(key, None) is not None)
 
 
-def _engine() -> Engine:
-    raw = os.environ.get("AIA_TEST_DATABASE_URL")
+class RouteUnavailable(RuntimeError):
+    """运行时路由未注册，供严格 xfail 精确匹配。"""
+
+
+def _database_url() -> str:
+    raw = os.environ.get("AIA_TEST_DATABASE_URL") or os.environ.get("TT41_DATABASE_URL")
     if not raw:
-        pytest.fail("T-T128 未注入 AIA_TEST_DATABASE_URL，不能以假库代替真实 PG")
+        pytest.skip("未设置 AIA_TEST_DATABASE_URL 或 TT41_DATABASE_URL，跳过 PostgreSQL 验收")
+    return raw
+
+
+def _upgrade(database_url: str) -> Engine:
     backend = Path(__file__).resolve().parents[3] / "src" / "backend"
     cfg = Config(str(backend / "alembic.ini"))
-    cfg.cmd_opts = SimpleNamespace(x=[f"url={raw}"])
+    cfg.cmd_opts = SimpleNamespace(x=[f"url={database_url}"])
     try:
         command.upgrade(cfg, "head")
     except MigrationLineageError as exc:
         if "DATABASE_REVISION_NOT_MAINLINE" not in str(exc):
             raise
     return create_engine(
-        make_url(raw).set(drivername="postgresql+psycopg"),
+        make_url(database_url).set(drivername="postgresql+psycopg"),
         hide_parameters=True,
         pool_pre_ping=True,
     )
 
 
-def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+def _settings(monkeypatch: pytest.MonkeyPatch, database_url: str) -> Settings:
     config_dir = Path(__file__).resolve().parents[3] / "config"
-    raw = os.environ.get("AIA_TEST_DATABASE_URL")
-    if not raw:
-        pytest.fail("T-T128 未注入 AIA_TEST_DATABASE_URL，不能以假库代替真实 PG")
     monkeypatch.setattr(
         Settings,
         "settings_customise_sources",
@@ -90,7 +97,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
         _env_file=None,
         app_env="test",
         service_name="api",
-        database_url=SecretStr(raw),
+        database_url=SecretStr(database_url),
         redis_url="redis://127.0.0.1:63999/0",
         app_master_key=None,
         api_prefix="/api/v1",
@@ -102,59 +109,99 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 def _require_route(client: TestClient, path: str) -> None:
     if not any(route.path == path for route in client.app.routes):
-        pytest.xfail(f"T-B242/T-T128 待修绿：HTTP 路由未注册 {path}")
+        raise RouteUnavailable(f"HTTP 路由未注册 {path}")
 
 
 @pytest.fixture(scope="module")
-def pg() -> Engine:
-    engine = _engine()
-    with engine.begin() as conn:
-        conn.execute(
-            pg_insert(users).values(
-                id=OWNER,
-                username=f"tt128_{OWNER.hex[:8]}",
-                password_hash="synthetic-password-hash",
-                role="user",
-                status="approved",
-            ).on_conflict_do_nothing(index_elements=[users.c.id])
-        )
-        conn.execute(
-            pg_insert(securities).on_conflict_do_nothing(index_elements=[securities.c.code]),
-            [
-                {"code": CODE, "type": "stock", "name": "虚构复盘证券", "exchange": "SH", "listing_status": "listed"},
-                {"code": BENCHMARK, "type": "index", "name": "虚构基准", "exchange": "SH", "listing_status": "listed"},
-            ],
-        )
-        conn.execute(
-            insert(action_plans).values(
-                id=PLAN_ID,
-                user_id=OWNER,
-                security_code=CODE,
-                status="draft",
-                origin="manual",
-                candidate_signal_ids=[],
+def pg() -> Any:
+    base_url = make_url(_database_url())
+    database_name = "tt128_" + uuid.uuid4().hex
+    if not base_url.database:
+        raise RuntimeError("T-T128 数据库 DSN 缺少数据库名")
+    admin = psycopg.connect(
+        base_url.set(drivername="postgresql", database="postgres").render_as_string(hide_password=False),
+        autocommit=True,
+    )
+    created = False
+    engine: Engine | None = None
+    try:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+        created = True
+        isolated_url = base_url.set(database=database_name).set(drivername="postgresql+psycopg")
+        engine = _upgrade(isolated_url.render_as_string(hide_password=False))
+        with engine.begin() as conn:
+            conn.execute(
+                insert(users).values(
+                    id=OWNER,
+                    username=f"tt128_{OWNER.hex[:8]}",
+                    password_hash="synthetic-password-hash",
+                    role="user",
+                    status="approved",
+                )
             )
-        )
-        conn.execute(
-            insert(plan_versions).values(
-                id=PLAN_VERSION_ID,
-                plan_id=PLAN_ID,
-                version_no=1,
-                action="buy",
-                rationale="虚构复盘计划",
-                snapshot_id=None,
+            conn.execute(
+                pg_insert(securities),
+                [
+                    {"code": CODE, "type": "stock", "name": "虚构复盘证券", "exchange": "SH", "listing_status": "listed"},
+                    {"code": BENCHMARK, "type": "index", "name": "虚构基准", "exchange": "SH", "listing_status": "listed"},
+                ],
             )
-        )
-        conn.execute(update(action_plans).where(action_plans.c.id == PLAN_ID).values(current_version_id=PLAN_VERSION_ID))
-        conn.execute(pg_insert(trading_calendar).values(date=DAY, is_open=True).on_conflict_do_nothing())
-    yield engine
-    engine.dispose()
+            conn.execute(
+                insert(action_plans).values(
+                    id=PLAN_ID,
+                    user_id=OWNER,
+                    security_code=CODE,
+                    status="draft",
+                    origin="manual",
+                    candidate_signal_ids=[],
+                )
+            )
+            conn.execute(
+                insert(plan_versions).values(
+                    id=PLAN_VERSION_ID,
+                    plan_id=PLAN_ID,
+                    version_no=1,
+                    action="buy",
+                    rationale="虚构复盘计划",
+                    snapshot_id=None,
+                )
+            )
+            conn.execute(update(action_plans).where(action_plans.c.id == PLAN_ID).values(current_version_id=PLAN_VERSION_ID))
+            conn.execute(insert(trading_calendar).values(date=DAY, is_open=True))
+        yield engine
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if created:
+            admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database_name)))
+        admin.close()
 
 
 @pytest.fixture
-def http(pg: Engine, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    cfg = _settings(monkeypatch)
+def http(pg: Engine, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> TestClient:
+    cfg = _settings(monkeypatch, pg.url.render_as_string(hide_password=False))
     app = create_app(cfg)
+    required = {
+        "test_post_reviews_freezes_four_empty_outcome_metrics_and_gaps": ["/api/v1/reviews"],
+        "test_get_reviews_projects_summary_status_and_metric_gaps": ["/api/v1/reviews"],
+        "test_get_review_detail_without_version_has_empty_state_and_status": ["/api/v1/reviews/{identifier}"],
+        "test_versions_keep_old_snapshot_metrics_and_evidence_frozen": [
+            "/api/v1/reviews",
+            "/api/v1/reviews/{identifier}/versions",
+            "/api/v1/reviews/{identifier}/versions/{version_no}",
+        ],
+        "test_timeline_separates_simulated_tracking_from_actual_trade_evidence": ["/api/v1/reviews/{identifier}"],
+        "test_import_commit_visibility_and_pit_do_not_make_zero_samples": ["/api/v1/reviews"],
+    }[request.node.name]
+    missing = next((path for path in required if not any(route.path == path for route in app.routes)), None)
+    if missing:
+        request.node.add_marker(
+            pytest.mark.xfail(
+                strict=True,
+                raises=RouteUnavailable,
+                reason=f"T-T128 缺路由 {missing}，等 T-B242/#362",
+            )
+        )
     redis = RedisStub()
     app.dependency_overrides.update(
         {
@@ -245,13 +292,23 @@ def _insert_trade(
     )
 
 
-def test_post_reviews_freezes_four_empty_outcome_metrics_and_gaps(http: TestClient) -> None:
+def test_post_reviews_freezes_four_empty_outcome_metrics_and_gaps(http: TestClient, pg: Engine) -> None:
     """清单 1：POST 创建的四项指标均为空，缺口逐项归因。"""
     _require_route(http, "/api/v1/reviews")
     response = http.post("/api/v1/reviews", json=_body())
     assert response.status_code == 201, response.text
     payload = response.json()
     _assert_empty_metrics(_metrics(payload))
+    snapshot_id = payload["current_version"]["snapshot_id"]
+    with pg.connect() as conn:
+        snapshot = conn.execute(
+            select(data_snapshots.c["items"]).where(data_snapshots.c.id == snapshot_id)
+        ).scalar_one()
+    persisted_metrics = snapshot["outcome_metrics"]
+    for metric in persisted_metrics.values():
+        assert metric["value"] is None
+        assert metric["n"] == 0
+        assert metric["small_sample"] is True
     assert _metric_gap_keys(payload) >= {
         "outcome_metrics.holding_return",
         "outcome_metrics.benchmark_return",
