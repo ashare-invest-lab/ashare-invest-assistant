@@ -156,6 +156,7 @@ tests:
   - {"file": "tests/backend/unit/test_tb195_intraday_field_fixtures.py", "group": "parallel", "keywords": ["read-only synthetic JSON and Pydantic models", "no network, PG, Redis or Docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb197_p0_plan.py", "group": "parallel", "keywords": ["pure in-memory planner", "socket monkeypatch; zero timer/thread", "synthetic calendar and universe"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb200_restrictions.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb200c_restrictions_contract.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
   - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
