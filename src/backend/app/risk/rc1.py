@@ -16,7 +16,7 @@ from sqlalchemy import Connection, select
 
 from app.config import Settings
 from app.db.tables.accounts import opening_positions, trades
-from app.db.tables.market import daily_bars, realtime_quotes, trading_calendar
+from app.db.tables.market import daily_bars, quotes_snapshot, trading_calendar
 from app.schemas.enums import RiskControl, RiskLevel
 from app.signals.models import Evidence, RiskFlag, Stops
 
@@ -249,15 +249,21 @@ def load(
             facts.low, facts.high, facts.observed_at = bar.low, bar.high, closing
             facts.fetched_at = bar.fetched_at
     else:
-        facts.endpoint = "market.realtime_quotes:raw"
+        facts.endpoint = "market.quotes_snapshot:raw"
+        from app.marketdata.daily_snapshot import active_licence_id
+
+        licence = active_licence_id(conn, owner, at)  # contract §1.1: licence UUID, not user id
         quote = conn.execute(
-            select(realtime_quotes)
+            select(quotes_snapshot)
             .where(
-                realtime_quotes.c.code == code,
-                realtime_quotes.c.ts <= at,
-                realtime_quotes.c.fetched_at <= at,
+                quotes_snapshot.c.code == code,
+                quotes_snapshot.c.source == "mairui",
+                quotes_snapshot.c.source_licence_id.is_not(None),
+                quotes_snapshot.c.source_licence_id == licence,
+                quotes_snapshot.c.ts <= at,
+                quotes_snapshot.c.fetched_at <= at,
             )
-            .order_by(realtime_quotes.c.ts.desc())
+            .order_by(quotes_snapshot.c.ts.desc(), quotes_snapshot.c.revision.desc())
             .limit(1)
         ).first()
         if quote is not None:

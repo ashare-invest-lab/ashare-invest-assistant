@@ -15,7 +15,7 @@ from sqlalchemy import Connection, create_engine, insert, text
 from sqlalchemy.engine import make_url
 
 from app.config import Settings, load_yaml_dir
-from app.db.tables.market import daily_bars, realtime_quotes, trading_calendar
+from app.db.tables.market import daily_bars, quotes_snapshot, realtime_quotes, trading_calendar
 from app.risk import rc1
 from app.risk.rc1 import SH, load
 
@@ -28,6 +28,7 @@ OWNER = uuid.UUID(int=99)
 PRICE = Decimal("10.25")
 QUOTE_AT = AT - dt.timedelta(seconds=10)
 FETCHED_AT = AT - dt.timedelta(seconds=5)
+LICENCE = uuid.UUID("00000000-0000-0000-0000-000000000099")
 
 
 @pytest.fixture
@@ -57,15 +58,16 @@ def rc1_conn(pg_url: str) -> Iterator[Connection]:
             transaction = conn.begin()
             try:
                 conn.execute(text("CREATE SCHEMA IF NOT EXISTS market"))
-                for table in (trading_calendar, realtime_quotes, daily_bars):
+                for table in (trading_calendar, realtime_quotes, quotes_snapshot, daily_bars):
                     table.create(conn, checkfirst=True)
                 conn.execute(insert(trading_calendar).values(date=DAY, is_open=True))
                 conn.execute(
-                    insert(realtime_quotes).values(
+                    insert(quotes_snapshot).values(
                         code=CODE,
                         ts=QUOTE_AT,
                         price=PRICE,
-                        source="ssjy_more",
+                        source="mairui",
+                        source_licence_id=LICENCE,
                         fetched_at=FETCHED_AT,
                     )
                 )
@@ -88,12 +90,18 @@ def rc1_conn(pg_url: str) -> Iterator[Connection]:
         engine.dispose()
 
 
-def test_intraday_uses_fixed_at_quote(settings: Settings, rc1_conn: Connection) -> None:
+def test_intraday_uses_fixed_at_quote(
+    settings: Settings, rc1_conn: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "app.marketdata.daily_snapshot.active_licence_id",
+        lambda conn, owner, at: LICENCE,
+    )
     facts = load(
         rc1_conn, OWNER, None, CODE, settings, at=AT, stops_at=AT, position_known=False
     )
     assert facts.mode == "intraday"
-    assert facts.endpoint == "market.realtime_quotes:raw"
+    assert facts.endpoint == "market.quotes_snapshot:raw"
     assert facts.last == PRICE
     assert facts.observed_at == QUOTE_AT
     assert facts.fetched_at == FETCHED_AT
@@ -137,16 +145,56 @@ def rc1_without_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fixed_at_is_independent_of_wall_clock(
-    settings: Settings, rc1_conn: Connection, rc1_without_wall_clock: None
+    settings: Settings,
+    rc1_conn: Connection,
+    rc1_without_wall_clock: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "app.marketdata.daily_snapshot.active_licence_id",
+        lambda conn, owner, at: LICENCE,
+    )
     facts = load(
         rc1_conn, OWNER, None, CODE, settings, at=AT, stops_at=AT, position_known=False
     )
     assert facts.mode == "intraday"
-    assert facts.endpoint == "market.realtime_quotes:raw"
+    assert facts.endpoint == "market.quotes_snapshot:raw"
     assert facts.last == PRICE
     assert facts.observed_at == QUOTE_AT
     assert facts.fetched_at == FETCHED_AT
+
+
+def test_intraday_ignores_legacy_and_foreign_quotes(
+    settings: Settings, rc1_conn: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "app.marketdata.daily_snapshot.active_licence_id",
+        lambda conn, owner, at: LICENCE,
+    )
+    rc1_conn.execute(
+        insert(realtime_quotes).values(
+            code=CODE,
+            ts=AT - dt.timedelta(seconds=2),
+            price=Decimal("99"),
+            source="ssjy_more",
+            fetched_at=AT,
+        )
+    )
+    rc1_conn.execute(
+        insert(quotes_snapshot).values(
+            code=CODE,
+            ts=AT - dt.timedelta(seconds=1),
+            price=Decimal("88"),
+            source="mairui",
+            source_licence_id=uuid.UUID("00000000-0000-0000-0000-000000000098"),
+            fetched_at=AT,
+        )
+    )
+    facts = load(
+        rc1_conn, OWNER, None, CODE, settings, at=AT, stops_at=AT, position_known=False
+    )
+    assert facts.last == PRICE
+    assert facts.observed_at == QUOTE_AT
 
 
 def test_fixed_at_patch_is_independent_of_stdlib_datetime(

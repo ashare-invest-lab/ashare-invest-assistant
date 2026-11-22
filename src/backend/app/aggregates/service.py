@@ -12,6 +12,7 @@ from sqlalchemy import Connection, func, select
 
 from app.aggregates import models as m
 from app.aggregates import products, t_view
+from app.aggregates.market_overview import MarketOverview, build_market_overview
 from app.aggregates.reconciliation import read as read_reconciliation
 from app.api.v1.portfolio import _account, previous_open_day
 from app.common.errors import AppError, ErrorCode
@@ -59,19 +60,29 @@ def gap(key: str, message: str, reason: GapReason = GapReason.NO_SOURCE) -> m.Ga
     return m.Gap(key=key, reason=reason, message=message)
 
 
-def market(clock: m.MarketClock) -> m.MarketOverview:
-    return m.MarketOverview(
-        trade_date=clock.trade_date,
-        session=clock.session,
-        indices=[],
-        breadth=None,
-        regime=None,
-        regime_position_range=None,
-        turnover_total=None,
-        data_status=DataStatus.UNAVAILABLE,
-        data_as_of=None,
-        gaps=[gap("market", "行情聚合尚未接线；没有伪造指数、宽度或市场环境。")],
-    )
+def market(
+    conn: Connection | m.MarketClock,
+    user_id: uuid.UUID | None = None,
+    clock: m.MarketClock | None = None,
+    query_as_of: dt.datetime | None = None,
+    stale_threshold_s: int = 30,
+) -> m.MarketOverview | MarketOverview:
+    if isinstance(conn, m.MarketClock):
+        return m.MarketOverview(
+            trade_date=conn.trade_date,
+            session=conn.session,
+            indices=[],
+            breadth=None,
+            regime=None,
+            regime_position_range=None,
+            turnover_total=None,
+            data_status=DataStatus.UNAVAILABLE,
+            data_as_of=None,
+            gaps=[gap("market", "行情聚合尚未接线；没有伪造指数、宽度或市场环境。")],
+        )
+    if user_id is None or clock is None or query_as_of is None:
+        raise TypeError("market requires conn, user_id, clock and query_as_of")
+    return build_market_overview(conn, user_id, clock, query_as_of, stale_threshold_s)
 
 
 def terminal(
