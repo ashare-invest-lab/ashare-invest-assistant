@@ -27,8 +27,7 @@ def compliant_intraday_fixture_rows(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def row(*args: object, **kwargs: object) -> dict[str, object]:
         values = original(*args, **kwargs)
-        if values["source"] == "mairui":
-            values["source_licence_id"] = licence_id
+        values["source_licence_id"] = licence_id if values["source"] == "mairui" else None
         return values
 
     monkeypatch.setattr(source_tests, "_row", row)
