@@ -11,6 +11,7 @@ import type {
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
   DataGapScope, SecurityType,
+  RestrictionKind, RestrictionTargetType,
 } from './enums';
 import type { DailyDimensionAnalysis } from './phase2Types';
 
@@ -202,6 +203,8 @@ export interface TerminalRow {
   name: string;
   in_watchlist: boolean;
   focus: boolean;
+  /** 证券主数据类型；主数据缺失时为 null。旧响应缺字段按 null 处理。 */
+  security_type: SecurityType | null;
   quote: TerminalQuote | null;
   holding: TerminalHolding | null;
   suggestion: SuggestionSummary | null;
@@ -211,6 +214,9 @@ export interface TerminalRow {
   /** v0.2.3：该行行情与建议中较旧者的数据时点；完全无数据为 null */
   data_as_of: DateTime | null;
 }
+
+export const securityTypeOf = (row: Pick<TerminalRow, 'holding'> & { security_type?: SecurityType | null }) =>
+  row.security_type ?? row.holding?.security_type ?? null;
 
 // ---------- §5.2 ----------
 export interface DimensionViewEntry { dimension: Dimension; view: DimensionView; score: number | null; rules: RuleRef[] }
@@ -402,6 +408,20 @@ export interface NonExecutableReason {
   released_by: 'system' | 'user';
 }
 
+/** /restrictions 资源，契约 #337（api-contract §7.5）。运行时 status 可能包含未知字符串。 */
+export interface Restriction {
+  id: Uuid;
+  kind: RestrictionKind;
+  target_type: RestrictionTargetType;
+  target_id: string;
+  until: DateTime | null;
+  reason: string | null;
+  created_at: DateTime;
+  name: string | null;
+  status: string;
+  removed_at: DateTime | null;
+}
+
 // ---------- §7.1 / 7.2 / 7.3 / 7.10 ----------
 export interface Me {
   id: Uuid;
@@ -579,7 +599,8 @@ export interface TView {
   as_of: DateTime | null;
   gaps: Gap[];
 }
-export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
+/** 旧 /today 响应可能缺少行级字段，读取时按 null 处理。 */
+export type TodayFocusRow = Omit<TerminalRow, 'security_type'> & { security_type?: SecurityType | null; t_view?: TView | null };
 
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }

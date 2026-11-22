@@ -66,10 +66,9 @@ describe('路由与页面（MSW 示例数据）', () => {
     expect(within(page).getByText('盘后日报')).toBeInTheDocument();
   });
 
-  it('未实现页面为占位页，未知路径 404', async () => {
-    // /reviews 已接入复盘页面，用仍未实现的 /restrictions 验证占位页
+  it('/restrictions 渲染真实限制页', async () => {
     renderAt('/restrictions');
-    expect(await screen.findByTestId('placeholder')).toBeInTheDocument();
+    expect(await screen.findByTestId('restrictions-page')).toBeInTheDocument();
   });
   it('未知路径', async () => {
     renderAt('/no-such-page');
