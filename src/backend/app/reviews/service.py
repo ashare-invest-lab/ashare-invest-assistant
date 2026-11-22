@@ -393,34 +393,51 @@ def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None)
 
 def _status_for(snap: dict[str, Any], period_end: dt.date | None) -> dict[str, Any]:
     gaps: list[dict[str, Any]] = []
-    for gap in normalise_gaps(snap.get("gaps"), "outcome_metrics"):
-        if gap["reason"] == "not_yet_published":
-            gap = {**gap, "reason": "no_source"}
-        if gap["key"] == "outcome_metrics":
-            gaps.extend(
-                {**gap, "key": f"outcome_metrics.{name}"}
-                for name in METRIC_NAMES
-            )
-        elif gap not in gaps:
+
+    def add_gap(gap: dict[str, Any]) -> None:
+        if gap not in gaps:
             gaps.append(gap)
-    if not gaps:
-        for name, metric in (snap.get("outcome_metrics") or {}).items():
-            for gap in normalise_gaps(metric.get("gaps"), name):
-                if gap["reason"] == "not_yet_published":
-                    gap = {**gap, "reason": "no_source"}
-                if gap["key"] == name:
-                    gap = {**gap, "key": f"outcome_metrics.{name}"}
-                if gap not in gaps:
-                    gaps.append(gap)
+
+    for gap in normalise_gaps(snap.get("gaps"), "outcome_metrics"):
+        if gap["key"] == "outcome_metrics":
+            metric_gaps = [{**gap, "key": f"outcome_metrics.{name}"} for name in METRIC_NAMES]
+        elif gap["key"] in {f"outcome_metrics.{name}" for name in METRIC_NAMES}:
+            metric_gaps = [gap]
+        else:
+            add_gap(gap)
+            continue
+        for metric_gap in metric_gaps:
+            if metric_gap["reason"] == "not_yet_published":
+                metric_gap = {**metric_gap, "reason": "no_source"}
+            add_gap(metric_gap)
+
+    outcome_metrics = snap.get("outcome_metrics") or {}
+    for name in METRIC_NAMES:
+        metric = outcome_metrics.get(name) or {}
+        for gap in normalise_gaps(metric.get("gaps"), name):
+            metric_gap = {**gap, "key": f"outcome_metrics.{name}"}
+            if metric_gap["reason"] == "not_yet_published":
+                metric_gap = {**metric_gap, "reason": "no_source"}
+            add_gap(metric_gap)
+
     metric_values = {
-        name: (snap.get("outcome_metrics") or {}).get(name, {}).get("value")
+        name: outcome_metrics.get(name, {}).get("value")
         for name in METRIC_NAMES
     }
     all_metrics_missing = all(value is None for value in metric_values.values())
     data_status = snap.get("data_status", "unavailable")
     if data_status == "pending" or all_metrics_missing:
         data_status = "unavailable"
-        if not gaps:
+        if all_metrics_missing:
+            metric_gap_keys = {gap["key"] for gap in gaps}
+            no_source_gaps = {
+                gap["key"]: gap for gap in status_block(reason="no_source")["gaps"]
+            }
+            for name in METRIC_NAMES:
+                key = f"outcome_metrics.{name}"
+                if key not in metric_gap_keys:
+                    add_gap(no_source_gaps[key])
+        elif not gaps:
             gaps = status_block(reason="no_source")["gaps"]
     return {"data_status": data_status, "data_as_of": snap.get("data_as_of"), "gaps": gaps}
 

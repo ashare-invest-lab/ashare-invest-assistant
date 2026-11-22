@@ -357,12 +357,55 @@ def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
         "outcome_metrics": {"holding_return": {"gaps": ["user_input_missing"]}},
     }
     status = service._status_for(snap, dt.date(2026, 1, 2))
-    assert {
+    assert [
         (gap["key"], gap["reason"])
         for gap in status["gaps"]
-    } == {
-        (f"outcome_metrics.{name}", "no_source")
-        for name in service.METRIC_NAMES
-    }
+    ] == [
+        *[(f"outcome_metrics.{name}", "no_source") for name in service.METRIC_NAMES],
+        ("outcome_metrics.holding_return", "user_input_missing"),
+    ]
     metric_status = service._status_for({**snap, "gaps": []}, dt.date(2026, 1, 2))
-    assert [gap["reason"] for gap in metric_status["gaps"]] == ["user_input_missing"]
+    assert [gap["reason"] for gap in metric_status["gaps"]] == [
+        "user_input_missing",
+        "no_source",
+        "no_source",
+        "no_source",
+    ]
+
+
+def test_g_status_for_keeps_non_metric_gap_and_merges_old_metric_gap() -> None:
+    non_metric_gap = {
+        "key": "trades.import_commit_unproven",
+        "reason": "not_yet_published",
+        "message": "导入提交尚未证明",
+    }
+    snap = {
+        "data_status": "partial",
+        "data_as_of": None,
+        "gaps": [non_metric_gap],
+        "outcome_metrics": {
+            "holding_return": {"value": None, "gaps": ["not_yet_published"]},
+            "benchmark_return": {"value": None},
+            "excess_return": {"value": None},
+            "max_drawdown": {"value": None},
+        },
+    }
+
+    status = service._status_for(snap, dt.date(2026, 1, 2))
+
+    assert status["gaps"] == [
+        non_metric_gap,
+        {
+            "key": "outcome_metrics.holding_return",
+            "reason": "no_source",
+            "message": "复盘周期尚未结束",
+        },
+        *[
+            {
+                "key": f"outcome_metrics.{name}",
+                "reason": "no_source",
+                "message": "来源缺失，指标未验证（待回测）",
+            }
+            for name in service.METRIC_NAMES[1:]
+        ],
+    ]
