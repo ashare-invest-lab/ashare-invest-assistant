@@ -9,6 +9,7 @@ import type { SecurityProfile } from '../../api/marketTypes';
 import { useHorizonAssessment } from '../../api/queries';
 import type { Bar, BarsResponse, QuoteItem } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, KeyTip, Loading } from '../../components/common';
+import { QuoteStreamFallback } from '../../components/QuoteStreamFallback';
 import { CAP_KIND_TEXT, HORIZON_DATA_MISSING, capExplanation, horizonDataMissing, noSuitableForLackOfData } from '../../i18n/horizonCaps';
 import { BOARD, HORIZON, INDUSTRY_TAXONOMY, LISTING_STATUS, PROVIDER, QUOTE_CLOSE_PRICE, SECURITY_RISK_FLAG, SECURITY_RISK_FLAG_TIP, SECURITY_TYPE } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
@@ -138,32 +139,34 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
   // 评审 T-F22a m12：日 K 还没有当日 bar 时，用 1m 响应的 pre_close 作昨收（与分时图共用缓存）
   const intraday = useBarsOf(code, '1m', 240);
   const q = quote.data;
-  const tb = todayBar(daily.first ? daily.bars : undefined, q);
+  const displayQuote = q?.data_status === 'unavailable' ? null : q;
+  const tb = todayBar(daily.first ? daily.bars : undefined, displayQuote);
   // v0.2.7：停牌不是上市状态，用 suspended 表示
   const suspended = profile.suspended === true;
-  const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, q) ?? (suspended && q ? q.price : null);
+  const preClose = tb?.pre_close ?? intradayPreClose(intraday.data, displayQuote) ?? (suspended && displayQuote ? displayQuote.price : null);
   const float = profile.float_shares ? Number(profile.float_shares) : null;
   // v0.2.8：ETF 涨跌额按 3 位
   const pd = profile.type === 'etf' ? 3 : 2;
   // 与现有收盘价标签使用相同的 stale + 有价/时点判断；两项都缺失时提示回退。
-  const turnoverHint = q?.data_status === 'stale' && q.price != null && q.t && q.volume == null && q.amount == null
+  const turnoverHint = displayQuote?.data_status === 'stale' && displayQuote.price != null && displayQuote.t && displayQuote.volume == null && displayQuote.amount == null
     ? '收盘价回退，无成交量/额' : '暂无数据';
   const stats: [string, React.ReactNode, string?][] = [
     ['今开', tb ? <span className={pctClass(preClose ? Number(tb.open) - Number(preClose) : 0)}>{fmtPrice(tb.open, profile.type)}</span> : '—'],
     ['最高', tb ? <span className={pctClass(preClose ? Number(tb.high) - Number(preClose) : 0)}>{fmtPrice(tb.high, profile.type)}</span> : '—'],
     ['最低', tb ? <span className={pctClass(preClose ? Number(tb.low) - Number(preClose) : 0)}>{fmtPrice(tb.low, profile.type)}</span> : '—'],
     ['昨收', fmtPrice(preClose, profile.type)],
-    ['成交量', q?.volume != null ? `${fmtAmount(Number(q.volume) / 100)}手` : '—', q && q.volume == null ? turnoverHint : undefined],
-    ['成交额', q ? fmtAmount(q.amount) : '—', q && q.amount == null ? turnoverHint : undefined],
-    ['换手率', q?.volume != null && float ? `${fmtNum((Number(q.volume) / float) * 100)}%` : '—'],
-    ['总市值', q?.price != null && profile.total_shares ? fmtAmount(capOf(q.price, Number(profile.total_shares))) : '—'],
-    ['流通市值', q?.price != null && float ? fmtAmount(capOf(q.price, float)) : '—'],
+    ['成交量', displayQuote?.volume != null ? `${fmtAmount(Number(displayQuote.volume) / 100)}手` : '—', displayQuote && displayQuote.volume == null ? turnoverHint : undefined],
+    ['成交额', displayQuote ? fmtAmount(displayQuote.amount) : '—', displayQuote && displayQuote.amount == null ? turnoverHint : undefined],
+    ['换手率', displayQuote?.volume != null && float ? `${fmtNum((Number(displayQuote.volume) / float) * 100)}%` : '—'],
+    ['总市值', displayQuote?.price != null && profile.total_shares ? fmtAmount(capOf(displayQuote.price, Number(profile.total_shares))) : '—'],
+    ['流通市值', displayQuote?.price != null && float ? fmtAmount(capOf(displayQuote.price, float)) : '—'],
   ];
   return (
     <header className="stock-head" data-testid="stock-head">
       <div className="sh-id">
         <span className="q-name">{profile.name}</span>
         <span className="mono muted">{code}</span>
+        <QuoteStreamFallback />
         {profile.type !== 'stock' ? <Tag color={labelOf(SECURITY_TYPE, profile.type) ? 'blue' : undefined} data-testid="security-type-tag">{(labelOf(SECURITY_TYPE, profile.type) ?? '未知')}</Tag> : null}
         {profile.board ? <Tag variant="outlined">{(labelOf(BOARD, profile.board) ?? '未知')}</Tag> : null}
         {profile.risk_flag ? <Tag color={labelOf(SECURITY_RISK_FLAG, profile.risk_flag) ? 'orange' : undefined} data-testid="risk-flag-tag" data-flag={profile.risk_flag} title={(labelOf(SECURITY_RISK_FLAG_TIP, profile.risk_flag) ?? '未知')}>{(labelOf(SECURITY_RISK_FLAG, profile.risk_flag) ?? '未知')}</Tag> : null}
@@ -174,12 +177,12 @@ function StockHeader({ profile }: { profile: SecurityProfile }) {
       </div>
       {quote.isPending ? <span className="muted">行情加载中…</span> : q ? (
         <div className="sh-quote">
-          <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, profile.type)}</span>
+          <span className={`q-price mono ${pctClass(displayQuote?.change_pct)}`}>{fmtPrice(displayQuote?.price, profile.type)}</span>
           {q.data_status === 'stale' && q.t ? <Tag data-testid="quote-stale-tag">{QUOTE_CLOSE_PRICE}·{fmtTime(q.t).slice(5, 10)}</Tag> : null}
-          <span className={`mono ${pctClass(q.change_pct)}`}>
-            {preClose && q.price != null && !suspended ? `${signed(Number(q.price) - Number(preClose), pd)} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
+          <span className={`mono ${pctClass(displayQuote?.change_pct)}`}>
+            {preClose && displayQuote?.price != null && !suspended ? `${signed(Number(displayQuote.price) - Number(preClose), pd)} ` : ''}{displayQuote?.change_pct != null ? `(${signed(displayQuote.change_pct)}%)` : '—'}
           </span>
-          {q.data_status !== 'stale' ? <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(q.t)}</span></Tooltip> : null}
+          {q.data_status !== 'stale' && displayQuote?.t ? <Tooltip title="行情时间（北京时间）"><span className="muted small mono">{fmtTime(displayQuote.t)}</span></Tooltip> : null}
           <DataStatusTag status={q.data_status} asOf={q.data_as_of} gaps={q.gaps} />
         </div>
       ) : <span className="muted">无行情缓存</span>}
