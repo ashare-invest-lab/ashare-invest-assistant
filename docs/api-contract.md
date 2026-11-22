@@ -19,6 +19,7 @@
 - T-A219 补充 `GET /market/overview` 的字段来源、沪深京资格池、PIT 与盘中/收盘切换、宽度比例、成交额、错误空态和虚构夹具；F25/G-02 未批准参数继续 `enabled=false`，不升版本、不新增枚举或错误码。详细实现契约见 [`docs/contracts/T-A219-market-overview.md`](contracts/T-A219-market-overview.md)。
 - T-A230（2026-11-21，不升版本）：实时类工程参数逐条登记见 [`docs/contracts/T-A230-realtime-params.md`](contracts/T-A230-realtime-params.md)。
 - T-A231（2026-11-21，不升版本）：补充 `/securities/{code}` 首导未完成错误口径与 `/quotes` 闭市日收盘回落 freshness 口径。
+- T-A239（2026-11-23，不升版本）：补充 RS-02 同模板冷却的盘后/非交易日起算规则，示例为 2026-11-02 16:00 写入 → 2026-11-05 15:00 解除；因主线尚无 RS-02，本条同时带入 T-A238 的 RS-02 正文（新增 `SAME_TEMPLATE_COOLDOWN`）并叠加上述补句。其余 T-A238 条款仍见 PR #419/#429，本 PR 不重复带入。
 - T-A215（2026-11-21）：§7.5 将 `/restrictions` 的目标可见性、`until`、响应投影、删除重查与 PIT 口径定稿，幂等沿用 §1.3，不新增错误码或公共枚举。
 - T-A215 第2轮（2026-11-21）：统一 §7.5 与 T-A209 的 PIT 口径；明确已删除限制重复 DELETE 的 `200`、原 `removed_at` 与无事件幂等语义；补充按 `target_type` 的删除重查关联、行锁、保留与释放规则；主线尚未实现 restrictions 路由的现状改为未验证。
 
@@ -454,7 +455,7 @@
 | `research_candidate_status` | `researching` `watching` `dropped` `planned`（v0.2.9 T-A11；研究候选状态，§6.0；`planned` 只由系统写入） |
 | `research_candidate_origin` | `strategy_screen` `suggestion` `manual` `from_stock`（v0.2.9 T-A11；与库表 CHECK 一致；本版 `POST /candidates` 不接受 `strategy_screen`，§7.7A） |
 | `candidate_decision` | `continue` `watch` `drop`（v0.2.9 T-A11；分别把研究候选状态置为 `researching`、`watching`、`dropped`） |
-| `reason_code` | 见 6.1（22 个；v0.2.5 删 `PROFILE_OR_CONSENT_MISSING`） |
+| `reason_code` | 见 6.1（23 个；v0.2.5 删 `PROFILE_OR_CONSENT_MISSING`，T-A238 新增 `SAME_TEMPLATE_COOLDOWN`） |
 | `reason_status` | `active` `released` `obsolete` |
 | `check_on` | `tick` `daily_close` `schedule` `holding_change` `cash_update` `import` `plan_change` `user_action` |
 | `release_kind` | `expr` `time` `event` `user_action` |
@@ -844,9 +845,20 @@
 | `CONFLICTS_CONFIRMED_PLAN` | user_action | user_action | 是 |
 | `BLOCKLISTED` | user_action | user_action | 是（通过 `/restrictions`；`machine_checkable=true`，对其调用 `/release` → `409 REASON_NOT_MANUALLY_RELEASABLE`，v0.2.9） |
 | `COOLING_OFF` | time | schedule | 否 |
+| `SAME_TEMPLATE_COOLDOWN` | time | schedule | 否 |
 | `LOSS_STREAK_PAUSE` | user_action / time | user_action, schedule | 是 |
 | `STRATEGY_CONFLICT` | user_action / expr | user_action, tick | 是（`evidence` 中写明对方候选信号的 id，v0.2.9；#30 写明：每个对方信号一条 `Evidence`，`key="signal.conflict_signal_id"`（保留键，不进 feature_catalog）、`value` 为对方信号的 uuid、`unit=null`、`provider="system"`、`endpoint=null`、`epistemic_type="fact"`，`data_as_of`、`fetched_at` 为检测时刻；不另设字段） |
 | `USER_MUTED` | user_action / time | user_action, schedule | 是（通过 `/restrictions`；`machine_checkable=true`，对其调用 `/release` → `409 REASON_NOT_MANUALLY_RELEASABLE`，v0.2.9） |
+
+**RS-02 同模板冷却（新增 `SAME_TEMPLATE_COOLDOWN`）**：候选写入场景使用专用码 `SAME_TEMPLATE_COOLDOWN` 表示“同用户、同证券、同策略版本（模板）已有前序候选”，不使用 `COOLING_OFF`。前序候选的 `content.created_at` 必须在候选写入时点已可见，窗口为 `[previous.content.created_at, expiry_at)`，`expiry_at` 为该时点起算第 `config/risk_controls.yaml` `executability.same_template_cooldown_days` 个交易日的 15:00（北京时间），现值为 3。起算规则：前序候选 `created_at`（北京时间）落在交易日的 [09:30, 15:00) 时，当天计为第 1 个交易日；若写入时点为盘后（该交易日 15:00 收盘后，含 15:00）或非交易日，则从下一开市日起算为第 1 个交易日。示例：2026-11-02（交易日）16:00 写入，下一开市日 11-03 为第 1 日、11-04 为第 2 日、11-05 为第 3 日，`expiry_at` 为 2026-11-05 15:00（中间交易日已按 `config/trading_calendar.json` 核实均为开市日）。此口径出处为 `docs/plan.md` 第 9 节问题 30，已核实原文“同模板同证券冷却 3 个交易日”。交易日历缺失时不判定，写入 `gaps` 的 `no_source`，不得用自然日补齐。命中时写入 `NonExecutableReason`，其 `release_condition={kind:"time", at:expiry_at, event:null, action:null, check_on:["schedule"], human_text:"同模板同证券冷却至到期交易日15:00（北京时间）", machine_checkable:true}`。该原因自动解除，手动调用 release 返回 `409 REASON_NOT_MANUALLY_RELEASABLE`。计划场景仍沿用本表中 `SAME_DIRECTION_PLAN_EXISTS` 的 `plan_change` 检查时机。
+
+RS-02 受影响入口与验收（按入口）：
+
+- `signals.service.write_candidate`：以候选写入时可见的前序候选做同用户、同证券、同 `strategy_version_id` 匹配，按半开交易日窗口命中后写入 `SAME_TEMPLATE_COOLDOWN`。日历缺失只记 gap，不写阻断原因，不以 0 值代替。
+- `GET /candidate-signals`、`GET /candidate-signals/{id}`：返回 `SAME_TEMPLATE_COOLDOWN` 的 `code`、`release_condition`、`machine_checkable`、`status`，窗口到期前保持 `active`，到期后自动变为 `released`。
+- `GET /non-executable-reasons` 与 `POST /non-executable-reasons/{id}/release`：列表和详情保持 `SAME_TEMPLATE_COOLDOWN` 的同一原因投影。该自动原因的手动解除返回 `409 REASON_NOT_MANUALLY_RELEASABLE`，与 `COOLING_OFF` 一致，不新增 HTTP 错误码。
+- `signals.service.recheck_restriction`：删除 restriction 时不得释放 `SAME_TEMPLATE_COOLDOWN`。只重查对应的 `BLOCKLISTED`、`USER_MUTED`、`COOLING_OFF` 原因，`SAME_TEMPLATE_COOLDOWN` 不在 restriction 重查集合内，继续按时间检查。
+- 前端/测试须同步新码。只读 `git grep` 发现原因码全集硬编码于 `src/frontend/prototype/src/labels.ts`、`src/frontend/prototype/src/types/contract.ts`、`src/frontend/src/api/enums.ts`、`src/frontend/src/i18n/labels.ts`；`tests/` 未发现原因码全集列表。
 
 ### 6.2 周 K 口径（`freq=w`，v0.2.7）
 1. **聚合方式**：由日 K 按自然周（周一到周日，北京时间）聚合，复权方式与同一请求的日 K 完全相同（`qfq` 与 `hfq` 都先对日线复权再聚合；`adjust` 默认 `qfq`）。不直接使用麦蕊的周线。
