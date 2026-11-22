@@ -7,10 +7,11 @@ import datetime as dt
 import hashlib
 import uuid
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, text, update
 
 from app.auth.deps import AuthDep, EngineDep, RedisDep, SettingsDep
 from app.common import idempotency
@@ -80,6 +81,15 @@ class RestrictionPage(BaseModel):
 
 
 SCOPE = "restrictions:list"
+BEIJING = ZoneInfo("Asia/Shanghai")
+
+
+def _bj_iso(value: dt.datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.UTC)
+    return value.astimezone(BEIJING).isoformat()
 
 
 def _now() -> dt.datetime:
@@ -170,10 +180,10 @@ def _project_row(
         "target_type": row.target_type,
         "target_id": row.target_id,
         "name": name,
-        "until": row.until,
+        "until": _bj_iso(row.until),
         "reason": row.reason,
-        "created_at": row.created_at,
-        "removed_at": getattr(row, "removed_at", None),
+        "created_at": _bj_iso(row.created_at),
+        "removed_at": _bj_iso(getattr(row, "removed_at", None)),
         "status": _status(row, now),
     }
     return item, ([_no_source_gap(row)] if name is None else [])
@@ -374,6 +384,10 @@ def delete_restriction(
 ) -> RestrictionDelete:
     removed_at = _now()
     with engine.begin() as conn:
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),
+            {"owner": str(auth.user_id)},
+        )
         row = conn.execute(
             select(user_restrictions)
             .where(
@@ -415,7 +429,7 @@ def delete_restriction(
             auth.user_id,
             removed_at,
         )
-    item["removed_at"] = removed_at
+    item["removed_at"] = _bj_iso(removed_at)
     item["status"] = "removed"
     return RestrictionDelete(
         **item,

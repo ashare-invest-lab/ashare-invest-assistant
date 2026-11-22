@@ -1115,6 +1115,11 @@
       "note": "T-R88b：sw_ma_trend_pullback v2 升版前原文冻结；历史身份，不晋级"
     },
     {
+      "path": "docs/strategies/T-R103/review_tracking_metrics.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R103 复盘与建议跟踪指标口径卡；候选信号研究支持文档，非策略身份"
+    },
+    {
       "path": "docs/strategies/T-R116/review-metrics.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R116 复盘页指标口径与出处；仅登记文档，不改变策略身份或运行态"
@@ -3040,11 +3045,11 @@
   },
   "t_r116_refresh": {
     "basis": "T-R116 用户任务：登记本单复盘指标文档，不改变策略身份或运行态",
-    "previous_scope_files": 239,
-    "scope_files": 240,
+    "previous_scope_files": 240,
+    "scope_files": 241,
     "identity_records": 48,
     "source_identity_files": 26,
     "runtime_changed": false,
-    "change": "scope 239→240；新增 docs/strategies/T-R116/review-metrics.md，身份记录、来源身份文件与统计保持不变"
+    "change": "scope 240→241；新增 docs/strategies/T-R116/review-metrics.md，身份记录、来源身份文件与统计保持不变"
   }
 }
