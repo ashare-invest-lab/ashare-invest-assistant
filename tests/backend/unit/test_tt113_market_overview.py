@@ -129,8 +129,9 @@ def close_fact(
     close: str,
     pre_close: str,
     *,
+    trade_date: dt.date = TRADE_DATE,
     query_as_of: dt.datetime = dt.datetime(2026, 11, 13, 9, 15, tzinfo=dt.timezone.utc),
-    fetched_at: dt.datetime = dt.datetime(2026, 11, 13, 9, 15, tzinfo=dt.timezone.utc),
+    fetched_at: dt.datetime | None = None,
     licence: uuid.UUID | None = LICENCE_A,
     kind: str = "stock",
     source: str = "mairui",
@@ -138,11 +139,15 @@ def close_fact(
     amount: str = "1000",
     **extra: Any,
 ) -> MarketFact:
+    observed = dt.datetime.combine(trade_date, dt.time(15), tzinfo=SHANGHAI)
+    visible_at = fetched_at or dt.datetime.combine(
+        trade_date, dt.time(9, 15), tzinfo=dt.timezone.utc
+    )
     return MarketFact(
         code=code,
         query_as_of=query_as_of,
-        ts=dt.datetime(2026, 11, 13, 15, 0, tzinfo=SHANGHAI),
-        fetched_at=fetched_at,
+        ts=observed,
+        fetched_at=visible_at,
         source=source,
         source_licence_id=licence,
         close=Decimal(close),
@@ -254,6 +259,8 @@ def test_market_overview_empty_state_is_honest(world: OverviewState) -> None:
     assert payload["data_status"] == "unavailable"
     assert payload["data_as_of"] is None
     assert payload["gaps"]
+    assert all(gap["key"] == "market" for gap in payload["gaps"])
+    assert all(gap["reason"] == "no_source" for gap in payload["gaps"])
     assert all(gap["reason"] != "pending" for gap in payload["gaps"])
 
 
@@ -288,6 +295,12 @@ def test_market_overview_complete_intraday_batch(world: OverviewState) -> None:
         "完整盘中宽度比例与同批 basis/turnover，契约 §5.1/§9",
     )
     assert (breadth["up"], breadth["down"], breadth["flat"]) == (2, 1, 0)
+    assert all(isinstance(breadth[field], int) for field in ("up", "down", "flat"))
+    # §5.2：完整批次若无规则出处，limit_* 仍应是 null，而不是 int。
+    assert all(
+        breadth[field] is None or isinstance(breadth[field], int)
+        for field in ("limit_up", "limit_down")
+    )
     assert_decimal_ratio(breadth["up_ratio"], Decimal(2) / Decimal(3))
     assert_decimal_ratio(breadth["down_ratio"], Decimal(1) / Decimal(3))
     assert_decimal_ratio(breadth["flat_ratio"], Decimal("0"))
@@ -330,7 +343,7 @@ def test_market_overview_intraday_missing_volume_amount_is_partial(world: Overvi
         (dt.datetime(2026, 11, 13, 6, 59, 59, tzinfo=dt.timezone.utc), False),
         (dt.datetime(2026, 11, 13, 7, 0, 1, tzinfo=dt.timezone.utc), False),
         (dt.datetime(2026, 11, 13, 9, 9, 59, tzinfo=dt.timezone.utc), False),
-        (dt.datetime(2026, 11, 13, 9, 10, 1, tzinfo=dt.timezone.utc), True),
+        (dt.datetime(2026, 11, 13, 9, 15, 1, tzinfo=dt.timezone.utc), True),
     ],
 )
 def test_market_overview_1500_and_1710_selection(
@@ -429,6 +442,52 @@ def test_market_overview_limit_counts_need_rule_evidence(world: OverviewState) -
     assert breadth["limit_up"] is None and breadth["limit_down"] is None
 
 
+def test_market_overview_coverage_threshold_stays_disabled(world: OverviewState) -> None:
+    world.facts = complete_intraday_facts()
+    payload = get_overview(world)
+    basis = payload["basis"]
+    no_source_gaps = [gap for gap in payload["gaps"] if gap["reason"] == "no_source"]
+    require_component(
+        payload,
+        basis is not None
+        and payload.get("coverage_threshold") is None
+        and basis.get("coverage_threshold") is None
+        and bool(no_source_gaps)
+        and all(gap["reason"] != "coverage_unknown" for gap in payload["gaps"]),
+        "coverage_threshold 保持 disabled，相关值为 null 且不冒充覆盖率证据，契约 §3.1",
+    )
+    assert payload.get("coverage_threshold") is None
+    assert basis.get("coverage_threshold") is None
+    assert all(gap["reason"] != "coverage_unknown" for gap in payload["gaps"])
+
+
+def test_market_overview_zero_denominator_keeps_width_null(world: OverviewState) -> None:
+    world.facts = [
+        close_fact("600000.SH", "11", "10", is_suspended=True),
+        close_fact("000001.SZ", "11", "10", volume="0"),
+    ]
+    payload = get_overview(world)
+    breadth = payload["breadth"]
+    width_fields = (
+        "up",
+        "down",
+        "flat",
+        "up_ratio",
+        "down_ratio",
+        "flat_ratio",
+        "limit_up",
+        "limit_down",
+    )
+    require_component(
+        payload,
+        breadth is not None
+        and all(breadth[field] is None for field in width_fields)
+        and any(gap["reason"] == "no_source" for gap in payload["gaps"]),
+        "宽度分母 N=0 时计数与比例均为 null，契约 §1/§5.1",
+    )
+    assert all(breadth[field] is None for field in width_fields)
+
+
 @pytest.mark.parametrize("catalog_status", ["declared", "verified_live"])
 def test_market_overview_regime_remains_gated(catalog_status: str, world: OverviewState) -> None:
     world.facts = [close_fact("000300.SH", "4000", "3990", kind="index")]
@@ -462,11 +521,25 @@ def test_market_overview_no_licence_or_all_future_is_unavailable(world: Overview
         ),
     ]
     payload = get_overview(world)
+    expected_gap_keys = {
+        "market.indices.600000.SH",
+        "market.indices.000001.SZ",
+        "market.basis",
+        "market.breadth",
+        "market.turnover_total",
+    }
     require_component(
         payload,
         payload["data_status"] == "unavailable"
         and all(item["price"] is None for item in payload["indices"])
-        and any(gap["reason"] == "data_licence_unavailable" for gap in payload["gaps"]),
+        and any(gap["reason"] == "data_licence_unavailable" for gap in payload["gaps"])
+        and expected_gap_keys.issubset(
+            {
+                gap["key"]
+                for gap in payload["gaps"]
+                if gap["reason"] == "no_source"
+            }
+        ),
         "无证书与全空 PIT 响应，契约 §6/§8/§9",
     )
     assert payload["data_as_of"] is None
@@ -491,38 +564,58 @@ def test_market_overview_nontrading_and_preopen_use_stale_close(
     world.query_as_of = dt.datetime.combine(
         trade_date, dt.time(0), tzinfo=dt.timezone.utc
     )
+    # 11-14 为休市日，最近已完成收盘批是 11-13；开盘前（11-13 08:00）则用 11-12。
+    previous_trade_date = (
+        dt.date(2026, 11, 13)
+        if session is MarketSession.NON_TRADING_DAY
+        else dt.date(2026, 11, 12)
+    )
+    early_same_day = world.query_as_of - dt.timedelta(minutes=30)
     world.facts = [
         close_fact(
             "600000.SH",
             "11",
             "10",
+            trade_date=previous_trade_date,
             query_as_of=world.query_as_of,
-            fetched_at=dt.datetime(2026, 11, 13, 9, 15, tzinfo=dt.timezone.utc),
         ),
-        intraday_fact("600000.SH", "1", query_as_of=world.query_as_of),
+        # 查询时已可见的当日（或休市日清晨）盘中行，仍不得被当作回退收盘。
+        intraday_fact(
+            "600000.SH",
+            "1",
+            query_as_of=world.query_as_of,
+            ts=early_same_day,
+            fetched_at=early_same_day,
+        ),
     ]
     payload = get_overview(world)
     require_component(
         payload,
-        payload["data_status"] == "stale" and payload["session"] == session.value,
+        payload["data_status"] == "stale"
+        and payload["session"] == session.value
+        and payload["basis"] is not None
+        and payload["basis"]["mode"] == "close"
+        and payload["basis"]["observed_date"] == previous_trade_date.isoformat()
+        and any(
+            item["security_code"] == "600000.SH" and item["price"] == "11"
+            for item in payload["indices"]
+        )
+        and all(
+            item["change_pct"] != "1"
+            for item in payload["indices"]
+            if item["security_code"] == "600000.SH"
+        ),
         "非交易日/开盘前沿用上一完整收盘且不读当日盘中，契约 §4/§8/§9",
     )
     assert payload["trade_date"] == trade_date.isoformat()
-    if payload["basis"] is not None:
-        assert payload["basis"]["mode"] == "close"
-    else:
-        readable = [
-            item
-            for item in payload["indices"]
-            if any(item[field] is not None for field in ("price", "change_pct", "amount"))
-        ]
-        if readable:
-            selected = [
-                item for item in readable if item["security_code"] == "600000.SH"
-            ]
-            assert len(selected) == 1
-            assert selected[0]["price"] == "11"
-            assert selected[0]["change_pct"] != "1"
+    assert payload["basis"]["mode"] == "close"
+    assert payload["basis"]["observed_date"] == previous_trade_date.isoformat()
+    selected = [
+        item for item in payload["indices"] if item["security_code"] == "600000.SH"
+    ]
+    assert len(selected) == 1
+    assert selected[0]["price"] == "11"
+    assert selected[0]["change_pct"] != "1"
 
 
 def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: OverviewState) -> None:
@@ -550,11 +643,71 @@ def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: Ove
     )
 
 
+def test_market_overview_bj_gate_positive_requires_twenty_clean_pairs(
+    world: OverviewState,
+) -> None:
+    world.facts = [
+        close_fact(
+            f"830{i:03d}.BJ",
+            "10.1",
+            "10.0",
+            source=source,
+            licence=licence,
+        )
+        for i in range(1, 21)
+        for source, licence in (("mairui", LICENCE_A), ("tdx_local", LICENCE_B))
+    ] + [
+        close_fact(
+            "830021.BJ", "10.1", "10.0", source=source, licence=licence, is_suspended=True
+        )
+        for source, licence in (("mairui", LICENCE_A), ("tdx_local", LICENCE_B))
+    ] + [
+        close_fact("830022.BJ", "10.1", "10.0", source=source, licence=licence, volume="0")
+        for source, licence in (("mairui", LICENCE_A), ("tdx_local", LICENCE_B))
+    ]
+    # 对照结果、来源时点和规则版本可追溯；该门闩待合入，不宣称主线已验收。
+    world.bj_gate_evidence = {  # type: ignore[attr-defined]
+        "rule_version": "synthetic-T-A219-bj-2026-11-13",
+        "sources": ("mairui", "tdx_local"),
+        "reconciled_on": TRADE_DATE.isoformat(),
+        "clean_codes": 20,
+    }
+    payload = get_overview(world)
+    breadth = payload["breadth"]
+    basis = payload["basis"]
+    admitted = (
+        basis is not None
+        and basis["mode"] == "close"
+        and basis["observed_date"] == "2026-11-13"
+        and (
+            (breadth is not None and breadth["up"] + breadth["down"] + breadth["flat"] == 20)
+            or basis.get("eligible") == 20
+        )
+    )
+    require_component(
+        payload,
+        admitted,
+        "BJ 足数双源正例仅在 20 个清洗后代码且来源时点/规则可追溯时启用，契约 §3.2/§9。该契约待合入，不宣称主线验收",
+    )
+    if breadth is not None:
+        assert breadth["up"] + breadth["down"] + breadth["flat"] == 20
+    else:
+        assert basis["eligible"] == 20
+
+
 def test_market_overview_pit_cross_licence_does_not_borrow_rows(world: OverviewState) -> None:
     world.query_as_of = QUERY
     world.facts = [
         intraday_fact("600000.SH", "1", licence=LICENCE_A, query_as_of=QUERY),
         intraday_fact("600000.SH", "-1", licence=LICENCE_B, query_as_of=QUERY),
+        # 证书 A 下第二只股票使用更晚的行情时点，用以断言 data_as_of 取参与源最早 ts。
+        intraday_fact(
+            "688001.SH",
+            "2",
+            licence=LICENCE_A,
+            query_as_of=QUERY,
+            ts=dt.datetime(2026, 11, 13, 2, 5, tzinfo=dt.timezone.utc),
+        ),
         intraday_fact(
             "600000.SH",
             "5",
@@ -567,10 +720,18 @@ def test_market_overview_pit_cross_licence_does_not_borrow_rows(world: OverviewS
     payload = get_overview(world)
     require_component(
         payload,
-        payload["data_as_of"] is not None or bool(payload["indices"]),
+        payload["data_as_of"] == "2026-11-13T02:00:00Z"
+        and len(
+            [
+                item
+                for item in payload["indices"]
+                if item["security_code"] in {"600000.SH", "688001.SH"}
+            ]
+        )
+        == 2,
         "同码同日证书归属与未来 fetched_at PIT 过滤，契约 §2/§4/§9",
     )
-    assert payload["data_as_of"] is None or payload["data_as_of"] <= QUERY.isoformat()
+    assert payload["data_as_of"] <= QUERY.isoformat()
     selected = [
         item for item in payload["indices"] if item["security_code"] == "600000.SH"
     ]
