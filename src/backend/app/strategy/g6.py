@@ -47,17 +47,35 @@ def compare(history_days: int | None, own: set[str], others: list[set[str]]) -> 
 
 
 def missing_history_gate(
-    fixtures_pass: bool, overlap: Overlap, *, quota_unknown: bool = False
+    fixtures_pass: bool,
+    overlap: Overlap,
+    *,
+    quota_unknown: bool = False,
+    warnings: list[str] | None = None,
+    history_status: str | None = None,
 ) -> dict[str, Any]:
-    """Partial report only: valid fixtures cannot substitute for unexamined G6 statistics."""
+    """Report G6 without turning missing history or warnings into a pass."""
+    history_status = history_status or (overlap.max_jaccard_null_reason or "available")
+    warning_list = list(warnings or [])
+    if overlap.max_jaccard_null_reason:
+        warning_list.append(overlap.max_jaccard_null_reason)
+    if history_status in {"no_history", "no_comparable_set"}:
+        warning_list.append(history_status)
+    if overlap.duplicate:
+        warning_list.append("jaccard_above_0.9")
     return {
         "gate": "G6",
-        "result": "warn" if fixtures_pass else "fail",
+        "result": "fail"
+        if not fixtures_pass
+        else "warn"
+        if warning_list or quota_unknown
+        else "pass",
         "detail": {
             "fixtures_all_pass": fixtures_pass,
             **({"quota_delta_reason": QUOTA_UNKNOWN_REASON} if quota_unknown else {}),
             "max_jaccard_null_reason": overlap.max_jaccard_null_reason,
-            "history": "not_examined_no_real_120_day_owned_history",
+            "history": history_status,
+            "warnings": sorted(set(warning_list)),
             "warning": "未体检/覆盖不足；不使用合成golden冒充真实历史统计。",
         },
     }

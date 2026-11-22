@@ -63,6 +63,10 @@ class Conn:
         if isinstance(statement, Insert):
             return Result([])
         text = str(statement)
+        if "pg_advisory_xact_lock" in text:
+            return Result([])
+        if "candidate_signals" in text or "non_executable_reasons" in text:
+            return Result([])
         if "user_restrictions" in text:
             return Result(self.rows)
         if self.names:
@@ -226,6 +230,23 @@ def test_delete_returns_removed_projection_and_recheck(
     assert result.name == "示例证券"
     assert result.recheck.released_reason_ids == []
     assert result.gaps == []
+
+
+def test_repeated_delete_replays_original_projection_without_recheck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(restrictions, "_now", lambda: NOW)
+    original_removed_at = NOW - dt.timedelta(hours=2)
+    row = restriction_row(removed_at=original_removed_at)
+    connection = Conn([row], [SimpleNamespace(name="示例证券")])
+
+    result = restrictions.delete_restriction(row.id, auth(), Engine(connection))  # type: ignore[arg-type]
+
+    assert result.removed_at == original_removed_at
+    assert result.status == "removed"
+    assert result.recheck.released_reason_ids == []
+    assert result.recheck.remaining_reason_ids == []
+    assert not any(isinstance(statement, Update) for statement in connection.statements)
 
 
 def test_repeated_delete_reuses_removed_at_without_recheck_or_event(
