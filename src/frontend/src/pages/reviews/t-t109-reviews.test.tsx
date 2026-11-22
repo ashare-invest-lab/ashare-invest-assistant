@@ -1,5 +1,5 @@
 /** T-T109 / T-F69：复盘页离线契约测试。导入失败必须暴露，尚未实现的页面逐条标记待实现。 */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { http, HttpResponse } from 'msw';
 import type { ComponentType } from 'react';
@@ -38,6 +38,12 @@ const metrics = {
   excess_return: emptyMetric,
   max_drawdown: emptyMetric,
 };
+const metricGaps = [
+  { key: 'outcome_metrics.holding_return', reason: 'no_source', message: '定稿前无来源' },
+  { key: 'outcome_metrics.benchmark_return', reason: 'no_source', message: '定稿前无来源' },
+  { key: 'outcome_metrics.excess_return', reason: 'no_source', message: '定稿前无来源' },
+  { key: 'outcome_metrics.max_drawdown', reason: 'no_source', message: '定稿前无来源' },
+];
 
 function versionOf(versionNo: number, lessons: string) {
   return {
@@ -52,8 +58,9 @@ function versionOf(versionNo: number, lessons: string) {
     attribution: { judgement: [], execution: [], market: [] },
     outcome_metrics: metrics,
     created_at: versionNo === 1 ? '2026-11-10T09:00:00+08:00' : '2026-11-20T09:00:00+08:00',
+    data_status: 'partial',
     data_as_of: null,
-    gaps: [],
+    gaps: metricGaps,
   };
 }
 
@@ -68,10 +75,12 @@ const review = {
   period_end: '2026-11-20',
   current_version_no: 2,
   created_at: '2026-11-20T09:00:00+08:00',
+  data_status: 'partial',
   data_as_of: null,
-  gaps: [],
+  gaps: metricGaps,
   current_version: version2,
   timeline: [],
+  evidence: [],
 };
 
 function installList(items: unknown[] = [review]) {
@@ -187,8 +196,10 @@ it.skipIf(!ReviewsPage)('GET 失败显示错误且页面不白屏（主线尚未
       { status: 500 },
     )));
     renderList();
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect((document.body.textContent ?? '').length).toBeGreaterThan(0);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveAttribute('data-code', 'INTERNAL_ERROR');
+    expect(alert).toHaveTextContent('加载失败：服务内部错误，请稍后重试');
+    expect(alert).toHaveTextContent('INTERNAL_ERROR');
 });
 
 it.skipIf(!ReviewsPage)('保存失败显示错误并保留已填笔记（主线尚未提供 ReviewsPage，待实现）', async () => {
@@ -204,8 +215,10 @@ it.skipIf(!ReviewsPage)('保存失败显示错误并保留已填笔记（主线�
     const notes = screen.getByLabelText(/复盘笔记|笔记|备注/);
     fireEvent.change(notes, { target: { value: '失败后仍应保留的虚构笔记' } });
     fireEvent.click(screen.getByTestId('submit-review'));
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect((document.body.textContent ?? '').length).toBeGreaterThan(0);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveAttribute('data-code', 'INTERNAL_ERROR');
+    expect(alert).toHaveTextContent('保存复盘失败：服务内部错误，请稍后重试');
+    expect(alert).toHaveTextContent('INTERNAL_ERROR');
     expect(notes).toHaveValue('失败后仍应保留的虚构笔记');
 });
 it('/reviews/:id 路由登记与占位状态可观察', async () => {
@@ -244,4 +257,27 @@ it.skipIf(!ReviewDetailPage || !detailRoute)('切换版本不覆盖旧笔记（�
   expect(await screen.findByTestId('review-notes')).toHaveTextContent('虚构复盘笔记');
   fireEvent.click(await screen.findByTestId('review-version-1'));
   expect(screen.getByTestId('review-notes')).toHaveTextContent('旧版虚构笔记');
+});
+
+it.skipIf(!ReviewDetailPage || !detailRoute)('未知状态与时间线类型显示未知（主线尚未提供 ReviewDetailPage 或尚未登记 reviews/:id，待实现）', async () => {
+  const unknownReview = {
+    ...review,
+    data_status: '__proto__',
+    gaps: metricGaps,
+    current_version: { ...version2, data_status: '__proto__', gaps: metricGaps },
+    timeline: [{
+      kind: '__proto__',
+      at: '2026-11-20T09:00:00+08:00',
+      resource_id: null,
+      version_no: null,
+      evidence_ids: [],
+    }],
+  };
+  installDetail(unknownReview, [version1, version2]);
+  renderDetail();
+  expect(await screen.findByTestId('review-notes')).toBeInTheDocument();
+  const detail = screen.getByTestId('review-detail');
+  expect(within(detail).getAllByText('未知', { exact: true }).length).toBeGreaterThanOrEqual(2);
+  expect(detail).not.toHaveTextContent('fresh');
+  expect(detail).not.toHaveTextContent('无缺口');
 });
