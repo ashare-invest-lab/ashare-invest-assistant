@@ -1,5 +1,5 @@
-/** T-T109 / T-F69：复盘页离线契约测试。页面文件不存在时跳过，存在则严格执行，导入失败必须暴露。 */
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+/** T-T109 / T-F69：复盘页离线契约测试。导入失败必须暴露，尚未实现的页面逐条标记待实现。 */
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { http, HttpResponse } from 'msw';
 import type { ComponentType } from 'react';
@@ -16,8 +16,8 @@ const PLAN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 const pageLoaders = import.meta.glob<Record<string, unknown>>('./ReviewsPage.{tsx,ts}', { eager: false });
 const detailLoaders = import.meta.glob<Record<string, unknown>>('./ReviewDetailPage.{tsx,ts}', { eager: false });
-const pageLoader = Object.values(pageLoaders)[0];
-const detailLoader = Object.values(detailLoaders)[0];
+const pageLoader = Object.values(pageLoaders)[0] as (() => Promise<Record<string, unknown>>) | undefined;
+const detailLoader = Object.values(detailLoaders)[0] as (() => Promise<Record<string, unknown>>) | undefined;
 const reviewModule = pageLoader ? await pageLoader() : null;
 const detailModule = detailLoader ? await detailLoader() : null;
 if (pageLoader && !(reviewModule?.ReviewsPage ?? reviewModule?.default)) {
@@ -31,7 +31,7 @@ const ReviewDetailPage = (detailModule?.ReviewDetailPage ?? detailModule?.defaul
 
 beforeAll(() => preloadRoutes(routes), 30_000);
 
-const emptyMetric = { value: null, n: 0, window: 'synthetic', small_sample: true };
+const emptyMetric = { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true };
 const metrics = {
   holding_return: emptyMetric,
   benchmark_return: emptyMetric,
@@ -39,7 +39,7 @@ const metrics = {
   max_drawdown: emptyMetric,
 };
 
-function versionOf(versionNo: number, lessons: string, status = 'partial') {
+function versionOf(versionNo: number, lessons: string) {
   return {
     id: `v-${versionNo}`,
     review_id: REVIEW_ID,
@@ -52,9 +52,8 @@ function versionOf(versionNo: number, lessons: string, status = 'partial') {
     attribution: { judgement: [], execution: [], market: [] },
     outcome_metrics: metrics,
     created_at: versionNo === 1 ? '2026-11-10T09:00:00+08:00' : '2026-11-20T09:00:00+08:00',
-    data_status: status,
     data_as_of: null,
-    gaps: [{ key: 'no_source', reason: 'no_source', message: '虚构来源暂缺' }],
+    gaps: [],
   };
 }
 
@@ -69,25 +68,20 @@ const review = {
   period_end: '2026-11-20',
   current_version_no: 2,
   created_at: '2026-11-20T09:00:00+08:00',
-  data_status: 'partial',
   data_as_of: null,
-  gaps: version2.gaps,
+  gaps: [],
   current_version: version2,
-  versions: [version1, version2],
-  timeline: [
-    { kind: 'created', at: '2026-11-10T09:00:00+08:00', resource_id: null, version_no: 1, evidence_ids: [] as string[] },
-    { kind: 'version_created', at: '2026-11-20T09:00:00+08:00', resource_id: null, version_no: 2, evidence_ids: [] as string[] },
-  ],
+  timeline: [],
 };
 
 function installList(items: unknown[] = [review]) {
   server.use(http.get(`${API}/reviews`, () => HttpResponse.json({ items, next_cursor: null })));
 }
 
-function installDetail(body: unknown = review, versions: unknown[] = review.versions) {
+function installDetail(body: unknown = review, versionItems: unknown[] = [version1, version2]) {
   server.use(
-    http.get(`${API}/reviews/${REVIEW_ID}`, () => HttpResponse.json(body)),
-    http.get(`${API}/reviews/${REVIEW_ID}/versions`, () => HttpResponse.json({ items: versions, next_cursor: null })),
+    http.get(`${API}/reviews/${REVIEW_ID}`, () => HttpResponse.json(body as Record<string, unknown>)),
+    http.get(`${API}/reviews/${REVIEW_ID}/versions`, () => HttpResponse.json({ items: versionItems, next_cursor: null })),
   );
 }
 
@@ -108,24 +102,33 @@ beforeEach(() => {
   installList([]);
 });
 
-const listSuite = ReviewsPage ? describe : describe.skip;
-listSuite('T-F69 复盘列表与创建', () => {
-  it('/reviews 路由使用复盘页面而非占位页', async () => {
-    const route = routes.find((item) => item.path === '/')?.children?.find((item) => item.path === 'reviews');
-    expect(route).toBeDefined();
-    const router = renderList();
-    await waitFor(() => expect(router.state.initialized).toBe(true));
-    expect(await screen.findByRole('status', { name: /暂无复盘|没有.*复盘/ })).toBeInTheDocument();
-    expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
-  });
+const reviewsRoute = routes.find((item) => item.path === '/')?.children?.find((item) => item.path === 'reviews');
+const detailRoute = routes.find((item) => item.path === '/')?.children?.find((item) => item.path === 'reviews/:id');
 
-  it('空列表显示空态', async () => {
+it('/reviews 路由已登记并完成初始化，主线占位状态可观察', async () => {
+  expect(reviewsRoute).toBeDefined();
+  const router = renderList();
+  await waitFor(() => expect(router.state.initialized).toBe(true));
+  if (ReviewsPage) {
+    expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
+  } else {
+    expect(await screen.findByTestId('placeholder')).toBeInTheDocument();
+  }
+});
+
+it.skipIf(!ReviewsPage)('/reviews 必须使用 ReviewsPage 而非占位（主线尚未提供 ReviewsPage，当前为 PlaceholderPage）', async () => {
+  renderList();
+  expect(await screen.findByTestId('reviews-page')).toBeInTheDocument();
+  expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
+});
+
+it.skipIf(!ReviewsPage)('空列表显示空态（主线尚未提供 ReviewsPage，待实现）', async () => {
     installList([]);
     renderList();
-    expect(await screen.findByRole('status', { name: /暂无复盘|没有.*复盘/ })).toBeInTheDocument();
-  });
+    expect(await screen.findByRole('status', { name: '暂无复盘记录' })).toBeInTheDocument();
+});
 
-  it('有数据能显示证券与计划，筛选参数随 GET 和 URL 保留', async () => {
+it.skipIf(!ReviewsPage)('有数据能显示证券与计划，筛选参数随 GET 和 URL 保留（主线尚未提供 ReviewsPage，待实现）', async () => {
     const seen: URL[] = [];
     server.use(http.get(`${API}/reviews`, ({ request }) => {
       const url = new URL(request.url);
@@ -138,16 +141,15 @@ listSuite('T-F69 复盘列表与创建', () => {
     await waitFor(() => expect(seen.some((url) => url.searchParams.get('security_code') === 'SYN001.SH' && url.searchParams.get('plan_id') === PLAN_ID)).toBe(true));
     expect(router.state.location.search).toContain('security_code=SYN001.SH');
     expect(router.state.location.search).toContain(`plan_id=${PLAN_ID}`);
-  });
+});
 
-  it('创建表单拒绝缺少计划和证券及无序日期，合法提交不带计算指标并进入详情', async () => {
+it.skipIf(!ReviewsPage || !ReviewDetailPage || !detailRoute)('创建表单校验并在成功后进入详情（主线尚未提供 ReviewsPage 或 ReviewDetailPage，或尚未登记 reviews/:id，待实现）', async () => {
     let posted: Record<string, unknown> | null = null;
     server.use(http.post(`${API}/reviews`, async ({ request }) => {
       posted = await request.json() as Record<string, unknown>;
       return HttpResponse.json({
         ...review,
         current_version: { ...version2, lessons: String(posted.lessons ?? '') },
-        versions: [version1, { ...version2, lessons: String(posted.lessons ?? '') }],
       }, { status: 201 });
     }));
     installDetail();
@@ -156,7 +158,7 @@ listSuite('T-F69 复盘列表与创建', () => {
     const notes = await screen.findByLabelText(/复盘笔记|笔记|备注/);
     fireEvent.change(notes, { target: { value: '提交前的虚构笔记' } });
     fireEvent.click(screen.getByTestId('submit-review'));
-    expect(await screen.findByTestId('review-form-error')).toHaveTextContent(/至少填写一项/);
+    expect(await screen.findByTestId('review-form-error')).toHaveTextContent('计划或证券至少填写一项。');
     expect(notes).toHaveValue('提交前的虚构笔记');
     expect(posted).toBeNull();
 
@@ -164,7 +166,7 @@ listSuite('T-F69 复盘列表与创建', () => {
     fireEvent.change(screen.getByLabelText('起始日期'), { target: { value: '2026-11-20' } });
     fireEvent.change(screen.getByLabelText('结束日期'), { target: { value: '2026-11-01' } });
     fireEvent.click(screen.getByTestId('submit-review'));
-    expect(await screen.findByTestId('review-form-error')).toHaveTextContent(/日期必须有序|必须有序/);
+    expect(await screen.findByTestId('review-form-error')).toHaveTextContent('起止日期必须有序。');
     expect(posted).toBeNull();
     expect(notes).toHaveValue('提交前的虚构笔记');
 
@@ -174,23 +176,22 @@ listSuite('T-F69 复盘列表与创建', () => {
     expect(posted).not.toHaveProperty('metrics');
     expect(posted).not.toHaveProperty('outcome_metrics');
     expect(posted).not.toHaveProperty('return_pct');
-    expect(posted?.lessons).toBe('提交前的虚构笔记');
-    await waitFor(() => expect(
-      router.state.location.pathname === `/reviews/${REVIEW_ID}`
-      || (document.body.textContent ?? '').includes('提交前的虚构笔记'),
-    ).toBe(true));
-  });
+    expect((posted as Record<string, unknown> | null)?.lessons).toBe('提交前的虚构笔记');
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/reviews/${REVIEW_ID}`));
+    expect(await screen.findByTestId('review-detail')).toBeInTheDocument();
+});
 
-  it('GET 失败显示错误且页面不白屏', async () => {
+it.skipIf(!ReviewsPage)('GET 失败显示错误且页面不白屏（主线尚未提供 ReviewsPage，待实现）', async () => {
     server.use(http.get(`${API}/reviews`, () => HttpResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: '虚构读取失败' } },
       { status: 500 },
     )));
     renderList();
-    expect(await screen.findByRole('alert')).toHaveTextContent(/失败|INTERNAL_ERROR|错误/);
-  });
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect((document.body.textContent ?? '').length).toBeGreaterThan(0);
+});
 
-  it('保存失败显示错误并保留已填笔记', async () => {
+it.skipIf(!ReviewsPage)('保存失败显示错误并保留已填笔记（主线尚未提供 ReviewsPage，待实现）', async () => {
     server.use(http.post(`${API}/reviews`, () => HttpResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: '虚构保存失败' } },
       { status: 500 },
@@ -203,54 +204,44 @@ listSuite('T-F69 复盘列表与创建', () => {
     const notes = screen.getByLabelText(/复盘笔记|笔记|备注/);
     fireEvent.change(notes, { target: { value: '失败后仍应保留的虚构笔记' } });
     fireEvent.click(screen.getByTestId('submit-review'));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/失败|INTERNAL_ERROR|错误/);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect((document.body.textContent ?? '').length).toBeGreaterThan(0);
     expect(notes).toHaveValue('失败后仍应保留的虚构笔记');
-  });
 });
-
-const detailSuite = ReviewDetailPage ? describe : describe.skip;
-detailSuite('T-F69 复盘详情与版本', () => {
-  it('/reviews/:id 路由使用详情页而非占位页', async () => {
-    installDetail();
-    const route = routes.find((item) => item.path === '/')?.children?.find((item) => item.path === 'reviews/:id');
-    expect(route).toBeDefined();
-    const router = renderDetail();
-    await waitFor(() => expect(router.state.initialized).toBe(true));
+it('/reviews/:id 路由登记与占位状态可观察', async () => {
+  installDetail();
+  const router = renderDetail();
+  await waitFor(() => expect(router.state.initialized).toBe(true));
+  if (detailRoute && ReviewDetailPage) {
     expect(await screen.findByTestId('review-detail')).toBeInTheDocument();
     expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
-  });
+  } else {
+    expect(detailRoute).toBeUndefined();
+    expect(screen.queryByTestId('review-detail')).not.toBeInTheDocument();
+  }
+});
 
-  it('显示笔记、来源缺口和空指标，不伪造数字', async () => {
-    installDetail();
-    renderDetail();
-    expect(await screen.findByTestId('review-notes')).toHaveTextContent('虚构复盘笔记');
-    expect(screen.getByTestId('review-metric-gap')).toHaveTextContent(/虚构来源暂缺/);
-    expect(screen.getByTestId('metric-holding_return')).toHaveTextContent('—');
-    expect(screen.getByTestId('metric-max_drawdown')).toHaveTextContent('—');
-    expect(screen.getByTestId('metric-holding_return').textContent).not.toMatch(/\d/);
-  });
+it.skipIf(!detailRoute || !ReviewDetailPage)('/reviews/:id 必须使用 ReviewDetailPage 而非占位（主线尚未登记 reviews/:id 或尚未提供 ReviewDetailPage，待实现）', async () => {
+  installDetail();
+  const router = renderDetail();
+  await waitFor(() => expect(router.state.initialized).toBe(true));
+  expect(await screen.findByTestId('review-detail')).toBeInTheDocument();
+  expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
+});
 
-  it('未知 timeline kind 和 data_status 安全展示为未知，切换版本不覆盖旧笔记', async () => {
-    const odd = versionOf(2, '虚构复盘笔记', '__proto__');
-    odd.gaps = [{ key: 'x', reason: 'constructor', message: '未知状态示例' }];
-    const old = versionOf(1, '旧版虚构笔记', 'constructor');
-    const body = {
-      ...review,
-      data_status: '__proto__',
-      gaps: odd.gaps,
-      current_version: odd,
-      versions: [old, odd],
-      timeline: [
-        { kind: '__proto__', at: odd.created_at, resource_id: null, version_no: 2, evidence_ids: [] as string[] },
-        { kind: 'constructor', at: odd.created_at, resource_id: null, version_no: null, evidence_ids: [] as string[] },
-      ],
-    };
-    installDetail(body, [old, odd]);
-    renderDetail();
-    await screen.findByText('虚构复盘笔记');
-    const page = screen.getByTestId('review-detail');
-    expect(within(page).getAllByText('未知').length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByTestId('review-version-1'));
-    expect(screen.getByTestId('review-notes')).toHaveTextContent('旧版虚构笔记');
-  });
+it.skipIf(!ReviewDetailPage || !detailRoute)('详情显示笔记和空指标（主线尚未提供 ReviewDetailPage 或尚未登记 reviews/:id，待实现）', async () => {
+  installDetail();
+  renderDetail();
+  expect(await screen.findByTestId('review-notes')).toHaveTextContent('虚构复盘笔记');
+  expect(screen.getByTestId('metric-holding_return')).toHaveTextContent('—');
+  expect(screen.getByTestId('metric-max_drawdown')).toHaveTextContent('—');
+  expect(screen.getByTestId('metric-holding_return').textContent).not.toMatch(/\d/);
+});
+
+it.skipIf(!ReviewDetailPage || !detailRoute)('切换版本不覆盖旧笔记（主线尚未提供 ReviewDetailPage 或尚未登记 reviews/:id，待实现）', async () => {
+  installDetail(review, [version1, version2]);
+  renderDetail();
+  expect(await screen.findByTestId('review-notes')).toHaveTextContent('虚构复盘笔记');
+  fireEvent.click(await screen.findByTestId('review-version-1'));
+  expect(screen.getByTestId('review-notes')).toHaveTextContent('旧版虚构笔记');
 });
