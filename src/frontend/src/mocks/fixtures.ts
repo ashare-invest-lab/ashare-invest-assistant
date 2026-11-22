@@ -6,7 +6,7 @@ import { withDailyDimensions } from './phase2Fixtures';
  * 不联网，不调用后端或麦蕊接口。生成过程是确定性的（固定种子），便于截图与测试复现。
  */
 import type {
-  Action, ConfidenceLevel, DataStatus, Dimension, DimensionView, Horizon, Lifecycle, ReasonCode, StrategyEvalState, TLeg,
+  Action, ConfidenceLevel, DataStatus, Dimension, DimensionView, Horizon, Lifecycle, ReasonCode, SecurityType, StrategyEvalState, TLeg,
   CandidateSignalState, RiskLevel,
 } from '../api/enums';
 import { ENUMS } from '../api/enums';
@@ -589,7 +589,7 @@ export const TERMINAL_ACCOUNT: TerminalAccount = {
 };
 
 export const TERMINAL_ROWS: TerminalRow[] = (() => {
-  const rows = SPECS.map((s): TerminalRow & { security_type: 'stock' | null; _w: number; _added: number } => {
+  const rows = SPECS.map((s): TerminalRow & { security_type: SecurityType | null; _w: number; _added: number } => {
     const sg = suggestionOf(s.code)!;
     const q = QUOTES.find((x) => x.security_code === s.code)!;
     const pos = PORTFOLIO.positions.find((p) => p.security_code === s.code);
