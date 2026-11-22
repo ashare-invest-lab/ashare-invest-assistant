@@ -618,3 +618,65 @@ export interface TodayResponse {
   data_gaps: MoreList<TodayDataGap>;
   evidence: Evidence[];
 }
+
+// §7.8.1–7.8.4 复盘对象。按 #349@c718b419，ReviewSummary、ReviewDetail、ReviewVersion
+// 三者顶层均平铺 DataStatusBlock，ReviewVersion 冻结版本快照，详情与列表取当前版本。
+export interface ReviewJudgement { condition_text: string; fulfilled: boolean | null; note: string | null }
+export interface ReviewAttribution {
+  judgement: ReviewJudgement[];
+  execution: TextWithEvidence[];
+  market: TextWithEvidence[];
+}
+export interface ReviewOutcomeMetrics {
+  holding_return: Stat;
+  benchmark_return: Stat;
+  excess_return: Stat;
+  max_drawdown: Stat;
+}
+export interface ReviewVersion extends DataStatusBlock {
+  id: Uuid;
+  version_no: number;
+  plan_version_ids: Uuid[];
+  trade_ids: Uuid[];
+  snapshot_id: Uuid | null;
+  lessons: string | null;
+  tags: string[];
+  attribution: ReviewAttribution;
+  outcome_metrics: ReviewOutcomeMetrics;
+  created_at: DateTime;
+}
+export type ReviewTimelineKind = 'review_version' | 'plan_version' | 'trade';
+export interface ReviewTimelineItem {
+  kind: ReviewTimelineKind;
+  at: DateTime;
+  resource_id: Uuid | null;
+  version_no: number | null;
+  evidence_ids: string[];
+}
+export interface ReviewSummary extends DataStatusBlock {
+  id: Uuid;
+  plan_id: Uuid | null;
+  security_code: string | null;
+  name: string | null;
+  period_start: DateStr;
+  period_end: DateStr;
+  current_version_no: number | null;
+  created_at: DateTime;
+}
+export interface ReviewDetail extends ReviewSummary {
+  current_version: ReviewVersion | null;
+  evidence: Evidence[];
+  timeline: ReviewTimelineItem[];
+}
+export interface ReviewCreate {
+  plan_id: Uuid | null;
+  security_code: string | null;
+  period_start: DateStr;
+  period_end: DateStr;
+  plan_version_ids: Uuid[];
+  trade_ids: Uuid[];
+  lessons: string | null;
+  tags: string[];
+  judgement: ReviewJudgement[];
+}
+export interface ReviewVersionCreate extends ReviewCreate { base_version_no: number }
