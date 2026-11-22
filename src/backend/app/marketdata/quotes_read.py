@@ -195,7 +195,14 @@ def _realtime_item(
             if price is None
             else format(price, ".3f" if security_type == SecurityType.ETF else "f")
         ),
-        change_pct=None if pct_change is None else format(pct_change, "f"),
+        change_pct=(
+            None
+            if pct_change is None
+            else format(
+                Decimal(pct_change).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
+                "f",
+            )
+        ),
         volume=None if volume is None else format(volume, "f"),
         amount=None if amount is None else format(amount, "f"),
         t=stamp.astimezone(BEIJING).isoformat(),

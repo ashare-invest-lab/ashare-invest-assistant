@@ -10,6 +10,24 @@ from types import SimpleNamespace
 from app.marketdata import daily_snapshot, quotes_read
 
 
+def test_realtime_change_rounds_to_four_decimal_places() -> None:
+    realtime_ts = dt.datetime(2026, 11, 21, 9, 30, tzinfo=dt.UTC)
+    row = SimpleNamespace(
+        code="999233.SH",
+        realtime_ts=realtime_ts,
+        realtime_price=Decimal("20"),
+        realtime_pct_change=Decimal("1.23456"),
+        realtime_volume=Decimal("10"),
+        realtime_amount=Decimal("200"),
+    )
+
+    item = quotes_read._realtime_item(
+        row, "合成", "stock", realtime_ts, threshold=60
+    )
+
+    assert item.change_pct == "1.2346"
+
+
 def test_daily_change_rounds_and_data_as_of_is_trade_close(monkeypatch) -> None:
     code = "999229.SH"
     licence = uuid.UUID(int=229)
