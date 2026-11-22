@@ -24,7 +24,7 @@
      任何 compose 文件都不得改掉。
      按服务的 secret 白名单 SERVICE_SECRETS（T-A04 ②，MASTER_KEY_ALLOC 由它派生）：api = 公钥 + app_master_key；
      worker = app_master_key；ingest = 私钥 + 公钥；db-roles = 三个 db_password_*；maint-cli = db_password_aia_maint；
-     beat / signal-rt / migrate / timescale-apply / nginx / postgres / redis = 无。服务挂了表外的 secret、
+     beat / signal-rt / migrate / timescale-apply / nginx / postgres / redis / intraday-health = 无。服务挂了表外的 secret、
      表外的服务、顶层定义了未登记的 secret → 失败；base compose 里表中服务必须挂齐（少挂 → 失败）。
   8. 不悄悄换主密钥（T-O11 评审 M1）：deploy/scripts/compose.sh 不直接调用 app-master-keygen.sh，只经
      app-master-key-ensure.sh（已有 → 用；旧 .env 有 → 迁移；库有数据 → 拒绝；全新空库 → 生成）；基础 compose 里
@@ -93,6 +93,8 @@ SERVICE_SECRETS: dict[str, frozenset[str]] = {
     "master-bootstrap": frozenset({MASTER_SECRET}),
     "beat": frozenset(), "signal-rt": frozenset(), "migrate": frozenset(), "timescale-apply": frozenset(),
     "nginx": frozenset(), "postgres": frozenset(), "redis": frozenset(),
+    # T-O117：opt-in profile monitor 的盘中只读健康检查，不挂任何 secret。
+    "intraday-health": frozenset(),
 }
 # 兼容：True = 必须挂 app_master_key，False = 不得挂（由 SERVICE_SECRETS 派生，不再单独维护）
 MASTER_KEY_ALLOC = {k: MASTER_SECRET in v for k, v in SERVICE_SECRETS.items()}

@@ -1,5 +1,6 @@
 /** T-F03：个股档案 /stocks/:code 与市场概览 /market（MSW 示例数据；未定契约的端点标 [待契约确认]） */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from '../app/AppProviders';
 import { makeQueryClient } from '../app/queryClient';
@@ -8,6 +9,7 @@ import { preloadRoutes } from '../test/preloadRoutes';
 import { server } from '../mocks/server';
 import { mockLoginAs } from '../mocks/session';
 import { HORIZON_ASSESSMENTS } from '../mocks/fixtures';
+import { INDEX_SPECS, MARKET_OVERVIEW } from '../mocks/marketFixtures';
 import { safeExternalUrl } from '../lib/url';
 import { ANNOUNCEMENT_DISCLAIMER } from './stock/StockTabs';
 
@@ -147,8 +149,8 @@ describe('市场概览 /market', () => {
     renderAt('/market');
     await screen.findByTestId('breadth-panel');
     const strip = screen.getByRole('list', { name: '主要指数' });
-    expect(within(strip).getAllByRole('listitem')).toHaveLength(6);
-    expect(within(strip).getByText('上证指数（示例）')).toBeInTheDocument();
+    expect(within(strip).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(strip).getByText('虚构宽基指数')).toBeInTheDocument();
     expect(within(screen.getByTestId('breadth-panel')).getByText('涨停')).toBeInTheDocument();
     expect(within(screen.getByTestId('regime-panel')).getByText(/参考仓位区间/)).toBeInTheDocument();
     const sector = screen.getByTestId('sector-panel');
@@ -160,6 +162,21 @@ describe('市场概览 /market', () => {
   });
 
   it('点击指数卡切换图表', async () => {
+    const spec = INDEX_SPECS.find((x) => x.code === '399001.SZ')!;
+    server.use(http.get('/api/v1/market/overview', () => HttpResponse.json({
+      ...MARKET_OVERVIEW,
+      indices: [
+        ...MARKET_OVERVIEW.indices,
+        {
+          security_code: spec.code,
+          name: spec.name,
+          price: spec.price.toFixed(2),
+          change_pct: (((spec.price - spec.prev_close) / spec.prev_close) * 100).toFixed(4),
+          amount: spec.amount.toFixed(2),
+          t: MARKET_OVERVIEW.indices[0].t,
+        },
+      ],
+    })));
     renderAt('/market');
     const strip = await screen.findByRole('list', { name: '主要指数' });
     const card = within(strip).getByText('深证成指（示例）').closest('button')!;
