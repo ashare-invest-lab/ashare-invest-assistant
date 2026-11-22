@@ -259,6 +259,30 @@ def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     assert "fetch-depth: 0" in workflow and "GH_TOKEN: ${{ github.token }}" in workflow
 
 
+def _assert_pull_request_types(path):
+    import yaml
+
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    triggers = workflow.get("on", workflow.get(True))
+    pull_request = triggers["pull_request"]
+    assert set(pull_request["types"]) == {"opened", "synchronize", "reopened", "edited"}
+
+
+def test_pull_request_trigger_reruns_on_base_edit_and_mutation_fails(tmp_path):
+    workflow_path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
+    _assert_pull_request_types(workflow_path)
+
+    mutated = workflow_path.read_text(encoding="utf-8").replace(
+        "types: [opened, synchronize, reopened, edited]",
+        "types: [opened, synchronize, reopened]",
+    )
+    assert mutated != workflow_path.read_text(encoding="utf-8")
+    mutated_path = tmp_path / "ci.yml"
+    mutated_path.write_text(mutated, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        _assert_pull_request_types(mutated_path)
+
+
 def test_pending_exact_main_push_is_distinct_from_missing_measurement(monkeypatch):
     monkeypatch.setattr(loader.subprocess, "run", Mock(return_value=SimpleNamespace(returncode=0)))
     sha = "b" * 40
