@@ -417,7 +417,13 @@ def test_same_template_cooldown_blocks_trading_days(
 ) -> None:
     """RS-02 ①: each of trading days 1–3 is blocked, including a weekend/holiday gap."""
     if target_day == COOLDOWN_DAYS[2]:
-        request.applymarker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=IMPLEMENTATION_PENDING))
+        request.applymarker(
+            pytest.mark.xfail(
+                strict=True,
+                raises=AssertionError,
+                reason="转绿条件：第三交易日窗口内应拦截并返回 SAME_TEMPLATE_COOLDOWN，单号 T-B244",
+            )
+        )
     world = _seed_world(sql, str(synthetic_user.id), target_day=target_day)
     result = _writer(monkeypatch, world, isolated_pg.engine)
     assert result["diagnostic"] == "blocked"
@@ -447,7 +453,13 @@ def test_same_template_cooldown_release_condition_is_exact(
     sql: Any, request: pytest.FixtureRequest,
 ) -> None:
     """RS-02 ③: the reason projection carries the exact machine release condition."""
-    request.applymarker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=IMPLEMENTATION_PENDING))
+    request.applymarker(
+        pytest.mark.xfail(
+            strict=True,
+            raises=AssertionError,
+            reason="转绿条件：release_condition 字段须为精确约定值，单号 T-B244",
+        )
+    )
     world = _seed_world(sql, str(synthetic_user.id))
     result = _writer(monkeypatch, world, isolated_pg.engine)
     assert result["diagnostic"] == "blocked"
