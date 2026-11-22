@@ -83,27 +83,28 @@ limit_down = count_i(close_i = limit_down_price_i)
 
 ### 4.1 口径和公式
 
-对同一 T、同一来源批次定义资格池 `Q_T`。`Q_T` 只包含沪深股票，且证券代码、交易所、证券类型、T 日上市状态均能在 `query_as_of` 时点按 PIT 证明。ETF、基金、指数、债券和北交所默认排除。以下五个集合是 **T-A219/T-R102 候选口径（#359 未合入）**，并与候选 `MarketBasis` 计数使用同一划分。
+对同一 T、同一来源批次定义资格池 `Q_T`。`Q_T` 只包含沪深股票，且证券代码、交易所、证券类型、T 日上市状态均能在 `query_as_of` 时点按 PIT 证明。ETF、基金、指数、债券和北交所默认排除。集合字段的现行主线语义来自 `docs/contracts/T-A209-market-wiring.md:123-124` 与 `docs/api-contract.md:639` 的 `MarketBasis`：`observed` 是有可解释观察的成员，`trading` 是确认有成交的成员，`suspended` 是确认停牌的成员，`missing=eligible−observed`。资格池细节、覆盖率阈值和启用开关仍是 **T-A219/T-R102 候选口径（#359 未合入）**，不能写成主线已实现。
 
 字段和时点先冻结。每个证券都读取 `security_code`、`exchange`、`security_type`、`listing_status_T`、`suspended_flag_T`、`trade_date`、`close`、`pre_close`、`volume`、来源批次、`fetched_at` 和 `available_from`。主数据字段须满足 `available_from <= query_as_of`。行情行须满足 `trade_date=T`、行情逻辑时点为北京时间 15:00、`fetched_at <= query_as_of`、来源批次可解释并满足日线 `FINAL_AFTER=17:10`。任何字段都不得读取 T+1 或之后的值，不能用当前时钟替代 `query_as_of`。
 
 集合定义按优先级确定，因此天然两两不交。
 
-- `suspended_T` 包含 `Q_T` 中 `suspended_flag_T=true` 的证券。该分类优先于成交量和价格字段，停牌行即使 `volume=0` 或价格字段缺失仍只计入 `suspended_T`。
-- `trading_T` 包含 `Q_T` 中 `suspended_flag_T=false`、来源批次和行情行均可见、`trade_date=T`、`close` 与 `pre_close` 完整且为有效数值、`volume>0` 的证券。
-- `missing_T` 包含 `Q_T` 中未进入前两集合的其余证券，包括没有可见 T 日行情行、`volume` 缺失、`volume=0`、`close` 或 `pre_close` 缺失或无效、来源批次不可解释，以及 `suspended_flag_T` 缺失的证券。若停牌标记缺失，即使有非零量，也归入 `missing_T`，不得猜作交易或停牌。
-- `eligible_T` 是 `Q_T` 的证券数，亦即五集合中的资格总数。
-- `observed_T` 与 `trading_T` 完全相同，只统计有完整可见字段且 `volume>0` 的成交行。零量、停牌和任何缺字段均不进入 `observed_T`。
+- `suspended_T` 包含 `Q_T` 中由同一可解释来源批次确认停牌的证券，即规范化 `is_suspended=true`，或有同批可解释的停牌证据。该分类优先于成交量判断。已确认停牌的成员即使 `volume=0` 或价格字段缺失，也归入 `suspended_T`，因为停牌证据本身是可解释观察。
+- `trading_T` 包含 `Q_T` 中确认非停牌（`is_suspended=false`）、来源批次和行情行均可见、`trade_date=T`、`close` 与 `pre_close` 完整且为有效数值、`volume>0` 的证券。
+- `observed_T = trading_T ∪ suspended_T`。停牌属于可解释观察，计入 `basis.observed`。零量且未确认停牌的证券归入 `missing_T`，不进入 `observed_T`。`volume` 缺失或价格缺失时不能进入 `trading_T`，在没有确认停牌时归入 `missing_T`；若同时有确认停牌证据，则按停牌优先级归入 `suspended_T`。来源批次不可解释时不能形成可解释观察，归入 `missing_T`。
+- `missing_T` 定义为 `eligible_T − observed_T`，包括没有可见 T 日行情行、未确认停牌而 `volume=0`、未确认停牌而 `volume` 缺失、`close` 或 `pre_close` 缺失或无效、来源批次不可解释，以及停牌标记为 `NULL` 且没有同批可解释停牌证据的证券。停牌标记为 `NULL` 但有同批可解释停牌证据时，归入 `suspended_T`，不得猜作交易。
+- `eligible_T` 是 `Q_T` 的证券数。`trading_T`、`suspended_T` 与 `missing_T` 两两不交，且覆盖全部 `eligible_T`。
 
-闭合关系如下。`eligible_T = trading_T ∪ suspended_T ∪ missing_T`，三者两两不交。计数形式为 `|eligible_T| = |trading_T| + |suspended_T| + |missing_T|`，`|observed_T| = |trading_T|`。因此候选覆盖率为 `coverage_T = |observed_T| / |eligible_T|`（`eligible_T>0`），零分母时为 `null`。若 `Q_T` 的 PIT 资格成员本身无法确认，候选 `eligible_T` 与覆盖率均为 `null`，不能用样本数、指数成分数、持仓数或成交额反推。
+闭合关系如下。`observed_T = trading_T ∪ suspended_T`，`missing_T = eligible_T − observed_T`，`eligible_T = trading_T ∪ suspended_T ∪ missing_T`。计数形式为 `|observed_T| = |trading_T| + |suspended_T|`，`|eligible_T| = |trading_T| + |suspended_T| + |missing_T|`，并且 `|eligible_T| = |observed_T| + |missing_T|`。覆盖率与主线 basis 同口径，为 `coverage_T = |observed_T| / |eligible_T|`（`eligible_T>0`），零分母时为 `null`。如需单独观察确认成交比例，只能命名为候选 `trading_coverage_T = |trading_T| / |eligible_T|`，不得把它与覆盖率混用。例：若 `|trading_T|=80`、`|suspended_T|=10`、`|missing_T|=10`，则 `|eligible_T|=100`、`|observed_T|=90`、`coverage_T=0.90`，候选 `trading_coverage_T=0.80`。若 `Q_T` 的 PIT 资格成员本身无法确认，候选 `eligible_T` 与覆盖率均为 `null`，不能用样本数、指数成分数、持仓数或成交额反推。
 
 ### 4.2 阈值和出处
 
 | 参数或门槛 | 当前口径 | 出处与状态 |
 |---|---|---|
 | 分母 | T 日沪深合资格股票数 `eligible_T` | 资格池、排除条件和分母是**仓内定义**；R6、R7（200）仅证明行情字段接口 |
-| 分子 | 同批次、完整字段、PIT 可见且 `volume>0` 的 `observed_T=trading_T` | **候选口径（T-A219/T-R102，#359 未合入）**；R6、R7（200）不证明供应商覆盖 |
-| 比例 | `observed_T / eligible_T`，Decimal，范围 `[0,1]` | 公式是**仓内定义**，无交易所统一覆盖率标准，**未验证** |
+| 分子 | `observed_T=trading_T ∪ suspended_T`，即同批次、PIT 可见且有可解释成交或停牌观察的成员 | `observed`、`trading`、`suspended` 和 `missing=eligible−observed` 的现行主线语义见 `docs/contracts/T-A209-market-wiring.md:123-124`、`docs/api-contract.md:639`；R6、R7（200）不证明供应商覆盖 |
+| 比例 | 主线同口径为 `observed_T / eligible_T`，Decimal，范围 `[0,1]` | 资格池、阈值和启用条件仍是**候选口径（T-A219/T-R102，#359 未合入）**；无交易所统一覆盖率标准，**未验证** |
+| 成交覆盖率（另列） | 候选 `trading_coverage_T = trading_T / eligible_T`，不得替代覆盖率 | **候选口径（T-A219/T-R102，#359 未合入）**，用于只看确认成交成员的附加观察 |
 | 放行阈值 | 没有外部公开数值；任何候选数值均标**待回测**，本轮不设默认放行值 | 未找到交易所、证监会或指数公司统一门槛，**未验证** |
 | 零分母 | **候选口径（T-A219/T-R102，#359 未合入）**。`eligible_T=0` 时返回 `null`，是否附 `no_source` 仍属候选 gap；不返回 0 | 现行主线只规定字段形状与可空性，见 `docs/api-contract.md:933` |
 
