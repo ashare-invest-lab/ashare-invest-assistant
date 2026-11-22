@@ -55,7 +55,7 @@ export const etfNotApplicable = (code: string, key: string) => ({
 const indexOf = (code: string) => INDEX_SPECS.find((s) => s.code === code) ?? ETF_SPECS.find((s) => s.code === code);
 
 const MARKET_OVERVIEW_INDEX = {
-  security_code: '000300.SH', name: '虚构宽基指数', price: '3999.12', change_pct: '0.8420', amount: '123456789.00',
+  security_code: 'SYNTHETIC.INDEX', name: '虚构宽基指数', price: '3999.12', change_pct: '0.8420', amount: '123456789.00',
   t: '2026-11-02T10:31:00+08:00',
 };
 const MARKET_INDEX_GAP_KEY = ['market', 'indices', MARKET_OVERVIEW_INDEX.security_code].join('.');
