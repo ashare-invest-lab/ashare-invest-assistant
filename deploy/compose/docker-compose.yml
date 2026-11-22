@@ -516,12 +516,18 @@ services:
       TZ: Asia/Shanghai
       INTRADAY_HEARTBEAT_KEY: ${INTRADAY_HEARTBEAT_KEY:-${INGEST_HEARTBEAT_KEY:-ingest:heartbeat}}
       INTRADAY_QUEUE_KEY: ${INTRADAY_QUEUE_KEY:-}
+      INTRADAY_QUOTES_TS_KEY: ${INTRADAY_QUOTES_TS_KEY:-}
+      INTRADAY_TRADING_DAY_KEY: ${INTRADAY_TRADING_DAY_KEY:-}
+      REALTIME_QUOTES_SOURCE: ${REALTIME_QUOTES_SOURCE:-off}
+      INTRADAY_REALTIME_CONFIG: /app/config/realtime.yaml
       INTRADAY_STALE_AFTER_S: ${INTRADAY_STALE_AFTER_S:-120}
       INTRADAY_QUEUE_ZERO_ALERT_S: ${INTRADAY_QUEUE_ZERO_ALERT_S:-900}
+      INTRADAY_QUOTES_FUTURE_TOLERANCE_S: ${INTRADAY_QUOTES_FUTURE_TOLERANCE_S:-5} # 默认 5 秒为工程参数，未验证。
       INTRADAY_HEALTH_LOG: ${INTRADAY_HEALTH_LOG:-/tmp/intraday-health.log}
       INTRADAY_HEALTH_STATE: ${INTRADAY_HEALTH_STATE:-/tmp/intraday-health.state}
     volumes:
       - ../scripts/intraday-health.sh:/usr/local/bin/intraday-health.sh:ro
+      - ../../config/realtime.yaml:/app/config/realtime.yaml:ro
     depends_on:
       redis:
         condition: service_healthy
