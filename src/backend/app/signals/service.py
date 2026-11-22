@@ -14,6 +14,7 @@ from sqlalchemy import Connection, and_, func, insert, or_, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.common.errors import AppError, ErrorCode
+from app.config import get_settings
 from app.config_files import MarketRulesConfig
 from app.db.tables.accounts import accounts
 from app.db.tables.licences import user_data_licences
@@ -45,13 +46,14 @@ from app.db.tables.strategy import (
 from app.db.tables.users import users
 from app.importing.pipeline import live_snapshots
 from app.market_rules.lots import lot_spec
-from app.schemas.enums import Action, GapReason
+from app.schemas.enums import Action, DataStatus, GapReason
 from app.signals.admission import run_with_master_guard
 from app.signals.execution import assess, condition
-from app.signals.models import MarketFacts, SignalInput
+from app.signals.models import Gap, MarketFacts, SignalInput
 from app.signals.screen import screen_membership
 from app.strategy.instances.service import owned
 from app.strategy.universe_norm import board_in_universe, normalize_universe
+from app.suggestions.risk import effective_config
 
 BJT = dt.timezone(dt.timedelta(hours=8))
 SAME_TEMPLATE_COOLDOWN_TEXT = "同模板同证券冷却至到期交易日15:00（北京时间）"
@@ -170,8 +172,15 @@ def same_template_expiry(
     ).all()
     if not rows or rows[0].date != start:
         return None
+    local_time = previous_created_at.astimezone(BJT).time().replace(tzinfo=None)
+    count_from = (
+        start if rows[0].is_open and local_time < dt.time(15) else start + dt.timedelta(days=1)
+    )
+
     open_days = 0
     for row in rows:
+        if row.date < count_from:
+            continue
         if row.is_open:
             open_days += 1
             if open_days == cooldown_days:
@@ -278,9 +287,29 @@ def release_due_schedule_reasons(
     at: dt.datetime,
 ) -> list[uuid.UUID]:
     """Apply the existing schedule check to due time-based reasons."""
+    candidate_signal_ids = {
+        row.signal_id
+        for row in conn.execute(
+            select(reasons.c.signal_id).where(
+                reasons.c.user_id == user_id, reasons.c.status == "active"
+            )
+        ).all()
+    }
+    candidate_rows = (
+        conn.execute(
+            select(signals)
+            .where(signals.c.user_id == user_id, signals.c.id.in_(candidate_signal_ids))
+            .order_by(signals.c.id)
+            .with_for_update()
+        ).all()
+        if candidate_signal_ids
+        else []
+    )
+    candidate_by_id = {row.id: row for row in candidate_rows}
     rows = conn.execute(
         select(reasons)
         .where(reasons.c.user_id == user_id, reasons.c.status == "active")
+        .order_by(reasons.c.id)
         .with_for_update()
     ).all()
     released: list[uuid.UUID] = []
@@ -326,11 +355,7 @@ def release_due_schedule_reasons(
                 reasons.c.status == "active",
             )
         ).first():
-            signal = conn.execute(
-                select(signals).where(
-                    signals.c.id == reason.signal_id, signals.c.user_id == user_id
-                ).with_for_update()
-            ).one_or_none()
+            signal = candidate_by_id.get(reason.signal_id)
             if signal is not None:
                 transition(conn, signal, "released", "reason_released", at)
     return released
@@ -567,6 +592,32 @@ def snapshot_items(content: SignalInput, facts: MarketFacts) -> dict[str, Any]:
     }
 
 
+def add_same_template_gap(content: SignalInput, gap: dict[str, str] | None) -> SignalInput:
+    """Include a cooldown source gap in the immutable signal input once."""
+    if gap is None or any(item.key == gap["key"] for item in content.gaps):
+        return content
+    return content.model_copy(
+        update={
+            "data_status": (
+                DataStatus.PARTIAL
+                if content.data_status == DataStatus.FRESH
+                else content.data_status
+            ),
+            "gaps": [*content.gaps, Gap.model_validate(gap)],
+        }
+    )
+
+
+def configured_same_template_days(
+    conn: Connection, user_id: uuid.UUID, explicit: int | None
+) -> int:
+    if explicit is not None:
+        return explicit
+    return effective_config(
+        conn, user_id, get_settings().business.risk_controls
+    ).executability.same_template_cooldown_days
+
+
 def write_candidate(
     conn: Connection,
     *,
@@ -575,7 +626,7 @@ def write_candidate(
     content: SignalInput,
     facts: MarketFacts,
     market_rules: MarketRulesConfig,
-    same_template_cooldown_days: int = 3,
+    same_template_cooldown_days: int | None = None,
     origin_signal_event_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Trusted producer input, never a public user-authored signal. Caller owns transaction."""
@@ -586,6 +637,9 @@ def write_candidate(
         return {"id": None, "diagnostic": "user_not_approved"}
     if content.proposed_action in {"hold", "wait"}:
         return {"id": None, "diagnostic": "no_candidate_action"}
+    same_template_cooldown_days = configured_same_template_days(
+        conn, user_id, same_template_cooldown_days
+    )
     # Shared owner lock serializes opposite strategies as well as snapshot replays.
     conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"), {"owner": str(user_id)}
@@ -595,6 +649,15 @@ def write_candidate(
         return {"id": None, "diagnostic": "instance_not_active"}
     actual = instance.derived_strategy_version_id or instance.strategy_version_id
     version = conn.execute(select(versions).where(versions.c.id == actual)).one()
+    cooldown, cooldown_gap = same_template_cooldown(
+        conn,
+        user_id=user_id,
+        security_code=content.security_code,
+        strategy_version_id=actual,
+        created_at=content.created_at,
+        cooldown_days=same_template_cooldown_days,
+    )
+    content = add_same_template_gap(content, cooldown_gap)
     from app.db.tables.strategy import strategies
 
     template_owner = conn.execute(
@@ -882,14 +945,7 @@ def write_candidate(
         if opposites:
             blockers.append({"code": "STRATEGY_CONFLICT", "release_condition": conflict})
         gaps: list[dict[str, str]] = []
-        cooldown, gap = same_template_cooldown(
-            locked,
-            user_id=user_id,
-            security_code=content.security_code,
-            strategy_version_id=actual,
-            created_at=content.created_at,
-            cooldown_days=same_template_cooldown_days,
-        )
+        gap = cooldown_gap
         if gap is not None:
             gaps.append(gap)
         if cooldown is not None:
@@ -1029,6 +1085,7 @@ def post_close_for_user(
     ).all():
         try:
             instance_result = []
+            cooldown_days = configured_same_template_days(conn, user_id, None)
             with conn.begin_nested():
                 for content, facts in produce(instance):
                     instance_result.append(
@@ -1039,6 +1096,7 @@ def post_close_for_user(
                             content=content,
                             facts=facts,
                             market_rules=market_rules,
+                            same_template_cooldown_days=cooldown_days,
                         )
                     )
             result.extend(instance_result)
