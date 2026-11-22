@@ -588,7 +588,8 @@ export interface TodayResponse {
   evidence: Evidence[];
 }
 
-// §7.8.1–7.8.4 复盘对象。T-R103 工程接入与后端 evidence 填充仍未验证。
+// §7.8.1–7.8.4 复盘对象。按 #349@c718b419，ReviewSummary、ReviewDetail、ReviewVersion
+// 三者顶层均平铺 DataStatusBlock，ReviewVersion 冻结版本快照，详情与列表取当前版本。
 export interface ReviewJudgement { condition_text: string; fulfilled: boolean | null; note: string | null }
 export interface ReviewAttribution {
   judgement: ReviewJudgement[];

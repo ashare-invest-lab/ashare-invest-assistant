@@ -29,19 +29,49 @@ describe('T-F69 复盘页面', () => {
     expect(screen.getByTestId('review-detail')).toBeInTheDocument();
     expect(screen.getByTestId('review-notes')).toHaveTextContent('先记录执行条件');
     expect(screen.getByTestId('metric-holding_return')).toHaveTextContent('—');
+    expect(screen.getByTestId('metric-benchmark_return')).toHaveTextContent('—');
+    expect(screen.getByTestId('metric-excess_return')).toHaveTextContent('—');
+    expect(screen.getByTestId('metric-max_drawdown')).toHaveTextContent('—');
     expect(screen.getByTestId('review-metric-gap')).toHaveTextContent('无数据源');
     expect(screen.getByTestId('review-evidence')).toHaveTextContent('暂无证据');
+
+    const body = await fetch(`${API}/reviews/review-example-1`).then((response) => response.json()) as {
+      data_status: string;
+      data_as_of: string | null;
+      gaps: { key: string; reason: string }[];
+      current_version: { data_status: string; data_as_of: string | null; gaps: { key: string; reason: string }[] };
+    };
+    expect(body.data_status).toBe(body.current_version.data_status);
+    expect(body.data_as_of).toBe(body.current_version.data_as_of);
+    expect(body.gaps).toEqual(body.current_version.gaps);
+    for (const key of ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown']) {
+      expect(body.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ key: `outcome_metrics.${key}`, reason: 'no_source' })]));
+    }
   });
 
   it('缺少当前版本时列表显示横线，详情显示空态且不能保存新版本', async () => {
     const user = userEvent.setup();
     const router = renderAt('/reviews');
     await screen.findByTestId('review-link-review-example-legacy');
+    const legacyLink = screen.getByTestId('review-link-review-example-legacy');
+    expect(legacyLink.closest('tr')).toHaveTextContent('不可用');
     expect(screen.getByTestId('reviews-table')).toHaveTextContent('—');
     await user.click(screen.getByTestId('review-link-review-example-legacy'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/reviews/review-example-legacy'));
     expect(await screen.findByText('暂无版本内容。')).toBeInTheDocument();
+    expect(screen.getByTestId('review-gap')).toHaveTextContent('无数据源');
     expect(screen.getByTestId('review-save-version')).toBeDisabled();
+
+    const body = await fetch(`${API}/reviews/review-example-legacy`).then((response) => response.json()) as {
+      data_status: string;
+      data_as_of: string | null;
+      gaps: { key: string; reason: string }[];
+      current_version: unknown;
+    };
+    expect(body.current_version).toBeNull();
+    expect(body.data_status).toBe('unavailable');
+    expect(body.data_as_of).toBeNull();
+    expect(body.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'outcome_metrics', reason: 'no_source' })]));
   });
 
   it('按证券和计划筛选并写入 URL', async () => {
@@ -58,7 +88,7 @@ describe('T-F69 复盘页面', () => {
   it('支持空列表与创建校验，合法提交后进入详情', async () => {
     const user = userEvent.setup();
     server.use(http.get(`${API}/reviews`, () => HttpResponse.json({ items: [], next_cursor: null })));
-    renderAt('/reviews');
+    const router = renderAt('/reviews');
     expect(await screen.findByText('暂无复盘记录')).toBeInTheDocument();
     await user.click(screen.getByTestId('new-review'));
     await user.click(screen.getByTestId('submit-review'));
@@ -74,6 +104,9 @@ describe('T-F69 复盘页面', () => {
     await user.click(screen.getByTestId('submit-review'));
     await screen.findByText('新建笔记');
     expect(screen.getByTestId('review-detail')).toHaveTextContent('新建笔记');
+    const createdId = router.state.location.pathname.split('/').pop();
+    const created = await fetch(`${API}/reviews/${createdId}`).then((response) => response.json()) as { current_version: { outcome_metrics: { holding_return: { window: string } } } };
+    expect(created.current_version.outcome_metrics.holding_return.window).toBe('2026-11-20/2026-11-30');
   });
 
   it('版本切换及未知 timeline kind、状态安全显示为未知', async () => {
@@ -81,7 +114,7 @@ describe('T-F69 复盘页面', () => {
     const version = (no: number, lessons: string) => ({
       id: `v-${no}`, version_no: no, plan_version_ids: [], trade_ids: [], snapshot_id: null,
       lessons, tags: [], attribution: { judgement: [], execution: [], market: [] },
-      outcome_metrics: { holding_return: { value: null, n: 0, window: 'x', small_sample: true }, benchmark_return: { value: null, n: 0, window: 'x', small_sample: true }, excess_return: { value: null, n: 0, window: 'x', small_sample: true }, max_drawdown: { value: null, n: 0, window: 'x', small_sample: true } },
+      outcome_metrics: { holding_return: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true }, benchmark_return: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true }, excess_return: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true }, max_drawdown: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true } },
       created_at: '2026-11-20T10:00:00+08:00', data_status: '__proto__', data_as_of: null, gaps: [{ key: 'x', reason: 'constructor', message: '未知状态示例' }],
     });
     const v1 = version(1, '旧版本笔记');
@@ -109,8 +142,8 @@ describe('T-F69 复盘页面', () => {
 
   it('详情证据缺失或为空时显示空态，时间线证据按本详情解析', async () => {
     const evidence = { id: 'EV-1', key: 'close', value: '10.00', unit: '元', provider: 'system', endpoint: null, data_as_of: '2026-11-20T15:00:00+08:00', fetched_at: '2026-11-20T15:01:00+08:00', epistemic_type: 'fact' };
-    const version = { id: 'evidence-version', version_no: 1, plan_version_ids: [], trade_ids: [], snapshot_id: null, lessons: '带证据的复盘', tags: [], attribution: { judgement: [], execution: [], market: [] }, outcome_metrics: { holding_return: { value: null, n: 0, window: 'x', small_sample: true }, benchmark_return: { value: null, n: 0, window: 'x', small_sample: true }, excess_return: { value: null, n: 0, window: 'x', small_sample: true }, max_drawdown: { value: null, n: 0, window: 'x', small_sample: true } }, created_at: '2026-11-20T10:00:00+08:00', data_status: 'partial', data_as_of: null, gaps: [] };
-    const body = { id: 'review-evidence', plan_id: null, security_code: '600000.SH', name: '示例银行', period_start: '2026-11-01', period_end: '2026-11-20', current_version_no: 1, created_at: version.created_at, data_status: 'partial', data_as_of: null, gaps: [], current_version: version, evidence: [evidence], timeline: [{ kind: 'review_version', at: version.created_at, resource_id: null, version_no: 1, evidence_ids: ['EV-1', 'MISSING'] }] };
+    const version = { id: 'evidence-version', version_no: 1, plan_version_ids: [], trade_ids: [], snapshot_id: null, lessons: '带证据的复盘', tags: [], attribution: { judgement: [], execution: [], market: [] }, outcome_metrics: { holding_return: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true }, benchmark_return: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true }, excess_return: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true }, max_drawdown: { value: null, n: 0, window: '2026-11-01/2026-11-20', small_sample: true } }, created_at: '2026-11-20T10:00:00+08:00', data_status: 'partial', data_as_of: null, gaps: [{ key: 'outcome_metrics.holding_return', reason: 'no_source', message: '缺少来源' }, { key: 'outcome_metrics.benchmark_return', reason: 'no_source', message: '缺少来源' }, { key: 'outcome_metrics.excess_return', reason: 'no_source', message: '缺少来源' }, { key: 'outcome_metrics.max_drawdown', reason: 'no_source', message: '缺少来源' }] };
+    const body = { id: 'review-evidence', plan_id: null, security_code: '600000.SH', name: '示例银行', period_start: '2026-11-01', period_end: '2026-11-20', current_version_no: 1, created_at: version.created_at, data_status: 'partial', data_as_of: null, gaps: version.gaps, current_version: version, evidence: [evidence], timeline: [{ kind: 'review_version', at: version.created_at, resource_id: null, version_no: 1, evidence_ids: ['EV-1', 'MISSING'] }] };
     server.use(
       http.get(`${API}/reviews/review-evidence`, () => HttpResponse.json(body)),
       http.get(`${API}/reviews/review-evidence/versions`, () => HttpResponse.json({ items: [version], next_cursor: null })),
