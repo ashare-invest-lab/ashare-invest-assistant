@@ -256,6 +256,15 @@ def _daily_rows(
             and isinstance(trade_day := _row_value(row, "trade_date"), dt.date)
             and fetched >= dt.datetime.combine(trade_day, FINAL_AFTER, BEIJING)
         ]
+        latest_trade_date = max(
+            (
+                trade_day
+                for row in rows
+                if isinstance(trade_day := _row_value(row, "trade_date"), dt.date)
+            ),
+            default=None,
+        )
+        rows = [row for row in rows if _row_value(row, "trade_date") == latest_trade_date]
     chosen: dict[str, object] = {}
     for row in rows:
         chosen.setdefault(str(_row_value(row, "code")), row)
@@ -318,6 +327,19 @@ def _row_time(row: object, close_mode: bool) -> dt.datetime | None:
         day = _row_value(row, "trade_date")
         return dt.datetime.combine(day, dt.time(15), BEIJING) if isinstance(day, dt.date) else None
     return _aware(_row_value(row, "ts"))
+
+
+def _observed_date(rows: list[object], close_mode: bool) -> dt.date | None:
+    for row in rows:
+        if close_mode:
+            trade_date = _row_value(row, "trade_date")
+            if isinstance(trade_date, dt.date):
+                return trade_date
+            continue
+        timestamp = _aware(_row_value(row, "ts"))
+        if timestamp is not None:
+            return timestamp.astimezone(BEIJING).date()
+    return None
 
 
 def _overview(
@@ -447,7 +469,7 @@ def _overview(
         gaps.append(_gap("market.turnover_total", "成交额批次覆盖或单位未验证。"))
     basis = (
         m.MarketBasis(
-            observed_date=clock.trade_date,
+            observed_date=_observed_date(rows, close_mode) or clock.trade_date,
             mode="close" if close_mode else "intraday",
             eligible=len(candidate),
             observed=len(observed),
