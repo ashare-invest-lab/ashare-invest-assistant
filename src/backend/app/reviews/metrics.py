@@ -6,13 +6,11 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 from typing import Any
-from zoneinfo import ZoneInfo
 
 # fmt: off
 
 METRIC_NAMES = ("holding_return", "benchmark_return", "excess_return", "max_drawdown")
 GAP_REASONS = {"no_source", "not_yet_published", "user_input_missing"}
-SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _stat(window: str, *, value: Decimal | None = None, n: int = 0) -> dict[str, Any]:
@@ -71,34 +69,13 @@ def status_block(
 ) -> dict[str, Any]:
     if has_observation:
         return {"data_status": "partial", "data_as_of": None, "gaps": []}
+    if reason == "not_yet_published":
+        reason = "no_source"
     return {
-        "data_status": "pending" if reason == "not_yet_published" else "unavailable",
+        "data_status": "unavailable",
         "data_as_of": None,
-        "gaps": [_gap("outcome_metrics", reason, message)],
+        "gaps": [_gap(f"outcome_metrics.{name}", reason, message) for name in METRIC_NAMES],
     }
-
-
-def period_pending(period_end: dt.date | None, *, now: dt.datetime | None = None) -> bool:
-    """Return whether the endpoint is still open at the supplied Beijing time.
-
-    Weekends are only a workday approximation. A Friday endpoint is complete on
-    Saturday. Future endpoints remain pending until their date.
-    """
-    if period_end is None:
-        return False
-    current = now or dt.datetime.now(dt.UTC)
-    if current.tzinfo is None or current.utcoffset() is None:
-        current = current.replace(tzinfo=dt.UTC)
-    current = current.astimezone(SHANGHAI)
-    if period_end > current.date():
-        return True
-    if period_end < current.date():
-        return False
-    return current.weekday() < 5 and current.time() < dt.time(15)
-
-
-def pending_message() -> str:
-    return "复盘周期尚未结束；未验证：未接交易日历"
 
 
 def project_metrics(
@@ -107,24 +84,30 @@ def project_metrics(
     period_end: dt.date | None = None,
     now: dt.datetime | None = None,
 ) -> dict[str, Any]:
-    """Project frozen values, applying only the not-yet-ended period gate."""
+    """Project frozen values while the outcome metric contract is unfinished."""
     source = metrics or {}
-    pending = period_pending(period_end, now=now)
     result: dict[str, Any] = {}
     for name in METRIC_NAMES:
         item = dict(source.get(name) or {})
-        item["gaps"] = normalise_metric_gaps(item.get("gaps"))
+        gaps = normalise_metric_gaps(item.get("gaps"))
+        item["gaps"] = list(dict.fromkeys(
+            "no_source" if reason == "not_yet_published" else reason
+            for reason in gaps
+        ))
         if item.get("source") == "simulated_tracking":
             item.pop("source", None)
-            item["value"] = None
             item["gaps"] = [reason for reason in item["gaps"] if reason != "no_source"]
             item["gaps"].append("no_source")
-        if pending:
-            item["value"] = None
-            item["gaps"] = ["not_yet_published"]
-        elif item.get("value") is not None and item.get("n", 0) < 5:
-            item["value"] = None
-            item["label"] = "未验证"
+        item.pop("source", None)
+        item.pop("label", None)
+        item["value"] = None
+        item["n"] = 0
+        item["small_sample"] = True
+        item["gaps"] = (
+            ["user_input_missing"]
+            if "user_input_missing" in item["gaps"]
+            else ["no_source"]
+        )
         result[name] = item
     return result
 

@@ -8,20 +8,22 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from app.reviews import service
-from app.reviews.metrics import period_pending, project_metrics
+from app.reviews.metrics import project_metrics
 
 OWNER = uuid.UUID("11111111-1111-4111-8111-111111111111")
 
 
-def test_a_weekend_does_not_reopen_friday_period() -> None:
-    saturday = dt.datetime(2026, 1, 10, 10, tzinfo=dt.UTC)
-    assert not period_pending(dt.date(2026, 1, 9), now=saturday)
+def test_a_unfinished_metric_contract_hides_old_values() -> None:
     projected = project_metrics(
-        {},
+        {"holding_return": {"value": "12", "n": 10, "small_sample": True}},
         period_end=dt.date(2026, 1, 12),
         now=dt.datetime(2026, 1, 12, 2, tzinfo=dt.UTC),
     )
-    assert projected["holding_return"]["gaps"] == ["not_yet_published"]
+    for metric in projected.values():
+        assert metric["value"] is None
+        assert metric["n"] == 0
+        assert metric["small_sample"] is True
+        assert metric["gaps"] == ["no_source"]
 
 
 def test_b_frozen_as_of_is_kept_in_snapshot() -> None:
@@ -108,7 +110,10 @@ def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:
         [r.id for r in rows],
         at,
     )
-    assert metrics["holding_return"]["value"] == "10.0"
+    assert metrics["holding_return"]["value"] is None
+    assert metrics["holding_return"]["n"] == 0
+    assert metrics["holding_return"]["small_sample"] is True
+    assert metrics["holding_return"]["gaps"] == ["no_source"]
     assert metrics["benchmark_return"]["value"] is None
     assert metrics["benchmark_return"]["gaps"] == ["no_source"]
 
@@ -305,15 +310,6 @@ def test_g_project_metrics_excludes_simulated_tracking_and_merges_gaps() -> None
     assert projected["benchmark_return"]["gaps"] == ["no_source"]
 
 
-def test_g_period_pending_uses_beijing_cutoff_and_future_dates() -> None:
-    end = dt.date(2026, 1, 5)
-    before_close = dt.datetime(2026, 1, 5, 6, 59, tzinfo=dt.UTC)
-    after_close = dt.datetime(2026, 1, 5, 7, 1, tzinfo=dt.UTC)
-    assert period_pending(end, now=before_close)
-    assert not period_pending(end, now=after_close)
-    assert period_pending(dt.date(2026, 1, 6), now=after_close)
-
-
 def test_g_fifo_groups_security_codes_and_ignores_malformed_rows() -> None:
     rows = [
         _trade(
@@ -361,6 +357,12 @@ def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
         "outcome_metrics": {"holding_return": {"gaps": ["user_input_missing"]}},
     }
     status = service._status_for(snap, dt.date(2026, 1, 2))
-    assert [gap["reason"] for gap in status["gaps"]] == ["no_source"]
+    assert {
+        (gap["key"], gap["reason"])
+        for gap in status["gaps"]
+    } == {
+        (f"outcome_metrics.{name}", "no_source")
+        for name in service.METRIC_NAMES
+    }
     metric_status = service._status_for({**snap, "gaps": []}, dt.date(2026, 1, 2))
     assert [gap["reason"] for gap in metric_status["gaps"]] == ["user_input_missing"]

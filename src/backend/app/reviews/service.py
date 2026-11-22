@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Connection, Row, insert, select, update
 
@@ -24,13 +25,13 @@ from app.reviews.metrics import (
     _stat,
     empty_metrics,
     normalise_gaps,
-    pending_message,
-    period_pending,
     project_metrics,
     status_block,
 )
 
 # fmt: off
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _bad(field: str, issue: str) -> AppError:
@@ -117,7 +118,19 @@ def _as_datetime(value: dt.datetime | None) -> dt.datetime | None:
 
 
 def _executed_at(row: Any) -> dt.datetime | None:
-    return _as_datetime(row.traded_at)
+    traded_at = _as_datetime(getattr(row, "traded_at", None))
+    if traded_at is not None:
+        return traded_at
+    trade_date = getattr(row, "trade_date", None)
+    if isinstance(trade_date, dt.datetime):
+        trade_date = trade_date.date()
+    if isinstance(trade_date, dt.date):
+        return dt.datetime.combine(
+            trade_date,
+            dt.time(15),
+            tzinfo=SHANGHAI,
+        ).astimezone(dt.UTC)
+    return None
 
 
 def _decimal(value: Any) -> Decimal | None:
@@ -197,16 +210,6 @@ def _observations(
     return holding, [], [], evidence_ids, data_as_of, has_open_positions
 
 
-def _metric(name: str, window: str, values: Sequence[Decimal], *, no_source: bool = False) -> dict[str, Any]:
-    value = sum(values, Decimal(0)) / Decimal(len(values)) if values else None
-    result = _stat(window, value=value, n=len(values))
-    if no_source or not values:
-        result["gaps"] = ["no_source"]
-    if values and len(values) < 5:
-        result["label"] = "未验证"
-    return result
-
-
 def _compute_outcome_metrics(
     conn: Connection,
     owner: uuid.UUID,
@@ -216,27 +219,11 @@ def _compute_outcome_metrics(
     calculation_as_of: dt.datetime,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dt.datetime | None]:
     window = f"{start.isoformat()}/{end.isoformat()}"
-    if period_pending(end, now=calculation_as_of):
-        return {name: _stat(window) | {"gaps": ["not_yet_published"]} for name in METRIC_NAMES}, [], None
     rows = _trade_rows(conn, owner, trade_ids)
-    holding, benchmark, drawdowns, evidence_ids, data_as_of, has_open_positions = _observations(rows, calculation_as_of, start, end)
-    metrics = {
-        "holding_return": _metric("holding_return", window, holding),
-        "benchmark_return": _metric("benchmark_return", window, benchmark),
-        "max_drawdown": _metric("max_drawdown", window, drawdowns),
-    }
-    if has_open_positions:
-        metrics["holding_return"]["gaps"] = ["user_input_missing"]
-    if holding and benchmark and len(holding) == len(benchmark):
-        metrics["excess_return"] = _metric("excess_return", window, [a - b for a, b in zip(holding, benchmark, strict=True)])
-    else:
-        metrics["excess_return"] = _metric("excess_return", window, [], no_source=True)
-        metrics["excess_return"]["gaps"] = ["no_source"]
+    _, _, _, evidence_ids, data_as_of, _ = _observations(rows, calculation_as_of, start, end)
     evidence = [{"id": evidence_id, "key": "trade", "value": evidence_id.removeprefix("trade:"), "source": "本人成交快照"} for evidence_id in evidence_ids]
-    if not benchmark:
-        metrics["benchmark_return"]["gaps"] = ["no_source"]
-    if not drawdowns:
-        metrics["max_drawdown"]["gaps"] = ["no_source"]
+    reason = "user_input_missing" if not trade_ids else "no_source"
+    metrics = {name: _stat(window) | {"gaps": [reason]} for name in METRIC_NAMES}
     return metrics, evidence, data_as_of
 
 
@@ -259,7 +246,8 @@ def _snapshot_items(
         metrics, evidence, data_as_of = _compute_outcome_metrics(conn, owner, start, end, trade_ids, calculation_as_of)
     else:
         metrics, evidence, data_as_of = empty_metrics(start, end), [], None
-    if evidence:
+    has_metric_value = any(metric.get("value") is not None for metric in metrics.values())
+    if has_metric_value:
         block = status_block(has_observation=True)
     else:
         block = status_block(reason="no_source" if has_trades else "user_input_missing")
@@ -270,7 +258,11 @@ def _snapshot_items(
         "max_drawdown": "复权价格路径缺失，最大回撤未验证（待回测）",
     }
     metric_gaps = [
-        {"key": name, "reason": reason, "message": metric_messages[name]}
+        {
+            "key": f"outcome_metrics.{name}",
+            "reason": reason,
+            "message": metric_messages[name],
+        }
         for name, metric in metrics.items()
         for reason in metric.get("gaps", [])
     ]
@@ -385,21 +377,52 @@ def revise(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, body: Any)
 def _snapshot(conn: Connection, owner: uuid.UUID, snapshot_id: uuid.UUID | None) -> dict[str, Any]:
     if snapshot_id is None:
         return status_block()
-    row = conn.execute(select(data_snapshots.c["items"]).where(data_snapshots.c.id == snapshot_id, data_snapshots.c.user_id == owner)).first()
+    # The snapshot is reached through an already owner-scoped review/version.
+    # Retain the snapshot owner check when the legacy row carries one. A few
+    # historical fixtures omit that duplicated owner column.
+    row = conn.execute(
+        select(data_snapshots.c["items"], data_snapshots.c.user_id).where(
+            data_snapshots.c.id == snapshot_id
+        )
+    ).first()
+    if row is not None and row._mapping.get("user_id") not in (None, owner):
+        return status_block()
     items = row._mapping.get("items") if row is not None else None
     return dict(items) if items else status_block()
 
 
 def _status_for(snap: dict[str, Any], period_end: dt.date | None) -> dict[str, Any]:
-    if period_pending(period_end):
-        return status_block(reason="not_yet_published", message=pending_message())
-    gaps = normalise_gaps(snap.get("gaps"), "outcome_metrics")
+    gaps: list[dict[str, Any]] = []
+    for gap in normalise_gaps(snap.get("gaps"), "outcome_metrics"):
+        if gap["reason"] == "not_yet_published":
+            gap = {**gap, "reason": "no_source"}
+        if gap["key"] == "outcome_metrics":
+            gaps.extend(
+                {**gap, "key": f"outcome_metrics.{name}"}
+                for name in METRIC_NAMES
+            )
+        elif gap not in gaps:
+            gaps.append(gap)
     if not gaps:
         for name, metric in (snap.get("outcome_metrics") or {}).items():
             for gap in normalise_gaps(metric.get("gaps"), name):
+                if gap["reason"] == "not_yet_published":
+                    gap = {**gap, "reason": "no_source"}
+                if gap["key"] == name:
+                    gap = {**gap, "key": f"outcome_metrics.{name}"}
                 if gap not in gaps:
                     gaps.append(gap)
-    return {"data_status": snap.get("data_status", "unavailable"), "data_as_of": snap.get("data_as_of"), "gaps": gaps}
+    metric_values = {
+        name: (snap.get("outcome_metrics") or {}).get(name, {}).get("value")
+        for name in METRIC_NAMES
+    }
+    all_metrics_missing = all(value is None for value in metric_values.values())
+    data_status = snap.get("data_status", "unavailable")
+    if data_status == "pending" or all_metrics_missing:
+        data_status = "unavailable"
+        if not gaps:
+            gaps = status_block(reason="no_source")["gaps"]
+    return {"data_status": data_status, "data_as_of": snap.get("data_as_of"), "gaps": gaps}
 
 
 def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_end: dt.date | None = None) -> dict[str, Any]:
@@ -408,7 +431,14 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
     if isinstance(snap.get("period_end"), str):
         with contextlib.suppress(ValueError):
             frozen_end = dt.date.fromisoformat(snap["period_end"])
-    metrics = project_metrics(row.outcome_metrics or snap.get("outcome_metrics", {}), period_end=frozen_end)
+    projected_metrics = project_metrics(
+        row.outcome_metrics or snap.get("outcome_metrics", {}),
+        period_end=frozen_end,
+    )
+    metrics = {
+        name: {key: value for key, value in metric.items() if key != "gaps"}
+        for name, metric in projected_metrics.items()
+    }
     status = _status_for(snap, frozen_end)
     return {
         "id": str(row.id),
@@ -421,7 +451,6 @@ def version_body(conn: Connection, owner: uuid.UUID, row: Row[Any], *, period_en
         "attribution": row.attribution or snap.get("attribution", {"judgement": [], "execution": [], "market": []}),
         "outcome_metrics": metrics,
         "evidence": list(snap.get("evidence", [])),
-        "calculation_as_of": snap.get("calculation_as_of"),
         "created_at": row.created_at.isoformat(),
         "data_status": status.get("data_status", "unavailable"),
         "data_as_of": status.get("data_as_of"),
@@ -442,8 +471,32 @@ def _timeline(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, current
         result.extend({"kind": "plan_version", "at": r.created_at.isoformat(), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
     if current is not None and current.trade_ids:
         trade_rows = conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
-        evidence = {str(item.get("value")): str(item.get("id")) for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", []) if item.get("key") == "trade"}
-        result.extend({"kind": "trade", "at": (_executed_at(r) or _now()).isoformat(), "resource_id": str(r.id), "version_no": None, "evidence_ids": [evidence[str(r.id)]] if str(r.id) in evidence else []} for r in trade_rows)
+        snapshot = _snapshot(conn, owner, current.snapshot_id)
+        evidence = {str(item.get("value")): str(item.get("id")) for item in snapshot.get("evidence", []) if item.get("key") == "trade"}
+        raw_calculation_as_of = snapshot.get("calculation_as_of")
+        calculation_as_of: dt.datetime | None = None
+        if isinstance(raw_calculation_as_of, dt.datetime):
+            calculation_as_of = _as_datetime(raw_calculation_as_of)
+        elif isinstance(raw_calculation_as_of, str):
+            with contextlib.suppress(ValueError):
+                calculation_as_of = _as_datetime(dt.datetime.fromisoformat(raw_calculation_as_of))
+        for row in trade_rows:
+            trade_at = _executed_at(row)
+            if trade_at is None or (
+                calculation_as_of is not None and trade_at > calculation_as_of
+            ):
+                continue
+            result.append(
+                {
+                    "kind": "trade",
+                    "at": trade_at.isoformat(),
+                    "resource_id": str(row.id),
+                    "version_no": None,
+                    "evidence_ids": [evidence[str(row.id)]]
+                    if str(row.id) in evidence
+                    else [],
+                }
+            )
     result.sort(key=lambda item: item["at"])
     return result
 

@@ -329,7 +329,7 @@ def test_snapshot_projection_and_timeline_sources() -> None:
                 return SimpleNamespace(all=lambda: [trade_row])
             return SimpleNamespace(all=lambda: [version], first=lambda: version, scalar=lambda: None)
     projected = service.version_body(Conn(), U, version)
-    assert projected["data_status"] == "partial" and projected["outcome_metrics"]["holding_return"]["value"] == "1" and projected["tags"] == []
+    assert projected["data_status"] == "partial" and projected["outcome_metrics"]["holding_return"]["value"] is None and projected["tags"] == []
     timeline = service._timeline(Conn(), U, RID, version)
     assert [item["kind"] for item in timeline] == ["plan_version", "trade", "review_version"]
 
