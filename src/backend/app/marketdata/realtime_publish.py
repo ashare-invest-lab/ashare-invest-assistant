@@ -74,8 +74,7 @@ def publish_quote(
     if data is None:
         return False
     try:
-        publish(rds, owner, "quote", data, at, _content_token(data))
+        return bool(publish(rds, owner, "quote", data, at, _content_token(data)))
     except Exception as exc:  # noqa: BLE001 - publication is deliberately best effort
         log.warning("实时行情 SSE 发布失败：%s", type(exc).__name__)
         return False
-    return True

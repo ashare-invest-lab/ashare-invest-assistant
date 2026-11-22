@@ -60,6 +60,7 @@ def test_publish_quote_uses_content_token_and_is_best_effort(monkeypatch) -> Non
 
     def fake_publish(rds_arg, owner, kind, data, at, token):
         seen.append((rds_arg, owner, kind, data, at, token))
+        return "1-0"
 
     monkeypatch.setattr("app.marketdata.realtime_publish.publish", fake_publish)
     assert publish_quote(rds, OWNER, _response(_item("999991.SH", "2030-06-11T09:31:00+08:00")), AT)
@@ -71,3 +72,13 @@ def test_publish_quote_uses_content_token_and_is_best_effort(monkeypatch) -> Non
 
     monkeypatch.setattr("app.marketdata.realtime_publish.publish", broken)
     assert not publish_quote(rds, OWNER, _response(_item("999991.SH", "2030-06-11T09:31:00+08:00")), AT)
+
+
+def test_publish_quote_returns_false_when_transport_deduplicates(monkeypatch) -> None:
+    monkeypatch.setattr("app.marketdata.realtime_publish.publish", lambda *_args: "")
+    assert not publish_quote(_Redis(), OWNER, _response(_item("999991.SH", "2030-06-11T09:31:00+08:00")), AT)
+
+
+def test_publish_quote_returns_true_when_transport_writes_event(monkeypatch) -> None:
+    monkeypatch.setattr("app.marketdata.realtime_publish.publish", lambda *_args: "1-0")
+    assert publish_quote(_Redis(), OWNER, _response(_item("999991.SH", "2030-06-11T09:31:00+08:00")), AT)
