@@ -76,7 +76,6 @@ def owned_world(world: Any, no_enqueue: None) -> Any:  # noqa: F811
             for row in state.licences
             if (
                 row.user_id == OWNER
-                and row.deleted_at is None
                 and row.status == "active"
                 and not any(hold.user_id == row.user_id for hold in state.holds)
                 and (row.paused_until is None or row.paused_until <= state.now)
@@ -147,6 +146,7 @@ def test_ta173_quotes_unusable_licence_with_owned_daily_cache_returns_unavailabl
         state.licences[0].deleted_at = NOW - dt.timedelta(days=1)
     retained = list(state.bars)
     assert_unavailable(owned_world.client.get("/api/v1/quotes", params={"codes": CODE}))
+    assert state.licence_has_deleted_filter is True
     assert_cache_untouched(owned_world, retained)
 
 

@@ -17,6 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import elements
 from sqlalchemy.sql import operators, visitors
 
 from app.api.v1 import router
@@ -28,6 +29,34 @@ OWNER, OTHER = uuid.UUID(int=711), uuid.UUID(int=712)
 CODE, ETF = "999991.SH", "999992.SH"
 LICENCE = uuid.UUID(int=713)
 NOW = dt.datetime(2041, 5, 6, 16, 5, tzinfo=dt.UTC)
+
+
+def has_is_predicate(
+    statement: Any,
+    *,
+    table_name: str,
+    column_name: str,
+    value: bool | None,
+) -> bool:
+    """Inspect a SELECT's WHERE AST without depending on rendered SQL text."""
+    expected = {
+        None: elements.Null,
+        False: elements.False_,
+        True: elements.True_,
+    }[value]
+    for criterion in statement._where_criteria:
+        for expression in visitors.iterate(criterion):
+            if getattr(expression, "operator", None) is not operators.is_:
+                continue
+            column = getattr(expression, "left", None)
+            if (
+                getattr(column, "name", None) == column_name
+                and getattr(getattr(column, "table", None), "fullname", None)
+                == table_name
+                and isinstance(getattr(expression, "right", None), expected)
+            ):
+                return True
+    return False
 
 
 def test_aggregates_service_import_succeeds_in_fresh_process() -> None:
@@ -126,6 +155,13 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             assert params["trade_date_2"] == dt.time(15)
             assert params["param_1"] == "Asia/Shanghai"
             assert params["fetched_at_1"] == state.now
+            has_suspend_filter = has_is_predicate(
+                statement,
+                table_name="market.daily_bars",
+                column_name="is_suspended",
+                value=False,
+            )
+            state.daily_has_suspend_filter = has_suspend_filter
             eligible = [
                 row
                 for row in state.bars
@@ -133,7 +169,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 and row.source == params["source_1"]
                 and row.adj_type == params["adj_type_1"]
                 and row.source_licence_id == params["source_licence_id_1"]
-                and row.is_suspended is False
+                and (not has_suspend_filter or row.is_suspended is False)
                 and all(getattr(row, f) is not None for f in ("open", "high", "low", "close"))
                 and row.trade_date <= params["trade_date_1"]
                 and row.fetched_at >= dt.datetime.combine(
@@ -170,9 +206,16 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             assert selected_names == {"date"}
             assert date_comparisons[0] in (operators.lt, operators.le)
             assert params["param_1"] == 1
+            has_open_filter = has_is_predicate(
+                statement,
+                table_name="market.trading_calendar",
+                column_name="is_open",
+                value=True,
+            )
+            state.calendar_prev_has_open_filter = has_open_filter
             open_dates = [
                 day for day, is_open in state.calendar.items()
-                if is_open is True
+                if (not has_open_filter or is_open is True)
                 and (
                     day < params["date_1"]
                     if date_comparisons[0] is operators.lt
@@ -184,7 +227,23 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
             state.reads.append("licence")
             assert "app.user_data_licence_holds" in tables
             assert "held" not in params
-            return Result([LICENCE] if params["user_id_1"] in state.active else [])
+            has_deleted_filter = has_is_predicate(
+                statement,
+                table_name="app.user_data_licence_status",
+                column_name="deleted_at",
+                value=None,
+            )
+            state.licence_has_deleted_filter = has_deleted_filter
+            if not hasattr(state, "licences"):
+                return Result([LICENCE] if params["user_id_1"] in state.active else [])
+            eligible = [
+                row
+                for row in state.licences
+                if row.user_id == params["user_id_1"]
+                and row.user_id in state.active
+                and (not has_deleted_filter or row.deleted_at is None)
+            ]
+            return Result([row.id for row in eligible[:1]])
         raise AssertionError(f"unexpected SELECT from tables: {sorted(tables)}")
 
     engine = SimpleNamespace(
@@ -434,6 +493,7 @@ def test_incomplete_latest_bar_falls_back_or_reports_no_source(world: Any, inval
         bar(),
     ]
     item = world.client.get("/api/v1/quotes", params={"codes": CODE}).json()["items"][0]
+    assert world.state.daily_has_suspend_filter is True
     assert item["data_status"] == "stale" and item["price"] == "7.8750"
     world.state.reads.clear()
     world.state.bars.pop()
@@ -667,6 +727,7 @@ def test_nontrading_day_close_requires_calendar_and_same_day_fetch(
     assert calendar_queries[0] == "calendar_is_open"
     if calendar_reads == 2:
         assert calendar_queries[1] == "calendar_prev"
+        assert world.state.calendar_prev_has_open_filter is True
 
 
 @pytest.mark.parametrize(
