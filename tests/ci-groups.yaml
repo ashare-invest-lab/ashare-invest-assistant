@@ -186,3 +186,4 @@ tests:
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata and purge wiring", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "synthetic evidence"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb236_realtime_read.py", "group": "parallel", "keywords": ["MagicMock/synthetic", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb237_realtime_collect.py", "group": "parallel", "keywords": ["AST/synthetic", "no real PG/Redis/network"], "unverified": false}

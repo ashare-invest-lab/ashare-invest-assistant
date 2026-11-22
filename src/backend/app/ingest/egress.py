@@ -480,6 +480,7 @@ def mairui_get(
     stop: Path,
     halt: Path,
     transport: Callable[[str, str], tuple[int, object]] = _https_get,
+    upstream: Callable[[str, str], tuple[int, object]] | None = None,
     verify: bool = False,
 ) -> EgressResult:
     """Admit via IngestCore then call ``transport``. Order is fixed (contract §7.11.5).
@@ -489,6 +490,9 @@ def mairui_get(
     结果由消费者按最小语义落库（成功才 ``active``，其余保持原状态）。
     """
     from app.ingest.daily_lists import DailyHaltError, limited
+
+    if upstream is not None:
+        transport = upstream
 
     if verify and verification_is_offline():
         raise EgressDenied(VERIFY_OFFLINE_REASON)

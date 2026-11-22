@@ -225,7 +225,7 @@ def test_calendar_gate_returns_without_transport(monkeypatch: pytest.MonkeyPatch
             settings,
             owner=OWNER,
             now=NOW,
-            transport=transport,
+            upstream=transport,
             engine=Mock(),
         )
         == 0

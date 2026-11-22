@@ -2,8 +2,8 @@
 
 入口是 :func:`realtime_quotes_task`，由 ``market.realtime_quotes_fetch`` 调度。
 ``REALTIME_QUOTES_SOURCE=off`` 是默认值，关闭时不会创建数据库或麦蕊连接。
-生产请求必须经过既有 ``single_egress`` / ``mairui_get``，测试可注入无网络
-``transport``。一轮先完成所有响应校验，再在一个事务中写入同一 ``batch_id``。
+生产请求必须经过既有 ``single_egress`` / ``mairui_get``，测试可注入无网络上游。
+一轮先完成所有响应校验，再在一个事务中写入同一 ``batch_id``。
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ REALTIME_FIELD_MAP: Final[Mapping[str, str]] = {
     "limit_down": "limit_down",
 }
 
-Transport = Callable[[str, str], tuple[int, object]]
+Upstream = Callable[[str, str], tuple[int, object]]
 SecretLoader = Callable[[Engine, uuid.UUID], str]
 RedisClient = redis.Redis
 
@@ -266,7 +266,7 @@ def _fetch_with_egress(
     licence_id: uuid.UUID,
     now: dt.datetime,
     path: str,
-    transport: Transport | None,
+    upstream: Upstream | None,
     secret_loader: SecretLoader,
     stop: Path,
     halt: Path,
@@ -292,8 +292,8 @@ def _fetch_with_egress(
         "stop": stop,
         "halt": halt,
     }
-    if transport is not None:
-        kwargs["transport"] = transport
+    if upstream is not None:
+        kwargs["upstream"] = upstream
     try:
         with single_egress(engine) as lease:
             kwargs["lease"] = lease
@@ -309,7 +309,7 @@ def collect_realtime_quotes(
     *,
     owner: uuid.UUID,
     now: dt.datetime | None = None,
-    transport: Transport | None = None,
+    upstream: Upstream | None = None,
     secret_loader: SecretLoader = credential,
     engine: Engine | None = None,
     redis_client: RedisClient | None = None,
@@ -348,7 +348,7 @@ def collect_realtime_quotes(
             licence_id=licence_id,
             now=stamp,
             path=path,
-            transport=transport,
+            upstream=upstream,
             secret_loader=secret_loader,
             stop=stop,
             halt=halt,
@@ -383,7 +383,7 @@ def realtime_quotes_task(
     *,
     now: dt.datetime | None = None,
     owner: uuid.UUID | str | None = None,
-    transport: Transport | None = None,
+    upstream: Upstream | None = None,
     secret_loader: SecretLoader = credential,
     redis_client: RedisClient | None = None,
 ) -> int:
@@ -430,7 +430,7 @@ def realtime_quotes_task(
                     settings,
                     owner=current_owner,
                     now=stamp,
-                    transport=transport,
+                    upstream=upstream,
                     secret_loader=secret_loader,
                     engine=engine,
                     redis_client=redis_client,
