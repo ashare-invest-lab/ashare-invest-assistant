@@ -191,3 +191,4 @@ tests:
   - {"file": "tests/backend/unit/test_tt113_market_overview.py", "group": "parallel", "keywords": ["offline TestClient", "deny socket", "虚构夹具", "env -u MAIRUI_LICENCE", "不连 PG/Redis/外网"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt118_ingest_collection.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "denied sockets", "synthetic transport", "UUID batch idempotence"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt127_restrictions_e2e.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "create_app + TestClient HTTP", "虚构用户和证券", "env -u MAIRUI_LICENCE", "不连外网/麦蕊", "并发删除"], "unverified": false}
+  - {"file": "tests/backend/api_app/test_t_t137_rv03_rv06.py", "group": "parallel", "keywords": ["create_app + TestClient HTTP", "虚构复盘/跟踪/风控夹具", "fake Engine/Redis", "不连 PG/Redis/外网/麦蕊"], "unverified": false}
