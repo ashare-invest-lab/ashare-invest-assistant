@@ -6,7 +6,7 @@ import { withDailyDimensions } from './phase2Fixtures';
  * 不联网，不调用后端或麦蕊接口。生成过程是确定性的（固定种子），便于截图与测试复现。
  */
 import type {
-  Action, ConfidenceLevel, DataStatus, Dimension, DimensionView, Horizon, Lifecycle, ReasonCode, StrategyEvalState, TLeg,
+  Action, ConfidenceLevel, DataStatus, Dimension, DimensionView, Horizon, Lifecycle, ReasonCode, SecurityType, StrategyEvalState, TLeg,
   CandidateSignalState, RiskLevel,
 } from '../api/enums';
 import { ENUMS } from '../api/enums';
@@ -567,7 +567,7 @@ export const TERMINAL_ACCOUNT: TerminalAccount = {
 };
 
 export const TERMINAL_ROWS: TerminalRow[] = (() => {
-  const rows = SPECS.map((s): TerminalRow & { security_type: 'stock' | null; _w: number; _added: number } => {
+  const rows = SPECS.map((s): TerminalRow & { security_type: SecurityType | null; _w: number; _added: number } => {
     const sg = suggestionOf(s.code)!;
     const q = QUOTES.find((x) => x.security_code === s.code)!;
     const pos = PORTFOLIO.positions.find((p) => p.security_code === s.code);
@@ -589,6 +589,12 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     if (ga !== gb) return ga - gb;
     if (ga === 0) return b._w - a._w;
     return a._added - b._added;
+  });
+  rows.push({
+    security_code: '510001.SH', name: '示例沪深300ETF', in_watchlist: true, focus: true, security_type: 'etf',
+    quote: { price: '3.94', change_pct: null, amount: null, t: NOW }, holding: null, suggestion: null,
+    active_reason_count: 0, max_risk_level: null, data_status: 'fresh', data_as_of: NOW,
+    _w: -1, _added: rows.length,
   });
   return rows.map(({ _w, _added, ...row }) => { void _w; void _added; return row; });
 })();

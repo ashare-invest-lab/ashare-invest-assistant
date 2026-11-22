@@ -5,7 +5,7 @@ import type { Time } from 'lightweight-charts';
 import { useBars, useCandidateSignals, useSecuritySignals } from '../../api/queries';
 import { useBarsWindow } from '../../api/marketQueries';
 import { chartStops, markerSignals } from './chartStops';
-import type { Suggestion, TerminalRow } from '../../api/types';
+import { securityTypeOf, type Suggestion, type TerminalRow } from '../../api/types';
 import { DataStatusTag } from '../../components/common';
 import { KlineChart } from '../../components/charts/KlineChart';
 import { KlineWindowInfo } from '../../components/charts/KlineWindowInfo';
@@ -49,7 +49,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
         <span className="mono muted">{row.security_code}</span>
         {q ? (
           <>
-            <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, row.holding?.security_type)}</span>
+            <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, securityTypeOf(row))}</span>
             <span className={`mono ${pctClass(q.change_pct)}`}>
               {pre ? `${signed(Number(q.price) - Number(pre))} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
             </span>
