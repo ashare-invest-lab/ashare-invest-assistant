@@ -47,6 +47,36 @@ describe('T-F81 复盘指标口径', () => {
     }
   });
 
+  it('默认 review-example-2 按指标来源缺口标记为部分缺失', async () => {
+    const response = await fetch(`${API}/reviews/review-example-2`);
+    const body = await response.json() as {
+      data_status: string;
+      gaps: { key: string; reason: string }[];
+      current_version: {
+        data_status: string;
+        gaps: { key: string; reason: string }[];
+      };
+    };
+    expect(response.ok).toBe(true);
+    expect(body.data_status).toBe('partial');
+    expect(body.data_status).not.toBe('pending');
+    expect(body.data_status).toBe(body.current_version.data_status);
+    expect(body.gaps).toEqual(body.current_version.gaps);
+    expect(body.gaps).toHaveLength(metricKeys.length);
+    expect(body.gaps.map((gap) => gap.key)).toEqual(metricKeys.map((key) => `outcome_metrics.${key}`));
+    expect(body.gaps.every((gap) => gap.reason === 'no_source')).toBe(true);
+    expect(body.gaps.some((gap) => gap.reason === 'not_yet_published')).toBe(false);
+
+    renderAt('/reviews/review-example-2');
+    await screen.findByTestId('metric-holding_return');
+    const page = screen.getByTestId('review-detail');
+    expect(within(page).getByTestId('review-gap')).toHaveTextContent('无数据源');
+    expect(within(page).getByTestId('review-metric-gap')).toHaveTextContent('无数据源');
+    expect(page).not.toHaveTextContent('尚未发布');
+    expect(page).not.toHaveTextContent('拉取中');
+    for (const key of metricKeys) expect(within(page).getByTestId(`metric-${key}`)).toHaveTextContent('—');
+  });
+
   it('按原因合并缺口，去重消息并列出合法指标名', () => {
     const gaps = [
       { key: 'trade_ids', reason: 'user_input_missing', message: '缺少可关联成交记录' },
