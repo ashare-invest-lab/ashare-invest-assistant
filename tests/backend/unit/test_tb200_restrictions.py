@@ -65,6 +65,7 @@ class Result:
 class Connection:
     def __init__(self, rows: list[Any]) -> None:
         self.rows = rows
+        self.names = [SimpleNamespace(name="Synthetic target")]
         self.statements: list[Any] = []
 
     def execute(self, statement: Any, *_args: Any, **_kwargs: Any) -> Result:
@@ -74,7 +75,15 @@ class Connection:
             return Result([])
         if isinstance(statement, (Insert, Delete)):
             return Result([])
-        return Result(self.rows)
+        statement_text = str(statement)
+        if (
+            "candidate_signals" in statement_text
+            or "non_executable_reasons" in statement_text
+        ):
+            return Result([])
+        if "user_restrictions" in statement_text:
+            return Result(self.rows)
+        return Result([self.names.pop(0)]) if self.names else Result([])
 
 
 class Engine:
@@ -106,20 +115,23 @@ class RecheckConnection(Connection):
         signal_rows = [
             SimpleNamespace(
                 id=item.signal_row_id,
+                user_id=USER_ID,
                 instance_id=item.instance_id,
                 security_code=item.security_code,
                 strategy_version_id=item.strategy_version_id,
+                created_at=restriction.created_at + dt.timedelta(minutes=1),
             )
             for item in candidates
             if item.signal_row_id is not None
         ]
         self.select_results = [
             [restriction],
-            reason_rows,
             signal_rows,
+            reason_rows,
             remaining_restrictions,
             [signal],
             [],
+            [SimpleNamespace(name="Synthetic target")],
         ]
         self.reason_updates: list[dict[str, Any]] = []
         self.reason_events: list[dict[str, Any]] = []
@@ -187,9 +199,9 @@ def test_get_lists_expired_rows_and_uses_cursor_shape() -> None:
     )
 
     assert [item["id"] for item in result.items] == [expired.id]
-    assert result.items[0]["until"] == expired.until
+    assert result.items[0]["until"] == "2026-11-21T19:59:59+08:00"
     assert result.next_cursor is None
-    statement = str(engine.connection.statements[-1])
+    statement = str(engine.connection.statements[0])
     assert "removed_at" in statement
     assert "user_id" in statement
 
@@ -209,7 +221,11 @@ def test_post_creates_only_the_authenticated_owner_record() -> None:
 
     assert result.id == created.id
     assert result.kind == RestrictionKind.BLOCKLIST
-    insert_statement = engine.connection.statements[0]
+    insert_statement = next(
+        statement
+        for statement in engine.connection.statements
+        if isinstance(statement, Insert)
+    )
     assert isinstance(insert_statement, Insert)
     assert insert_statement.compile().params["user_id"] == USER_ID
 
@@ -258,9 +274,13 @@ def test_delete_soft_deletes_and_repeat_or_foreign_is_not_found() -> None:
     assert result.removed_at.tzinfo is not None
     assert result.recheck.released_reason_ids == []
     assert owned.removed_at == result.removed_at
-    with pytest.raises(AppError) as repeated:
-        restrictions.delete_restriction(identifier, auth(), engine)
-    assert repeated.value.code == ErrorCode.NOT_FOUND
+    repeated = restrictions.delete_restriction(identifier, auth(), engine)
+    assert repeated.id == identifier
+    assert repeated.removed_at == result.removed_at
+    assert repeated.status == "removed"
+    assert repeated.recheck.released_reason_ids == []
+    assert repeated.recheck.remaining_reason_ids == []
+    assert repeated.gaps == result.gaps
 
     foreign_engine = Engine([])
     with pytest.raises(AppError) as foreign:
@@ -270,6 +290,7 @@ def test_delete_soft_deletes_and_repeat_or_foreign_is_not_found() -> None:
 
 def test_delete_rechecks_only_associated_reason_and_releases_signal() -> None:
     restriction = row(kind="blocklist")
+    restriction.created_at = NOW - dt.timedelta(hours=1)
     reason_id = uuid.uuid4()
     unrelated_id = uuid.uuid4()
     signal = SimpleNamespace(
@@ -309,7 +330,9 @@ def test_delete_rechecks_only_associated_reason_and_releases_signal() -> None:
 
 def test_delete_keeps_reason_when_another_valid_restriction_remains() -> None:
     restriction = row(kind="blocklist")
+    restriction.created_at = NOW - dt.timedelta(hours=1)
     other = row(kind="blocklist")
+    other.created_at = restriction.created_at - dt.timedelta(minutes=1)
     other.target_id = restriction.target_id
     reason_id = uuid.uuid4()
     signal = SimpleNamespace(

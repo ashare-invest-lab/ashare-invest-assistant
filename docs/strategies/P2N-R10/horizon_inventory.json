@@ -1115,6 +1115,11 @@
       "note": "T-R88b：sw_ma_trend_pullback v2 升版前原文冻结；历史身份，不晋级"
     },
     {
+      "path": "docs/strategies/T-R103/review_tracking_metrics.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R103 复盘与建议跟踪指标口径卡；候选信号研究支持文档，非策略身份"
+    },
+    {
       "path": "docs/strategies/T-R114/unverified_followup.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R114：T-R112 未验证参数补证追踪；非策略身份"
