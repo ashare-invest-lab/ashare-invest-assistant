@@ -172,11 +172,48 @@ class Connection:
             ]
             return Result(rows)
         if "daily_bars" in sql:
+            params = statement.compile().params  # type: ignore[attr-defined]
+            trade_day = next(
+                (
+                    value
+                    for value in params.values()
+                    if isinstance(value, dt.date) and not isinstance(value, dt.datetime)
+                ),
+                None,
+            )
+            exact_day = "trade_date =" in sql
+            fetched_after = next(
+                (
+                    value
+                    for value in params.values()
+                    if isinstance(value, dt.datetime)
+                    and value.astimezone(BEIJING).time() == dt.time(17, 10)
+                ),
+                None,
+            )
             return Result(
                 [
                     item
                     for item in self.daily_rows
-                    if self.as_of is None or item._mapping["fetched_at"] <= self.as_of
+                    if (
+                        self.as_of is None
+                        or item._mapping["fetched_at"] <= self.as_of
+                    )
+                    and (
+                        trade_day is None
+                        or (
+                            exact_day
+                            and item._mapping["trade_date"] == trade_day
+                        )
+                        or (
+                            not exact_day
+                            and item._mapping["trade_date"] < trade_day
+                        )
+                    )
+                    and (
+                        fetched_after is None
+                        or item._mapping["fetched_at"] >= fetched_after
+                    )
                 ]
             )
         if "securities" in sql:
@@ -338,7 +375,15 @@ def test_close_fixture_uses_final_mairui_bar_and_amount_in_yuan() -> None:
     )
     assert result.basis is not None and result.basis.mode == "close"
     assert result.turnover_total == "20.00"
-    assert result.indices[0].change_pct == "11.11111111111111111111111111"
+    assert result.indices[0].change_pct == "11.1111"
+
+
+def test_intraday_index_change_pct_is_quantized() -> None:
+    result = overview(
+        Connection(quotes=[quote("000300.SH", pct="11.11111111111111111111111111")]),
+        dt.datetime(2031, 2, 3, 10, 1, tzinfo=BEIJING),
+    )
+    assert result.indices[0].change_pct == "11.1111"
 
 
 def test_suspended_zero_volume_delisted_excluded_and_st_keeps_width() -> None:
@@ -453,6 +498,24 @@ def test_pre_open_and_non_trading_use_previous_final_bar_as_stale(
         and result.basis.mode == "close"
     )
     assert result.basis.observed_date == previous
+
+
+def test_after_final_deadline_uses_previous_final_bar_as_stale() -> None:
+    previous = DAY - dt.timedelta(days=1)
+    result = overview(
+        Connection(
+            daily_rows=[
+                daily("600000.SH", trade_date=previous),
+                daily("000001.SZ", trade_date=previous),
+                daily("000300.SH", trade_date=previous),
+            ]
+        ),
+        dt.datetime(2031, 2, 3, 17, 30, tzinfo=BEIJING),
+    )
+    assert result.basis is not None
+    assert result.basis.mode == "close"
+    assert result.basis.observed_date == previous
+    assert result.data_status is DataStatus.STALE
 
 
 def test_previous_close_fallback_does_not_mix_trade_dates() -> None:

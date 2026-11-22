@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -77,6 +77,17 @@ def _decimal(value: object) -> Decimal | None:
 def _text(value: object) -> str | None:
     number = _decimal(value)
     return format(number, "f") if number is not None else None
+
+
+def _change_pct_text(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    quantized = value.quantize(RATIO_QUANTUM, rounding=ROUND_HALF_UP)
+    formatted = format(value, "f")
+    fractional_digits = len(formatted.partition(".")[2])
+    if value == quantized and fractional_digits <= 4:
+        return formatted
+    return format(quantized, "f")
 
 
 def _aware(value: object) -> dt.datetime | None:
@@ -421,7 +432,7 @@ def _overview(
         )
     )
     used_previous_close = False
-    if close_mode and clock.session == MarketSession.NON_TRADING_DAY and not rows:
+    if close_mode and not rows:
         rows = _daily_rows(conn, codes, licence, clock.trade_date, query_as_of, exact_day=False)
         used_previous_close = bool(rows)
     if not rows and not close_mode:
@@ -444,7 +455,7 @@ def _overview(
             continue
         price, change, amount, _suspended, _volume = _row_metrics(row, close_mode)
         card.price = _text(price)
-        card.change_pct = _text(change)
+        card.change_pct = _change_pct_text(change)
         card.amount = _text(amount)
         card.t = _row_time(row, close_mode)
     candidate = {str(_row_value(row, "code")) for row in stocks}
