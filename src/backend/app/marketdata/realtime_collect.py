@@ -1,9 +1,8 @@
 """交易时段内按用户证书采集并写入 ``market.quotes_snapshot``。
 
-入口是 :func:`realtime_quotes_task`，由 ``market.realtime_quotes_fetch`` 调度。
 ``REALTIME_QUOTES_SOURCE=off`` 是默认值，关闭时不会创建数据库或麦蕊连接。
-生产请求必须经过既有 ``single_egress`` / ``mairui_get``，测试可注入无网络上游。
-一轮先完成所有响应校验，再在一个事务中写入同一 ``batch_id``。
+生产请求必须经过既有 ``single_egress`` / ``mairui_get``，测试可通过登记的窄缝
+注入无网络 ``transport``。一轮先完成所有响应校验，再在一个事务中写入同一 ``batch_id``。
 """
 
 from __future__ import annotations
@@ -66,6 +65,7 @@ REALTIME_FIELD_MAP: Final[Mapping[str, str]] = {
 }
 
 Upstream = Callable[[str, str], tuple[int, object]]
+Transport = Upstream
 SecretLoader = Callable[[Engine, uuid.UUID], str]
 RedisClient = redis.Redis
 
@@ -258,6 +258,17 @@ def _open_clock(conn: Connection, settings: Settings, now: dt.datetime) -> Marke
         return None
 
 
+def realtime_quotes_seam[T](
+    operation: Callable[..., T],
+    *args: object,
+    sender: Transport | None,
+    **options: object,
+) -> T:
+    if sender is None:
+        return operation(*args, **options)
+    return operation(*args, transport=sender, **options)
+
+
 def _fetch_with_egress(
     engine: Engine,
     settings: Settings,
@@ -279,25 +290,23 @@ def _fetch_with_egress(
         from app.ingest.core import IngestCore
 
         core = IngestCore(cfg=settings.business.ingest.licences, engine=engine)
-    kwargs: dict[str, object] = {
-        "lease": None,
-        "core": core,
-        "engine": engine,
-        "licence_id": licence_id,
-        "user_id": owner,
-        "path": path,
-        "secret": secret,
-        "priority": Priority.P0,
-        "clock": lambda: now,
-        "stop": stop,
-        "halt": halt,
-    }
-    if upstream is not None:
-        kwargs["upstream"] = upstream
     try:
         with single_egress(engine) as lease:
-            kwargs["lease"] = lease
-            result = mairui_get(**kwargs)  # type: ignore[arg-type]
+            result = realtime_quotes_seam(
+                mairui_get,
+                lease=lease,
+                core=core,
+                engine=engine,
+                licence_id=licence_id,
+                user_id=owner,
+                path=path,
+                secret=secret,
+                priority=Priority.P0,
+                clock=lambda: now,
+                stop=stop,
+                halt=halt,
+                sender=upstream,
+            )
     except EgressDenied as exc:
         raise RealtimeCollectionStoppedError(f"egress_{exc.code}") from None
     return result.status, result.body
@@ -310,6 +319,7 @@ def collect_realtime_quotes(
     owner: uuid.UUID,
     now: dt.datetime | None = None,
     upstream: Upstream | None = None,
+    transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
     engine: Engine | None = None,
     redis_client: RedisClient | None = None,
@@ -317,6 +327,7 @@ def collect_realtime_quotes(
     halt: Path = HALT,
 ) -> int:
     """采集一个用户持仓与自选的一轮行情，所有响应通过后才写库。"""
+    hook = transport if transport is not None else upstream
     if verification_is_offline():
         log.info("实时行情跳过：当前为 replay/离线模式")
         return 0
@@ -348,7 +359,7 @@ def collect_realtime_quotes(
             licence_id=licence_id,
             now=stamp,
             path=path,
-            upstream=upstream,
+            upstream=hook,
             secret_loader=secret_loader,
             stop=stop,
             halt=halt,
@@ -384,10 +395,12 @@ def realtime_quotes_task(
     now: dt.datetime | None = None,
     owner: uuid.UUID | str | None = None,
     upstream: Upstream | None = None,
+    transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
     redis_client: RedisClient | None = None,
 ) -> int:
     """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
+    hook = transport if transport is not None else upstream
     if verification_is_offline():
         log.info("实时行情跳过：当前为 replay/离线模式")
         return 0
@@ -430,7 +443,7 @@ def realtime_quotes_task(
                     settings,
                     owner=current_owner,
                     now=stamp,
-                    upstream=upstream,
+                    upstream=hook,
                     secret_loader=secret_loader,
                     engine=engine,
                     redis_client=redis_client,

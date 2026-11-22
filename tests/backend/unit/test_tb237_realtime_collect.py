@@ -1,4 +1,4 @@
-"""T-B237 verifies the realtime upstream seam stays outside the transport name."""
+"""T-B237 verifies the registered realtime transport seam."""
 
 from __future__ import annotations
 
@@ -12,7 +12,10 @@ from unittest.mock import Mock
 import pytest
 
 from app.marketdata import realtime_collect
-from tests.backend.unit.test_ta91_a1s_static_t_t55 import _s5_transport_inject
+from tests.backend.unit.test_ta91_a1s_static_t_t55 import (
+    _realtime_quotes_seam_lines,
+    _s5_transport_inject,
+)
 
 OWNER = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1")
 LICENCE = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1")
@@ -43,10 +46,11 @@ def _live_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAIRUI_MODE", "live")
 
 
-def test_realtime_collect_has_no_transport_injection_ast() -> None:
+def test_realtime_collect_has_only_registered_transport_seam() -> None:
     path = Path(__file__).parents[3] / "src/backend/app/marketdata/realtime_collect.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    assert _s5_transport_inject(tree) == []
+    allowed = {f"kw:transport:{line}" for line in _realtime_quotes_seam_lines(tree)}
+    assert set(_s5_transport_inject(tree)) == allowed
 
 
 def test_collect_entry_accepts_synthetic_upstream_without_network(
@@ -95,7 +99,7 @@ def test_fetch_maps_synthetic_upstream_to_egress(
 
     def fake_mairui_get(**kwargs: object) -> SimpleNamespace:
         seen.update(kwargs)
-        status, body = kwargs["upstream"]("synthetic-path", "synthetic-secret")  # type: ignore[operator]
+        status, body = kwargs["transport"]("synthetic-path", "synthetic-secret")  # type: ignore[operator]
         return SimpleNamespace(status=status, body=body)
 
     monkeypatch.setattr(realtime_collect, "get_ingest_core", lambda: core)
@@ -116,5 +120,6 @@ def test_fetch_maps_synthetic_upstream_to_egress(
     )
 
     assert (status, body) == (200, [{"synthetic": True}])
-    assert seen["upstream"] is upstream
+    assert seen["transport"] is upstream
+    assert "upstream" not in seen
     upstream.assert_called_once_with("synthetic-path", "synthetic-secret")
