@@ -20,6 +20,8 @@ const body: TerminalResponse = {
   account_id: TERMINAL_ACCOUNT.account_id,
   server_time: '2026-11-02T02:31:00Z', trade_date: '2026-11-02', session: 'morning',
   account: TERMINAL_ACCOUNT, rows, truncated: true, unread_notifications: 0,
+  data_status: 'partial', data_as_of: '2026-11-02T10:30:00+08:00',
+  gaps: [{ key: 'aggregation', reason: 'no_source', message: '行情聚合缺证（虚构夹具）' }],
 };
 beforeEach(() => {
   mockLoginAs('demo_user');
@@ -42,6 +44,8 @@ describe('T-F51 交易终端', () => {
     expect(await screen.findByTestId('quote-head')).toHaveTextContent(rows[0].name);
     expect(screen.getByText(/服务器时间 2026-11-02 10:31/)).toHaveTextContent('列表已截断');
     expect(screen.getByTestId('account-strip')).toHaveTextContent('总资产');
+    expect(screen.getByTestId('terminal-gap-note')).toHaveTextContent('行情聚合缺证');
+    expect(screen.getByTestId('terminal-account-basis')).toHaveTextContent('市场批次');
     const table = screen.getByTestId('watch-table');
     const second = await within(table).findByText(rows[1].name, { exact: false });
     fireEvent.click(second);

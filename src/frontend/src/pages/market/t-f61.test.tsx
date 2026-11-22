@@ -1,4 +1,4 @@
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -33,13 +33,13 @@ function mount(path: string, body: unknown) {
 const cases: [string, MarketCaseBody, string, boolean, boolean, boolean][] = [
   ['同批', base, '覆盖率：100.0%', false, false, false],
   ['部分批', { ...base, data_status: 'partial', breadth: null, turnover_total: null, basis: { ...basis, observed: 8, missing: 2 }, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：缺两个成员' }] }, 'missing：2', true, false, false],
-  ['部分缺失', { ...base, basis: { ...basis, observed: null, suspended: null, missing: null } }, '覆盖率：—', false, false, false],
+  ['部分缺失', { ...base, basis: { ...basis, observed: null, suspended: null, missing: null } }, '覆盖率：缺证', false, false, false],
   ['旧收盘', { ...base, data_status: 'stale', basis: { ...basis, observed_date: '2026-10-30', mode: 'close' } }, 'observed_date：2026-10-30', false, true, false],
   ['旧且部分', { ...base, data_status: 'partial', basis: { ...basis, observed_date: '2026-10-30', missing: 2, observed: 8 } }, 'missing：2', true, true, false],
-  ['真实零', { ...base, breadth: { up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0, up_ratio: null, down_ratio: null, flat_ratio: null }, basis: { ...basis, eligible: 0, observed: 0, trading: 0, suspended: 0 } }, '覆盖率：—', false, false, false],
-  ['未知资格池', { ...base, basis: { ...basis, eligible: null, observed: null, trading: null, suspended: null, missing: null } }, 'eligible：—', false, false, false],
-  ['旧响应缺失 basis', withoutBasis(base), 'basis：—', false, false, true],
-  ['无市场快照', { ...base, basis: null, breadth: null, turnover_total: null, data_status: 'unavailable', data_as_of: null, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：无市场批次' }] }, 'basis：—', false, false, true],
+  ['真实零', { ...base, breadth: { up: 0, down: 0, flat: 0, limit_up: 0, limit_down: 0, up_ratio: null, down_ratio: null, flat_ratio: null }, basis: { ...basis, eligible: 0, observed: 0, trading: 0, suspended: 0 } }, '覆盖率：缺证', false, false, false],
+  ['未知资格池', { ...base, basis: { ...basis, eligible: null, observed: null, trading: null, suspended: null, missing: null } }, 'eligible：缺证', false, false, false],
+  ['旧响应缺失 basis', withoutBasis(base), 'basis：缺证', false, false, true],
+  ['无市场快照', { ...base, basis: null, breadth: null, turnover_total: null, data_status: 'unavailable', data_as_of: null, gaps: [{ key: 'market.breadth', reason: 'no_source', message: '合成：无市场批次' }] }, 'basis：缺证', false, false, true],
 ];
 
 describe.each(paths)('%s 共用市场展示', (path) => {
@@ -48,13 +48,13 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     const panel = await screen.findByTestId('market-basis');
     expect(panel).toHaveTextContent(text);
     const responseBasis = 'basis' in body ? body.basis : undefined;
-    if (responseBasis?.eligible === null) expect(panel).toHaveTextContent('覆盖率：—');
+    if (responseBasis?.eligible === null) expect(panel).toHaveTextContent('覆盖率：缺证');
     if (responseBasis?.mode === 'intraday') expect(panel).toHaveTextContent('mode：intraday');
     if (responseBasis?.mode === 'close') expect(panel).toHaveTextContent('mode：close');
     if (responseBasis) expect(panel).toHaveTextContent('scope：沪深股票口径');
     if (missingBasis) {
       expect(panel).toHaveTextContent('无市场快照证据');
-      expect(panel).toHaveTextContent('basis：—');
+      expect(panel).toHaveTextContent('basis：缺证');
     }
     expect(!!within(panel).queryByText('部分批')).toBe(partial);
     expect(!!within(panel).queryByText('旧批')).toBe(old);
@@ -80,6 +80,20 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     expect(screen.getByTestId('market-page')).toHaveTextContent('未知');
     expect(await screen.findByText('暂无板块资金：未知')).toBeInTheDocument();
     expect(screen.getByTestId('sector-meta')).toHaveTextContent('未知');
+  });
+
+  it('板块资金展示来源 provider、endpoint、fetched_at，来源缺失显示缺证', async () => {
+    mount(path, base);
+    expect(await screen.findByTestId('sector-sources')).toHaveTextContent('麦蕊');
+    expect(screen.getByTestId('sector-sources')).toHaveTextContent('fetched_at 2026-10-30 18:00');
+
+    cleanup();
+    server.use(http.get('/api/v1/market/sector-flows', () => HttpResponse.json({
+      kind: 'industry', taxonomy: null, trade_date: null, items: [], sources: [], data_status: 'unavailable', data_as_of: null,
+      gaps: [{ key: 'sector_flows', reason: 'no_source', message: '板块资金来源缺失（虚构夹具）' }],
+    })));
+    mount(path, base);
+    expect(await screen.findByTestId('sector-sources')).toHaveTextContent('来源：缺证');
   });
 
   it('涨跌停或计数为 null 时显示破折号并保留缺口说明', async () => {

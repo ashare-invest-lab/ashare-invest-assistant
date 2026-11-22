@@ -6,8 +6,9 @@ import { securityTypeOf, type TerminalAccount, type TerminalRow, type TerminalSc
 import { DataGrid, type DataColumn } from '../../components/DataGrid';
 import { ActionBadge, ConsensusBadge, DataStatusTag } from '../../components/common';
 import { EXECUTABILITY, REGIME, RISK_LEVEL } from '../../i18n/labels';
-import { fmtAmount, fmtNum, fmtPrice, pctClass, signed } from '../../lib/format';
+import { fmtAmount, fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { quoteCloseTagText } from '../../lib/quoteDisplay';
+import { BasisTrace } from '../../pages/market/MarketBasis';
 
 const SCOPES: { label: string; value: TerminalScope }[] = [
   { label: '全部', value: 'all' },
@@ -29,7 +30,7 @@ export function AccountStrip({ account }: { account: TerminalAccount | null | un
         <b>{account.regime ? (labelOf(REGIME, account.regime) ?? '未知') : '—'}</b>
         {r ? <span className="muted small"> 参考区间 {fmtNum(r.min_pct, 0)}–{fmtNum(r.max_pct, 0)}%</span> : null}
       </div>
-      <div><label>数据</label><DataStatusTag status={account.data_status} /></div>
+      <div><label>数据</label><DataStatusTag status={account.data_status} /><BasisTrace basis={account.basis} testId="terminal-account-basis" /></div>
     </div>
   );
 }
@@ -122,7 +123,12 @@ export function WatchTable({ rows, loading, scope, onScope, selected, onSelect, 
       key: 'risk', header: '风控', width: 50, sortable: false,
       render: (r) => (r.max_risk_level ? <span style={{ color: tagOf(RISK_LEVEL, r.max_risk_level).color === 'red' ? '#ff7b72' : tagOf(RISK_LEVEL, r.max_risk_level).color === 'orange' ? '#f0b429' : labelOf(RISK_LEVEL, r.max_risk_level) ? '#58a6ff' : '#7d8794' }}>{tagOf(RISK_LEVEL, r.max_risk_level).text}</span> : <span className="muted">—</span>),
     },
-    { key: 'ds', header: '数据', width: 72, sortable: false, render: (r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
+    { key: 'ds', header: '数据', width: 118, sortable: false, render: (r) => (
+      <span>
+        <DataStatusTag status={r.data_status} asOf={r.data_as_of} />
+        <span className="muted small">行情时点：{r.quote?.t ? fmtTime(r.quote.t) : '缺证'}</span>
+      </span>
+    ) },
   ], []);
 
   return (

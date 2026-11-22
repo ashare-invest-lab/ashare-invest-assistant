@@ -489,6 +489,8 @@ export interface TerminalAccount {
   regime: MarketRegime | null;
   regime_position_range: RegimePositionRange | null;
   data_status: DataStatus;
+  /** 当前 main 的 /terminal.account 市场批次说明，旧响应可缺省。 */
+  basis?: MarketBasis | null;
 }
 export interface TerminalResponse {
   /** T-A12：实际选中的本人账户；没有账户时为 null。 */
@@ -501,6 +503,10 @@ export interface TerminalResponse {
   rows: TerminalRow[];
   truncated: boolean;
   unread_notifications: number;
+  /** /terminal 继承 DataStatusBlock，旧响应可缺省。 */
+  data_status?: DataStatus;
+  data_as_of?: DateTime | null;
+  gaps?: Gap[];
 }
 /** v0.2.7 §7.3 /today 补充：提醒（不含 origin=plan_condition） */
 export interface TodayAlert {
@@ -609,7 +615,7 @@ export interface TodayResponse {
   server_time: DateTime;
   trade_date: DateStr;
   session: MarketSession;
-  market: { regime: MarketRegime | null; regime_position_range: RegimePositionRange | null; data_status: DataStatus };
+  market: { basis?: MarketBasis | null; regime: MarketRegime | null; regime_position_range: RegimePositionRange | null; data_status: DataStatus };
   focus: MoreList<TodayFocusRow>;
   pending_plan_drafts: MoreList<{ id: Uuid; security_code: string; name: string; action: Action; valid_until: DateTime | null; status: PlanDraftStatus }>;
   released_reasons: MoreList<{ reason_id: Uuid; signal_id: Uuid; code: ReasonCode; security_code: string; name: string; released_at: DateTime }>;
@@ -623,6 +629,10 @@ export interface TodayResponse {
   plan_triggers: MoreList<TodayPlanTrigger>;
   data_gaps: MoreList<TodayDataGap>;
   evidence: Evidence[];
+  /** /today 继承 DataStatusBlock，旧响应可缺省。 */
+  data_status?: DataStatus;
+  data_as_of?: DateTime | null;
+  gaps?: Gap[];
 }
 
 // §7.8.1–7.8.4 复盘对象。按 #349@c718b419，ReviewSummary、ReviewDetail、ReviewVersion

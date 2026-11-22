@@ -7,10 +7,20 @@ import { useMarketOverview, useSectorFlows } from '../../api/marketQueries';
 import type { SectorFlow, SectorKind } from '../../api/marketTypes';
 import type { MarketOverview } from '../../api/types';
 import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
-import { GAP_REASON, INDUSTRY_TAXONOMY, REGIME, SESSION } from '../../i18n/labels';
+import { GAP_REASON, INDUSTRY_TAXONOMY, PROVIDER, REGIME, SESSION } from '../../i18n/labels';
 import { fmtAmount, fmtNum, fmtTime, pctClass, signed } from '../../lib/format';
 import { PriceChartPanel } from '../stock/PriceChartPanel';
 import { MarketBasis } from './MarketBasis';
+
+function sourceText(sources: { provider: string; endpoint: string | null; fetched_at: string | null }[]): string {
+  if (!sources.length) return '来源：缺证';
+  return `来源：${sources.map((source) => {
+    const provider = Object.hasOwn(PROVIDER, source.provider) ? PROVIDER[source.provider as keyof typeof PROVIDER] : '未知';
+    const endpoint = source.endpoint ? ` · ${source.endpoint}` : '';
+    const fetched = source.fetched_at ? ` · fetched_at ${fmtTime(source.fetched_at)}` : ' · fetched_at 缺证';
+    return `${provider}${endpoint}${fetched}`;
+  }).join('；')}`;
+}
 
 /** /market 市场概览（plan §2.3 能力 1 / §2.4）：指数、涨跌家数与涨跌停、regime 与参考仓位区间、两市成交额、板块资金 */
 export function MarketPage() {
@@ -49,7 +59,8 @@ export function MarketPage() {
             <span className="ic-name">{i.name}</span>
             <span className={`ic-price mono ${pctClass(i.change_pct)}`}>{fmtNum(i.price)}</span>
             <span className={`mono ${pctClass(i.change_pct)}`}>{i.change_pct === null ? '—' : `${signed(i.change_pct)}%`}</span>
-            <span className="muted small mono">成交 {fmtAmount(i.amount)}</span>
+            <span className="muted small mono">成交额（元）{fmtAmount(i.amount)}</span>
+            <span className="muted small mono">行情时点：{i.t ? fmtTime(i.t) : '缺证'}</span>
           </button>
         ))}
       </div>
@@ -92,7 +103,7 @@ function BreadthPanel({ m }: { m: MarketOverview }) {
           <div className="stat-grid two">
             <div><label>涨停</label><b className="mono up">{countText(b.limit_up)}</b></div>
             <div><label>跌停</label><b className="mono down">{countText(b.limit_down)}</b></div>
-            <div><label>两市成交额</label><b className="mono">{fmtAmount(m.turnover_total)}</b></div>
+            <div><label>两市成交额（元）</label><b className="mono">{fmtAmount(m.turnover_total)}</b></div>
             <div><label>上涨占比</label><b className="mono">{b.up_ratio === null ? '—' : `${fmtNum(Number(b.up_ratio) * 100, 1)}%`}</b></div>
           </div>
         </div>
@@ -134,7 +145,7 @@ function SectorPanel() {
     { title: kind === 'industry' ? '行业' : '概念', dataIndex: 'name', width: 170 },
     { title: '涨跌幅', dataIndex: 'change_pct', width: 90, align: 'right', render: (v: string | null) => <span className={`mono ${pctClass(v)}`}>{v === null ? '—' : `${signed(v)}%`}</span> },
     {
-      title: '主力净流入', dataIndex: 'main_net', render: (v: string | null) => {
+      title: '主力净流入（元）', dataIndex: 'main_net', render: (v: string | null) => {
         if (v === null) return <span className="muted">—</span>;
         const n = Number(v);
         return (
@@ -145,7 +156,7 @@ function SectorPanel() {
         );
       },
     },
-    { title: '成交额', dataIndex: 'amount', width: 100, align: 'right', render: (v: string | null) => <span className="mono">{v === null ? '—' : fmtAmount(v)}</span> },
+    { title: '成交额（元）', dataIndex: 'amount', width: 110, align: 'right', render: (v: string | null) => <span className="mono">{v === null ? '—' : fmtAmount(v)}</span> },
     { title: '涨 / 跌家数', key: 'ud', width: 110, align: 'right', render: (_v, r) => <span className="mono"><span className="up">{r.up_count ?? '—'}</span> / <span className="down">{r.down_count ?? '—'}</span></span> },
     {
       title: '领涨股', dataIndex: 'leader', width: 200, render: (l: SectorFlow['leader']) => (l ? (
@@ -164,7 +175,10 @@ function SectorPanel() {
           按主力净流入排序 · 盘后数据{q.data ? `（${q.data.trade_date ?? '交易日期暂不可用'}${q.data.taxonomy ? ` · ${(labelOf(INDUSTRY_TAXONOMY, q.data.taxonomy) ?? '未知')}` : ''}）` : ''}
         </span>
         <span className="spacer" />
-        {q.data ? <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} /> : null}
+        {q.data ? <>
+          <DataStatusTag status={q.data.data_status} asOf={q.data.data_as_of} gaps={q.data.gaps} />
+          <span className="muted small" data-testid="sector-sources">{sourceText(q.data.sources)}</span>
+        </> : null}
       </div>
       {q.isPending ? <Loading /> : q.isError ? <ErrorBox error={q.error} /> : (
         <>
