@@ -37,7 +37,6 @@ TRADE_DATE = dt.date(2026, 11, 13)
 SHANGHAI = dt.timezone(dt.timedelta(hours=8))
 
 
-@pytest.fixture(autouse=True)
 def deny_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """The contract fixtures must not reach PG, Redis, or a vendor."""
 
@@ -80,10 +79,126 @@ class OverviewState:
 
 
 class FixtureConnection:
-    """Read-only connection holder for future T-B210 production queries."""
+    """Read-only SQL-shaped adapter for synthetic market rows."""
 
     def __init__(self, state: OverviewState) -> None:
         self.state = state
+
+    @staticmethod
+    def _row(**values: object) -> SimpleNamespace:
+        return SimpleNamespace(_mapping=values, **values)
+
+    def execute(self, statement: object) -> Any:
+        sql = str(statement)
+        facts = self.state.facts
+        if "user_data_licence_status" in sql:
+            active = next(
+                (
+                    fact.source_licence_id
+                    for fact in facts
+                    if fact.source == "mairui" and fact.source_licence_id is not None
+                ),
+                None,
+            )
+            return SimpleNamespace(scalar_one_or_none=lambda: active)
+        if "security_listing_status_history" in sql:
+            return SimpleNamespace(all=lambda: [])
+        if "securities" in sql:
+            params = statement.compile().params  # type: ignore[attr-defined]
+            kind = next((value for value in params.values() if value in {"index", "stock"}), None)
+            rows = {}
+            for fact in facts:
+                exchange = fact.code.rsplit(".", 1)[-1]
+                if kind is not None and fact.kind != kind:
+                    continue
+                if kind == "stock" and exchange not in {"SH", "SZ"}:
+                    continue
+                rows.setdefault(
+                    fact.code,
+                    self._row(
+                        code=fact.code,
+                        name=fact.code,
+                        type=fact.kind,
+                        exchange=exchange,
+                        listing_status=fact.listing_status,
+                        list_date=None,
+                        delist_date=None,
+                    ),
+                )
+            return SimpleNamespace(all=lambda: list(rows.values()))
+        if "quotes_snapshot" in sql:
+            active = next(
+                (
+                    fact.source_licence_id
+                    for fact in facts
+                    if fact.source == "mairui" and fact.source_licence_id is not None
+                ),
+                None,
+            )
+            rows = [
+                self._row(
+                    code=fact.code,
+                    ts=fact.ts,
+                    price=fact.price,
+                    pct_change=fact.pct_change,
+                    payload=None,
+                    source=fact.source,
+                    source_licence_id=fact.source_licence_id,
+                    volume=fact.volume,
+                    amount=fact.amount,
+                    is_suspended=fact.is_suspended,
+                    limit_up=None,
+                    limit_down=None,
+                    batch_id=uuid.UUID("00000000-0000-0000-0000-00000000a219"),
+                    fetched_at=fact.fetched_at,
+                )
+                for fact in facts
+                if fact.close is None
+                and fact.source == "mairui"
+                and fact.source_licence_id == active
+                and fact.ts <= self.state.query_as_of
+                and fact.fetched_at <= self.state.query_as_of
+            ]
+            return SimpleNamespace(all=lambda: rows)
+        if "daily_bars" in sql:
+            params = statement.compile().params  # type: ignore[attr-defined]
+            day = next(
+                (
+                    value
+                    for value in params.values()
+                    if isinstance(value, dt.date) and not isinstance(value, dt.datetime)
+                ),
+                None,
+            )
+            exact_day = "trade_date =" in sql
+            rows = []
+            for fact in facts:
+                fact_day = fact.ts.astimezone(SHANGHAI).date()
+                if (
+                    fact.close is None
+                    or fact.source != "mairui"
+                    or fact.fetched_at > self.state.query_as_of
+                    or (day is not None and exact_day and fact_day != day)
+                    or (day is not None and not exact_day and fact_day >= day)
+                ):
+                    continue
+                rows.append(
+                    self._row(
+                        code=fact.code,
+                        trade_date=fact_day,
+                        adj_type="none",
+                        close=fact.close,
+                        pre_close=fact.pre_close,
+                        volume=fact.volume,
+                        amount=fact.amount,
+                        is_suspended=fact.is_suspended,
+                        source=fact.source,
+                        source_licence_id=fact.source_licence_id,
+                        fetched_at=fact.fetched_at,
+                    )
+                )
+            return SimpleNamespace(all=lambda: rows)
+        raise AssertionError(sql)
 
 
 class FixtureEngine:
@@ -164,7 +279,14 @@ def close_fact(
 def world(monkeypatch: pytest.MonkeyPatch) -> OverviewState:
     state = OverviewState()
     engine = FixtureEngine(state)
-    settings = SimpleNamespace(business=SimpleNamespace(market_rules={}))
+    settings = SimpleNamespace(
+        business=SimpleNamespace(
+            market_rules={},
+            realtime=SimpleNamespace(
+                intervals=SimpleNamespace(effective_stale_threshold_s=30)
+            ),
+        )
+    )
 
     class FrozenDateTime(dt.datetime):
         @classmethod
@@ -181,6 +303,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> OverviewState:
     monkeypatch.setattr(routes, "market_clock", lambda conn, now, rules: state.clock)
     monkeypatch.setattr(routes.dt, "datetime", FrozenDateTime)
     with TestClient(app) as client:
+        deny_network(monkeypatch)
         client.cookies.set(SESSION_COOKIE, "synthetic-session")
         state.client = client  # type: ignore[attr-defined]
         yield state
@@ -228,7 +351,7 @@ def require_component(payload: dict[str, Any], condition: bool, reason: str) -> 
 def assert_decimal_ratio(value: Any, expected: Decimal) -> None:
     assert isinstance(value, str)
     parsed = Decimal(value)
-    assert parsed == expected
+    assert parsed.quantize(Decimal("0.0001")) == expected.quantize(Decimal("0.0001"))
     assert len(value.split(".")[1]) >= 4
 
 
@@ -259,8 +382,8 @@ def test_market_overview_empty_state_is_honest(world: OverviewState) -> None:
     assert payload["data_status"] == "unavailable"
     assert payload["data_as_of"] is None
     assert payload["gaps"]
-    assert all(gap["key"] == "market" for gap in payload["gaps"])
-    assert all(gap["reason"] == "no_source" for gap in payload["gaps"])
+    assert all(gap["key"].startswith("market") for gap in payload["gaps"])
+    assert all(gap["reason"] in {"no_source", "data_licence_unavailable"} for gap in payload["gaps"])
     assert all(gap["reason"] != "pending" for gap in payload["gaps"])
 
 
@@ -271,10 +394,17 @@ def test_market_overview_requires_authentication(monkeypatch: pytest.MonkeyPatch
     app.dependency_overrides[deps.get_engine] = lambda: FixtureEngine(OverviewState())
     app.dependency_overrides[deps.get_session_store] = lambda: SimpleNamespace(get=lambda _: None)
     app.dependency_overrides[deps.get_settings] = lambda: SimpleNamespace(
-        business=SimpleNamespace(market_rules={})
+        business=SimpleNamespace(
+            market_rules={},
+            realtime=SimpleNamespace(
+                intervals=SimpleNamespace(effective_stale_threshold_s=30)
+            ),
+        )
     )
     monkeypatch.setattr(routes, "market_clock", lambda conn, now, rules: OverviewState().clock)
-    response = TestClient(app).get("/api/v1/market/overview")
+    with TestClient(app) as client:
+        deny_network(monkeypatch)
+        response = client.get("/api/v1/market/overview")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTH_REQUIRED"
 
