@@ -9,6 +9,7 @@ with a hand-built MarketOverview.
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import operator
 import socket
 import uuid
@@ -332,24 +333,6 @@ class FixtureConnection:
     def _licences(self) -> list[dict[tuple[tuple[object, object], str], object]]:
         licence = self.state.licence
         if licence is None:
-            owned_facts = [fact for fact in self.state.facts if fact.source == "mairui"]
-            licence = next(
-                (
-                    fact.source_licence_id for fact in owned_facts
-                    if fact.source_licence_id is not None
-                ),
-                None,
-            )
-        if licence is None:
-            licence = next(
-                (
-                    fact.source_licence_id
-                    for fact in self.state.facts
-                    if fact.source_licence_id is not None
-                ),
-                None,
-            )
-        if licence is None:
             return []
         return [
             {
@@ -555,6 +538,17 @@ def require_component(payload: dict[str, Any], condition: bool, reason: str) -> 
     if not condition and is_unwired_empty_state(payload):
         pytest.xfail(f"T-B210 未实现：{reason}")
     assert condition
+
+
+def market_overview_reader_is_wired() -> bool:
+    market = getattr(routes.service, "market", None)
+    if not callable(market):
+        return False
+    try:
+        parameters = inspect.signature(market).parameters
+    except (TypeError, ValueError):
+        return False
+    return {"conn", "user_id", "clock", "query_as_of"}.issubset(parameters)
 
 
 def assert_decimal_ratio(value: Any, expected: Decimal) -> None:
@@ -928,6 +922,22 @@ def test_market_overview_no_licence_or_all_future_is_unavailable(world: Overview
     assert payload["turnover_total"] is None
 
 
+def test_fixture_connection_does_not_infer_owner_licence_from_market_facts() -> None:
+    state = OverviewState(
+        facts=[
+            close_fact(
+                "830001.BJ",
+                "10.1",
+                "10.0",
+                source="tdx_local",
+                licence=LICENCE_B,
+            )
+        ]
+    )
+
+    assert FixtureConnection(state)._licences() == []
+
+
 @pytest.mark.parametrize(
     ("session", "trade_date"),
     [
@@ -1016,8 +1026,9 @@ def test_market_overview_nontrading_and_preopen_use_stale_close(
     assert selected[0]["change_pct"] != "1"
 
 
-@pytest.mark.xfail(strict=False, reason="待 #182/T-A172 §10")
 def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: OverviewState) -> None:
+    if not market_overview_reader_is_wired():
+        pytest.xfail("待 #182/T-A172 §10：BJ 门闩运行能力尚未接入")
     world.facts = [
         close_fact(f"830{i:03d}.BJ", "10.1", "10.0", source=source)
         for i in range(1, 20)
@@ -1028,11 +1039,7 @@ def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: Ove
         close_fact("830021.BJ", "10.1", "10.0", is_suspended=True, source="mairui"),
     ]
     payload = get_overview(world)
-    require_component(
-        payload,
-        payload["basis"] is not None,
-        "BJ 同日双来源门闩与默认拦截，契约 §3.2/§9。该契约待合入，不宣称主线验收",
-    )
+    assert payload["basis"] is not None
     assert payload["basis"]["scope"] == "沪深股票口径"
     assert payload["breadth"] is None or (
         payload["breadth"]["up"]
@@ -1042,10 +1049,11 @@ def test_market_overview_bj_gate_stays_closed_below_twenty_clean_rows(world: Ove
     )
 
 
-@pytest.mark.xfail(strict=False, reason="待 #182/T-A172 §10")
 def test_market_overview_bj_gate_positive_requires_twenty_clean_pairs(
     world: OverviewState,
 ) -> None:
+    if not market_overview_reader_is_wired():
+        pytest.xfail("待 #182/T-A172 §10：BJ 门闩运行能力尚未接入")
     world.facts = [
         close_fact(
             f"830{i:03d}.BJ",
@@ -1084,11 +1092,7 @@ def test_market_overview_bj_gate_positive_requires_twenty_clean_pairs(
             or basis.get("eligible") == 20
         )
     )
-    require_component(
-        payload,
-        admitted,
-        "BJ 足数双源正例仅在 20 个清洗后代码且来源时点/规则可追溯时启用，契约 §3.2/§9。该契约待合入，不宣称主线验收",
-    )
+    assert admitted
     if breadth is not None:
         assert breadth["up"] + breadth["down"] + breadth["flat"] == 20
     else:
