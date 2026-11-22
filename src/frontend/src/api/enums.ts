@@ -104,12 +104,12 @@ export const ENUMS = {
   security_reconciliation_source: ['mairui_lists', 'mairui_real_all', 'cninfo', 'akshare'],
 } as const;
 
-/** §6.1 不可执行原因码（v0.2.5：22 个） */
+/** §6.1 不可执行原因码（v0.2.5：23 个） */
 export const REASON_CODES = [
   'DATA_STALE', 'KEY_DATA_MISSING', 'LOW_CONFIDENCE', 'NON_TRADING_TIME', 'SUSPENDED', 'LIMIT_LOCKED', 'ST_OR_DELISTING',
   'NEW_LISTING', 'INSUFFICIENT_CASH', 'T1_NOT_SELLABLE', 'NO_POSITION', 'POSITION_CAP_REACHED', 'STRATEGY_BUDGET_EXHAUSTED',
   'SECTOR_EXPOSURE_EXCEEDED', 'REGIME_MISMATCH', 'SAME_DIRECTION_PLAN_EXISTS', 'CONFLICTS_CONFIRMED_PLAN', 'BLOCKLISTED',
-  'COOLING_OFF', 'LOSS_STREAK_PAUSE', 'STRATEGY_CONFLICT', 'USER_MUTED',
+  'COOLING_OFF', 'SAME_TEMPLATE_COOLDOWN', 'LOSS_STREAK_PAUSE', 'STRATEGY_CONFLICT', 'USER_MUTED',
 ] as const;
 
 type E<K extends keyof typeof ENUMS> = (typeof ENUMS)[K][number];

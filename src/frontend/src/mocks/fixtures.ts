@@ -120,7 +120,7 @@ const SPECS: SecSpec[] = [
   {
     code: '830001.BJ', name: '演示精工', sector: '机械设备', prev_close: 9.66, price: 9.66, volume_lots: 0, in_watchlist: true, focus: false,
     data_status: 'unavailable', data_as_of: '2026-10-30T15:00:00+08:00', seed: 97,
-    strategies: [{ key: 'demo_trend', action: 'buy', score: 57, conf: 0.41, state: 'blocked', reasons: ['SUSPENDED'] }],
+    strategies: [{ key: 'demo_trend', action: 'buy', score: 57, conf: 0.41, state: 'blocked', reasons: ['SUSPENDED', 'SAME_TEMPLATE_COOLDOWN'] }],
   },
 ];
 
@@ -332,6 +332,10 @@ const REASON_DEFS: Partial<Record<ReasonCode, { desc: string; rc: ReleaseConditi
   COOLING_OFF: {
     desc: '该股 10-28 触发止损卖出，处于冷静期（默认 3 个交易日）',
     rc: { kind: 'time', expr: null, at: '2026-11-03T09:30:00+08:00', event: null, action: null, check_on: ['schedule'], human_text: '冷静期于 2026-11-03 09:30 到期后自动重评', machine_checkable: true },
+  },
+  SAME_TEMPLATE_COOLDOWN: {
+    desc: '同用户、同证券、同策略版本（模板）已有前序候选，当前仍在 3 个交易日冷却窗口内',
+    rc: { kind: 'time', expr: null, at: '2026-11-05T15:00:00+08:00', event: null, action: null, check_on: ['schedule'], human_text: '同模板同证券冷却至到期交易日15:00（北京时间）', machine_checkable: true },
   },
   NON_TRADING_TIME: {
     desc: '盘前集合竞价阶段，日内做T 策略不在可执行时段（示例）',

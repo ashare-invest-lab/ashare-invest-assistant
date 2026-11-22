@@ -93,7 +93,7 @@ describe('#37 拟定草案的判定顺序（§7.7 七步）', () => {
     const r = await draft([uid(1035)]);
     expect(r.status).toBe(409);
     expect(r.body.error.code).toBe('SIGNAL_NOT_EXECUTABLE');
-    expect(r.body.error.details.reason_ids).toEqual([uid(1036)]);
+    expect(r.body.error.details.reason_ids).toEqual([uid(1036), uid(1037)]);
   });
   it('open 且无原因 → 201，信号变为 drafted；open/drafted/released 可拟定，其余不可', async () => {
     patchSignal(uid(1005), { state: 'open' });
