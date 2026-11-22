@@ -12,13 +12,13 @@ from .tt21_head import expected_main_head
 BACKEND = Path(__file__).resolve().parents[3] / 'src/backend'
 
 
-def test_explicit_mainline_snapshot_has_reviewed_0039_head():
+def test_explicit_mainline_snapshot_has_reviewed_0041_head():
     manifest = json.loads(Path(__file__).with_name('tt21_mainline.json').read_text())
     assert manifest['baseline'] == '18e27b3aadc3bd3fb21e829f1a97c25498cbf0d2'
     assert manifest['main_migration_baseline'] == '465e02046fa8d971897603742497444f884e89a2'
-    assert manifest['expected_head'] == '0039'
-    assert len(manifest['migrations']) == 38
-    assert expected_main_head(BACKEND) == '0039'
+    assert manifest['expected_head'] == '0041'
+    assert len(manifest['migrations']) == 40
+    assert expected_main_head(BACKEND) == '0041'
 
 
 @pytest.mark.parametrize('mutation', ['change', 'add', 'remove'])

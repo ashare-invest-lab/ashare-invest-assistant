@@ -1,4 +1,4 @@
-"""check_contract.py 自测（T-O10）：原因码总数 = 22（契约第 325 行 + 架构师裁定），且脚本不在 openapi 里找 /admin/*。"""
+"""check_contract.py 自测（T-O10）：当前契约原因码总数 = 23，且脚本不在 openapi 里找 /admin/*。"""
 
 from __future__ import annotations
 
@@ -21,11 +21,11 @@ def _meta_from_contract(text: str) -> dict:
     }
 
 
-def test_expected_reason_total_is_22_and_matches_contract() -> None:
+def test_expected_reason_total_is_23_and_matches_contract() -> None:
     text = cm.contract_text()
-    assert cc.EXPECTED_REASON_TOTAL == 22
-    assert len(cm.reason_codes(text)) == 22
-    assert re.search(r"见 6\.1（22 个", text), "契约 §3 应写明 reason_code 22 个"
+    assert cc.EXPECTED_REASON_TOTAL == 23
+    assert len(cm.reason_codes(text)) == 23
+    assert re.search(r"见 6\.1（23 个", text), "契约 §3 应写明 reason_code 23 个"
     assert cc.static_checks(text) == []
 
 
@@ -37,9 +37,9 @@ def test_static_check_rejects_wrong_reason_count() -> None:
     idx = next(i for i, ln in enumerate(lines) if i > start and ln.startswith("|") and f"`{first}`" in ln.split("|")[1])
     dropped = "".join(lines[:idx] + lines[idx + 1:])
     errs = cc.static_checks(dropped)
-    assert any("§6.1 原因码应为 22 个" in e and "实际 21" in e for e in errs)
+    assert any("§6.1 原因码应为 23 个" in e and "实际 22" in e for e in errs)
     duplicated = "".join(lines[: idx + 1] + [lines[idx]] + lines[idx + 1:])
-    assert any("§6.1 原因码应为 22 个" in e for e in cc.static_checks(duplicated))
+    assert any("§6.1 原因码应为 23 个" in e for e in cc.static_checks(duplicated))
 
 
 def test_meta_check_passes_without_any_admin_routes() -> None:

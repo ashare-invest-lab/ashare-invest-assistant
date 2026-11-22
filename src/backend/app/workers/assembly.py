@@ -230,8 +230,9 @@ def conclusion(
         stops_at=at,
         position_known=owned_risk.position_known,
     )
+    risk_config = effective_config(conn, owner, settings.business.risk_controls)
     risk, risk_controls = assessed(
-        effective_config(conn, owner, settings.business.risk_controls),
+        risk_config,
         owned_risk,
         action=Action(result["action"]),
         horizon=Horizon(instance.horizon),
@@ -284,6 +285,7 @@ def conclusion(
         content=signal,
         facts=facts,
         market_rules=settings.business.market_rules,
+        same_template_cooldown_days=risk_config.executability.same_template_cooldown_days,
         origin_signal_event_id=origin_signal_event_id,
     )
     if signal.proposed_action not in {"hold", "wait"} and candidate["id"] is None:
