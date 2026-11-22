@@ -23,7 +23,7 @@ from urllib.parse import quote
 
 import pytest
 import psycopg
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, literal, select, text
 from sqlalchemy.engine import make_url
 
 from app.config_files import MarketRulesConfig
@@ -134,17 +134,6 @@ def synthetic_user(sql: Any) -> SimpleNamespace:
     return SimpleNamespace(id=user_id)
 
 
-class _LatestSnapshot:
-    def order_by(self, _order: Any) -> _LatestSnapshot:
-        return self
-
-    def limit(self, _limit: int) -> _LatestSnapshot:
-        return self
-
-    def one_or_none(self) -> None:
-        return None
-
-
 def _rules() -> MarketRulesConfig:
     import yaml
 
@@ -253,13 +242,14 @@ def _seed_world(
     )
     sql_call(
         "INSERT INTO app.strategy_instances(id, user_id, strategy_version_id, scope, account_id, "
-        "security_code, status, origin) VALUES (:id, :uid, :vid, 'account', :aid, NULL, 'active', 'user')",
+        "security_code, horizon, status, origin) VALUES (:id, :uid, :vid, 'account', :aid, NULL, 'short', 'active', 'user')",
         id=str(instance_id), uid=user_id, vid=str(version_id), aid=str(account_id),
     )
     for code in {target_security, "600002.SH"}:
         sql_call(
             "INSERT INTO market.securities(code, type, name, exchange, board, listing_status) "
-            "VALUES (:code, 'stock', :name, 'SH', 'main', 'listed')",
+            "VALUES (:code, 'stock', :name, 'SH', 'main', 'listed') "
+            "ON CONFLICT (code) DO NOTHING",
             code=code, name=f"Synthetic {code}",
         )
     for day in [BASE_DAY, *COOLDOWN_DAYS, EXPIRY_DAY, dt.date(2026, 11, 11)]:
@@ -316,6 +306,7 @@ def _seed_world(
             "risk_flags": [],
             "crowding_flag": False,
             "state": "open",
+            "created_at": base_at,
             "state_changed_at": base_at,
             "cooldown_key": f"prior-{uuid.uuid4()}",
         }
@@ -367,7 +358,13 @@ def _writer(monkeypatch: pytest.MonkeyPatch, world: SimpleNamespace, engine: Any
     monkeypatch.setattr(service, "screen_membership", lambda **_kwargs: None)
     monkeypatch.setattr(service, "calendar_state", lambda *_args, **_kwargs: (True, None))
     monkeypatch.setattr(service, "assess", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(service, "live_snapshots", lambda _id: _LatestSnapshot())
+    monkeypatch.setattr(
+        service,
+        "live_snapshots",
+        lambda _id: select(
+            literal(None).label("cash_available"), literal(0).label("version_no")
+        ),
+    )
     with engine.begin() as conn:
         return service.write_candidate(
             conn,
@@ -405,7 +402,7 @@ def _switch_to_different_template(sql_call: Any, world: SimpleNamespace, user_id
     )
     sql_call(
         "INSERT INTO app.strategy_instances(id, user_id, strategy_version_id, scope, account_id, "
-        "security_code, status, origin) VALUES (:id, :uid, :vid, 'account', :aid, NULL, 'active', 'user')",
+        "security_code, horizon, status, origin) VALUES (:id, :uid, :vid, 'account', :aid, NULL, 'short', 'active', 'user')",
         id=str(other_instance), uid=user_id, vid=str(other_version), aid=str(world.account_id),
     )
     world.instance_id = other_instance
@@ -432,10 +429,9 @@ def test_same_template_cooldown_blocks_trading_days(
 
 def test_same_template_cooldown_releases_after_third_trading_day(
     monkeypatch: pytest.MonkeyPatch, isolated_pg: SimpleNamespace, synthetic_user: SimpleNamespace,
-    sql: Any, request: pytest.FixtureRequest,
+    sql: Any,
 ) -> None:
     """RS-02 ②: the first candidate after the half-open window is executable."""
-    request.applymarker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=IMPLEMENTATION_PENDING))
     world = _seed_world(sql, str(synthetic_user.id), target_day=EXPIRY_DAY)
     result = _writer(monkeypatch, world, isolated_pg.engine)
     assert result["diagnostic"] == "open"
