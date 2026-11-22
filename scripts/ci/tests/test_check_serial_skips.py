@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import check_serial_skips as check
+from conftest import REPO
 
 
 def _inputs(tmp_path: Path, passed: int, skipped: int, failed: int = 0) -> list[str]:
@@ -105,14 +106,14 @@ def test_trusted_baseline_missing_field_fails_closed(tmp_path: Path) -> None:
 
 def test_reference_baseline_has_sources_and_requested_floors() -> None:
     baseline = json.loads(
-        Path("scripts/ci/serial-skip-baseline.json").read_text(encoding="utf-8")
+        (REPO / "scripts/ci/serial-skip-baseline.json").read_text(encoding="utf-8")
     )
     assert baseline["serial_pg"] == {"max_skipped": 99, "min_passed": 1290}
     assert "44965913926" in baseline["source"] and "44957367134" in baseline["source"]
 
 
 def test_workflow_places_serial_check_after_a1s_check() -> None:
-    text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    text = (REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert text.index("确认 serial_pg 用例未悄悄变成跳过") > text.index(
         "确认 A1s–A32 与 t_t41 已执行"
     )

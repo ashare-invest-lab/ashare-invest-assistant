@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import check_shard_artifacts as check
+from conftest import REPO
 
 
 def _make_tree(root: Path) -> None:
@@ -86,7 +87,7 @@ def test_empty_coverage_and_invalid_junit_fail(tmp_path: Path) -> None:
 
 
 def test_workflow_has_six_matrix_shards_and_integrity_step() -> None:
-    text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    text = (REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "shard: [0, 1, 2, 3, 4, 5]" in text
     assert "核对分片归档完整性" in text
     assert "--shards 6" in text
