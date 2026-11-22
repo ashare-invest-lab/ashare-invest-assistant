@@ -8,6 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -91,7 +92,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: 叠加 PR 跳过 main 覆盖率棘轮
+        if: ${{ github.event_name == 'pull_request' && github.base_ref != 'main' }}
+        run: echo "::notice::叠加 PR 不做 main 棘轮，转向 main 时由该 PR 再跑完整门禁"
       - name: 等待原 main push 的精确测量归档
+        if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base-ready.json" --coverage-output "${RUNNER_TEMP}/coverage-base-ready-coverage.json"
@@ -384,13 +389,13 @@ jobs:
             --groups tests/ci-groups.yaml --config scripts/ci/serial-skip-baseline.json \
             "${trusted_args[@]}"
       - name: 冻结可信 base 覆盖率棘轮基线
-        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main') && hashFiles('src/backend/.venv/bin/python') != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/coverage_ratchet_base.py --wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" --coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"
       - name: 精确覆盖率棘轮（可信 base，不下降）
         id: coverage_ratchet
-        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.base_ref == 'main') && hashFiles('src/backend/.venv/bin/python') != '' }}
         run: |
           test -f "${RUNNER_TEMP}/coverage.json" || { echo "::error title=coverage::没有 coverage.json（pytest 未运行）"; exit 1; }
           python3 scripts/ci/check_coverage.py "${RUNNER_TEMP}/coverage.json" \
