@@ -28,7 +28,7 @@ def seed_calendar(conn: Connection, seed: CalendarReference) -> int:
     opens = set(seed.open_days)
     dates = [start + dt.timedelta(days=index) for index in range((end - start).days + 1)]
     stmt = insert(trading_calendar).values(
-        [{"date": day, "is_open": day.isoformat() in opens} for day in dates]
+        _calendar_rows(conn, start, end, dates, opens),
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=[trading_calendar.c.date],
@@ -83,3 +83,25 @@ def market_clock(conn: Connection, now: dt.datetime, rules: MarketRulesConfig) -
     else:
         state = MarketSession.CLOSED
     return MarketClock(trade_date=day, session=state)
+
+
+def _calendar_rows(
+    conn: Connection,
+    start: dt.date,
+    end: dt.date,
+    dates: list[dt.date],
+    opens: set[str],
+) -> list[dict[str, dt.date | bool]]:
+    existing = conn.execute(
+        select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+            trading_calendar.c.date.between(start, end)
+        )
+    ).all()
+    expected = {day: day.isoformat() in opens for day in dates}
+    conflicts = sorted(
+        (row.date for row in existing if row.is_open != expected.get(row.date)),
+        key=lambda day: day,
+    )
+    if conflicts:
+        raise ValueError(f"calendar_conflict:{conflicts[0].isoformat()}")
+    return [{"date": day, "is_open": expected[day]} for day in dates]
