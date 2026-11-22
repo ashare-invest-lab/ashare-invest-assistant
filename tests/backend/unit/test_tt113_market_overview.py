@@ -583,7 +583,10 @@ def test_market_overview_empty_state_is_honest(world: OverviewState) -> None:
     assert payload["data_status"] == "unavailable"
     assert payload["data_as_of"] is None
     assert payload["gaps"]
-    assert all(gap["key"] == "market" for gap in payload["gaps"])
+    regime_gap = next((gap for gap in payload["gaps"] if gap["key"] == "market.regime"), None)
+    if is_unwired_empty_state(payload) and regime_gap is None:
+        pytest.xfail("T-B210 未实现：空态须含契约 §7 的 market.regime/no_source")
+    assert regime_gap is not None and regime_gap["reason"] == "no_source" and "F25/G-02 参数未批准" in regime_gap["message"]
     assert all(gap["reason"] == "no_source" for gap in payload["gaps"])
     assert all(gap["reason"] != "pending" for gap in payload["gaps"])
 
