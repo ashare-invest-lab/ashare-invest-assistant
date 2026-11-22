@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
+from datetime import datetime as datetime_type
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -111,7 +113,7 @@ def _fresh_close_day(conn: Connection, now: dt.datetime) -> dt.date | None:
     ).scalar_one_or_none()
 
 
-def _identity_rows(conn: Connection, codes: tuple[str, ...]) -> list[Row[*tuple[Any, ...]]]:
+def _identity_rows(conn: Connection, codes: tuple[str, ...]) -> Sequence[Row[Any, Any, Any]]:
     """Load public identities before any owner-scoped market-data read."""
     return conn.execute(
         select(securities.c.code, securities.c.name, securities.c.type).where(
@@ -125,13 +127,15 @@ def _row_value(row: object, name: str) -> object | None:
 
 
 def _realtime_item(
-    row: object, name: str, security_type: SecurityType, now: dt.datetime, threshold: int
+    row: Row[Any], name: str, security_type: SecurityType, now: dt.datetime, threshold: int
 ) -> QuoteItem:
-    stamp = _row_value(row, "realtime_ts")
-    price = _row_value(row, "realtime_price")
-    pct_change = _row_value(row, "realtime_pct_change")
-    volume = _row_value(row, "realtime_volume")
-    amount = _row_value(row, "realtime_amount")
+    stamp = row.realtime_ts
+    if not isinstance(stamp, datetime_type):
+        raise ValueError("realtime timestamp must be a datetime")
+    price = row.realtime_price
+    pct_change = row.realtime_pct_change
+    volume = row.realtime_volume
+    amount = row.realtime_amount
     age = (now - stamp).total_seconds()
     return QuoteItem(
         security_code=row.code,
@@ -182,7 +186,7 @@ def read_quotes(
         row = closes.get(code)
         if realtime_row is not None and row is not None:
             daily_ts = dt.datetime.combine(row.trade_date, dt.time(15), BEIJING)
-            if _row_value(realtime_row, "realtime_ts") <= daily_ts:
+            if realtime_row.realtime_ts <= daily_ts:
                 realtime_row = None
             else:
                 row = None
