@@ -19,7 +19,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from collections.abc import Iterator
-from urllib.parse import quote
 
 import pytest
 import psycopg
@@ -38,8 +37,8 @@ _HERE = Path(__file__).resolve()
 
 BJT = dt.timezone(dt.timedelta(hours=8))
 BASE_DAY = dt.date(2026, 11, 5)
-COOLDOWN_DAYS = (dt.date(2026, 11, 6), dt.date(2026, 11, 9), dt.date(2026, 11, 10))
-EXPIRY_DAY = dt.date(2026, 11, 12)
+COOLDOWN_DAYS = (dt.date(2026, 11, 5), dt.date(2026, 11, 6), dt.date(2026, 11, 9))
+EXPIRY_DAY = dt.date(2026, 11, 9)
 SAME_TEMPLATE_COOLDOWN = "SAME_TEMPLATE_COOLDOWN"
 IMPLEMENTATION_PENDING = "T-T130 等 T-B244"
 
@@ -48,17 +47,7 @@ def _base_url() -> str:
     configured = os.environ.get("AIA_TEST_DATABASE_URL") or os.environ.get("TT41_DATABASE_URL")
     if configured:
         return configured
-    host = os.environ.get("PGHOST", "127.0.0.1")
-    port = os.environ.get("PGPORT", "5432")
-    user = os.environ.get("PGUSER")
-    password = os.environ.get("PGPASSWORD")
-    credentials = ""
-    if user:
-        credentials = quote(user, safe="")
-        if password:
-            credentials += ":" + quote(password, safe="")
-        credentials += "@"
-    return f"postgresql://{credentials}{host}:{port}/postgres"
+    pytest.skip("AIA_TEST_DATABASE_URL 与 TT41_DATABASE_URL 均未设置，跳过隔离 PostgreSQL 测试")
 
 
 def _psycopg_url(url: str) -> str:
@@ -204,6 +193,8 @@ def _seed_world(
     target_security: str = "600001.SH",
     target_content_security: str | None = None,
     target_day: dt.date = COOLDOWN_DAYS[0],
+    base_at: dt.datetime | None = None,
+    target_at: dt.datetime | None = None,
 ) -> SimpleNamespace:
     """Create only synthetic owner/template/input rows in the isolated database."""
     account_id = uuid.uuid4()
@@ -213,8 +204,8 @@ def _seed_world(
     snapshot_id = uuid.uuid4()
     prior_snapshot_id = uuid.uuid4()
     prior_id = uuid.uuid4()
-    base_at = dt.datetime.combine(BASE_DAY, dt.time(10, 0), BJT)
-    target_at = dt.datetime.combine(target_day, dt.time(10, 0), BJT)
+    base_at = base_at or dt.datetime.combine(BASE_DAY, dt.time(10, 0), BJT)
+    target_at = target_at or dt.datetime.combine(target_day, dt.time(10, 0), BJT)
     target_content_security = target_content_security or target_security
     config = {
         "universe": {"pool": "持仓 ∪ 自选", "security_types": ["stock"], "boards": {"main": True}},
@@ -252,11 +243,24 @@ def _seed_world(
             "ON CONFLICT (code) DO NOTHING",
             code=code, name=f"Synthetic {code}",
         )
-    for day in [BASE_DAY, *COOLDOWN_DAYS, EXPIRY_DAY, dt.date(2026, 11, 11)]:
+    calendar_days = {
+        BASE_DAY,
+        *COOLDOWN_DAYS,
+        EXPIRY_DAY,
+        dt.date(2026, 11, 2),
+        dt.date(2026, 11, 3),
+        dt.date(2026, 11, 4),
+        dt.date(2026, 11, 7),
+        dt.date(2026, 11, 8),
+        dt.date(2026, 11, 10),
+        dt.date(2026, 11, 11),
+        dt.date(2026, 11, 12),
+    }
+    for day in sorted(calendar_days):
         sql_call(
             "INSERT INTO market.trading_calendar(date, is_open) VALUES (:day, :open) "
             "ON CONFLICT (date) DO UPDATE SET is_open = EXCLUDED.is_open",
-            day=day, open=day != dt.date(2026, 11, 11),
+            day=day, open=day not in {dt.date(2026, 11, 7), dt.date(2026, 11, 8)},
         )
     prior_content = _signal_input(prior_snapshot_id, base_at, target_security)
     prior_facts = MarketFacts(
@@ -413,17 +417,9 @@ def _switch_to_different_template(sql_call: Any, world: SimpleNamespace, user_id
 def test_same_template_cooldown_blocks_trading_days(
     target_day: dt.date,
     monkeypatch: pytest.MonkeyPatch, isolated_pg: SimpleNamespace, synthetic_user: SimpleNamespace,
-    sql: Any, request: pytest.FixtureRequest,
+    sql: Any,
 ) -> None:
     """RS-02 ①: each of trading days 1–3 is blocked, including a weekend/holiday gap."""
-    if target_day == COOLDOWN_DAYS[2]:
-        request.applymarker(
-            pytest.mark.xfail(
-                strict=True,
-                raises=AssertionError,
-                reason="转绿条件：第三交易日窗口内应拦截并返回 SAME_TEMPLATE_COOLDOWN，单号 T-B244",
-            )
-        )
     world = _seed_world(sql, str(synthetic_user.id), target_day=target_day)
     result = _writer(monkeypatch, world, isolated_pg.engine)
     assert result["diagnostic"] == "blocked"
@@ -439,13 +435,117 @@ def test_same_template_cooldown_releases_after_third_trading_day(
     sql: Any,
 ) -> None:
     """RS-02 ②: the first candidate after the half-open window is executable."""
-    world = _seed_world(sql, str(synthetic_user.id), target_day=EXPIRY_DAY)
+    world = _seed_world(
+        sql,
+        str(synthetic_user.id),
+        target_day=EXPIRY_DAY,
+        target_at=dt.datetime.combine(EXPIRY_DAY, dt.time(15, 0), BJT),
+    )
     result = _writer(monkeypatch, world, isolated_pg.engine)
     assert result["diagnostic"] == "open"
     assert sql(
         "SELECT count(*) FROM app.non_executable_reasons WHERE user_id=:uid AND signal_id=:sid",
         uid=str(synthetic_user.id), sid=result["id"],
     )[0][0] == 0
+
+
+def _assert_blocked_until(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_pg: SimpleNamespace,
+    synthetic_user: SimpleNamespace,
+    sql: Any,
+    world: SimpleNamespace,
+    expected_at: dt.datetime,
+) -> None:
+    result = _writer(monkeypatch, world, isolated_pg.engine)
+    assert result["diagnostic"] == "blocked"
+    rows = sql(
+        "SELECT release_condition FROM app.non_executable_reasons "
+        "WHERE user_id=:uid AND signal_id=:sid AND code=:code",
+        uid=str(synthetic_user.id), sid=result["id"], code=SAME_TEMPLATE_COOLDOWN,
+    )
+    assert len(rows) == 1
+    assert rows[0][0]["at"] == expected_at.isoformat()
+
+
+def test_same_template_cooldown_after_hours_starts_next_open_day(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_pg: SimpleNamespace,
+    synthetic_user: SimpleNamespace,
+    sql: Any,
+    request: pytest.FixtureRequest,
+) -> None:
+    """盘后 2026-11-02 16:00 从下一开市日起算，至 11-05 15:00 到期。"""
+    request.applymarker(
+        pytest.mark.xfail(
+            strict=True,
+            raises=AssertionError,
+            reason="转绿条件：盘后 2026-11-02 16:00 必须从 11-03 起算并于 11-05 15:00 到期，单号 T-B244",
+        )
+    )
+    world = _seed_world(
+        sql,
+        str(synthetic_user.id),
+        target_day=dt.date(2026, 11, 3),
+        base_at=dt.datetime(2026, 11, 2, 16, 0, tzinfo=BJT),
+        target_at=dt.datetime(2026, 11, 3, 10, 0, tzinfo=BJT),
+    )
+    _assert_blocked_until(
+        monkeypatch,
+        isolated_pg,
+        synthetic_user,
+        sql,
+        world,
+        dt.datetime(2026, 11, 5, 15, 0, tzinfo=BJT),
+    )
+
+
+def test_same_template_cooldown_intraday_counts_write_day(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_pg: SimpleNamespace,
+    synthetic_user: SimpleNamespace,
+    sql: Any,
+) -> None:
+    """盘中 2026-11-02 14:00 当天为第 1 日，至 11-04 15:00 到期。"""
+    world = _seed_world(
+        sql,
+        str(synthetic_user.id),
+        target_day=dt.date(2026, 11, 3),
+        base_at=dt.datetime(2026, 11, 2, 14, 0, tzinfo=BJT),
+        target_at=dt.datetime(2026, 11, 3, 10, 0, tzinfo=BJT),
+    )
+    _assert_blocked_until(
+        monkeypatch,
+        isolated_pg,
+        synthetic_user,
+        sql,
+        world,
+        dt.datetime(2026, 11, 4, 15, 0, tzinfo=BJT),
+    )
+
+
+def test_same_template_cooldown_non_trading_day_starts_next_open_day(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_pg: SimpleNamespace,
+    synthetic_user: SimpleNamespace,
+    sql: Any,
+) -> None:
+    """非交易日 2026-11-07 写入，从 11-09 起算，至 11-11 15:00 到期。"""
+    world = _seed_world(
+        sql,
+        str(synthetic_user.id),
+        target_day=dt.date(2026, 11, 9),
+        base_at=dt.datetime(2026, 11, 7, 10, 0, tzinfo=BJT),
+        target_at=dt.datetime(2026, 11, 9, 10, 0, tzinfo=BJT),
+    )
+    _assert_blocked_until(
+        monkeypatch,
+        isolated_pg,
+        synthetic_user,
+        sql,
+        world,
+        dt.datetime(2026, 11, 11, 15, 0, tzinfo=BJT),
+    )
 
 
 def test_same_template_cooldown_release_condition_is_exact(
@@ -471,7 +571,7 @@ def test_same_template_cooldown_release_condition_is_exact(
     assert len(rows) == 1
     assert rows[0][0] == {
         "kind": "time",
-        "at": "2026-11-12T15:00:00+08:00",
+        "at": "2026-11-09T15:00:00+08:00",
         "event": None,
         "action": None,
         "check_on": ["schedule"],
