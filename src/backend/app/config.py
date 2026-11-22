@@ -525,6 +525,14 @@ class Settings(BaseSettings):
     daily_bars_source: Literal["off", "fake", "mairui"] = "off"
     #: 环境变量 ``REALTIME_QUOTES_SOURCE``。默认 off，打开前须由运维配置本人 active 证书。
     realtime_quotes_source: Literal["off", "fake", "mairui"] = "off"
+    #: 与 #399 读取端环境变量 ``INTRADAY_QUOTES_TS_KEY`` / ``INTRADAY_TRADING_DAY_KEY`` 同名。
+    #: 默认 ``realtime:quotes:last_ts``（T-O132）、``realtime:quotes:trading_day``（本单定稿）。
+    intraday_quotes_ts_key: str = Field(default="realtime:quotes:last_ts", min_length=1)
+    intraday_trading_day_key: str = Field(default="realtime:quotes:trading_day", min_length=1)
+    #: TTL 环境变量 ``INTRADAY_QUOTES_TS_TTL_S`` / ``INTRADAY_TRADING_DAY_TTL_S``。
+    #: 秒数未验证，默认 None（不设 EX）。
+    intraday_quotes_ts_ttl_s: int | None = None
+    intraday_trading_day_ttl_s: int | None = None
 
     # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
     #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
