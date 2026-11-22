@@ -30,6 +30,7 @@ case "$*" in
   *"api repos/"*) printf 'abcdef0123456789abcdef0123456789abcdef01\\n' ;;
   *"run list"*) printf 'abcdef0123456789abcdef0123456789abcdef01 completed success\\n' ;;
   *"pr list"*) printf '%s\\n' "${{FAKE_PR_LIST:-[]}}" ;;
+  *"pr view 12"*"mergeCommit"*) printf 'abcdef0123456789abcdef0123456789abcdef01\\n' ;;
   *"pr view 12"*) if [ "${{FAKE_FILES:-sensitive}}" = sensitive ]; then printf '%s\\n' '{{"baseRefName":"main","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{{"name":"ci","conclusion":"SUCCESS"}}],"files":[{{"path":"deploy/env/.env"}}],"headRefName":"x"}}'; else printf '%s\\n' '{{"baseRefName":"main","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{{"name":"ci","conclusion":"SUCCESS"}}],"files":[{{"path":"src/a.py"}}],"headRefName":"x"}}'; fi ;;
   *) printf '{{}}\\n' ;;
 esac
@@ -39,6 +40,19 @@ esac
 
 def run(cmd, env, timeout=30):
     return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def run_merge_case(tmp_path: Path, fail_on: str = ""):
+    app, bindir, rt = tmp_path / "app", tmp_path / "bin", tmp_path / "runtime"
+    app.mkdir(); bindir.mkdir(); rt.mkdir()
+    shutil.copy2(MERGEQ, app / "mergeq.sh")
+    (app / "merge-approved.sh").write_text("#!/bin/bash\nexit 0\n")
+    (app / "merge-approved.sh").chmod(0o755)
+    make_gh(bindir / "gh")
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "GH_REPO": "test/example", "MQ_RT": str(rt), "MQ_GH_TIMEOUT": "1", "MQ_SLEEP": "0", "MQ_ONCE": "1", "FAKE_PR_LIST": "12", "FAKE_FILES": "normal"}
+    if fail_on:
+        env["FAKE_GH_FAIL_ON"] = fail_on
+    return run(["bash", str(app / "mergeq.sh")], env), rt
 
 
 def test_timeout_and_heartbeat_and_flock(tmp_path: Path) -> None:
@@ -141,6 +155,38 @@ def test_gate_exit_two_aborts_without_rejection(tmp_path: Path) -> None:
     result = run(["bash", str(app / "mergeq.sh")], env)
     assert result.returncode == 0
     log = (rt / "mergeq.log").read_text(); assert "GH-FAIL" in log and "合并门禁拒绝" not in log
+
+
+def test_merge_failure_aborts_with_gh_fail(tmp_path: Path) -> None:
+    require_tools(); result, rt = run_merge_case(tmp_path, "pr merge")
+    log = (rt / "mergeq.log").read_text(); heartbeat = (rt / "mergeq.heartbeat").read_text()
+    assert result.returncode == 0 and "MERGED" not in log
+    assert "GH-FAIL 合并 #12 rc=7" in log and "#12 merge 命令失败 rc=7" in log
+    assert "说明=本轮因 GH-FAIL 放弃（合并 #12）" in heartbeat
+
+
+def test_merge_view_failure_aborts_with_gh_fail(tmp_path: Path) -> None:
+    require_tools(); result, rt = run_merge_case(tmp_path, "mergeCommit")
+    log = (rt / "mergeq.log").read_text(); heartbeat = (rt / "mergeq.heartbeat").read_text()
+    assert result.returncode == 0 and "MERGED" not in log
+    assert "GH-FAIL 合并后查询 #12 rc=7" in log
+    assert "#12 合并命令 rc=0 但合并后查询失败 rc=7，需人工核对" in log
+    assert "说明=本轮因 GH-FAIL 放弃（合并后查询 #12）" in heartbeat
+
+
+def test_merge_comment_failure_aborts_with_gh_fail(tmp_path: Path) -> None:
+    require_tools(); result, rt = run_merge_case(tmp_path, "pr comment")
+    log = (rt / "mergeq.log").read_text(); heartbeat = (rt / "mergeq.heartbeat").read_text()
+    assert result.returncode == 0 and "MERGED" not in log
+    assert "GH-FAIL 合并后评论 #12 rc=7" in log
+    assert "#12 已合入 abcdef0 但合并后评论失败 rc=7" in log
+    assert "说明=本轮因 GH-FAIL 放弃（合并后评论 #12）" in heartbeat
+
+
+def test_merge_success_is_logged_as_merged(tmp_path: Path) -> None:
+    require_tools(); result, rt = run_merge_case(tmp_path)
+    log = (rt / "mergeq.log").read_text()
+    assert result.returncode == 0 and "MERGED #12 -> abcdef0" in log
 
 
 def test_run_list_timeout_is_logged(tmp_path: Path) -> None:

@@ -237,18 +237,42 @@ while true; do
       round_abort_stage="合并 #$n"
       break
     fi
-    if [ "$rc" -eq 0 ]; then
-      mc_raw=$(run_timed "合并后查询 #$n" gh pr view "$n" -R "$R" --json mergeCommit -q .mergeCommit.oid)
-      rc_view=$?
-      mc=""
-      [ "$rc_view" -eq 0 ] && mc=$(printf '%s' "$mc_raw" | cut -c1-7)
-      [ -n "$mc" ] || mc="未知"
-      run_timed "合并后评论 #$n" gh pr comment "$n" -R "$R" -b "已合入 $mc（自动合并队列）" >/dev/null
-      printf '%s MERGED #%s -> %s\n' "$(date '+%F %T')" "$n" "$mc" >>"$L"
-      merged=1
-    else
-      printf '%s #%s merge 命令失败\n' "$(date '+%F %T')" "$n" >>"$L"
+    if [ "$rc" -ne 0 ]; then
+      printf '%s #%s merge 命令失败 rc=%s\n' "$(date '+%F %T')" "$n" "$rc" >>"$L"
+      round_abort=1
+      round_abort_kind="GH-FAIL"
+      round_abort_stage="合并 #$n"
+      break
     fi
+    mc_raw=$(run_timed_log "合并后查询 #$n" gh pr view "$n" -R "$R" --json mergeCommit -q .mergeCommit.oid)
+    rc_view=$?
+    if is_timeout_rc "$rc_view" || [ "$rc_view" -ne 0 ] || ! [[ "$mc_raw" =~ ^[0-9a-fA-F]{40}$ ]]; then
+      printf '%s #%s 合并命令 rc=0 但合并后查询失败 rc=%s，需人工核对\n' "$(date '+%F %T')" "$n" "$rc_view" >>"$L"
+      round_abort=1
+      if is_timeout_rc "$rc_view"; then
+        round_abort_kind="GH-TIMEOUT"
+      else
+        round_abort_kind="GH-FAIL"
+      fi
+      round_abort_stage="合并后查询 #$n"
+      break
+    fi
+    mc=$(printf '%s' "$mc_raw" | cut -c1-7)
+    run_timed_log "合并后评论 #$n" gh pr comment "$n" -R "$R" -b "已合入 $mc（自动合并队列）" >/dev/null
+    rc_comment=$?
+    if [ "$rc_comment" -ne 0 ]; then
+      printf '%s #%s 已合入 %s 但合并后评论失败 rc=%s\n' "$(date '+%F %T')" "$n" "$mc" "$rc_comment" >>"$L"
+      round_abort=1
+      if is_timeout_rc "$rc_comment"; then
+        round_abort_kind="GH-TIMEOUT"
+      else
+        round_abort_kind="GH-FAIL"
+      fi
+      round_abort_stage="合并后评论 #$n"
+      break
+    fi
+    printf '%s MERGED #%s -> %s\n' "$(date '+%F %T')" "$n" "$mc" >>"$L"
+    merged=1
     break
   done
 
