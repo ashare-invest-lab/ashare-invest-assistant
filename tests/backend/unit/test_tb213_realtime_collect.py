@@ -20,6 +20,11 @@ LICENCE = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1")
 NOW = dt.datetime(2030, 6, 11, 2, 0, tzinfo=dt.UTC)
 
 
+@pytest.fixture(autouse=True)
+def _live_mode_for_collection_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAIRUI_MODE", "live")
+
+
 class _Context:
     def __init__(self, value: object, on_exit: object | None = None) -> None:
         self.value = value
@@ -55,6 +60,28 @@ def test_default_switch_is_off_and_does_not_create_engine(monkeypatch: pytest.Mo
     monkeypatch.setattr(jobs, "_engine", denied)
     assert realtime_collect.realtime_quotes_task(settings) == 0
     denied.assert_not_called()
+
+
+def test_replay_mode_skips_engine_licence_and_egress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAIRUI_MODE", "replay")
+    settings = SimpleNamespace(realtime_quotes_source="mairui")
+    engine = Mock(side_effect=AssertionError("replay mode must return before engine creation"))
+    licence = Mock(side_effect=AssertionError("replay mode must not read a licence"))
+    secret = Mock(side_effect=AssertionError("replay mode must not read credentials"))
+    lease = Mock(side_effect=AssertionError("replay mode must not open egress"))
+    client = Mock(side_effect=AssertionError("replay mode must not call mairui"))
+    monkeypatch.setattr(jobs, "_engine", engine)
+    monkeypatch.setattr(realtime_collect, "active_licence_id", licence)
+    monkeypatch.setattr(realtime_collect, "credential", secret)
+    monkeypatch.setattr(realtime_collect, "single_egress", lease)
+    monkeypatch.setattr(realtime_collect, "mairui_get", client)
+
+    assert realtime_collect.realtime_quotes_task(settings, now=NOW) == 0
+    engine.assert_not_called()
+    licence.assert_not_called()
+    secret.assert_not_called()
+    lease.assert_not_called()
+    client.assert_not_called()
 
 
 def test_config_switch_defaults_off() -> None:
@@ -204,6 +231,29 @@ def test_calendar_gate_returns_without_transport(monkeypatch: pytest.MonkeyPatch
         == 0
     )
     transport.assert_not_called()
+
+
+def test_owned_codes_include_etf_holdings_and_watchlist_but_exclude_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    watchlist_result = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: ["510050.SH", "000001.SH"])
+    )
+    securities_result = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: ["159919.SZ", "510050.SH"])
+    )
+    conn = Mock()
+    conn.execute.side_effect = [watchlist_result, securities_result]
+    monkeypatch.setattr(realtime_collect, "select_account", lambda *_args: OWNER)
+    monkeypatch.setattr(
+        realtime_collect,
+        "_account",
+        lambda *_args: SimpleNamespace(positions={"159919.SZ": object(), "399001.SZ": object()}),
+    )
+
+    assert realtime_collect._owned_codes(conn, OWNER, NOW.date()) == ["159919.SZ", "510050.SH"]
+    sql = str(conn.execute.call_args_list[1].args[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "'etf'" in sql and "'stock'" in sql and "'index'" not in sql
 
 
 def test_response_batch_has_single_batch_id_at_write_boundary(
