@@ -6,7 +6,7 @@ import { makeQueryClient } from '../../app/queryClient';
 import { routes } from '../../app/routes';
 import { preloadRoutes } from '../../test/preloadRoutes';
 import { server } from '../../mocks/server';
-import { metricLabel, metricValueText } from '../../lib/reviewMetrics';
+import { formatReviewGapClauses, metricLabel, metricValueText } from '../../lib/reviewMetrics';
 
 const API = '/api/v1';
 const renderAt = (path: string) => {
@@ -31,7 +31,51 @@ describe('T-F81 复盘指标口径', () => {
     expect(await screen.findByTestId('review-metrics')).toHaveTextContent('000300.SH');
     expect(screen.getByTestId('review-benchmark')).toHaveTextContent('未验证');
     for (const key of metricKeys) expect(screen.getByTestId(`metric-${key}`)).toHaveTextContent('—');
-    expect(screen.getByTestId('review-metric-gap')).toHaveTextContent('无数据源');
+    for (const testId of ['review-gap', 'review-metric-gap']) {
+      const note = screen.getByTestId(testId);
+      const text = note.textContent ?? '';
+      expect((text.match(/部分数据缺失/g) ?? [])).toHaveLength(1);
+      expect((text.match(/无数据源/g) ?? [])).toHaveLength(1);
+      expect((text.match(/待用户录入/g) ?? [])).toHaveLength(1);
+      expect(text).toContain('持有收益');
+      expect(text).toContain('基准收益');
+      expect(text).toContain('超额收益');
+      expect(text).toContain('最大回撤');
+      expect((text.match(/缺少价格、基准或公式来源，指标暂不计算/g) ?? [])).toHaveLength(1);
+      expect((text.match(/缺少可关联成交记录/g) ?? [])).toHaveLength(1);
+      expect(text).not.toMatch(/无数据源.*无数据源/);
+    }
+  });
+
+  it('按原因合并缺口，去重消息并列出合法指标名', () => {
+    const gaps = [
+      { key: 'trade_ids', reason: 'user_input_missing', message: '缺少可关联成交记录' },
+      { key: 'outcome_metrics.holding_return', reason: 'no_source', message: '缺少价格、基准或公式来源，指标暂不计算' },
+      { key: 'outcome_metrics.benchmark_return', reason: 'no_source', message: '缺少价格、基准或公式来源，指标暂不计算' },
+      { key: 'outcome_metrics.excess_return', reason: 'no_source', message: '缺少价格、基准或公式来源，指标暂不计算' },
+      { key: 'outcome_metrics.max_drawdown', reason: 'no_source', message: '缺少价格、基准或公式来源，指标暂不计算' },
+      { key: 'outcome_metrics.max_drawdown', reason: 'no_source', message: '缺少价格、基准或公式来源，指标暂不计算' },
+    ] as Parameters<typeof formatReviewGapClauses>[0];
+    expect(formatReviewGapClauses(gaps)).toEqual([
+      '待用户录入（缺少可关联成交记录）',
+      '无数据源（持有收益、基准收益、超额收益、最大回撤：缺少价格、基准或公式来源，指标暂不计算）',
+    ]);
+  });
+
+  it('未知原因和指标键不发明白名单标签', () => {
+    const gaps = [
+      { key: 'outcome_metrics.__proto__', reason: 'no_source', message: '缺少来源' },
+      { key: 'constructor', reason: 'no_source', message: '缺少来源' },
+      { key: 'unknown_metric', reason: 'no_source', message: '其他来源' },
+      { key: 'outcome_metrics.unknown_metric', reason: 'constructor', message: '未知来源' },
+      { key: 'other', reason: 'totally_unknown', message: '陌生原因' },
+    ] as Parameters<typeof formatReviewGapClauses>[0];
+    expect(formatReviewGapClauses(gaps)).toEqual([
+      '无数据源（缺少来源；其他来源）',
+      '未知（未知来源）',
+      '未知（陌生原因）',
+    ]);
+    expect(formatReviewGapClauses(gaps).join('')).not.toMatch(/持有收益|基准收益|超额收益|最大回撤/);
   });
 
   it('指标白名单拒绝原型键和未知键，缺失值不渲染伪数字', () => {

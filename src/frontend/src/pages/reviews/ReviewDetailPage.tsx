@@ -2,15 +2,43 @@ import { Button, Select, Tag } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useCreateReviewVersion, useReview, useReviewVersions } from '../../api/reviewQueries';
-import type { Evidence, ReviewCreate, ReviewVersion } from '../../api/types';
+import type { DataStatus } from '../../api/enums';
+import type { Evidence, Gap, ReviewCreate, ReviewVersion } from '../../api/types';
 import { ApiError } from '../../api/client';
-import { DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
+import { DataStatusTag, ErrorBox, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
+import { isNotApplicable } from '../../lib/dataGaps';
 import { labelOf } from '../../lib/explanations';
 import { fmtTime } from '../../lib/format';
-import { metricLabel, metricValueText, REVIEW_BENCHMARK_NOTE, REVIEW_METRIC_KEYS } from '../../lib/reviewMetrics';
+import { formatReviewGapClauses, metricLabel, metricValueText, REVIEW_BENCHMARK_NOTE, REVIEW_METRIC_KEYS } from '../../lib/reviewMetrics';
 
 const TIMELINE_LABELS = { review_version: '复盘版本', plan_version: '计划版本', trade: '成交' } as const;
+const NOTE_STATUS: readonly DataStatus[] = ['stale', 'partial', 'unavailable'];
+
+function ReviewGapNote({ status, gaps, asOf, testId = 'gap-note' }: { status: DataStatus; gaps: Gap[]; asOf?: string | null; testId?: string }) {
+  if (!gaps.length && !NOTE_STATUS.includes(status)) return null;
+  if (isNotApplicable(gaps)) {
+    return (
+      <div className="gap-note na small" role="note" aria-label="数据状态说明" data-testid={testId} data-status="not_applicable">
+        <b>不适用</b>：该证券类型没有此类数据{gaps[0].message ? `（${gaps[0].message}）` : ''}
+      </div>
+    );
+  }
+  const licence = gaps.some((gap) => gap.reason === 'data_licence_unavailable');
+  const onlySuspended = gaps.length > 0 && gaps.every((gap) => gap.reason === 'suspended');
+  const head = onlySuspended && status !== 'stale' ? '停牌说明'
+    : status === 'unavailable' ? '数据暂不可用' : status === 'stale' ? `数据已过期${asOf ? `（截至 ${fmtTime(asOf)}）` : ''}` : status === 'partial' ? '部分数据缺失' : '数据提示';
+  const clauses = formatReviewGapClauses(gaps);
+  return (
+    <div className="gap-note small" role="note" aria-label="数据状态说明" data-testid={testId} data-status={status}>
+      <b>{head}</b>
+      {clauses.length ? '：' : null}
+      {clauses.map((clause, index) => <span key={`${clause}-${index}`}>{index ? '；' : ''}{clause}</span>)}
+      {licence ? <> <Link to="/settings/data-licence" data-testid="gap-licence-link">去设置数据证书 ›</Link></> : null}
+    </div>
+  );
+}
+
 function MetricBlock({ version }: { version: ReviewVersion }) {
   const metricGap = version.gaps.find((gap) => gap.key.startsWith('outcome_metrics.'));
   const outcomeMetrics = version.outcome_metrics && typeof version.outcome_metrics === 'object' ? version.outcome_metrics : null;
@@ -21,7 +49,7 @@ function MetricBlock({ version }: { version: ReviewVersion }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(100px, 1fr))', gap: 8, marginTop: 8 }}>
         {REVIEW_METRIC_KEYS.map((key) => <div key={key}><div className="muted small">{metricLabel(key) ?? '未知指标'}</div><b data-testid={`metric-${key}`}>{metricValueText(outcomeMetrics && Object.hasOwn(outcomeMetrics, key) ? outcomeMetrics[key] : null)}</b></div>)}
       </div>
-      <GapNote status={version.data_status} gaps={version.gaps} asOf={version.data_as_of} testId="review-metric-gap" />
+      <ReviewGapNote status={version.data_status} gaps={version.gaps} asOf={version.data_as_of} testId="review-metric-gap" />
     </section>
   );
 }
@@ -93,7 +121,7 @@ export function ReviewDetailPage() {
     <div className="page-scroll page" data-testid="review-detail">
       <div className="detail-head"><Button size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/reviews')}>复盘列表</Button><h2 className="page-title" style={{ margin: 0 }}>{r.name ?? '复盘详情'}</h2><DataStatusTag status={r.data_status} asOf={r.data_as_of} gaps={r.gaps} /></div>
       <div className="muted small" style={{ margin: '6px 0 10px' }}>{r.security_code ? `证券 ${r.security_code}` : '未填证券'}{planHref ? <> · 计划 <Link to={planHref} data-testid="review-plan-link">{r.plan_id}</Link></> : null} · {r.period_start} ～ {r.period_end} · 创建于 {fmtTime(r.created_at)}</div>
-      <GapNote status={r.data_status} gaps={r.gaps} asOf={r.data_as_of} testId="review-gap" />
+      <ReviewGapNote status={r.data_status} gaps={r.gaps} asOf={r.data_as_of} testId="review-gap" />
       {version ? <>
         <section className="panel" data-testid="review-notes">
           <div className="panel-head"><span className="panel-title">第 {version.version_no} 版笔记</span>{version.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</div>
