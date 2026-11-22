@@ -6,11 +6,13 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 from app.reviews import service
-from app.reviews.metrics import period_pending, project_metrics
+from app.reviews.metrics import period_pending, period_pending_state, project_metrics
 
 OWNER = uuid.UUID("11111111-1111-4111-8111-111111111111")
+ACCOUNT = uuid.UUID(int=900)
 
 
 def test_a_weekend_does_not_reopen_friday_period() -> None:
@@ -21,7 +23,99 @@ def test_a_weekend_does_not_reopen_friday_period() -> None:
         period_end=dt.date(2026, 1, 12),
         now=dt.datetime(2026, 1, 12, 2, tzinfo=dt.UTC),
     )
-    assert projected["holding_return"]["gaps"] == ["not_yet_published"]
+    assert projected["holding_return"]["value"] is None
+
+
+def test_a_missing_calendar_cannot_release_period() -> None:
+    class Connection:
+        def execute(self, _statement: object) -> SimpleNamespace:
+            return SimpleNamespace(first=lambda: None)
+
+    assert period_pending(
+        dt.date(2026, 1, 9),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+        conn=Connection(),
+    )
+
+
+def test_a_closed_endpoint_uses_previous_open_trading_day() -> None:
+    class Connection:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, _statement: object) -> SimpleNamespace:
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(
+                    first=lambda: SimpleNamespace(
+                        date=dt.date(2026, 1, 10), is_open=False
+                    )
+                )
+            return SimpleNamespace(
+                first=lambda: SimpleNamespace(date=dt.date(2026, 1, 9), is_open=True)
+            )
+
+    pending, available = period_pending_state(
+        dt.date(2026, 1, 10),
+        now=dt.datetime(2026, 1, 12, 1, tzinfo=dt.UTC),
+        conn=Connection(),
+    )
+    assert not pending and available
+
+
+def test_a_closed_endpoint_without_previous_open_day_stays_pending() -> None:
+    class Connection:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, _statement: object) -> SimpleNamespace:
+            self.calls += 1
+            if self.calls > 1:
+                return SimpleNamespace(first=lambda: None)
+            return SimpleNamespace(
+                first=lambda: SimpleNamespace(date=dt.date(2026, 1, 10), is_open=False)
+            )
+
+    assert period_pending_state(
+        dt.date(2026, 1, 10),
+        now=dt.datetime(2026, 1, 10, 1, tzinfo=dt.UTC),
+        conn=Connection(),
+    ) == (True, False)
+
+
+def test_a_gap_reason_and_simulation_source_are_preserved() -> None:
+    projected = project_metrics(
+        {
+            "holding_return": {
+                "value": "12.5",
+                "n": 5,
+                "window": "2026-01-01/2026-01-05",
+                "small_sample": True,
+                "source": "simulated_tracking",
+                "gaps": ["future_reason"],
+            }
+        },
+        period_end=dt.date(2026, 1, 5),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    holding = projected["holding_return"]
+    assert holding["source"] == "simulated_tracking"
+    assert holding["label"] == "模拟跟踪"
+    assert holding["value"] is None
+    assert holding["n"] == 0 and holding["small_sample"] is True
+    assert "gaps" not in holding
+
+
+def test_b_project_metrics_freezes_nonempty_inputs_before_contract_final() -> None:
+    projected = project_metrics(
+        {name: {"value": "9.9", "n": 7} for name in service.METRIC_NAMES},
+        period_end=dt.date(2026, 1, 5),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert all(
+        item["value"] is None and item["n"] == 0 and item["small_sample"] is True
+        for item in projected.values()
+    )
 
 
 def test_b_frozen_as_of_is_kept_in_snapshot() -> None:
@@ -53,7 +147,28 @@ class TradeConnection:
         self.rows = rows
 
     def execute(self, _statement: object) -> SimpleNamespace:
+        if "trading_calendar" in str(_statement):
+            return SimpleNamespace(
+                first=lambda: SimpleNamespace(date=dt.date(2026, 1, 5), is_open=True)
+            )
+        if "daily_bars" in str(_statement):
+            return SimpleNamespace(all=list)
         return SimpleNamespace(all=lambda: self.rows)
+
+
+class BatchTradeConnection(TradeConnection):
+    def __init__(
+        self, rows: list[SimpleNamespace], batches: list[SimpleNamespace]
+    ) -> None:
+        super().__init__(rows)
+        self.batches = batches
+        self.batch_calls = 0
+
+    def execute(self, statement: object) -> SimpleNamespace:
+        if "import_batches" in str(statement):
+            self.batch_calls += 1
+            return SimpleNamespace(all=lambda: self.batches)
+        return super().execute(statement)
 
 
 def _trade(
@@ -63,19 +178,166 @@ def _trade(
     quantity: str,
     net_amount: str,
     traded_at: dt.datetime,
+    created_at: dt.datetime | None = None,
+    source: str = "import",
+    account_id: uuid.UUID | None = None,
+    import_batch_id: uuid.UUID | None = None,
     voided_at: dt.datetime | None = None,
     epistemic_type: str = "execution",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.UUID(int=number),
+        account_id=account_id or ACCOUNT,
         security_code="600000.SH",
+        trade_date=traded_at.date(),
         side=side,
         quantity=Decimal(quantity),
         net_amount=Decimal(net_amount),
         traded_at=traded_at,
+        created_at=created_at or traded_at,
+        source=source,
+        import_batch_id=import_batch_id,
         voided_at=voided_at,
         epistemic_type=epistemic_type,
     )
+
+
+def _batch(
+    identifier: uuid.UUID,
+    *,
+    owner: uuid.UUID = OWNER,
+    account_id: uuid.UUID = ACCOUNT,
+    committed_at: dt.datetime | None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=identifier,
+        user_id=owner,
+        account_id=account_id,
+        committed_at=committed_at,
+    )
+
+
+def test_tb216_committed_at_after_snapshot_is_not_visible_without_gap() -> None:
+    batch_id = uuid.UUID(int=700)
+    row = _trade(
+        701,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        import_batch_id=batch_id,
+    )
+    conn = BatchTradeConnection(
+        [row],
+        [_batch(batch_id, committed_at=dt.datetime(2026, 1, 11, tzinfo=dt.UTC))],
+    )
+    _, evidence, data_as_of, gaps = service._compute_outcome_metrics(
+        conn,
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [row.id],
+        dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert conn.batch_calls == 1
+    assert evidence == [] and data_as_of is None
+    assert "trades.import_commit_unproven" not in gaps
+
+
+def test_tb216_uncommitted_batch_is_hidden_and_flattened_gap_is_deduplicated() -> None:
+    batch_id = uuid.UUID(int=710)
+    row = _trade(
+        711,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        import_batch_id=batch_id,
+    )
+    conn = BatchTradeConnection([row], [_batch(batch_id, committed_at=None)])
+    snapshot = service._snapshot_items(
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        None,
+        [],
+        [],
+        True,
+        conn=conn,
+        owner=OWNER,
+        trade_ids=[row.id],
+        calculation_as_of=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    matching = [
+        gap for gap in snapshot["gaps"] if gap["key"] == "trades.import_commit_unproven"
+    ]
+    assert conn.batch_calls == 1
+    assert snapshot["evidence"] == [] and snapshot["data_as_of"] is None
+    assert matching == [
+        {
+            "key": "trades.import_commit_unproven",
+            "reason": "no_source",
+            "message": "导入批次提交时点不可证实",
+        }
+    ]
+
+
+def test_tb216_other_owner_or_account_batch_is_hidden() -> None:
+    batch_id = uuid.UUID(int=720)
+    row = _trade(
+        721,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        import_batch_id=batch_id,
+    )
+    for batch in (
+        _batch(
+            batch_id,
+            owner=uuid.UUID(int=901),
+            committed_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
+        ),
+        _batch(
+            batch_id,
+            account_id=uuid.UUID(int=902),
+            committed_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
+        ),
+    ):
+        conn = BatchTradeConnection([row], [batch])
+        _, evidence, data_as_of, gaps = service._compute_outcome_metrics(
+            conn,
+            OWNER,
+            dt.date(2026, 1, 1),
+            dt.date(2026, 1, 5),
+            [row.id],
+            dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+        )
+        assert evidence == [] and data_as_of is None
+        assert gaps["trades.import_commit_unproven"] == ["no_source"]
+
+
+def test_tb216_manual_trade_keeps_created_and_traded_visibility() -> None:
+    row = _trade(
+        730,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        created_at=dt.datetime(2026, 1, 4, tzinfo=dt.UTC),
+        source="manual",
+    )
+    conn = BatchTradeConnection([row], [])
+    _, evidence, data_as_of, gaps = service._compute_outcome_metrics(
+        conn,
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [row.id],
+        dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert conn.batch_calls == 0
+    assert evidence and data_as_of == row.created_at
+    assert "trades.import_commit_unproven" not in gaps
 
 
 def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:
@@ -100,7 +362,7 @@ def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:
             ),
         )
     ]
-    metrics, _, _ = service._compute_outcome_metrics(
+    metrics, _, _, metric_gaps = service._compute_outcome_metrics(
         TradeConnection(rows),
         OWNER,
         dt.date(2026, 1, 1),
@@ -108,9 +370,55 @@ def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:
         [r.id for r in rows],
         at,
     )
-    assert metrics["holding_return"]["value"] == "10.0"
-    assert metrics["benchmark_return"]["value"] is None
-    assert metrics["benchmark_return"]["gaps"] == ["no_source"]
+    for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
+        assert metrics[name]["value"] is None
+        assert metrics[name]["n"] == 0
+        assert metrics[name]["small_sample"] is True
+        assert metric_gaps[name] == ["no_source"]
+
+
+def test_c_complete_sources_stay_unpublished_until_outcome_metric_contract_is_final(
+    monkeypatch: Any,
+) -> None:
+    at = dt.datetime(2026, 1, 10, tzinfo=dt.UTC)
+    rows = [
+        item
+        for i in range(5)
+        for item in (
+            _trade(
+                100 + i * 2,
+                side="buy",
+                quantity="10",
+                net_amount="-100",
+                traded_at=dt.datetime(2026, 1, 1 + i, tzinfo=dt.UTC),
+            ),
+            _trade(
+                101 + i * 2,
+                side="sell",
+                quantity="10",
+                net_amount="110",
+                traded_at=dt.datetime(2026, 1, 1 + i, 1, tzinfo=dt.UTC),
+            ),
+        )
+    ]
+    monkeypatch.setattr(
+        service,
+        "_benchmark_and_drawdowns",
+        lambda *_args: ([Decimal(2)], [Decimal(-3)], [Decimal(8)], at),
+    )
+    metrics, _, _, metric_gaps = service._compute_outcome_metrics(
+        TradeConnection(rows),
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [r.id for r in rows],
+        at,
+    )
+    for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
+        assert metrics[name]["value"] is None
+        assert metrics[name]["n"] == 0
+        assert metrics[name]["small_sample"] is True
+        assert metric_gaps[name] == ["no_source"]
 
 
 def test_c_fifo_partial_close_excludes_unclosed_quantity() -> None:
@@ -228,9 +536,129 @@ def test_c_trade_after_calculation_as_of_is_excluded() -> None:
     assert evidence_ids == ["trade:" + str(rows[0].id)]
 
 
+def test_c_trade_imported_after_calculation_as_of_is_excluded() -> None:
+    rows = [
+        _trade(
+            63,
+            side="buy",
+            quantity="10",
+            net_amount="-100",
+            traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        ),
+        _trade(
+            64,
+            side="sell",
+            quantity="10",
+            net_amount="110",
+            traded_at=dt.datetime(2026, 1, 2, 1, tzinfo=dt.UTC),
+            created_at=dt.datetime(2026, 1, 6, tzinfo=dt.UTC),
+        ),
+    ]
+    holding, _, _, evidence_ids, data_as_of, _ = service._observations(
+        rows,
+        dt.datetime(2026, 1, 5, tzinfo=dt.UTC),
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 10),
+    )
+    assert holding == []
+    assert evidence_ids == ["trade:" + str(rows[0].id)]
+    assert data_as_of == rows[0].created_at
+
+
+def test_c_non_execution_and_missing_dates_are_not_visible() -> None:
+    base = _trade(
+        65,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+    )
+    simulated = _trade(
+        66,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        epistemic_type="simulated",
+    )
+    malformed = SimpleNamespace(**{**vars(base), "trade_date": None})
+    holding, _, _, evidence, _, open_positions = service._observations(
+        [base, simulated, malformed],
+        dt.datetime(2026, 1, 5, tzinfo=dt.UTC),
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+    )
+    assert holding == [] and evidence == ["trade:" + str(base.id)] and open_positions
+
+
+def test_d_trade_evidence_uses_provider_and_trade_date_fallback() -> None:
+    manual = _trade(
+        67,
+        side="buy",
+        quantity="1",
+        net_amount="-1",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        source="manual",
+    )
+    assert service._trade_evidence(manual)["provider"] == "user_input"
+    fallback = service._trade_evidence(
+        SimpleNamespace(**{**vars(manual), "traded_at": None, "created_at": None})
+    )
+    assert fallback is not None
+    assert fallback["data_as_of"] == "2026-01-02T07:00:00+00:00"
+    assert service._trade_evidence(
+        SimpleNamespace(**{**vars(manual), "trade_date": None, "traded_at": None, "created_at": None})
+    ) is None
+
+
+def test_d_plan_evidence_requires_connection_owner_and_created_at() -> None:
+    plan = uuid.UUID(int=68)
+    assert service._plan_evidence(None, OWNER, [plan]) == []
+
+    class Connection:
+        def execute(self, _statement: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                all=lambda: [SimpleNamespace(id=plan, created_at=None)]
+            )
+
+    assert service._plan_evidence(Connection(), OWNER, [plan]) == []
+
+
 def test_d_evidence_is_written_for_plan_and_trade_snapshots() -> None:
     plan_id = uuid.UUID(int=10)
     trade_id = uuid.UUID(int=11)
+    trade = _trade(
+        trade_id.int,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+    )
+
+    class SnapshotConnection:
+        def execute(self, statement: object) -> SimpleNamespace:
+            text = str(statement)
+            if "trading_calendar" in text:
+                return SimpleNamespace(
+                    first=lambda: SimpleNamespace(
+                        date=dt.date(2026, 1, 2), is_open=True
+                    )
+                )
+            if "plan_versions" in text:
+                return SimpleNamespace(
+                    all=lambda: [
+                        SimpleNamespace(
+                            id=plan_id,
+                            created_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+                        )
+                    ]
+                )
+            if "trades" in text:
+                return SimpleNamespace(all=lambda: [trade])
+            if "daily_bars" in text:
+                return SimpleNamespace(all=list)
+            raise AssertionError(text)
+
     snapshot = service._snapshot_items(
         dt.date(2026, 1, 1),
         dt.date(2026, 1, 2),
@@ -238,6 +666,8 @@ def test_d_evidence_is_written_for_plan_and_trade_snapshots() -> None:
         [],
         [],
         True,
+        conn=SnapshotConnection(),
+        owner=OWNER,
         plan_version_ids=[plan_id],
         trade_ids=[trade_id],
     )
@@ -246,6 +676,74 @@ def test_d_evidence_is_written_for_plan_and_trade_snapshots() -> None:
         f"trade:{trade_id}",
     }
     assert snapshot["attribution"]["execution"][0]["evidence_ids"]
+    for item in snapshot["evidence"]:
+        assert {
+            "unit",
+            "provider",
+            "endpoint",
+            "data_as_of",
+            "fetched_at",
+            "epistemic_type",
+        } <= set(item)
+
+
+def test_d_full_timeline_evidence_ids_resolve_across_history(
+    monkeypatch: Any,
+) -> None:
+    old_snapshot = uuid.UUID(int=70)
+    current_snapshot = uuid.UUID(int=71)
+    old_trade = uuid.UUID(int=72)
+    current_trade = uuid.UUID(int=73)
+    versions = [
+        SimpleNamespace(
+            id=uuid.UUID(int=74),
+            version_no=1,
+            snapshot_id=old_snapshot,
+            created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+            plan_version_ids=[],
+            trade_ids=[],
+        ),
+        SimpleNamespace(
+            id=uuid.UUID(int=75),
+            version_no=2,
+            snapshot_id=current_snapshot,
+            created_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
+            plan_version_ids=[],
+            trade_ids=[current_trade],
+        ),
+    ]
+    snapshots = {
+        old_snapshot: {"evidence": [{"id": f"trade:{old_trade}"}]},
+        current_snapshot: {"evidence": [{"id": f"trade:{current_trade}"}]},
+    }
+
+    class TimelineConnection:
+        def execute(self, statement: object) -> SimpleNamespace:
+            text = str(statement)
+            if "review_versions" in text:
+                return SimpleNamespace(all=lambda: versions)
+            if "trades" in text:
+                return SimpleNamespace(all=list)
+            raise AssertionError(text)
+
+    monkeypatch.setattr(
+        service,
+        "_snapshot",
+        lambda _conn, _owner, snapshot_id: snapshots[snapshot_id],
+    )
+    timeline, evidence = service._timeline_data(
+        TimelineConnection(),
+        OWNER,
+        uuid.UUID(int=76),
+        versions[-1],
+    )
+    evidence_ids = {item["id"] for item in evidence}
+    assert evidence_ids == {f"trade:{old_trade}", f"trade:{current_trade}"}
+    assert all(
+        evidence_id in evidence_ids
+        for item in timeline
+        for evidence_id in item["evidence_ids"]
+    )
 
 
 def test_e_plan_and_outcome_are_separate_frozen_sections() -> None:
@@ -300,9 +798,10 @@ def test_g_project_metrics_excludes_simulated_tracking_and_merges_gaps() -> None
         now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
     )
     assert projected["holding_return"]["value"] is None
-    assert projected["holding_return"]["gaps"] == ["no_source"]
-    assert "source" not in projected["holding_return"]
-    assert projected["benchmark_return"]["gaps"] == ["no_source"]
+    assert projected["holding_return"]["source"] == "simulated_tracking"
+    assert projected["holding_return"]["label"] == "模拟跟踪"
+    assert "gaps" not in projected["holding_return"]
+    assert "gaps" not in projected["benchmark_return"]
 
 
 def test_g_period_pending_uses_beijing_cutoff_and_future_dates() -> None:
@@ -353,6 +852,134 @@ def test_g_fifo_groups_security_codes_and_ignores_malformed_rows() -> None:
     assert not open_positions
 
 
+def test_g_benchmark_and_drawdown_requires_complete_visible_paths() -> None:
+    first = dt.date(2026, 1, 2)
+    last = dt.date(2026, 1, 3)
+    as_of = dt.datetime(2026, 1, 10, tzinfo=dt.UTC)
+    benchmark_rows = [
+        SimpleNamespace(
+            code="000300.SH",
+            trade_date=first,
+            adj_type="none",
+            close=100,
+            fetched_at=dt.datetime(2026, 1, 3, 8, tzinfo=dt.UTC),
+            is_suspended=False,
+        ),
+        SimpleNamespace(
+            code="000300.SH",
+            trade_date=last,
+            adj_type="none",
+            close=110,
+            fetched_at=dt.datetime(2026, 1, 4, 8, tzinfo=dt.UTC),
+            is_suspended=False,
+        ),
+    ]
+    stock_rows = [
+        SimpleNamespace(
+            code="600000.SH",
+            trade_date=first,
+            adj_type="qfq",
+            close=100,
+            fetched_at=dt.datetime(2026, 1, 3, 8, tzinfo=dt.UTC),
+            is_suspended=False,
+        ),
+        SimpleNamespace(
+            code="600000.SH",
+            trade_date=last,
+            adj_type="qfq",
+            close=90,
+            fetched_at=dt.datetime(2026, 1, 4, 8, tzinfo=dt.UTC),
+            is_suspended=False,
+        ),
+    ]
+
+    class Connection:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, statement: object) -> SimpleNamespace:
+            self.calls += 1
+            rows = benchmark_rows if self.calls == 1 else stock_rows
+            return SimpleNamespace(all=lambda: rows)
+
+    benchmark, drawdowns, excess, market_as_of = service._benchmark_and_drawdowns(
+        Connection(), [("600000.SH", first, last, Decimal(5))], as_of
+    )
+    assert benchmark == [Decimal(10)]
+    assert drawdowns == [Decimal(-10)]
+    assert excess == [Decimal(-5)]
+    assert market_as_of == dt.datetime(2026, 1, 4, 8, tzinfo=dt.UTC)
+
+
+def test_g_benchmark_empty_pairs_and_incomplete_path_return_empty_metrics() -> None:
+    as_of = dt.datetime(2026, 1, 10, tzinfo=dt.UTC)
+    assert service._benchmark_and_drawdowns(SimpleNamespace(), [], as_of) == (
+        [],
+        [],
+        [],
+        None,
+    )
+
+    class Connection:
+        def execute(self, _statement: object) -> SimpleNamespace:
+            return SimpleNamespace(all=list)
+
+    result = service._benchmark_and_drawdowns(
+        Connection(),
+        [("600000.SH", dt.date(2026, 1, 2), dt.date(2026, 1, 3), Decimal(5))],
+        as_of,
+    )
+    assert result[:3] == ([], [], []) and result[3] is None
+
+
+def test_g_outcome_metric_gate_clears_values_but_keeps_evidence(
+    monkeypatch: Any,
+) -> None:
+    at = dt.datetime(2026, 1, 10, tzinfo=dt.UTC)
+    rows = [
+        item
+        for i in range(5)
+        for item in (
+            _trade(
+                80 + i * 2,
+                side="buy",
+                quantity="10",
+                net_amount="-100",
+                traded_at=dt.datetime(2026, 1, 1 + i, tzinfo=dt.UTC),
+            ),
+            _trade(
+                81 + i * 2,
+                side="sell",
+                quantity="10",
+                net_amount="110",
+                traded_at=dt.datetime(2026, 1, 1 + i, 1, tzinfo=dt.UTC),
+            ),
+        )
+    ]
+    monkeypatch.setattr(service, "OUTCOME_METRICS_ENABLED", True)
+    metrics, evidence, _, gaps = service._compute_outcome_metrics(
+        TradeConnection(rows),
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [r.id for r in rows],
+        at,
+    )
+    assert metrics["holding_return"]["value"] is not None
+    assert evidence and not gaps.get("holding_return")
+    monkeypatch.setattr(service, "OUTCOME_METRICS_ENABLED", False)
+    gated, _, _, gated_gaps = service._compute_outcome_metrics(
+        TradeConnection(rows),
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [r.id for r in rows],
+        at,
+    )
+    assert all(gated[name]["value"] is None for name in service.METRIC_NAMES)
+    assert all(gated_gaps[name] == ["no_source"] for name in service.METRIC_NAMES)
+
+
 def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
     snap = {
         "data_status": "partial",
@@ -361,6 +988,54 @@ def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
         "outcome_metrics": {"holding_return": {"gaps": ["user_input_missing"]}},
     }
     status = service._status_for(snap, dt.date(2026, 1, 2))
-    assert [gap["reason"] for gap in status["gaps"]] == ["no_source"]
+    assert [gap["key"] for gap in status["gaps"]] == [
+        "outcome_metrics.holding_return",
+        "outcome_metrics.benchmark_return",
+        "outcome_metrics.excess_return",
+        "outcome_metrics.max_drawdown",
+    ]
+    assert [gap["reason"] for gap in status["gaps"][:4]] == ["no_source"] * 4
     metric_status = service._status_for({**snap, "gaps": []}, dt.date(2026, 1, 2))
-    assert [gap["reason"] for gap in metric_status["gaps"]] == ["user_input_missing"]
+    assert [gap["reason"] for gap in metric_status["gaps"]] == ["no_source"] * 4
+
+
+def test_g_status_for_pending_keeps_non_outcome_snapshot_gaps() -> None:
+    snap = {
+        "period_end": "2099-01-05",
+        "gaps": [
+            {
+                "key": "trades.import_commit_unproven",
+                "reason": "no_source",
+            }
+        ],
+        "outcome_metrics": {},
+    }
+    status = service._status_for(snap, dt.date(2099, 1, 5))
+    assert {(gap["key"], gap["reason"]) for gap in status["gaps"]} >= {
+        ("outcome_metrics.holding_return", "no_source"),
+        ("trades.import_commit_unproven", "no_source"),
+    }
+
+
+def test_g_pending_snapshot_keeps_visible_trades_and_uses_no_source() -> None:
+    row = _trade(
+        880,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC),
+    )
+    snapshot = service._snapshot_items(
+        dt.date(2026, 1, 1),
+        dt.date(2099, 1, 5),
+        None,
+        [],
+        [],
+        True,
+        conn=TradeConnection([row]),
+        owner=OWNER,
+        trade_ids=[row.id],
+        calculation_as_of=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert any(item["key"] == "trade" for item in snapshot["evidence"])
+    assert all(gap["reason"] == "no_source" for gap in snapshot["gaps"])
