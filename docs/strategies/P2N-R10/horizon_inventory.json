@@ -1118,6 +1118,11 @@
       "path": "docs/strategies/T-R103/review_tracking_metrics.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R103 复盘与建议跟踪指标口径卡；候选信号研究支持文档，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R117/cooling-off.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R117：冷静期规则依据；非策略身份"
     }
   ],
   "records": [
@@ -3037,5 +3042,16 @@
     "historical_frozen": 7,
     "runtime_changed": false,
     "change": "scope 205→235；身份45→48、来源身份文件23→26、冻结身份4→7；H-01 v4、S-01 v3、W-01 v3；保留两侧历史刷新记录，不推断运行态"
+  },
+  "t_r117_refresh": {
+    "basis": "T-R117 用户任务：登记冷静期规则依据文档；不新增策略身份、不改运行态",
+    "previous_scope_files": 240,
+    "scope_files": 241,
+    "added_paths": [
+      "docs/strategies/T-R117/cooling-off.md"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 240→241；登记 1 个 feature/calendar/compliance rule reference 文档，身份记录48、来源身份文件26、records/stats不变"
   }
 }
