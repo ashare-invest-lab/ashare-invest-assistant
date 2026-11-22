@@ -98,8 +98,7 @@ def _version_page(conn: Connection, owner: uuid.UUID, identifier: uuid.UUID, cfg
     rows = conn.execute(query.order_by(review_versions.c.version_no.desc()).limit(pp.limit + 1)).all()
     page = build_page(rows, limit=pp.limit, key=lambda r: [r.version_no], scope=scope, settings=cfg)
     def body(row: Row[Any]) -> dict[str, Any]:
-        end = getattr(review, "period_end", None)
-        return service.version_body(conn, owner, row) if end is None else service.version_body(conn, owner, row, period_end=end)
+        return service.version_body(conn, owner, row, period_end=review.period_end)
     return Page(items=[body(r) for r in page.items], next_cursor=page.next_cursor)
 
 def _run(rds: redis.Redis, user: uuid.UUID, scope: str, key: str | None, payload: dict[str, Any], fn: Callable[[], tuple[int, Any]]) -> dict[str, Any]:
@@ -159,8 +158,7 @@ def version_detail(identifier: uuid.UUID, version_no: int, auth: AuthDep, engine
         ).first()
         if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
-        end = getattr(review, "period_end", None)
-        return service.version_body(conn, auth.user_id, row) if end is None else service.version_body(conn, auth.user_id, row, period_end=end)
+        return service.version_body(conn, auth.user_id, row, period_end=review.period_end)
 
 @router.post("/reviews/{identifier}/versions", status_code=201)
 def revise(
