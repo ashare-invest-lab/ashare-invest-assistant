@@ -6,7 +6,7 @@ import { Group, Panel, Separator, useDefaultLayout, useGroupRef, usePanelRef } f
 import { useNavigate } from 'react-router';
 import { useSuggestion, useTerminal } from '../../api/queries';
 import type { TerminalRow, TerminalScope } from '../../api/types';
-import { ErrorBox } from '../../components/common';
+import { DataStatusTag, ErrorBox, GapNote } from '../../components/common';
 import { SESSION } from '../../i18n/labels';
 import { fmtTime } from '../../lib/format';
 import { AccountStrip, WatchTable } from './WatchTable';
@@ -76,6 +76,8 @@ export function TerminalPage() {
         </Tooltip>
         <Button size="small" icon={<ReloadOutlined />} onClick={resetLayout} data-testid="reset-layout">恢复默认布局</Button>
       </div>
+      {terminal.data?.data_status ? <DataStatusTag status={terminal.data.data_status} asOf={terminal.data.data_as_of} gaps={terminal.data.gaps} /> : null}
+      {terminal.data?.data_status ? <GapNote status={terminal.data.data_status} gaps={terminal.data.gaps ?? []} asOf={terminal.data.data_as_of} testId="terminal-gap-note" /> : null}
       {terminal.isError ? <ErrorBox error={terminal.error} /> : null}
       <div className="term-body">
         <Group

@@ -138,7 +138,7 @@ function todayBody(): TodayResponse {
   const used = new Set([...alerts, ...triggers].flatMap((x) => x.evidence_ids));
   return {
     account_id: TERMINAL_ACCOUNT.account_id, server_time: NOW, trade_date: TRADE_DATE, session: 'morning',
-    market: { regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
+    market: { basis: TERMINAL_ACCOUNT.basis ?? null, regime: TERMINAL_ACCOUNT.regime, regime_position_range: TERMINAL_ACCOUNT.regime_position_range, data_status: 'fresh' },
     // T-F36/T-F36b：持仓行一律带 t_view，非持仓行为 null（契约 intraday-bars.md §3.7 ①）
     focus: more(TERMINAL_ROWS.filter((r) => r.focus).map((r, i) => ({ ...r, t_view: todayTView(r, i) }))),
     // T-F18：取自计划草案 mock 的当前状态（待确认 + 条件已变）
@@ -161,6 +161,7 @@ function todayBody(): TodayResponse {
     plan_triggers: more(triggers),
     data_gaps: { items: todayDataGaps(licOut).slice(0, 50), more: false },
     evidence: TODAY_EVIDENCE.filter((e) => used.has(e.id)),
+    data_status: 'partial', data_as_of: NOW, gaps: [{ key: 'aggregation', reason: 'no_source', message: '行情与部分事件来源尚未接线（示例）' }],
   };
 }
 
@@ -186,6 +187,7 @@ const routeHandlers = [
     return jsonWithEtag(request, {
       account_id: TERMINAL_ACCOUNT.account_id, server_time: NOW, trade_date: TRADE_DATE, session: 'morning', account: TERMINAL_ACCOUNT, rows: rows.slice(0, 300), truncated: rows.length > 300,
       unread_notifications: notifications().filter((n) => n.read_at === null).length,
+      data_status: 'partial', data_as_of: NOW, gaps: [{ key: 'aggregation', reason: 'no_source', message: '行情与部分事件来源尚未接线（示例）' }],
     });
   }),
   http.get(`${API}/today`, async ({ request }) => {

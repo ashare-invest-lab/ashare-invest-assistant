@@ -5,7 +5,7 @@ import { Link } from 'react-router';
 import { useDailyReport, useToday } from '../../api/queries';
 import { QuoteStreamFallback } from '../../components/QuoteStreamFallback';
 import { securityTypeOf, type TodayFocusRow, type TodayResponse } from '../../api/types';
-import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, Loading } from '../../components/common';
+import { ActionBadge, ConsensusBadge, DataStatusTag, ErrorBox, GapNote, Loading } from '../../components/common';
 import { EvidenceChips } from '../../components/EvidenceChips';
 import { CardDisclaimer } from '../../components/RiskDisclosure';
 import {
@@ -16,6 +16,7 @@ import { fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 import { WatchlistSection } from '../../features/watchlist/WatchlistSection';
 import { TViewCell } from './tView';
+import { BasisTrace } from '../market/MarketBasis';
 import { MORE_ROUTE, safeInternalRoute, type TodayListKey as ListKey } from './todayRoutes';
 import { NoSignals, ReportGaps, TodayAccount, TodayStatusBar } from './TodayStatus';
 import { buildReportGaps, hasSuggestion, preReportState, reportDateToFetch, reportState, type GlobalState } from './todayView';
@@ -68,7 +69,12 @@ const focusColumns = (nonTradingDay: boolean): ColumnsType<TodayFocusRow> => [
   { title: '分时（做T视图）', key: 'tv', width: 300, render: (_, r) => (r.holding ? <TViewCell code={r.security_code} t={r.t_view} nonTradingDay={nonTradingDay} /> : <span className="muted">—</span>) },
   { title: '不可执行原因', key: 'rs', width: 96, align: 'right', render: (_, r) => (r.active_reason_count ? <span className="num">{r.active_reason_count}</span> : <span className="muted">0</span>) },
   { title: '风险', key: 'risk', width: 70, render: (_, r) => (r.max_risk_level ? <Tag color={Object.hasOwn(RISK_LEVEL, r.max_risk_level) ? RISK_LEVEL[r.max_risk_level].color : undefined}>{Object.hasOwn(RISK_LEVEL, r.max_risk_level) ? RISK_LEVEL[r.max_risk_level].text : '未知级别'}</Tag> : <span className="muted">—</span>) },
-  { title: '数据', key: 'ds', width: 120, render: (_, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
+  { title: '数据', key: 'ds', width: 170, render: (_, r) => (
+    <span>
+      <DataStatusTag status={r.data_status} asOf={r.data_as_of} />
+      <span className="muted small">行情时点：{r.quote?.t ? fmtTime(r.quote.t) : '缺证'}</span>
+    </span>
+  ) },
   // T-F33：自选入口（以 GET /watchlist 为准，不用行上的 in_watchlist，写入后无需等 /today 轮询）
   { title: '自选', key: 'wl', width: 150, render: (_, r) => <WatchlistToggle code={r.security_code} testId={`watchlist-focus-${r.security_code}`} /> },
 ];
@@ -106,10 +112,12 @@ export function TodayPage() {
           大盘环境：{t.market.regime && Object.hasOwn(REGIME, t.market.regime) ? REGIME[t.market.regime] : '未知'}
           {range ? <span className="muted">（参考仓位区间 {fmtNum(range.min_pct, 0)}–{fmtNum(range.max_pct, 0)}%，模板参数，不是指令）</span> : null}
         </span>
-        <DataStatusTag status={t.market.data_status} />
+        <DataStatusTag status={t.data_status ?? t.market.data_status} asOf={t.data_as_of} gaps={t.gaps} />
         <span className="muted small">更新于 {fmtTime(t.server_time)}</span>
         <Link to="/notifications" className="small" data-testid="today-unread">未读通知 <span className="num">{t.unread_notifications}</span></Link>
       </div>
+      {t.data_status ? <div><GapNote status={t.data_status} gaps={t.gaps ?? []} asOf={t.data_as_of} testId="today-gap-note" /></div> : null}
+      <BasisTrace basis={t.market.basis} testId="today-market-basis" />
       {q.isError ? (
         <div data-testid="today-refresh-error">
           <ErrorBox error={q.error} prefix={`刷新失败，显示的是 ${fmtTime(t.server_time)} 的数据`} />

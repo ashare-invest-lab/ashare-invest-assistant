@@ -91,7 +91,7 @@ export function RestrictionsPage() {
         locale={{ emptyText: '暂无限制项。你可以在上方新增禁投、冷静期或屏蔽。' }} data-testid="restrictions-table"
         columns={[
           { title: '类型', key: 'kind', render: (_: unknown, row) => <Tag>{labelOf(RESTRICTION_KIND, row.kind) ?? '未知'}</Tag> },
-          { title: '目标', key: 'target', render: (_: unknown, row) => <>{row.name ? <>{row.name} <span className="mono muted">{row.target_id}</span></> : <span className="mono">{row.target_id}</span>}</> },
+          { title: '目标', key: 'target', render: (_: unknown, row) => <>{row.name ? <>{row.name} <span className="mono muted">{row.target_id}</span></> : <><span className="muted">名称：缺证</span> <span className="mono">{row.target_id}</span></>}</> },
           { title: '目标类型', key: 'target_type', render: (_: unknown, row) => labelOf(RESTRICTION_TARGET_TYPE, row.target_type) ?? '未知' },
           { title: '截止时间', dataIndex: 'until', render: (value: string | null) => value ? fmtTime(value) : '无截止时间' },
           { title: '原因', dataIndex: 'reason', render: (value: string | null) => value ?? '—' },

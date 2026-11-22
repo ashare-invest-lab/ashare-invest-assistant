@@ -1,4 +1,4 @@
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -80,6 +80,20 @@ describe.each(paths)('%s 共用市场展示', (path) => {
     expect(screen.getByTestId('market-page')).toHaveTextContent('未知');
     expect(await screen.findByText('暂无板块资金：未知')).toBeInTheDocument();
     expect(screen.getByTestId('sector-meta')).toHaveTextContent('未知');
+  });
+
+  it('板块资金展示来源 provider、endpoint、fetched_at，来源缺失显示缺证', async () => {
+    mount(path, base);
+    expect(await screen.findByTestId('sector-sources')).toHaveTextContent('麦蕊');
+    expect(screen.getByTestId('sector-sources')).toHaveTextContent('fetched_at 2026-10-30 18:00');
+
+    cleanup();
+    server.use(http.get('/api/v1/market/sector-flows', () => HttpResponse.json({
+      kind: 'industry', taxonomy: null, trade_date: null, items: [], sources: [], data_status: 'unavailable', data_as_of: null,
+      gaps: [{ key: 'sector_flows', reason: 'no_source', message: '板块资金来源缺失（虚构夹具）' }],
+    })));
+    mount(path, base);
+    expect(await screen.findByTestId('sector-sources')).toHaveTextContent('来源：缺证');
   });
 
   it('涨跌停或计数为 null 时显示破折号并保留缺口说明', async () => {

@@ -121,7 +121,7 @@ describe('T-F08 今日关注', () => {
     }
     expect(Object.keys(t.daily_report).sort()).toEqual(['date', 'status']);
     expect(Object.keys(t.reconciliation).sort()).toEqual(['as_of', 'diff_count', 'important_count', 'status']);
-    expect(Object.keys(t.market).sort()).toEqual(['data_status', 'regime', 'regime_position_range']);
+    expect(Object.keys(t.market).sort()).toEqual(['basis', 'data_status', 'regime', 'regime_position_range']);
   });
 
   it.skipIf(!HAS_DOCS)('v0.2.7：四个新增顶层字段都出现；TodayAlert / TodayPlanTrigger / TodayDataGap 字段与契约原文一致', async () => {
@@ -296,6 +296,8 @@ describe('T-F08 今日关注', () => {
     expect(screen.queryByTestId('placeholder')).toBeNull();
     expect(screen.getByTestId('today-session')).toHaveTextContent('上午连续竞价');
     expect(screen.getByTestId('today-regime')).toHaveTextContent('不是指令');
+    expect(screen.getByTestId('today-gap-note')).toHaveTextContent('行情与部分事件来源尚未接线');
+    expect(screen.getByTestId('today-market-basis')).toHaveTextContent('市场批次');
     expect(within(page).getByTestId('card-disclaimer')).toHaveTextContent(DISCLAIMER_TEXT);
     // 重点关注：行数与接口一致，证券链接到个股页
     const focus = screen.getByTestId('today-focus');
@@ -351,6 +353,18 @@ describe('T-F08 今日关注', () => {
     expect(screen.getByTestId('today-daily-report')).toHaveTextContent('尚未生成（收盘后生成）');
     expect(screen.getByTestId('today-reconciliation')).toHaveTextContent('默认账户');
     expect(screen.getByTestId('today-unread')).toHaveAttribute('href', '/notifications');
+  });
+
+  it('市场批次和顶层时点缺失时显示缺证与缺口，不补零', async () => {
+    server.use(http.get('/api/v1/today', () => HttpResponse.json({
+      ...FULL,
+      market: { ...FULL.market, basis: null },
+      data_status: 'unavailable', data_as_of: null,
+      gaps: [{ key: 'market', reason: 'no_source', message: '市场批次来源缺失（虚构夹具）' }],
+    } satisfies TodayResponse)));
+    await renderTestRoute('/today');
+    expect(await screen.findByTestId('today-market-basis')).toHaveTextContent('缺证');
+    expect(screen.getByTestId('today-gap-note')).toHaveTextContent('市场批次来源缺失');
   });
 
   it('完整示例：more=true 给出列表页入口；账户级风险无证券链接；日报 ready、未导入对账', async () => {

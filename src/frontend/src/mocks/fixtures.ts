@@ -14,7 +14,7 @@ import { minuteEnds } from '../lib/market';
 import type {
   Bar, BarsResponse, CandidateSignal, DailyReport, DailyReportListItem, DimensionCell, DimensionMatrixRow, DimensionViewEntry,
   Evidence, Gap, HealthReady, Me, NonExecutableReason, Notification, Portfolio, PortfolioPosition, QuoteItem, ReleaseCondition, RiskFlag, RuleRef,
-  SignalEvent, StrategyConclusion, Suggestion, SuggestionListItem, SuggestionSummary, TerminalAccount, TerminalRow,
+  SignalEvent, StrategyConclusion, Suggestion, SuggestionListItem, SuggestionSummary, TerminalAccount, TerminalRow, MarketBasis,
   TextWithEvidence, WatchlistItem, WatchlistResponse, Divergence, HorizonAssessment, HorizonCap, HorizonReason,
 } from '../api/types';
 import type { StreamEventMap } from '../api/streamTypes';
@@ -586,6 +586,7 @@ export const suggestionOf = (code: string) => SUGGESTIONS.find((x) => x.security
 export const TERMINAL_ACCOUNT: TerminalAccount = {
   account_id: ACCOUNT_ID, total_assets: f2(TOTAL), cash_available: f2(CASH), position_pct: f2((MV / TOTAL) * 100),
   pnl_day: '1864.00', regime: 'range', regime_position_range: { min_pct: '40.00', max_pct: '60.00' }, data_status: 'fresh',
+  basis: { snapshot_id: uid(219), observed_date: TRADE_DATE, mode: 'intraday', scope: '沪深股票口径', eligible: 3, observed: 3, trading: 3, suspended: 0, missing: 0, source: 'mairui' } satisfies MarketBasis,
 };
 
 export const TERMINAL_ROWS: TerminalRow[] = (() => {

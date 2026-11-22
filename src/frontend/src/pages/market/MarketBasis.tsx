@@ -1,6 +1,16 @@
 import { Tag } from 'antd';
-import type { MarketOverview } from '../../api/types';
+import type { MarketBasis as MarketBasisValue, MarketOverview } from '../../api/types';
 import { ownValue } from '../../lib/enumValue';
+
+/** 只展示后端给出的市场批次证据。没有批次时明确显示缺证，不从客户端时间推断。 */
+export function BasisTrace({ basis, testId = 'basis-trace' }: { basis?: MarketBasisValue | null; testId?: string }) {
+  if (!basis) return <div className="muted small" data-testid={testId}>市场批次：缺证</div>;
+  return (
+    <div className="muted small" data-testid={testId}>
+      市场批次：{basis.snapshot_id ?? '缺证'} · 观察日：{basis.observed_date ?? '缺证'} · 口径：{basis.mode ?? '缺证'} · 来源：{basis.source ?? '缺证'}
+    </div>
+  );
+}
 
 /** v0.2.11 §5.1：只展示响应批次，不用客户端日期或指数样本补造 basis。 */
 export function MarketBasis({ m }: { m: MarketOverview }) {
@@ -19,6 +29,7 @@ export function MarketBasis({ m }: { m: MarketOverview }) {
         <div>snapshot_id：{b.snapshot_id ?? '—'} · observed_date：{b.observed_date ?? '—'}</div>
         <div className="muted">mode：{b.mode === null ? '—' : ownValue({ intraday: 'intraday', close: 'close' }, b.mode, '未知')} · scope：{b.scope} · source：{b.source ?? '—'}</div>
         <div>eligible：{b.eligible ?? '—'} · observed：{b.observed ?? '—'} · trading：{b.trading ?? '—'} · suspended：{b.suspended ?? '—'} · missing：{b.missing ?? '—'} · 覆盖率：{coverage}</div>
+        <BasisTrace basis={b} testId="market-basis-trace" />
       </>}
     </section>
   );
