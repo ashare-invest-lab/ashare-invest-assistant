@@ -1118,6 +1118,11 @@
       "path": "docs/strategies/T-R103/review_tracking_metrics.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R103 复盘与建议跟踪指标口径卡；候选信号研究支持文档，非策略身份"
+    },
+    {
+      "path": "docs/strategies/T-R86/inputs/calendar.csv",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R86r 通达信公开日线最小日期切片；离线代理输入，非策略身份"
     }
   ],
   "records": [
