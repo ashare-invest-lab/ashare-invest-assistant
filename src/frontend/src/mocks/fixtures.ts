@@ -567,13 +567,13 @@ export const TERMINAL_ACCOUNT: TerminalAccount = {
 };
 
 export const TERMINAL_ROWS: TerminalRow[] = (() => {
-  const rows = SPECS.map((s): TerminalRow & { _w: number; _added: number } => {
+  const rows = SPECS.map((s): TerminalRow & { security_type: 'stock' | null; _w: number; _added: number } => {
     const sg = suggestionOf(s.code)!;
     const q = QUOTES.find((x) => x.security_code === s.code)!;
     const pos = PORTFOLIO.positions.find((p) => p.security_code === s.code);
     const maxLevel = sg.risk_flags.reduce<RiskLevel | null>((m, f) => (m === null || LEVEL_RANK[f.level] > LEVEL_RANK[m] ? f.level : m), null);
     return {
-      security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus,
+      security_code: s.code, name: s.name, in_watchlist: s.in_watchlist, focus: s.focus, security_type: s.code === '830001.BJ' ? null : 'stock',
       quote: s.data_status === 'unavailable' || q.price == null || q.t == null ? null : { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t },
       holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct, security_type: pos.security_type, estimated: pos.estimated } : null,
       suggestion: summarize(sg),
