@@ -202,6 +202,7 @@ const routeHandlers = [
     if (control && !(ENUMS.risk_control as readonly string[]).includes(control)) return validation('control', '未知风控项');
     return HttpResponse.json(page(riskEvents().filter((e) => (!st || e.status === st) && (!control || e.control === control) && (!code || e.security_code === code) && (!since || Date.parse(e.triggered_at) >= Date.parse(since))), url));
   }),
+  // IS_MOCK 由 lib/env.ts 按 VITE_USE_MOCK 控制；关闭 MSW 后 useMarketOverview 走同源 GET /market/overview，供 T-B210 真接口接入。
   http.get(`${API}/market/overview`, () => HttpResponse.json(degrade(MARKET_OVERVIEW, 'market.overview'))),
   // 自选股 GET/POST/DELETE（T-F33，见 watchlistHandlers.ts）
   ...watchlistHandlers,

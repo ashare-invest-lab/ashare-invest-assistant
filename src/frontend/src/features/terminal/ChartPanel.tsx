@@ -49,7 +49,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
         <span className="mono muted">{row.security_code}</span>
         {q ? (
           <>
-            <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price)}</span>
+            <span className={`q-price mono ${pctClass(q.change_pct)}`}>{fmtPrice(q.price, row.holding?.security_type)}</span>
             <span className={`mono ${pctClass(q.change_pct)}`}>
               {pre ? `${signed(Number(q.price) - Number(pre))} ` : ''}{q.change_pct != null ? `(${signed(q.change_pct)}%)` : '—'}
             </span>

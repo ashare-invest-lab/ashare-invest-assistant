@@ -247,10 +247,10 @@ def test_download_redirect_removes_token_across_hosts():
 
 def test_workflow_keeps_full_selection_and_only_changes_coverage_gate():
     workflow = (Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "for d in src/backend/tests tests/backend tests/replay; do" in workflow
-    assert "--cov=src/backend/app --cov-report=term-missing:skip-covered" in workflow
+    assert "scripts/ci/shard_backend_tests.py --shards 6" in workflow
+    assert "--cov=src/backend/app --cov-report=" in workflow
     assert "--cov-fail-under=80" not in workflow
-    assert "timeout-minutes: 30" in workflow
+    assert "timeout-minutes: 45" in workflow and "timeout-minutes: 40" in workflow
     assert "!cancelled() && steps.coverage_ratchet.outcome != 'skipped'" in workflow
     assert "steps.coverage_ratchet.outcome == 'success'" not in workflow
     assert '--base-coverage "${RUNNER_TEMP}/coverage-base-coverage.json"' in workflow
@@ -323,13 +323,18 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
     ready = jobs["coverage-base"]
     backend = jobs["backend"]
+    lint = jobs["backend-lint"]
+    shard = jobs["backend-shard"]
     # Both still run in parallel after classification, including on merge_group.
-    assert ready["needs"] == backend["needs"] == "changes"
-    assert ready["if"] == backend["if"] == (
+    assert ready["needs"] == lint["needs"] == shard["needs"] == "changes"
+    assert ready["if"] == lint["if"] == shard["if"] == (
         "${{ github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true' }}"
     )
-    # T-O89：保留 T-O80 的 45 分钟运行预算，另加最多 30 分钟基线等待。
-    assert backend["timeout-minutes"] == 75
+    assert backend["needs"] == ["changes", "backend-lint", "backend-shard"]
+    assert backend["if"] == (
+        "${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.docs_only != 'true') }}"
+    )
+    assert backend["timeout-minutes"] == 40
     assert backend["name"] == "backend (ruff, mypy, pytest+coverage)"
     assert ready["name"] == "trusted main coverage readiness"
     assert ready["timeout-minutes"] == 35
@@ -342,9 +347,9 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
     assert len(freezes) == 1
     freeze_index = freezes[0]
-    pytest_index = next(i for i, step in enumerate(steps) if step.get("name") == "pytest + 覆盖率")
+    merge_index = next(i for i, step in enumerate(steps) if step.get("name") == "合并覆盖率")
     ratchet_index = next(i for i, step in enumerate(steps) if step.get("id") == "coverage_ratchet")
-    assert pytest_index < freeze_index == ratchet_index - 1
+    assert merge_index < freeze_index == ratchet_index - 1
     frozen = steps[freeze_index]
     assert frozen["run"] == ('python3 scripts/ci/coverage_ratchet_base.py '
                              '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" '
@@ -359,11 +364,16 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     import yaml
 
     path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
-    backend = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend"]
+    backend = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["backend-shard"]
     command = next(step["run"] for step in backend["steps"] if step.get("name") == "pytest + 覆盖率")
-    dirs = ["src/backend/tests", "tests/backend", "tests/replay"]
-    for directory in dirs + ["src/backend/.venv/bin", "bin", "runner temp"]:
+    command = command.replace("${{ matrix.shard }}", "0")
+    test_file = "tests/backend/test_fixture.py"
+    for directory in ["src/backend/.venv/bin", "bin", "runner temp", "scripts/ci", "tests/backend"]:
         (tmp_path / directory).mkdir(parents=True, exist_ok=True)
+    (tmp_path / test_file).write_text("def test_fixture(): pass\n", encoding="utf-8")
+    (tmp_path / "scripts/ci/shard_backend_tests.py").write_text(
+        f"print({test_file!r})\n", encoding="utf-8"
+    )
     if with_ini:
         (tmp_path / "tests/pytest.ini").touch()
     runner_temp = tmp_path / "runner temp"
@@ -391,11 +401,10 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert json.loads((runner_temp / "argv.json").read_text(encoding="utf-8")) == [
         "-m", "pytest", "-p", "scripts.ci.pytest_safe_failures",
-        *(["-c", "tests/pytest.ini"] if with_ini else []), *dirs,
+        *(["-c", "tests/pytest.ini"] if with_ini else []), test_file,
         "--durations=30", "--durations-min=0.5",
-        "--cov=src/backend/app", "--cov-report=term-missing:skip-covered",
-        f"--cov-report=json:{runner_temp}/coverage.json",
-        f"--junitxml={runner_temp}/backend-pytest.xml",
+        "--cov=src/backend/app", "--cov-report=",
+        f"--junitxml={runner_temp}/cov/backend-pytest-shard0.xml",
     ]
 
 

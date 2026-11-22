@@ -66,4 +66,20 @@ describe('T-F47 秒级时间与价格位数', () => {
     expect(fmtPrice('3.1230')).toBe('3.123');
     expect(fmtPrice(null)).toBe('—');
   });
+
+  it('fmtPrice ETF 固定 3 位并补尾零，股票保持默认规则', () => {
+    expect(fmtPrice('3.94', 'etf')).toBe('3.940');
+    expect(fmtPrice('3.9480', 'etf')).toBe('3.948');
+    expect(fmtPrice('187.5800', 'stock')).toBe('187.58');
+    expect(fmtPrice('3.1230', 'stock')).toBe('3.123');
+  });
+
+  it.each([undefined, null, '', 'unknown', '__proto__', 'constructor'] as const)('fmtPrice 类型 %s 回退默认规则', (securityType) => {
+    expect(fmtPrice('3.94', securityType)).toBe(fmtPrice('3.94'));
+  });
+
+  it('fmtPrice 空值和 NaN 仍显示占位', () => {
+    expect(fmtPrice('', 'etf')).toBe('—');
+    expect(fmtPrice(Number.NaN, 'etf')).toBe('—');
+  });
 });
