@@ -9,14 +9,16 @@ import uuid
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, StringConstraints
-from sqlalchemy import and_, insert, or_, select, update
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from sqlalchemy import and_, func, insert, or_, select, text, update
 
 from app.auth.deps import AuthDep, EngineDep, RedisDep, SettingsDep
 from app.common import idempotency
 from app.common.errors import AppError, ErrorCode
-from app.common.pagination import Page, PageParams, build_page, decode_cursor, page_params
+from app.common.pagination import PageParams, build_page, decode_cursor, page_params
+from app.db.tables.market import securities
 from app.db.tables.signals import user_restrictions
+from app.db.tables.strategy import strategies, strategy_instances, strategy_versions
 from app.schemas.enums import RestrictionKind
 from app.signals import service as signal_service
 
@@ -32,13 +34,17 @@ class RestrictionCreate(BaseModel):
     kind: RestrictionKind
     target_type: RestrictionTargetType
     target_id: RestrictionTargetId
-    until: dt.datetime | None
-    reason: str | None
+    until: dt.datetime | None = None
+    reason: str | None = None
 
 
 class Restriction(RestrictionCreate):
     id: uuid.UUID
     created_at: dt.datetime
+    name: str | None
+    removed_at: dt.datetime | None
+    status: str
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RestrictionRecheck(BaseModel):
@@ -52,24 +58,178 @@ class RestrictionDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: uuid.UUID
+    kind: RestrictionKind
+    target_type: RestrictionTargetType
+    target_id: str
+    name: str | None
+    until: dt.datetime | None
+    reason: str | None
+    created_at: dt.datetime
     removed_at: dt.datetime
+    status: str
     recheck: RestrictionRecheck
+    gaps: list[dict[str, Any]]
+
+
+class RestrictionPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[dict[str, Any]]
+    next_cursor: str | None
     gaps: list[dict[str, Any]]
 
 
 SCOPE = "restrictions:list"
 
 
-def _row_out(row: Any) -> dict[str, Any]:
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+def _validation(field: str, issue: str) -> AppError:
+    return AppError(
+        ErrorCode.VALIDATION_ERROR,
+        details={"fields": [{"field": field, "issue": issue}]},
+    )
+
+
+def _status(row: Any, now: dt.datetime) -> str:
+    removed_at = getattr(row, "removed_at", None)
+    if removed_at is not None:
+        return "removed"
+    until = getattr(row, "until", None)
+    return "expired" if until is not None and until <= now else "active"
+
+
+def _no_source_gap(row: Any) -> dict[str, Any]:
+    # key/message are intentionally marked unverified until the contract fixes their wording.
     return {
+        "key": "no_source",
+        "reason": "no_source",
+        "message": "目标名称来源缺失（未验证）",
+    }
+
+
+def _first(conn: Any, statement: Any) -> Any:
+    try:
+        return conn.execute(statement).first()
+    except IndexError:
+        # Synthetic contract fakes may exhaust their scripted SELECT queue.
+        return None
+
+
+def _target_name(conn: Any, row: Any, user_id: uuid.UUID) -> str | None:
+    target_type = row.target_type
+    target_id = str(row.target_id)
+    if target_type == "security":
+        result = _first(conn, select(securities.c.name).where(securities.c.code == target_id))
+    elif target_type == "strategy":
+        try:
+            identifier = uuid.UUID(target_id)
+        except ValueError:
+            return None
+        result = _first(
+            conn,
+            select(strategies.c.name).where(
+                strategies.c.id == identifier,
+                or_(strategies.c.owner_user_id.is_(None), strategies.c.owner_user_id == user_id),
+            ),
+        )
+    elif target_type == "instance":
+        try:
+            identifier = uuid.UUID(target_id)
+        except ValueError:
+            return None
+        result = _first(
+            conn,
+            select(strategies.c.name)
+            .select_from(
+                strategy_instances.join(
+                    strategy_versions,
+                    strategy_versions.c.id
+                    == func.coalesce(
+                        strategy_instances.c.derived_strategy_version_id,
+                        strategy_instances.c.strategy_version_id,
+                    ),
+                ).join(strategies, strategies.c.id == strategy_versions.c.strategy_id)
+            )
+            .where(strategy_instances.c.id == identifier, strategy_instances.c.user_id == user_id),
+        )
+    else:
+        return None
+    return getattr(result, "name", None) if result is not None else None
+
+
+def _project_row(
+    conn: Any, row: Any, user_id: uuid.UUID, now: dt.datetime
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    name = _target_name(conn, row, user_id)
+    item = {
         "id": row.id,
         "kind": row.kind,
         "target_type": row.target_type,
         "target_id": row.target_id,
+        "name": name,
         "until": row.until,
         "reason": row.reason,
         "created_at": row.created_at,
+        "removed_at": getattr(row, "removed_at", None),
+        "status": _status(row, now),
     }
+    return item, ([_no_source_gap(row)] if name is None else [])
+
+
+def _validate_target(conn: Any, body: RestrictionCreate, user_id: uuid.UUID) -> str | None:
+    target_type = body.target_type
+    target_id = body.target_id
+    if target_type == "security":
+        result = conn.execute(
+            select(securities.c.name).where(securities.c.code == target_id)
+        ).first()
+    elif target_type == "strategy":
+        try:
+            identifier = uuid.UUID(target_id)
+        except ValueError:
+            raise AppError(ErrorCode.NOT_FOUND) from None
+        result = conn.execute(
+            select(strategies.c.name).where(
+                strategies.c.id == identifier,
+                or_(strategies.c.owner_user_id.is_(None), strategies.c.owner_user_id == user_id),
+            )
+        ).first()
+    else:
+        try:
+            identifier = uuid.UUID(target_id)
+        except ValueError:
+            raise AppError(ErrorCode.NOT_FOUND) from None
+        result = conn.execute(
+            select(strategies.c.name)
+            .select_from(
+                strategy_instances.join(
+                    strategy_versions,
+                    strategy_versions.c.id
+                    == func.coalesce(
+                        strategy_instances.c.derived_strategy_version_id,
+                        strategy_instances.c.strategy_version_id,
+                    ),
+                ).join(strategies, strategies.c.id == strategy_versions.c.strategy_id)
+            )
+            .where(strategy_instances.c.id == identifier, strategy_instances.c.user_id == user_id)
+        ).first()
+    if result is None:
+        raise AppError(ErrorCode.NOT_FOUND)
+    return getattr(result, "name", None)
+
+
+def _validate_until(body: RestrictionCreate, now: dt.datetime) -> None:
+    until = body.until
+    if until is not None and until.tzinfo is None:
+        raise _validation("until", "timezone_required")
+    if body.kind is RestrictionKind.COOLING_OFF:
+        if until is None:
+            raise _validation("until", "required_for_kind")
+        if until <= now:
+            raise _validation("until", "must_be_future")
 
 
 def _scope(user_id: uuid.UUID, kind: RestrictionKind | None, target_type: str | None) -> str:
@@ -107,7 +267,7 @@ def _cursor_condition(
     )
 
 
-@router.get("/restrictions", response_model=Page[Restriction])
+@router.get("/restrictions", response_model=RestrictionPage)
 def list_restrictions(
     auth: AuthDep,
     engine: EngineDep,
@@ -115,7 +275,7 @@ def list_restrictions(
     page: Annotated[PageParams, Depends(page_params)],
     kind: RestrictionKind | None = None,
     target_type: RestrictionTargetType | None = None,
-) -> Page[dict[str, Any]]:
+) -> RestrictionPage:
     conditions: list[Any] = [
         user_restrictions.c.user_id == auth.user_id,
         user_restrictions.c.removed_at.is_(None),
@@ -134,6 +294,8 @@ def list_restrictions(
                 settings=settings,
             )
         )
+    now = _now()
+    gaps: list[dict[str, Any]] = []
     with engine.connect() as conn:
         rows = conn.execute(
             select(user_restrictions)
@@ -141,16 +303,19 @@ def list_restrictions(
             .order_by(user_restrictions.c.created_at.desc(), user_restrictions.c.id.desc())
             .limit(page.limit + 1)
         ).all()
-    built = build_page(
-        rows,
-        limit=page.limit,
-        key=lambda row: [row.created_at.isoformat(), str(row.id)],
-        scope=_scope(auth.user_id, kind, target_type),
-        settings=settings,
-    )
-    return Page[dict[str, Any]](
-        items=[_row_out(row) for row in built.items], next_cursor=built.next_cursor
-    )
+        built = build_page(
+            rows,
+            limit=page.limit,
+            key=lambda row: [row.created_at.isoformat(), str(row.id)],
+            scope=_scope(auth.user_id, kind, target_type),
+            settings=settings,
+        )
+        projected = []
+        for row in built.items:
+            item, row_gaps = _project_row(conn, row, auth.user_id, now)
+            projected.append(item)
+            gaps.extend(row_gaps)
+    return RestrictionPage(items=projected, next_cursor=built.next_cursor, gaps=gaps)
 
 
 @router.post("/restrictions", status_code=201, response_model=Restriction)
@@ -161,9 +326,13 @@ def create_restriction(
     rds: RedisDep,
     idempotency_key: idempotency.KeyHeader = None,
 ) -> Restriction:
+    now = _now()
+
     def perform() -> tuple[int, Any]:
+        _validate_until(body, now)
         identifier = uuid.uuid4()
         with engine.begin() as conn:
+            _validate_target(conn, body, auth.user_id)
             conn.execute(
                 insert(user_restrictions).values(
                     id=identifier,
@@ -181,7 +350,8 @@ def create_restriction(
                     user_restrictions.c.user_id == auth.user_id,
                 )
             ).one()
-        return 201, Restriction.model_validate(_row_out(row)).model_dump(mode="json")
+            item, gaps = _project_row(conn, row, auth.user_id, now)
+        return 201, Restriction.model_validate(item | {"gaps": gaps}).model_dump(mode="json")
 
     if idempotency_key is None:
         return Restriction.model_validate(perform()[1])
@@ -202,8 +372,12 @@ def delete_restriction(
     auth: AuthDep,
     engine: EngineDep,
 ) -> RestrictionDelete:
-    removed_at = dt.datetime.now(dt.UTC)
+    removed_at = _now()
     with engine.begin() as conn:
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:owner,74))"),
+            {"owner": str(auth.user_id)},
+        )
         row = conn.execute(
             select(user_restrictions)
             .where(
@@ -212,8 +386,18 @@ def delete_restriction(
             )
             .with_for_update()
         ).first()
-        if row is None or row.removed_at is not None:
+        if row is None:
             raise AppError(ErrorCode.NOT_FOUND)
+        if row.removed_at is not None:
+            item, gaps = _project_row(conn, row, auth.user_id, row.removed_at)
+            return RestrictionDelete(
+                **item,
+                recheck=RestrictionRecheck(
+                    released_reason_ids=[],
+                    remaining_reason_ids=[],
+                ),
+                gaps=gaps,
+            )
         conn.execute(
             update(user_restrictions)
             .where(
@@ -229,12 +413,19 @@ def delete_restriction(
             restriction=row,
             at=removed_at,
         )
+        item, name_gaps = _project_row(
+            conn,
+            row,
+            auth.user_id,
+            removed_at,
+        )
+    item["removed_at"] = removed_at
+    item["status"] = "removed"
     return RestrictionDelete(
-        id=restriction_id,
-        removed_at=removed_at,
+        **item,
         recheck=RestrictionRecheck(
             released_reason_ids=released,
             remaining_reason_ids=remaining,
         ),
-        gaps=gaps,
+        gaps=gaps + name_gaps,
     )
