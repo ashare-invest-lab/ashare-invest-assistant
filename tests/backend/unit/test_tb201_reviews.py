@@ -222,8 +222,12 @@ def test_versions_conflict_success_history_and_methods(http: Any, monkeypatch: p
     class Row:
         version_no = 1
     http[1].execute = lambda _s: SimpleNamespace(first=lambda: Row())
-    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
-    monkeypatch.setattr(api.service, "version_body", lambda *_: history[1])
+    monkeypatch.setattr(
+        api.service,
+        "_owned",
+        lambda *_: SimpleNamespace(id=RID, period_end=dt.date(2026, 1, 5)),
+    )
+    monkeypatch.setattr(api.service, "version_body", lambda *_args, **_kwargs: history[1])
     first = c.get(f"/api/v1/reviews/{RID}/versions/1")
     second = c.get(f"/api/v1/reviews/{RID}/versions/1")
     assert first.json() == second.json() == history[1]
@@ -234,6 +238,12 @@ def test_missing_current_version_projection() -> None:
     row = SimpleNamespace(id=RID, user_id=U, plan_id=None, security_code=CODE, period_start=dt.date(2026, 1, 1), period_end=dt.date(2026, 1, 5), current_version_id=None, created_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC))
     class Conn:
         def execute(self, statement: Any) -> Any:
+            if "trading_calendar" in str(statement):
+                return SimpleNamespace(
+                    first=lambda: SimpleNamespace(
+                        date=dt.date(2026, 1, 5), is_open=True
+                    )
+                )
             return SimpleNamespace(first=lambda: row, scalar=lambda: None, all=list)
     detail = service.full(Conn(), U, RID)
     summary = service.summary(Conn(), row)
@@ -316,20 +326,24 @@ def test_service_create_snapshot_and_revise_guards(monkeypatch: pytest.MonkeyPat
 def test_snapshot_projection_and_timeline_sources() -> None:
     snap_items = {"data_status": "partial", "data_as_of": None, "gaps": [], "outcome_metrics": {"holding_return": {"value": "1", "n": 5}}, "attribution": {"judgement": []}}
     pv_row = SimpleNamespace(id=VID, created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC), version_no=3)
-    trade_row = SimpleNamespace(id=TID, created_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC), traded_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC))
+    trade_row = SimpleNamespace(id=TID, account_id=uuid.UUID(int=900), import_batch_id=None, created_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC), traded_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC))
     version = SimpleNamespace(id=RID, version_no=2, plan_version_ids=[VID], trade_ids=[TID], snapshot_id=VID, lessons=None, tags=None, attribution=None, outcome_metrics=None, created_at=dt.datetime(2026, 1, 4, tzinfo=dt.UTC))
     class Conn:
         def execute(self, statement: Any) -> Any:
             text = str(statement)
             if "data_snapshots" in text:
-                return SimpleNamespace(first=lambda: SimpleNamespace(_mapping={"items": snap_items}))
+                return SimpleNamespace(first=lambda: SimpleNamespace(items=snap_items))
             if "plan_versions" in text:
                 return SimpleNamespace(all=lambda: [pv_row])
             if "trades" in text:
                 return SimpleNamespace(all=lambda: [trade_row])
             return SimpleNamespace(all=lambda: [version], first=lambda: version, scalar=lambda: None)
     projected = service.version_body(Conn(), U, version)
-    assert projected["data_status"] == "partial" and projected["outcome_metrics"]["holding_return"]["value"] is None and projected["tags"] == []
+    assert projected["data_status"] == "partial"
+    assert projected["outcome_metrics"]["holding_return"]["value"] is None
+    assert projected["outcome_metrics"]["holding_return"]["n"] == 0
+    assert projected["tags"] == []
+    assert "calculation_as_of" not in projected
     timeline = service._timeline(Conn(), U, RID, version)
     assert [item["kind"] for item in timeline] == ["plan_version", "trade", "review_version"]
 
@@ -338,10 +352,10 @@ def test_route_invalid_cursors_and_version_not_found(http: Any, monkeypatch: pyt
     cfg = get_settings()
     scope = f"reviews:{U}:{RID}:versions"
     bad = encode_cursor(["wrong"], scope=scope, settings=cfg)
-    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
+    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID, period_end=dt.date(2026, 1, 5)))
     response = http[0].get(f"/api/v1/reviews/{RID}/versions", params={"cursor": bad})
     assert response.status_code == 400 and response.json()["error"]["code"] == "INVALID_CURSOR"
-    monkeypatch.setattr(api.service, "version_body", lambda *_: {"version_no": 1})
+    monkeypatch.setattr(api.service, "version_body", lambda *_args, **_kwargs: {"version_no": 1})
     http[1].execute = lambda _s: SimpleNamespace(first=lambda: None)
     response = http[0].get(f"/api/v1/reviews/{RID}/versions/99")
     assert response.status_code == 404 and response.json()["error"]["code"] == "NOT_FOUND"
@@ -349,13 +363,13 @@ def test_route_invalid_cursors_and_version_not_found(http: Any, monkeypatch: pyt
 
 def test_paging_helpers_and_revise_replacement(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = get_settings()
-    current = SimpleNamespace(version_no=1, id=VID)
+    current = SimpleNamespace(version_no=1, id=VID, period_end=dt.date(2026, 1, 5))
     rows = [SimpleNamespace(id=RID, created_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC))]
     class Conn:
         def execute(self, statement: Any) -> Any:
             text = str(statement)
             if "review_versions" in text:
-                return SimpleNamespace(all=lambda: [SimpleNamespace(version_no=1)], first=lambda: current)
+                return SimpleNamespace(all=lambda: [SimpleNamespace(version_no=1, id=VID, snapshot_id=None, outcome_metrics={}, plan_version_ids=[], trade_ids=[], lessons=None, tags=[], attribution=None, created_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC))], first=lambda: current)
             return SimpleNamespace(all=lambda: rows, first=lambda: current, one=lambda: SimpleNamespace(id=VID))
     page = api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=None), CODE, None)
     assert len(page.items) == 1
@@ -366,8 +380,8 @@ def test_paging_helpers_and_revise_replacement(monkeypatch: pytest.MonkeyPatch) 
         api._page_reviews(Conn(), U, cfg, PageParams(limit=1, cursor=bad_cursor), CODE, None)
     assert exc.value.code == ErrorCode.INVALID_CURSOR
 
-    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID))
-    monkeypatch.setattr(api.service, "version_body", lambda *_: {"version_no": 1})
+    monkeypatch.setattr(api.service, "_owned", lambda *_: SimpleNamespace(id=RID, period_end=dt.date(2026, 1, 5)))
+    monkeypatch.setattr(api.service, "version_body", lambda *_args, **_kwargs: {"version_no": 1})
     assert api._version_page(Conn(), U, RID, cfg, PageParams(limit=1, cursor=encode_cursor([1], scope=f"reviews:{U}:{RID}:versions", settings=cfg))).items == [{"version_no": 1}]
 
     review = SimpleNamespace(current_version_id=VID)
@@ -375,3 +389,150 @@ def test_paging_helpers_and_revise_replacement(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(service, "_validate_links", lambda *_args, **_kwargs: (CODE, None))
     monkeypatch.setattr(service, "_new_version", lambda *_args, **_kwargs: SimpleNamespace(id=uuid.UUID(int=207)))
     assert service.revise(Conn(), U, RID, ReviewVersionCreate.model_validate({**body(lessons="replacement"), "base_version_no": 1})) == RID
+
+
+def test_tb216_post_reviews_returns_snapshot_visibility(http: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    batch_id = uuid.UUID(int=740)
+    trade = SimpleNamespace(
+        id=TID,
+        account_id=uuid.UUID(int=900),
+        import_batch_id=batch_id,
+        security_code=CODE,
+        trade_date=dt.date(2026, 1, 2),
+        side="buy",
+        quantity=Decimal(10),
+        net_amount=Decimal(-100),
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        source="import",
+        voided_at=None,
+        epistemic_type="execution",
+    )
+    batch = SimpleNamespace(
+        id=batch_id,
+        user_id=U,
+        account_id=trade.account_id,
+        committed_at=dt.datetime(2026, 1, 11, tzinfo=dt.UTC),
+    )
+
+    class Conn:
+        def execute(self, statement: Any) -> Any:
+            text = str(statement)
+            if "trading_calendar" in text:
+                return SimpleNamespace(
+                    first=lambda: SimpleNamespace(date=dt.date(2026, 1, 5), is_open=True)
+                )
+            if "import_batches" in text:
+                return SimpleNamespace(all=lambda: [batch])
+            if "trades" in text:
+                return SimpleNamespace(all=lambda: [trade])
+            if "daily_bars" in text:
+                return SimpleNamespace(all=list)
+            raise AssertionError(text)
+
+    result: dict[str, Any] = {}
+
+    def create(_conn: Any, owner: uuid.UUID, _body: Any) -> uuid.UUID:
+        result.update(
+            service._snapshot_items(
+                dt.date(2026, 1, 1),
+                dt.date(2026, 1, 5),
+                None,
+                [],
+                [],
+                True,
+                conn=Conn(),
+                owner=owner,
+                trade_ids=[TID],
+                calculation_as_of=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+            )
+        )
+        return RID
+
+    monkeypatch.setattr(api.service, "create", create)
+    monkeypatch.setattr(api.service, "full", lambda *_args: result)
+    response = http[0].post("/api/v1/reviews", json=body(trade_ids=[str(TID)]))
+    assert response.status_code == 201
+    assert response.json()["evidence"] == []
+    assert response.json()["data_as_of"] is None
+    assert not any(gap["key"] == "trades.import_commit_unproven" for gap in response.json()["gaps"])
+
+
+def test_tb216_post_review_versions_returns_unproven_import_gap(
+    http: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    batch_id = uuid.UUID(int=750)
+    trade = SimpleNamespace(
+        id=TID,
+        account_id=uuid.UUID(int=900),
+        import_batch_id=batch_id,
+        security_code=CODE,
+        trade_date=dt.date(2026, 1, 2),
+        side="buy",
+        quantity=Decimal(10),
+        net_amount=Decimal(-100),
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        source="import",
+        voided_at=None,
+        epistemic_type="execution",
+    )
+    batch = SimpleNamespace(
+        id=batch_id,
+        user_id=U,
+        account_id=trade.account_id,
+        committed_at=None,
+    )
+
+    class Conn:
+        def execute(self, statement: Any) -> Any:
+            text = str(statement)
+            if "trading_calendar" in text:
+                return SimpleNamespace(
+                    first=lambda: SimpleNamespace(date=dt.date(2026, 1, 5), is_open=True)
+                )
+            if "import_batches" in text:
+                return SimpleNamespace(all=lambda: [batch])
+            if "trades" in text:
+                return SimpleNamespace(all=lambda: [trade])
+            if "daily_bars" in text:
+                return SimpleNamespace(all=list)
+            raise AssertionError(text)
+
+    result: dict[str, Any] = {}
+
+    def revise(_conn: Any, owner: uuid.UUID, _identifier: uuid.UUID, _body: Any) -> uuid.UUID:
+        result.update(
+            service._snapshot_items(
+                dt.date(2026, 1, 1),
+                dt.date(2026, 1, 5),
+                None,
+                [],
+                [],
+                True,
+                conn=Conn(),
+                owner=owner,
+                trade_ids=[TID],
+                calculation_as_of=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+            )
+        )
+        return RID
+
+    monkeypatch.setattr(api.service, "revise", revise)
+    monkeypatch.setattr(api.service, "full", lambda *_args: result)
+    response = http[0].post(
+        f"/api/v1/reviews/{RID}/versions",
+        json=body(trade_ids=[str(TID)], base_version_no=1),
+    )
+    assert response.status_code == 201
+    assert [
+        gap
+        for gap in response.json()["gaps"]
+        if gap["key"] == "trades.import_commit_unproven"
+    ] == [
+        {
+            "key": "trades.import_commit_unproven",
+            "reason": "no_source",
+            "message": "导入批次提交时点不可证实",
+        }
+    ]

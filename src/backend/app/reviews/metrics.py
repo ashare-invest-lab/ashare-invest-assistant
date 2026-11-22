@@ -6,11 +6,31 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import Connection, select
+
+from app.db.tables.market import trading_calendar
 
 # fmt: off
 
 METRIC_NAMES = ("holding_return", "benchmark_return", "excess_return", "max_drawdown")
-GAP_REASONS = {"no_source", "not_yet_published", "user_input_missing"}
+GAP_REASONS = {
+    "no_source",
+    "not_yet_published",
+    "upstream_error",
+    "quota_deferred",
+    "user_input_missing",
+    "data_licence_unavailable",
+    "not_applicable",
+    "suspended",
+}
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+GAP_MESSAGES = {
+    "no_source": "来源缺失，指标未验证（待回测）",
+    "not_yet_published": "复盘周期尚未结束",
+    "user_input_missing": "未关联实际成交，无法计算结果指标",
+}
 
 
 def _stat(window: str, *, value: Decimal | None = None, n: int = 0) -> dict[str, Any]:
@@ -23,12 +43,7 @@ def _stat(window: str, *, value: Decimal | None = None, n: int = 0) -> dict[str,
 
 
 def _gap(key: str, reason: str, message: str | None = None) -> dict[str, str]:
-    messages = {
-        "no_source": "来源缺失，指标未验证（待回测）",
-        "not_yet_published": "复盘周期尚未结束",
-        "user_input_missing": "未关联实际成交，无法计算结果指标",
-    }
-    return {"key": key, "reason": reason, "message": message or messages.get(reason, "未验证")}
+    return {"key": key, "reason": reason, "message": message or GAP_MESSAGES.get(reason, "未验证")}
 
 
 def normalise_gaps(value: Any, key: str) -> list[dict[str, Any]]:
@@ -54,7 +69,7 @@ def normalise_metric_gaps(value: Any) -> list[str]:
     result: list[str] = []
     for gap in values:
         reason = gap.get("reason") if isinstance(gap, dict) else gap
-        if isinstance(reason, str) and reason in GAP_REASONS and reason not in result:
+        if isinstance(reason, str) and reason not in result:
             result.append(reason)
     return result
 
@@ -69,13 +84,91 @@ def status_block(
 ) -> dict[str, Any]:
     if has_observation:
         return {"data_status": "partial", "data_as_of": None, "gaps": []}
-    if reason == "not_yet_published":
-        reason = "no_source"
     return {
         "data_status": "unavailable",
         "data_as_of": None,
-        "gaps": [_gap(f"outcome_metrics.{name}", reason, message) for name in METRIC_NAMES],
+        "gaps": [
+            _gap(
+                f"outcome_metrics.{name}",
+                reason,
+                message,
+            )
+            for name in METRIC_NAMES
+        ],
     }
+
+
+def _fallback_period_pending(period_end: dt.date, now: dt.datetime) -> bool:
+    """Keep the old deterministic approximation for callers without a DB."""
+    current = now.astimezone(SHANGHAI)
+    if period_end > current.date():
+        return True
+    if period_end < current.date():
+        return False
+    return current.weekday() < 5 and current.time() < dt.time(15)
+
+
+def period_pending_state(
+    period_end: dt.date | None,
+    *,
+    now: dt.datetime | None = None,
+    conn: Connection | None = None,
+) -> tuple[bool, bool]:
+    """Return ``(pending, calendar_available)`` for a review endpoint.
+
+    With a connection, the endpoint must be represented by the trading calendar.
+    A missing row is deliberately treated as unavailable and therefore pending.
+    A caller without a connection retains the historical approximation used by
+    pure projection code and old snapshots.
+    """
+    if period_end is None:
+        return False, True
+    current = now or dt.datetime.now(dt.UTC)
+    if current.tzinfo is None or current.utcoffset() is None:
+        current = current.replace(tzinfo=dt.UTC)
+    current = current.astimezone(SHANGHAI)
+    if period_end > current.date():
+        return True, True
+    if conn is None:
+        return _fallback_period_pending(period_end, current), True
+
+    endpoint = conn.execute(
+        select(trading_calendar.c.date, trading_calendar.c.is_open).where(
+            trading_calendar.c.date == period_end
+        )
+    ).first()
+    if endpoint is None:
+        return True, False
+    endpoint_date = endpoint.date
+    endpoint_open = endpoint.is_open
+    if not endpoint_open:
+        endpoint = conn.execute(
+            select(trading_calendar.c.date, trading_calendar.c.is_open)
+            .where(trading_calendar.c.date < period_end, trading_calendar.c.is_open.is_(True))
+            .order_by(trading_calendar.c.date.desc())
+            .limit(1)
+        ).first()
+        if endpoint is None:
+            return True, False
+        endpoint_date = endpoint.date
+    if endpoint_date > current.date():
+        return True, True
+    if endpoint_date < current.date():
+        return False, True
+    return current.time() < dt.time(15), True
+
+
+def period_pending(
+    period_end: dt.date | None,
+    *,
+    now: dt.datetime | None = None,
+    conn: Connection | None = None,
+) -> bool:
+    return period_pending_state(period_end, now=now, conn=conn)[0]
+
+
+def pending_message() -> str:
+    return "复盘周期尚未结束；未验证：交易日历缺失"
 
 
 def project_metrics(
@@ -83,31 +176,19 @@ def project_metrics(
     *,
     period_end: dt.date | None = None,
     now: dt.datetime | None = None,
+    conn: Connection | None = None,
 ) -> dict[str, Any]:
     """Project frozen values while the outcome metric contract is unfinished."""
     source = metrics or {}
     result: dict[str, Any] = {}
     for name in METRIC_NAMES:
         item = dict(source.get(name) or {})
-        gaps = normalise_metric_gaps(item.get("gaps"))
-        item["gaps"] = list(dict.fromkeys(
-            "no_source" if reason == "not_yet_published" else reason
-            for reason in gaps
-        ))
-        if item.get("source") == "simulated_tracking":
-            item.pop("source", None)
-            item["gaps"] = [reason for reason in item["gaps"] if reason != "no_source"]
-            item["gaps"].append("no_source")
+        item.pop("gaps", None)
         item.pop("source", None)
         item.pop("label", None)
         item["value"] = None
         item["n"] = 0
         item["small_sample"] = True
-        item["gaps"] = (
-            ["user_input_missing"]
-            if "user_input_missing" in item["gaps"]
-            else ["no_source"]
-        )
         result[name] = item
     return result
 
