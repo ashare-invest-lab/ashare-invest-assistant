@@ -12,6 +12,7 @@
 
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
+- T-A230（2026-11-21，不升版本）：实时类工程参数逐条登记见 [`docs/contracts/T-A230-realtime-params.md`](contracts/T-A230-realtime-params.md)。
 
 ### v0.2.10（2026-11-19，A2b：明确停牌的 K 线缺口与日报说明）
 
@@ -1472,6 +1473,7 @@ evidence: Evidence[]
 7. **ingest 启动（L-1/L-2）**：`engine_for(url, profile="ingest")` 使用 NullPool，并设 `connect_timeout=2`（T-A91 由 3 改 2，配合④的 3s 准入上限；libpq 最小有效值 2）、keepalives、`tcp_user_timeout=5000`、`statement_timeout=5000`、`lock_timeout=2000`（后两者是 tick/批处理兜底，准入路径按④用 `SET LOCAL` 覆盖）。`main()` 第一行先 `netguard.install()`（①b）。拿不到 DATABASE_URL、URL 格式错、Settings 校验失败、连接探测失败、停机标志目录不可写（④ M-c）都以退出码 78 拒绝启动，stderr 只有固定文案加异常类型名，不出现 traceback 和口令。
 
 ## 8. SSE `GET /stream` 🔒
+实时类工程参数的取值、理由、可调范围与修改责任见 [`docs/contracts/T-A230-realtime-params.md`](contracts/T-A230-realtime-params.md)，本节既有端点与事件定义不变。
 - `text/event-stream`；每 15 秒发一次 `heartbeat`；支持 `Last-Event-ID` 续传，服务端保留最近 10 分钟的事件；断线时客户端退回到轮询 `/notifications/unread-count`，终端与首页改为每 ≥ 15 秒带 `If-None-Match` 轮询 `/terminal`、`/today`。
 - 每个事件：`id: <单调递增字符串>`，`event: <type>`，`data: <JSON>`。
 
