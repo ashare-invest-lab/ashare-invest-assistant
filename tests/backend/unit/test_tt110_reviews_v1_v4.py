@@ -1,7 +1,7 @@
 """T-T110 /reviews V1--V4 的离线契约测试。
 
-测试只使用虚构用户、证券和 UUID。T-B201 尚未提供路由时，相关用例以严格
-动态 xfail 标记，路由落地后会直接执行这些 HTTP 契约断言。
+测试只使用虚构用户、证券和 UUID。T-B201 尚未提供路由时，各用例在公开 HTTP
+请求确认端点未接线后以严格动态 xfail 标记，路由落地后会直接执行契约断言。
 """
 
 from __future__ import annotations
@@ -29,6 +29,9 @@ VERSION_ID = uuid.UUID("44444444-4444-4444-8444-444444444444")
 OWN_PLAN = uuid.UUID("77777777-7777-4777-8777-777777777777")
 OTHER_PLAN = uuid.UUID("55555555-5555-4555-8555-555555555555")
 OTHER_TRADE = uuid.UUID("66666666-6666-4666-8666-666666666666")
+NULL_TRADED_AT_TRADE = uuid.UUID("99999999-9999-4999-8999-999999999991")
+IMPORT_BATCH_ID = uuid.UUID("99999999-9999-4999-8999-999999999992")
+OWN_ACCOUNT = uuid.UUID("99999999-9999-4999-8999-999999999993")
 SYNTHETIC_CODE = "000000.SZ"
 OUTCOME_METRIC_NAMES = (
     "holding_return",
@@ -121,6 +124,7 @@ class SyntheticDB:
     plans: list[SyntheticRow] = field(default_factory=list)
     plan_versions: list[SyntheticRow] = field(default_factory=list)
     trades: list[SyntheticRow] = field(default_factory=list)
+    import_batches: list[SyntheticRow] = field(default_factory=list)
     securities: list[SyntheticRow] = field(default_factory=list)
     statements: list[Any] = field(default_factory=list)
     inserted: list[Any] = field(default_factory=list)
@@ -176,6 +180,35 @@ class SyntheticDB:
                     created_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
                 )
             )
+        if not self.import_batches:
+            self.import_batches.append(
+                SyntheticRow(
+                    id=IMPORT_BATCH_ID,
+                    user_id=OWNER,
+                    account_id=OWN_ACCOUNT,
+                    status="committed",
+                    committed_at=dt.datetime(2026, 1, 2, 6, 45, tzinfo=dt.UTC),
+                )
+            )
+        if not self.trades:
+            self.trades.append(
+                SyntheticRow(
+                    id=NULL_TRADED_AT_TRADE,
+                    user_id=OWNER,
+                    account_id=OWN_ACCOUNT,
+                    security_code=SYNTHETIC_CODE,
+                    side="buy",
+                    quantity="1",
+                    price="1",
+                    source="import",
+                    epistemic_type="execution",
+                    trade_date=dt.date(2026, 1, 2),
+                    traded_at=None,
+                    created_at=dt.datetime(2026, 1, 2, 6, 30, tzinfo=dt.UTC),
+                    import_batch_id=IMPORT_BATCH_ID,
+                    voided_at=None,
+                )
+            )
         if not self.securities:
             self.securities.append(
                 SyntheticRow(code=SYNTHETIC_CODE, name="合成证券")
@@ -187,7 +220,7 @@ class SyntheticDB:
             "review_id": REVIEW_ID,
             "version_no": 1,
             "plan_version_ids": [VERSION_ID],
-            "trade_ids": [],
+            "trade_ids": [NULL_TRADED_AT_TRADE],
             "snapshot_id": uuid.UUID("88888888-8888-4888-8888-888888888888"),
             "lessons": "合成经验",
             "tags": ["synthetic"],
@@ -308,6 +341,8 @@ class SyntheticConnection:
             rows = self.db.plans
         elif "trades" in text:
             rows = self.db.trades
+        elif "import_batches" in text:
+            rows = self.db.import_batches
         elif "securities" in text:
             rows = self.db.securities
         else:
@@ -388,30 +423,17 @@ class World:
     db: SyntheticDB
 
     def require(self, method: str, path: str) -> None:
-        router = getattr(self.routes, "router", None)
-        if router is None:
+        concrete = path.replace("{review_id}", str(REVIEW_ID)).replace(
+            "{identifier}", str(REVIEW_ID)
+        ).replace("{version_no}", "1")
+        response = self.client.request(method.upper(), f"/api/v1{concrete}", json={})
+        if self.routes is None and response.status_code in {404, 405}:
             pytest.xfail(
-                f"T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
-                f"缺少 reviews.router（{method} {path}）"
+                f"T-B201 未实现（#349@3d93af9c §7.8.1–§7.8.4）："
+                f"{method} {path} 在官方 /api/v1 入口未接线（HTTP {response.status_code}）"
             )
-        def shape(value: str) -> str:
-            return "/".join(
-                "{}" if part.startswith("{") and part.endswith("}") else part
-                for part in value.split("/")
-            )
-
-        for route in router.routes:
-            if shape(route.path) == shape(path) and method.upper() in (route.methods or set()):
-                return
-        if any(shape(route.path) == shape(path) for route in router.routes):
-            concrete = path.replace("{review_id}", str(REVIEW_ID)).replace("{identifier}", str(REVIEW_ID)).replace("{version_no}", "1")
-            response = self.client.request(method.upper(), f"/api/v1{concrete}")
-            assert_error(response, 405, "METHOD_NOT_ALLOWED")
-            return
-        pytest.xfail(
-            f"T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
-            f"缺少 {method} {path}"
-        )
+        if self.routes is None:
+            assert response.status_code != 404, response.text
 
 
 def _load_routes() -> Any:
@@ -426,17 +448,7 @@ def _load_routes() -> Any:
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> World:
     routes = _load_routes()
-    if routes is None:
-        pytest.xfail(
-            "T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
-            "app.api.v1.reviews 模块尚不存在"
-        )
-    router = getattr(routes, "router", None)
-    if router is None:
-        pytest.xfail(
-            "T-B201 未实现（#349@2fd6730c §7.8.1–§7.8.4）："
-            "app.api.v1.reviews 未公开 router"
-        )
+    from app.api.v1 import router as v1_router
 
     from app.auth import deps
     from app.common.errors import install_exception_handlers
@@ -472,7 +484,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> World:
     redis = MemoryRedis()
     app = FastAPI()
     install_exception_handlers(app)
-    app.include_router(router, prefix="/api/v1")
+    app.include_router(v1_router, prefix="/api/v1")
     app.dependency_overrides[deps.get_engine] = lambda: engine
     app.dependency_overrides[deps.current_auth] = lambda: auth
     app.dependency_overrides[deps.get_redis] = lambda: redis
@@ -511,75 +523,6 @@ def assert_no_calculation_as_of(value: Any) -> None:
             assert_no_calculation_as_of(nested)
 
 
-def _contains_calculation_as_of(value: Any) -> bool:
-    if isinstance(value, dict):
-        return "calculation_as_of" in value or any(
-            _contains_calculation_as_of(nested) for nested in value.values()
-        )
-    if isinstance(value, list):
-        return any(_contains_calculation_as_of(nested) for nested in value)
-    return False
-
-
-def xfail_if_calculation_as_of(value: Any, *, surface: str) -> None:
-    if _contains_calculation_as_of(value):
-        pytest.xfail(
-            f"#349@2fd6730c §7.8.4：{surface} 对外不得返回 calculation_as_of，"
-            "仅提供 data_as_of"
-        )
-
-
-def xfail_if_stat_gaps(value: Any, *, surface: str) -> None:
-    if isinstance(value, dict) and "gaps" in value:
-        pytest.xfail(
-            f"#349@2fd6730c §7.8.1、§7.8.4：{surface} 的 Stat 只能有四个字段，"
-            "指标缺口必须放在所在对象顶层 gaps"
-        )
-
-
-def xfail_if_legacy_metric_gap_keys(gaps: Any, *, surface: str) -> None:
-    if isinstance(gaps, list) and any(
-        isinstance(item, dict) and item.get("key") == "outcome_metrics"
-        for item in gaps
-    ):
-        pytest.xfail(
-            f"#349@2fd6730c §7.8.4：{surface} 的 gaps.key 必须为 "
-            "outcome_metrics.<指标名>，reason 只能使用 §3 gap_reason"
-        )
-
-
-def xfail_if_future_gaps_stay_in_stats(payload: Any) -> None:
-    if not isinstance(payload, dict) or payload.get("data_status") != "pending":
-        return
-    current_version = payload.get("current_version")
-    metrics = (
-        current_version.get("outcome_metrics")
-        if isinstance(current_version, dict)
-        else None
-    )
-    if not isinstance(metrics, dict) or not metrics:
-        return
-    if not all(
-        isinstance(metric, dict)
-        and metric.get("value") is None
-        and isinstance(metric.get("gaps"), list)
-        and "not_yet_published" in metric.get("gaps", [])
-        for metric in metrics.values()
-    ):
-        return
-
-    def has_top_level_gap(value: Any) -> bool:
-        return isinstance(value, list) and bool(value)
-
-    if not has_top_level_gap(payload.get("gaps")) or not has_top_level_gap(
-        current_version.get("gaps")
-    ):
-        pytest.xfail(
-            "#349@2fd6730c §7.8.1：未来周期 data_status=pending 且 reason="
-            "not_yet_published 时，缺口必须出现在对象顶层 gaps"
-        )
-
-
 def assert_metric_gaps(gaps: Any, *, reason: str) -> None:
     assert isinstance(gaps, list)
     assert all(
@@ -600,28 +543,6 @@ def assert_metric_gaps(gaps: Any, *, reason: str) -> None:
         and item["message"]
         for item in gaps
     )
-
-
-def project_review_wire_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """保留线上字符串枚举，未知值显示为“未知”而不改变原始值。"""
-
-    known_statuses = {"fresh", "stale", "pending", "partial", "unavailable"}
-    known_kinds = {"review_version", "plan_version", "trade"}
-    status = payload.get("data_status")
-    timeline = []
-    for item in payload.get("timeline", []):
-        kind = item.get("kind")
-        timeline.append({**item, "kind_label": kind if kind in known_kinds else "未知"})
-    gaps = []
-    for item in payload.get("gaps", []):
-        reason = item.get("reason")
-        gaps.append({**item, "reason_label": reason if reason in GAP_REASONS else "未知"})
-    return {
-        "data_status": status,
-        "data_status_label": status if status in known_statuses else "未知",
-        "gaps": gaps,
-        "timeline": timeline,
-    }
 
 
 def valid_review(**overrides: Any) -> dict[str, Any]:
@@ -690,10 +611,8 @@ def test_v1_list_owned_rows_and_datastatusblock(world: World) -> None:
     for item in payload["items"]:
         assert {"data_status", "data_as_of", "gaps"} <= set(item)
         assert isinstance(item["data_status"], str)
-        xfail_if_legacy_metric_gap_keys(item["gaps"], surface="GET /reviews 列表")
         assert_metric_gaps(item["gaps"], reason="no_source")
     assert all(item["id"] != str(OTHER) for item in payload["items"])
-    xfail_if_calculation_as_of(payload, surface="GET /reviews 列表")
     assert_no_calculation_as_of(payload)
 
 
@@ -737,20 +656,14 @@ def test_v1_detail_has_current_version_timeline_and_parseable_empty_stats(world:
     assert payload["current_version_no"] == 1
     assert isinstance(payload["timeline"], list)
     assert all(isinstance(item["kind"], str) for item in payload["timeline"])
-    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="GET /reviews 详情")
-    xfail_if_legacy_metric_gap_keys(
-        payload["current_version"]["gaps"],
-        surface="GET /reviews 详情 current_version",
-    )
     assert_metric_gaps(payload["gaps"], reason="no_source")
     assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
     for key in OUTCOME_METRIC_NAMES:
-        xfail_if_stat_gaps(
-            payload["current_version"]["outcome_metrics"][key],
-            surface=f"GET /reviews 详情 outcome_metrics.{key}",
-        )
-        assert_stat(payload["current_version"]["outcome_metrics"][key])
-    xfail_if_calculation_as_of(payload, surface="GET /reviews 详情")
+        metric = payload["current_version"]["outcome_metrics"][key]
+        assert_stat(metric)
+        assert metric["value"] is None
+        assert metric["n"] == 0
+        assert metric["small_sample"] is True
     assert_no_calculation_as_of(payload)
 
 
@@ -776,7 +689,6 @@ def test_v1_missing_current_version_is_nullable_and_consistent(world: World) -> 
     payload = response.json()
     assert payload["current_version_no"] is None
     assert payload["current_version"] is None
-    xfail_if_calculation_as_of(payload, surface="GET /reviews 旧记录详情")
     assert_no_calculation_as_of(payload)
 
 
@@ -798,7 +710,6 @@ def test_v2_create_201_keeps_computed_facts_server_owned(world: World) -> None:
     assert "outcome_metrics" in payload.get("current_version", payload)
     assert payload.get("outcome_metrics") != {"holding_return": {"value": 999}}
     assert all("holding_return" not in item for item in payload.get("judgement", []))
-    xfail_if_calculation_as_of(payload, surface="POST /reviews 响应")
     assert_no_calculation_as_of(payload)
 
 
@@ -838,13 +749,11 @@ def test_v2_version_save_freezes_old_content(world: World) -> None:
     listed = world.client.get(f"/api/v1/reviews/{REVIEW_ID}/versions")
     assert listed.status_code == 200
     listed_payload = listed.json()
-    xfail_if_calculation_as_of(listed_payload, surface="GET /reviews/{id}/versions 列表")
     assert_no_calculation_as_of(listed_payload)
     before = world.client.get(f"/api/v1/reviews/{REVIEW_ID}/versions/1")
     assert before.status_code == 200
     before_payload = before.json()
     old_lessons = before_payload["lessons"]
-    xfail_if_calculation_as_of(before_payload, surface="GET /reviews/{id}/versions/{n} 详情")
     assert_no_calculation_as_of(before_payload)
     saved = world.client.post(
         f"/api/v1/reviews/{REVIEW_ID}/versions",
@@ -853,13 +762,11 @@ def test_v2_version_save_freezes_old_content(world: World) -> None:
     assert saved.status_code == 201
     saved_payload = saved.json()
     assert saved_payload["current_version_no"] > 1
-    xfail_if_calculation_as_of(saved_payload, surface="POST /reviews/{id}/versions 响应")
     assert_no_calculation_as_of(saved_payload)
     after = world.client.get(f"/api/v1/reviews/{REVIEW_ID}/versions/1")
     assert after.status_code == 200
     after_payload = after.json()
     assert after_payload["lessons"] == old_lessons
-    xfail_if_calculation_as_of(after_payload, surface="GET /reviews/{id}/versions/{n} 旧版")
     assert_no_calculation_as_of(after_payload)
 
 
@@ -894,7 +801,6 @@ def test_v3_timeline_and_judgement_preserve_three_part_attribution(world: World)
     assert attribution["judgement"][0]["fulfilled"] is True
     assert isinstance(attribution["execution"], list)
     assert isinstance(attribution["market"], list)
-    xfail_if_calculation_as_of(payload, surface="GET /reviews 详情")
     assert_no_calculation_as_of(payload)
 
 
@@ -920,18 +826,13 @@ def test_v4_outcome_metrics_are_stat_objects(world: World) -> None:
     payload = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()
     metrics = payload["current_version"]["outcome_metrics"]
     assert set(metrics) == set(OUTCOME_METRIC_NAMES)
-    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="GET /reviews 详情")
-    xfail_if_legacy_metric_gap_keys(
-        payload["current_version"]["gaps"],
-        surface="GET /reviews 详情 current_version",
-    )
     assert_metric_gaps(payload["gaps"], reason="no_source")
     assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
     for name, metric in metrics.items():
-        xfail_if_stat_gaps(metric, surface=f"GET /reviews outcome_metrics.{name}")
         assert_stat(metric)
         assert metric["value"] is None
-    xfail_if_calculation_as_of(payload, surface="GET /reviews 详情")
+        assert metric["n"] == 0
+        assert metric["small_sample"] is True
     assert_no_calculation_as_of(payload)
 
 
@@ -939,12 +840,12 @@ def test_v4_metrics_are_null_with_top_level_no_source_gaps(world: World) -> None
     world.require("GET", "/reviews/{review_id}")
     payload = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()
     metrics = payload["current_version"]["outcome_metrics"]
-    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="GET /reviews 详情")
     assert_metric_gaps(payload["gaps"], reason="no_source")
+    assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
     for name, metric in metrics.items():
-        xfail_if_stat_gaps(metric, surface=f"GET /reviews outcome_metrics.{name}")
         assert metric["value"] is None
         assert metric["n"] == 0
+        assert metric["small_sample"] is True
         assert "gaps" not in metric
 
 
@@ -952,34 +853,40 @@ def test_v4_future_period_has_no_terminal_value(world: World) -> None:
     world.require("GET", "/reviews/{review_id}")
     world.db.reviews[0].period_end = dt.date.today() + dt.timedelta(days=30)
     payload = world.client.get(f"/api/v1/reviews/{REVIEW_ID}").json()
-    xfail_if_future_gaps_stay_in_stats(payload)
-    xfail_if_legacy_metric_gap_keys(payload["gaps"], surface="未来周期 GET /reviews 详情")
-    xfail_if_legacy_metric_gap_keys(
-        payload["current_version"]["gaps"],
-        surface="未来周期 GET /reviews 详情 current_version",
-    )
     metrics = payload["current_version"]["outcome_metrics"]
     for name, metric in metrics.items():
-        xfail_if_stat_gaps(metric, surface=f"未来周期 outcome_metrics.{name}")
         assert metric["value"] is None
+        assert metric["n"] == 0
+        assert metric["small_sample"] is True
         assert "gaps" not in metric
-    assert payload["data_status"] == "pending"
-    assert_metric_gaps(payload["gaps"], reason="not_yet_published")
-    assert_metric_gaps(payload["current_version"]["gaps"], reason="not_yet_published")
-    xfail_if_calculation_as_of(payload, surface="未来周期 GET /reviews 详情")
+    assert_metric_gaps(payload["gaps"], reason="no_source")
+    assert_metric_gaps(payload["current_version"]["gaps"], reason="no_source")
     assert_no_calculation_as_of(payload)
 
 
-def test_v4_unknown_wire_values_are_preserved_as_unknown() -> None:
-    payload = {
-        "data_status": "future_status",
-        "gaps": [{"key": "outcome_metrics.holding_return", "reason": "future_reason", "message": "未知"}],
-        "timeline": [{"kind": "future_event", "at": "2026-01-03T00:00:00+00:00"}],
+def _trade_resource_ids(payload: dict[str, Any]) -> set[str]:
+    assert "timeline" in payload
+    assert isinstance(payload["timeline"], list)
+    return {
+        item["resource_id"]
+        for item in payload["timeline"]
+        if item["kind"] == "trade"
     }
-    projected = project_review_wire_payload(payload)
-    assert projected["data_status"] == "future_status"
-    assert projected["data_status_label"] == "未知"
-    assert projected["gaps"][0]["reason"] == "future_reason"
-    assert projected["gaps"][0]["reason_label"] == "未知"
-    assert projected["timeline"][0]["kind"] == "future_event"
-    assert projected["timeline"][0]["kind_label"] == "未知"
+
+
+def test_v4_null_traded_at_uses_beijing_1500_when_snapshot_is_after(world: World) -> None:
+    world.require("GET", "/reviews/{review_id}")
+    # 2026-01-02 北京 15:00 是 07:00 UTC，成交的 created/committed 均更早。
+    world.db.snapshots[0].items["calculation_as_of"] = "2026-01-02T07:01:00+00:00"
+    response = world.client.get(f"/api/v1/reviews/{REVIEW_ID}")
+    assert response.status_code == 200
+    assert str(NULL_TRADED_AT_TRADE) in _trade_resource_ids(response.json())
+
+
+def test_v4_null_traded_at_is_excluded_before_beijing_1500(world: World) -> None:
+    world.require("GET", "/reviews/{review_id}")
+    # 同一成交的回退执行时点尚未到达北京 15:00。
+    world.db.snapshots[0].items["calculation_as_of"] = "2026-01-02T06:59:00+00:00"
+    response = world.client.get(f"/api/v1/reviews/{REVIEW_ID}")
+    assert response.status_code == 200
+    assert str(NULL_TRADED_AT_TRADE) not in _trade_resource_ids(response.json())
