@@ -1,22 +1,36 @@
-"""T-T118：T-B221 实时采集只能由 ingest 出口执行。"""
+"""T-T118：实时行情只能经 ingest 公共入口采集并写入。"""
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib
-import inspect
 import json
+import os
 import socket
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
-from app.config import Settings
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, delete, insert, text
+from sqlalchemy.engine import make_url
+
+from app.config import Settings, load_yaml_dir
+from app.db.tables.licences import user_data_licences
+from app.db.tables.market import securities, trading_calendar
+from app.db.tables.research import watchlist_items
+from app.db.tables.users import users
 from app.workers import jobs
 
 TASK = "market.realtime_quotes_fetch"
 OWNER = UUID("00000000-0000-4000-8000-000000001118")
+LICENCE = UUID("00000000-0000-4000-8000-000000001119")
+CODES = ("SYN001.SH", "SYN002.SH")
+NOW = dt.datetime(2030, 6, 11, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 SOCKET_ATTEMPTS: list[object] = []
 
 
@@ -41,86 +55,224 @@ def deny_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket, "create_connection", reject)
 
 
+def _probe_entry() -> tuple[object, str, object] | None:
+    for module_name, names in (
+        (
+            "app.marketdata.realtime_collect",
+            ("collect_realtime_quotes", "realtime_quotes_task"),
+        ),
+        ("app.workers.ingest", ("tick_realtime_quotes",)),
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            continue
+        for name in names:
+            value = getattr(module, name, None)
+            if callable(value):
+                return module, name, value
+    return None
+
+
+_ENTRY_AVAILABLE = _probe_entry() is not None
+
+
+def _require_entry() -> tuple[object, str, object]:
+    found = _probe_entry()
+    if found is None:
+        pytest.xfail("T-B221 未实现：没有可调用的 ingest 公共实时采集入口")
+    return found
+
+
 def _worker_registered() -> bool:
     return TASK in jobs.TASKS or any(
         isinstance(value, dict) and TASK in value for value in vars(jobs).values()
     )
 
 
-def _worker_holds_egress() -> bool:
-    root = Path(jobs.__file__).parent
-    return any(token in path.read_text(encoding="utf-8") for path in root.glob("*.py") if path.name != "ingest.py" for token in ("mairui_get", "app.ingest.egress"))
-
-
 def _worker_tick() -> list[tuple[str, str]]:
     return jobs.worker_tick(Settings.model_construct(), client=_Queue())
 
 
-def _ingest_source(*, writer: bool = False) -> tuple[str, Path] | None:
-    for module_name in ("app.marketdata.realtime_collect", "app.workers.ingest"):
-        try:
-            module = importlib.import_module(module_name)
-        except ModuleNotFoundError:
-            continue
-        path = Path(module.__file__)
-        known = any(callable(getattr(module, name, None)) for name in ("collect_realtime_quotes", "realtime_quotes_task"))
-        source = path.read_text(encoding="utf-8")
-        if known or TASK in source or (writer and "quotes_snapshot" in source and "batch_id" in source):
-            return module_name, path
-    import app.ingest
-
-    root = Path(app.ingest.__file__).parent
-    for path in sorted(root.glob("*.py")):
-        if path.name in {"__init__.py", "owned_quotes.py"}:
-            continue
-        source = path.read_text(encoding="utf-8")
-        if TASK in source or (writer and "quotes_snapshot" in source and "batch_id" in source):
-            return f"app.ingest.{path.stem}", path
-    return None
+def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    monkeypatch.setattr(
+        Settings,
+        "settings_customise_sources",
+        classmethod(lambda cls, settings_cls, init_settings, **kwargs: (init_settings,)),
+    )
+    config_dir = Path(__file__).resolve().parents[3] / "config"
+    return Settings(
+        _env_file=None,
+        app_env="test",
+        database_url="postgresql://invalid/invalid",
+        redis_url="redis://invalid/0",
+        config_dir=config_dir,
+        business=load_yaml_dir(config_dir),
+        realtime_quotes_source="mairui",
+    )
 
 
-def _require_ingest(*, writer: bool = False) -> tuple[str, Path]:
-    found = _ingest_source(writer=writer)
-    if found is None:
-        pytest.xfail("T-B221 未实现：未发现 ingest 实时采集消费/写入入口")
-    return found
+def _engine() -> object:
+    pg_url = os.environ["AIA_TEST_DATABASE_URL"]
+    backend = Path(__file__).resolve().parents[3] / "src" / "backend"
+    alembic = Config(str(backend / "alembic.ini"))
+    alembic.cmd_opts = SimpleNamespace(x=[f"url={pg_url}"])
+    command.upgrade(alembic, "head")
+    return create_engine(make_url(pg_url).set(drivername="postgresql+psycopg"))
 
 
-def _callable_probe(source: tuple[str, Path]) -> Any:
-    module_name, _ = source
-    module = importlib.import_module(module_name)
-    for name in ("realtime_quotes_task", "collect_realtime_quotes"):
-        value = getattr(module, name, None)
-        if callable(value):
-            return value
-    pytest.xfail("T-B221 未实现：入口模块没有可调用采集函数")
+def _seed(engine: object) -> None:
+    with engine.begin() as conn:  # type: ignore[union-attr]
+        conn.execute(
+            text("DELETE FROM market.quotes_snapshot WHERE code IN (:a, :b)"),
+            {"a": CODES[0], "b": CODES[1]},
+        )
+        conn.execute(delete(watchlist_items).where(watchlist_items.c.user_id == OWNER))
+        conn.execute(delete(user_data_licences).where(user_data_licences.c.id == LICENCE))
+        conn.execute(delete(users).where(users.c.id == OWNER))
+        conn.execute(delete(securities).where(securities.c.code.in_(CODES)))
+        conn.execute(
+            insert(users).values(
+                id=OWNER,
+                username="tt118b_user",
+                password_hash="synthetic-password-hash",
+                role="user",
+                status="approved",
+            )
+        )
+        conn.execute(
+            insert(user_data_licences).values(
+                id=LICENCE,
+                user_id=OWNER,
+                provider="mairui",
+                status="active",
+                ciphertext=b"\x00",
+                licence_hmac=uuid4().bytes,
+                seal_key_version=1,
+                tier="annual",
+                has_quant_pro=False,
+            )
+        )
+        conn.execute(
+            insert(securities),
+            [
+                {
+                    "code": code,
+                    "type": "stock",
+                    "name": f"Synthetic {code}",
+                    "exchange": "SH",
+                    "listing_status": "listed",
+                }
+                for code in CODES
+            ],
+        )
+        conn.execute(
+            insert(watchlist_items),
+            [
+                {"user_id": OWNER, "security_code": code, "group_name": "synthetic"}
+                for code in CODES
+            ],
+        )
+        conn.execute(delete(trading_calendar).where(trading_calendar.c.date == NOW.date()))
+        conn.execute(insert(trading_calendar).values(date=NOW.date(), is_open=True))
 
 
-def _invoke(function: Any, fake_transport: Any) -> Any:
-    kwargs: dict[str, object] = {}
-    for name, parameter in inspect.signature(function).parameters.items():
-        if name in {"transport", "fetcher", "client"}:
-            kwargs[name] = fake_transport
-        elif name == "settings":
-            kwargs[name] = Settings.model_construct()
-        elif name == "owner":
-            kwargs[name] = OWNER
-        elif name in {"conn", "connection", "engine"}:
-            kwargs[name] = object()
-        elif parameter.default is inspect.Parameter.empty:
-            pytest.xfail(f"T-B221 未验证：入口需要未冻结参数 {name}")
-    return function(**kwargs)
+def _patch_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    module: object,
+    calls: list[tuple[str, str]],
+) -> object:
+    from app.ingest.egress import EgressResult
+    from app.ingest.upstream import Signal
+
+    body = [
+        {
+            "code": CODES[0],
+            "ts": "2030-06-11T10:00:00+08:00",
+            "price": "10.00",
+            "pct_change": "1.25",
+            "volume": "100",
+            "amount": "1000",
+        },
+        {
+            "code": CODES[1],
+            "ts": "2030-06-11T10:00:00+08:00",
+            "price": "20.00",
+            "pct_change": "2.50",
+            "volume": "200",
+            "amount": "4000",
+        },
+    ]
+
+    def transport(path: str, secret: str) -> tuple[int, object]:
+        calls.append((path, secret))
+        return 200, body
+
+    def replay_get(*args: object, **kwargs: object) -> EgressResult:
+        injected = kwargs.get("transport")
+        path = kwargs["path"] if "path" in kwargs else args[0]
+        secret = kwargs["secret"] if "secret" in kwargs else args[1]
+        runner = injected if callable(injected) else transport
+        status, response = runner(str(path), str(secret))
+        return EgressResult(status=status, body=response, signal=Signal.OK, transitions=[])
+
+    egress = importlib.import_module("app.ingest.egress")
+    monkeypatch.setattr(egress, "mairui_get", replay_get)
+    if getattr(module, "mairui_get", None) is not None:
+        monkeypatch.setattr(module, "mairui_get", replay_get)
+    collect_module = sys.modules.get("app.marketdata.realtime_collect")
+    if collect_module is not None and getattr(collect_module, "mairui_get", None) is not None:
+        monkeypatch.setattr(collect_module, "mairui_get", replay_get)
+    if getattr(module, "verification_is_offline", None) is not None:
+        monkeypatch.setattr(module, "verification_is_offline", lambda: False)
+    return transport
+
+
+def _call_entry(
+    entry: tuple[object, str, object],
+    engine: object,
+    tmp_path: Path,
+    transport: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> object:
+    module, name, function = entry
+    settings = _settings(monkeypatch)
+    kwargs = {
+        "owner": OWNER,
+        "now": NOW,
+        "transport": transport,
+        "secret_loader": lambda *_args, **_kwargs: "synthetic-secret",
+        "engine": engine,
+        "stop": tmp_path / "stop",
+        "halt": tmp_path / "halt",
+    }
+    if name == "collect_realtime_quotes":
+        with engine.connect() as conn:  # type: ignore[union-attr]
+            return function(conn, settings, **kwargs)
+    return function(settings, **kwargs)
+
+
+def _rows(engine: object) -> list[object]:
+    with engine.connect() as conn:  # type: ignore[union-attr]
+        return conn.execute(
+            text(
+                "SELECT code, batch_id::text AS batch_id "
+                "FROM market.quotes_snapshot "
+                "WHERE code IN (:a, :b) ORDER BY code"
+            ),
+            {"a": CODES[0], "b": CODES[1]},
+        ).mappings().all()
 
 
 def test_realtime_collection_is_ingest_only() -> None:
     assert not _worker_registered(), "T-B221 违约：采集任务已登记到 worker 注册表"
     assert _worker_tick() == [(TASK, "unknown")], "T-B221 违约：worker_tick 已消费采集任务"
-    assert _require_ingest()
+    _require_entry()
 
 
 def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.ingest import egress
-
+    entry = _require_entry()
+    egress = importlib.import_module("app.ingest.egress")
     calls: list[object] = []
 
     def forbidden(*args: object, **kwargs: object) -> None:
@@ -128,70 +280,63 @@ def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
         raise AssertionError("worker 不得调用 mairui_get")
 
     monkeypatch.setattr(egress, "mairui_get", forbidden)
-    assert not _worker_holds_egress(), "T-B221 违约：worker 持有麦蕊客户端"
+    if getattr(entry[0], "mairui_get", None) is not None:
+        monkeypatch.setattr(entry[0], "mairui_get", forbidden)
+    collect_module = sys.modules.get("app.marketdata.realtime_collect")
+    if collect_module is not None and getattr(collect_module, "mairui_get", None) is not None:
+        monkeypatch.setattr(collect_module, "mairui_get", forbidden)
     assert not _worker_registered(), "T-B221 违约：worker 注册了实时采集任务"
     assert _worker_tick() == [(TASK, "unknown")], "worker 不得成功执行实时采集"
     assert calls == []
-    assert _require_ingest()
 
 
+@pytest.mark.xfail(
+    condition=not _ENTRY_AVAILABLE,
+    strict=True,
+    reason="T-B221 未实现：没有可调用的 ingest 公共实时采集入口",
+)
 def test_replay_injected_transport_has_zero_socket_calls(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    entry = _require_entry()
+    engine = _engine()
+    _seed(engine)
+    calls: list[tuple[str, str]] = []
+    transport = _patch_replay(monkeypatch, entry[0], calls)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
+    try:
+        _call_entry(entry, engine, tmp_path, transport, monkeypatch)
+        rows = _rows(engine)
+        assert calls, "注入 transport 未被调用"
+        assert rows, "行情响应未解析并写入 market.quotes_snapshot"
+        assert SOCKET_ATTEMPTS == []
+    finally:
+        engine.dispose()
 
-    def fake_transport(path: str, secret: str) -> tuple[int, object]:
-        return 200, {"code": "SYN001.SH", "price": "10.00"}
 
-    function = _callable_probe(_require_ingest())
-    _invoke(function, fake_transport)
-    assert SOCKET_ATTEMPTS == []
-
-
-def test_quote_batch_has_uuid_and_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
-    module_name, _ = _require_ingest(writer=True)
-    module = importlib.import_module(module_name)
-    function = getattr(module, "realtime_quotes_task", None)
-    if not callable(function):
-        function = getattr(module, "collect_realtime_quotes", None)
-    if not callable(function):
-        pytest.xfail("T-B221 未实现：未发现公开行情写入口")
-    class Context:
-        def __init__(self, value: object) -> None:
-            self.value = value
-
-        def __enter__(self) -> object:
-            return self.value
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-    conn = object()
-    engine = SimpleNamespace(connect=lambda: Context(conn), begin=lambda: Context(conn))
-    rows: set[tuple[object, object]] = set()
-    batches: list[UUID] = []
+@pytest.mark.xfail(
+    condition=not _ENTRY_AVAILABLE,
+    strict=True,
+    reason="T-B221 未实现：没有可调用的 ingest 公共实时采集入口",
+)
+def test_quote_batch_has_uuid_and_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _require_entry()
+    engine = _engine()
+    _seed(engine)
+    calls: list[tuple[str, str]] = []
+    transport = _patch_replay(monkeypatch, entry[0], calls)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
-    if hasattr(module, "verification_is_offline"):
-        monkeypatch.setattr(module, "verification_is_offline", lambda: False)
-    monkeypatch.setattr(module, "_open_clock", lambda *_args: SimpleNamespace(session=SimpleNamespace(value="morning"), trade_date=None))
-    monkeypatch.setattr(module, "active_licence_id", lambda *_args: OWNER)
-    monkeypatch.setattr(module, "_owned_codes", lambda *_args: ["SYN001.SH", "SYN002.SH"])
-    monkeypatch.setattr(module, "_fetch_with_egress", lambda *_args, **_kwargs: (200, [{"code": "SYN001.SH", "ts": "2030-06-11T10:00:00+08:00", "price": "10.00"}, {"code": "SYN002.SH", "ts": "2030-06-11T10:00:00+08:00", "price": "20.00"}]))
-
-    def write(_conn: object, quote_rows: list[dict[str, object]], batch_id: UUID) -> int:
-        assert isinstance(batch_id, UUID) and batch_id.int
-        batches.append(batch_id)
-        before = len(rows)
-        rows.update((row["code"], row["ts"]) for row in quote_rows)
-        return len(rows) - before
-
-    monkeypatch.setattr(module, "_write_rows", write)
-    settings = SimpleNamespace(realtime_quotes_source="mairui")
-    for _ in range(2):
-        if function.__name__ == "realtime_quotes_task":
-            monkeypatch.setattr(jobs, "_engine", lambda _settings: engine)
-            function(settings, owner=OWNER, transport=lambda *_args: (200, []))
-        else:
-            function(conn, settings, owner=OWNER, engine=engine, transport=lambda *_args: (200, []))
-    assert len(batches) == 2 and all(batch.int for batch in batches)
-    assert len(rows) == 2
+    try:
+        _call_entry(entry, engine, tmp_path, transport, monkeypatch)
+        first = _rows(engine)
+        assert first and len({row["batch_id"] for row in first}) == 1
+        batch_id = UUID(first[0]["batch_id"])
+        assert batch_id.int
+        _call_entry(entry, engine, tmp_path, transport, monkeypatch)
+        second = _rows(engine)
+        assert len(second) == len(first)
+        assert calls
+    finally:
+        engine.dispose()
