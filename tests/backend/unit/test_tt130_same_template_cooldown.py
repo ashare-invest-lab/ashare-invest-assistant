@@ -416,7 +416,8 @@ def test_same_template_cooldown_blocks_trading_days(
     sql: Any, request: pytest.FixtureRequest,
 ) -> None:
     """RS-02 ①: each of trading days 1–3 is blocked, including a weekend/holiday gap."""
-    request.applymarker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=IMPLEMENTATION_PENDING))
+    if target_day == COOLDOWN_DAYS[2]:
+        request.applymarker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=IMPLEMENTATION_PENDING))
     world = _seed_world(sql, str(synthetic_user.id), target_day=target_day)
     result = _writer(monkeypatch, world, isolated_pg.engine)
     assert result["diagnostic"] == "blocked"
@@ -471,7 +472,6 @@ def test_reason_code_table_has_23_codes_and_same_template_code(
     request: pytest.FixtureRequest,
 ) -> None:
     """RS-02 ④: the public reason-code table has exactly 23 entries."""
-    request.applymarker(pytest.mark.xfail(strict=True, raises=AssertionError, reason=IMPLEMENTATION_PENDING))
     codes = [item.model_dump(mode="json") for item in build_enums().reason_codes]
     assert len(codes) == 23
     assert SAME_TEMPLATE_COOLDOWN in {item["code"] for item in codes}
