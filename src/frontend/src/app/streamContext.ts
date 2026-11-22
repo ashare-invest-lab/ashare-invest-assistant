@@ -1,4 +1,3 @@
-import { IS_MOCK } from '../lib/env';
 import { createContext, useContext } from 'react';
 import type { StreamState } from '../lib/eventStream';
 
@@ -10,12 +9,15 @@ export type StreamStatus = StreamState | 'off';
 export const StreamStatusContext = createContext<StreamStatus>('off');
 export const useStreamStatus = () => useContext(StreamStatusContext);
 
+/** SSE 在所有非 test 构建中启用，联调和生产不依赖 mock 开关。 */
+export const isStreamEnabled = (mode: string) => mode !== 'test';
+
 /**
  * 运行开关与时间参数。单元测试环境默认关闭（避免每个页面测试都挂一条长连接），
  * T-F14 的测试里显式打开并把重连间隔调小。
  */
 export const streamConfig = {
-  enabled: IS_MOCK && import.meta.env.MODE !== 'test',
+  enabled: isStreamEnabled(import.meta.env.MODE),
   retryMs: undefined as number | undefined,
   maxRetryMs: undefined as number | undefined,
   idleTimeoutMs: undefined as number | undefined,

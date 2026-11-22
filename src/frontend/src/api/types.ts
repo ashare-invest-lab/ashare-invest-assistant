@@ -11,6 +11,7 @@ import type {
   ReconciliationStatus, RegistrationMode, ReleaseKind, RiskControl, RiskLevel, Role, AccountStatus, RuleRole, Severity,
   SignalKind, StrategyEvalState, SuggestionOrigin, SuggestionStatus, TLeg, PlanDraftStatus, AlertOrigin, AlertStatus, PlanConditionKind,
   DataGapScope, SecurityType,
+  RestrictionKind, RestrictionTargetType,
 } from './enums';
 import type { DailyDimensionAnalysis } from './phase2Types';
 
@@ -202,6 +203,8 @@ export interface TerminalRow {
   name: string;
   in_watchlist: boolean;
   focus: boolean;
+  /** 证券主数据类型；主数据缺失时为 null。旧响应缺字段按 null 处理。 */
+  security_type: SecurityType | null;
   quote: TerminalQuote | null;
   holding: TerminalHolding | null;
   suggestion: SuggestionSummary | null;
@@ -211,6 +214,9 @@ export interface TerminalRow {
   /** v0.2.3：该行行情与建议中较旧者的数据时点；完全无数据为 null */
   data_as_of: DateTime | null;
 }
+
+export const securityTypeOf = (row: Pick<TerminalRow, 'holding'> & { security_type?: SecurityType | null }) =>
+  row.security_type ?? row.holding?.security_type ?? null;
 
 // ---------- §5.2 ----------
 export interface DimensionViewEntry { dimension: Dimension; view: DimensionView; score: number | null; rules: RuleRef[] }
@@ -402,6 +408,20 @@ export interface NonExecutableReason {
   released_by: 'system' | 'user';
 }
 
+/** /restrictions 资源，契约 #337（api-contract §7.5）。运行时 status 可能包含未知字符串。 */
+export interface Restriction {
+  id: Uuid;
+  kind: RestrictionKind;
+  target_type: RestrictionTargetType;
+  target_id: string;
+  until: DateTime | null;
+  reason: string | null;
+  created_at: DateTime;
+  name: string | null;
+  status: string;
+  removed_at: DateTime | null;
+}
+
 // ---------- §7.1 / 7.2 / 7.3 / 7.10 ----------
 export interface Me {
   id: Uuid;
@@ -533,13 +553,29 @@ export interface HealthReady {
   version: string;
 }
 
-// ---------- v0.2.3 §7.3 /market/overview（最小结构） ----------
+// ---------- v0.2.11 §7.3 /market/overview ----------
 export interface MarketIndexQuote { security_code: string; name: string; price: Decimal | null; change_pct: Decimal | null; amount: Decimal | null; t: DateTime | null }
+/** v0.2.11 §5.1 MarketBasis；没有市场快照证据时响应返回 null，前端不推造批次。 */
+export interface MarketBasis {
+  snapshot_id: Uuid | null; observed_date: DateStr | null; mode: 'intraday' | 'close' | null; scope: string;
+  eligible: number | null; observed: number | null; trading: number | null; suspended: number | null; missing: number | null;
+  source: string | null;
+}
 export interface MarketOverview extends DataStatusBlock {
+  basis: MarketBasis | null;
   trade_date: DateStr;
   session: MarketSession;
   indices: MarketIndexQuote[];
-  breadth: { up: number; down: number; flat: number; limit_up: number; limit_down: number } | null;
+  breadth: {
+    up: number | null;
+    down: number | null;
+    flat: number | null;
+    limit_up: number | null;
+    limit_down: number | null;
+    up_ratio: Decimal | null;
+    down_ratio: Decimal | null;
+    flat_ratio: Decimal | null;
+  } | null;
   regime: MarketRegime | null;
   regime_position_range: RegimePositionRange | null;
   turnover_total: Decimal | null;
@@ -563,7 +599,8 @@ export interface TView {
   as_of: DateTime | null;
   gaps: Gap[];
 }
-export type TodayFocusRow = TerminalRow & { t_view?: TView | null };
+/** 旧 /today 响应可能缺少行级字段，读取时按 null 处理。 */
+export type TodayFocusRow = Omit<TerminalRow, 'security_type'> & { security_type?: SecurityType | null; t_view?: TView | null };
 
 // ---------- §7.3 /today 首页聚合（ETag） ----------
 export interface MoreList<T> { items: T[]; more: boolean }
@@ -587,3 +624,65 @@ export interface TodayResponse {
   data_gaps: MoreList<TodayDataGap>;
   evidence: Evidence[];
 }
+
+// §7.8.1–7.8.4 复盘对象。按 #349@c718b419，ReviewSummary、ReviewDetail、ReviewVersion
+// 三者顶层均平铺 DataStatusBlock，ReviewVersion 冻结版本快照，详情与列表取当前版本。
+export interface ReviewJudgement { condition_text: string; fulfilled: boolean | null; note: string | null }
+export interface ReviewAttribution {
+  judgement: ReviewJudgement[];
+  execution: TextWithEvidence[];
+  market: TextWithEvidence[];
+}
+export interface ReviewOutcomeMetrics {
+  holding_return: Stat;
+  benchmark_return: Stat;
+  excess_return: Stat;
+  max_drawdown: Stat;
+}
+export interface ReviewVersion extends DataStatusBlock {
+  id: Uuid;
+  version_no: number;
+  plan_version_ids: Uuid[];
+  trade_ids: Uuid[];
+  snapshot_id: Uuid | null;
+  lessons: string | null;
+  tags: string[];
+  attribution: ReviewAttribution;
+  outcome_metrics: ReviewOutcomeMetrics;
+  created_at: DateTime;
+}
+export type ReviewTimelineKind = 'review_version' | 'plan_version' | 'trade';
+export interface ReviewTimelineItem {
+  kind: ReviewTimelineKind;
+  at: DateTime;
+  resource_id: Uuid | null;
+  version_no: number | null;
+  evidence_ids: string[];
+}
+export interface ReviewSummary extends DataStatusBlock {
+  id: Uuid;
+  plan_id: Uuid | null;
+  security_code: string | null;
+  name: string | null;
+  period_start: DateStr;
+  period_end: DateStr;
+  current_version_no: number | null;
+  created_at: DateTime;
+}
+export interface ReviewDetail extends ReviewSummary {
+  current_version: ReviewVersion | null;
+  evidence: Evidence[];
+  timeline: ReviewTimelineItem[];
+}
+export interface ReviewCreate {
+  plan_id: Uuid | null;
+  security_code: string | null;
+  period_start: DateStr;
+  period_end: DateStr;
+  plan_version_ids: Uuid[];
+  trade_ids: Uuid[];
+  lessons: string | null;
+  tags: string[];
+  judgement: ReviewJudgement[];
+}
+export interface ReviewVersionCreate extends ReviewCreate { base_version_no: number }

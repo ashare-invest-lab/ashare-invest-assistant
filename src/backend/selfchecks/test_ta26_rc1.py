@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from sqlalchemy import insert, select
 
-from app.db.tables.market import daily_bars, realtime_quotes
+from app.db.tables.market import daily_bars, quotes_snapshot
 from app.db.tables.strategy import risk_events
 from app.risk.evaluation import Inputs, assessed
 from app.risk.events import record
@@ -229,7 +229,9 @@ def test_rc1_trigger_never_adds_action_gates(action: Action) -> None:
     )
 
 
-def test_real_raw_cache_sources_and_close_timestamp(env: Any) -> None:
+def test_real_raw_cache_sources_and_close_timestamp(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     engine, _, _, owner, _, settings = env
     with engine.begin() as conn:
         from app.aggregates.calendar import seed_calendar
@@ -241,15 +243,25 @@ def test_real_raw_cache_sources_and_close_timestamp(env: Any) -> None:
                 Path(__file__).resolve().parents[3] / "config", "trading_calendar.json"
             ),
         )
+        licence = uuid.UUID("00000000-0000-0000-0000-000000000026")
+        monkeypatch.setattr(
+            "app.marketdata.daily_snapshot.active_licence_id",
+            lambda conn, owner, at: licence,
+        )
         conn.execute(
-            insert(realtime_quotes).values(
-                code="688018.SH", ts=AT, price=9, source="ssjy_more", fetched_at=AT
+            insert(quotes_snapshot).values(
+                code="688018.SH",
+                ts=AT,
+                price=9,
+                source="mairui",
+                source_licence_id=licence,
+                fetched_at=AT,
             )
         )
         f = load(conn, owner, None, "688018.SH", settings, AT, stops_at=AT, position_known=False)
         fs, _, _ = assess(stops(), f, AT)
         assert fs[0].message.endswith("stop_loss")
-        assert f.endpoint == "market.realtime_quotes:raw"
+        assert f.endpoint == "market.quotes_snapshot:raw"
         # Raw and qfq rows intentionally disagree: qfq must never trigger RC1.
         at = AT.replace(hour=16)
         for adjust, low, high in [
