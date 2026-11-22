@@ -67,8 +67,8 @@ describe('路由与页面（MSW 示例数据）', () => {
   });
 
   it('未实现页面为占位页，未知路径 404', async () => {
-    // /plans 自 T-F23 裁定跟进起为真实页面；用仍未实现的 /reviews 验证占位页
-    renderAt('/reviews');
+    // /reviews 已接入复盘页面，用仍未实现的 /restrictions 验证占位页
+    renderAt('/restrictions');
     expect(await screen.findByTestId('placeholder')).toBeInTheDocument();
   });
   it('未知路径', async () => {
