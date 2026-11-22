@@ -9,6 +9,8 @@ import { preloadRoutes } from '../../test/preloadRoutes';
 import { server } from '../../mocks/server';
 
 const API = '/api/v1';
+const outcomeMetricKeys = ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown'] as const;
+const outcomeMetricGaps = () => outcomeMetricKeys.map((key) => ({ key: `outcome_metrics.${key}`, reason: 'no_source', message: '缺少价格、基准或公式来源，指标暂不计算' }));
 const renderAt = (path: string) => {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={router} /></AppProviders>);
@@ -18,7 +20,7 @@ const metrics = () => Object.fromEntries(['holding_return', 'benchmark_return', 
 const version = (no: number, lessons: string, planVersionIds: string[] = [], tradeIds: string[] = [], extra: Record<string, unknown> = {}) => ({
   id: `review-f72-v${no}`, version_no: no, plan_version_ids: planVersionIds, trade_ids: tradeIds, snapshot_id: null,
   lessons, tags: [], attribution: { judgement: [], execution: [], market: [] }, outcome_metrics: metrics(), created_at: `2026-11-${no}T10:00:00+08:00`,
-  data_status: 'partial', data_as_of: null, gaps: [], ...extra,
+  data_status: 'partial', data_as_of: null, gaps: outcomeMetricGaps(), ...extra,
 });
 
 beforeAll(() => preloadRoutes(routes), 30_000);
@@ -34,12 +36,20 @@ describe('T-F72 复盘补充覆盖', () => {
   it('深链版本保留冻结计划与成交引用', async () => {
     const user = userEvent.setup();
     const v1 = version(1, 'v1 冻结笔记', ['plan-version-f72-v1'], ['trade-f72-1']);
-    const v2 = version(2, 'v2 当前笔记', ['plan-version-f72-v2'], ['trade-f72-2'], { data_status: 'fresh' });
+    const v2 = version(2, 'v2 当前笔记', ['plan-version-f72-v2'], ['trade-f72-2']);
     const body = {
       id: 'review-f72', plan_id: 'plan-example-1', security_code: '600000.SH', name: '示例银行', period_start: '2026-11-01', period_end: '2026-11-20',
-      current_version_no: 2, created_at: v2.created_at, data_status: 'fresh', data_as_of: null, gaps: [], current_version: v2,
+      current_version_no: 2, created_at: v2.created_at, data_status: v2.data_status, data_as_of: v2.data_as_of, gaps: v2.gaps, current_version: v2,
       timeline: [{ kind: 'review_version', at: v2.created_at, resource_id: 'review-f72', version_no: 1, evidence_ids: [] }],
     };
+    for (const current of [v1, v2]) {
+      expect(current.data_status).toBe('partial');
+      expect(current.gaps).toEqual(expect.arrayContaining(outcomeMetricGaps()));
+    }
+    expect(body.data_status).toBe('partial');
+    expect(body.gaps).toEqual(expect.arrayContaining(outcomeMetricGaps()));
+    expect(body.data_status).toBe(body.current_version.data_status);
+    expect(body.gaps).toEqual(body.current_version.gaps);
     server.use(
       http.get(`${API}/reviews/review-f72`, () => HttpResponse.json(body)),
       http.get(`${API}/reviews/review-f72/versions`, () => HttpResponse.json({ items: [v1, v2], next_cursor: null })),
