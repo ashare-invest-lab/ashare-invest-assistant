@@ -158,16 +158,15 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 ## 4. ②/restrictions 禁投·冷静期·屏蔽
 
 来源：API §7.5定义kind=blocklist/cooling_off/mute、target_type=security/strategy/instance、target_id、until、reason；`src/backend/app/db/tables/signals.py` user_restrictions已有id/user_id/created_at/removed_at。证券目标来自 `src/backend/app/master/search.py:search`；策略可见性来自 `src/backend/app/api/v1/strategy_cards.py:visible`；实例按本人归属校验。不需要麦蕊、通达信或日线参数。
-盘中/收盘：同一限制事实均按服务端时刻判断，until≤now失效（`src/backend/app/signals/service.py:write_candidate` 当前用content.created_at）；用户明确until不换算成自然日N。自动止损后冷静期的“默认关闭、N=3交易日”仅来自plan §6.1/问题31，非本页默认启用项；这次先交付手动管理。
+盘中/收盘：限制命中候选只按 `[restriction.created_at, restriction.removed_at)` 与候选 `content.created_at` 比较，并要求 `until=null` 或 `content.created_at < until`；服务端当前时刻不参与历史候选生效判定。用户明确until不换算成自然日N。自动止损后冷静期的“默认关闭、N=3交易日”仅来自plan §6.1/问题31，非本页默认启用项；这次先交付手动管理。
 已确认实现缺口：write_candidate读取限制时没有removed_at过滤，且只按target_id集合匹配；软删除接入必须同步修正removed_at和target_type匹配，否则删后仍拦截。名单删除只能重新检查关联原因，不能无条件解除所有同代码原因（API §6.1、§9 v0.2.9验收5）。
 缺数：限制列表真实为空=200 items[]、gaps[]；目标名称缺主数据，保留target_id、name=null、no_source；重查证据缺失时保留active原因并返回gap，不假定已恢复可执行。无行情证书不影响名单管理，不返回行情许可证gap。没有插值/前视；历史展示使用原创建/删除时间，不套用今日名单重写旧信号。
 
-**契约草案**：补全既有 GET/POST `/restrictions`、DELETE `/restrictions/{id}`，不另建第二套控制接口。
-- GET请求 `kind?、target_type?、limit、cursor`；默认未删除，按created_at desc/id desc（API §1.2）；响应 `{items:[Restriction],next_cursor,gaps}`。Restriction沿上述字段增id/created_at/removed_at/name/status（active/expired；草案派生展示，不落新状态枚举）；until=null不擅自补到期日。
-- POST请求严格沿§7.5六字段；201返回Restriction+gaps；不接收user_id。cooling_off须有未来until，否则400 VALIDATION_ERROR（本草案补齐有效性约束，以plan“冷静期结束”语义为据）；blocklist/mute保留现有until可空能力。
-- DELETE建议200 `{id,removed_at,recheck:{released_reason_ids:uuid[],remaining_reason_ids:uuid[]},gaps}`（既有契约未规定响应体，本次增量）；重复删除同一本人记录返回相同删除时间、不重复事件；仅解除已证实无其他有效限制的原因。未完成重查不能返回“已解除”。
-- 错误除共用项外：目标不可见/不存在同404；字段组合无效400。`POST /non-executable-reasons/{id}/release` 对BLOCKLISTED/USER_MUTED继续409 REASON_NOT_MANUALLY_RELEASABLE（`src/backend/app/api/v1/candidate_signals.py:release_reason`），引导名单页；cooling_off按时间条件重查，不绕过机器条件。
-- 入口验收：`/restrictions`增删筛选及过期展示；`/candidate-signals/:id`名单解除跳转、重复限制仍阻断；`/candidate-signals?tab=released`与`/today.released_reasons`只出现确实解除的事件；`/terminal`原因计数刷新一致；新候选不再命中removed记录；旧建议归档不被覆写。
+**正式契约**：本节只描述 market wiring 的依赖与 PIT 约束。本节 restrictions 段已被 `docs/api-contract.md §7.5` 取代；`GET/POST /restrictions`、`DELETE /restrictions/{id}` 的请求、响应、错误、幂等、目标可见性、状态派生和删除重查均以 §7.5 为唯一事实来源，不另建第二套控制接口。
+- 目标校验继续复用证券主数据搜索、策略可见性和实例本人归属。未知证券、不可见策略、不存在或他人的实例统一按 `404 NOT_FOUND`，不得泄露存在性。该点以 API §7.5 为准，目标名称缺失时只通过 `gaps` 披露。
+- 生成候选的限制判定必须使用 `[restriction.created_at, restriction.removed_at)`，并将 `until` 相对候选 `content.created_at` 比较。当前时刻只用于实时接口的 `status` 展示和创建时 `cooling_off.until` 的未来校验，不能回写历史候选。
+- 删除首次执行与重查必须在同一事务中完成，先用 `SELECT candidate_signals ... FOR UPDATE` 锁定本人且命中目标的候选，再用 `SELECT non_executable_reasons ... FOR UPDATE` 按 `non_executable_reasons.signal_id` 关联原因。依据 `src/backend/app/db/tables/signals.py` 的现有列，`target_type=security` 用候选 `security_code=target_id`；`target_type=strategy` 通过候选 `strategy_version_id` 关联 `strategy_versions.strategy_id=target_id`；`target_type=instance` 用候选 `instance_id=target_id`。原因 `code` 必须匹配被删 `kind` 对应的 `BLOCKLISTED`、`USER_MUTED` 或 `COOLING_OFF`，并按候选 `content.created_at` 的 PIT 条件判断。若仍有另一条同一用户、未删除且对该候选生效的对应限制，原因保留 `active`；仅无其他命中时将原因行 `released_by="system"` 并写入 `reason_status_events` 的既有字段 `reason_id/from_status/to_status/evaluated_value/at`。删除已完成的记录再次 DELETE 返回 `200` 与原 `removed_at`，不新增事件；响应结构与 `gaps` 位置以 API §7.5 为准。当前主线尚未实现 restrictions 路由与上述事务重查，未验证。若实现需要 `restriction_id` 等现有 schema 没有的列，须迁移补列，未验证。
+- 本节的入口验收沿用 API §7.5 及其 §9 验收条目。涉及 `/candidate-signals/:id`、`/candidate-signals?tab=released`、`/today.released_reasons`、`/terminal` 的联动，需以后端实现和测试实际通过为准，不把草案建议写成已实现。
 
 | 别名｜建议单号 | 范围/净增上限 | 依赖 | 验收 |
 | --- | --- | --- | --- |
@@ -180,29 +179,9 @@ T-O111 的四类症状同源：ingest/signal-rt 盘中链路占位，实时快�
 
 ## 5. ③/reviews 复盘
 
-来源：`docs/plan.md` §2.4能力5要求计划版本→成交→后续结果、判断/执行/市场环境归因、经验标签；API §7.8只列GET/POST骨架。`src/backend/app/db/tables/reviews.py` reviews/review_versions已有period_start/end、plan_id、plan_version_ids、trade_ids、outcome_metrics、attribution、lessons、tags、snapshot_id；无需借用 `strategy/reviews.py` 的晋级审核对象。
-实际计划从 `src/backend/app/plans/service.py:owned`、`project_version`读取本人版本；成交来自本人已确认导入（plan §2.4能力5、API §7.2）。麦蕊仅作为已入本地库且本人可见的日线/基准证据，参数none、pre_close、source_licence_id/fetched_at约束沿第3节；通达信仍仅研究，不自动补本人的正式复盘收益。
-收益/基准/超额/回撤的业务目标有出处（plan能力5），但实际成交复盘的费用、现金流、分红、未平仓处理及行业基准映射尚未有本次确认的统一公式，未验证 U5；参数未定前返回null+gap，不借用模拟跟踪数充当实绩。`src/backend/app/tracking/service.py:view`可复用本人模拟结果展示；`instrument`直接查日线不构成所有者隔离证明，不能原样套用到新增复盘。
-盘中只展示记录事实和最近完成的收盘结果，开放期间标未完成；收盘按period_end及知识截止冻结。计划当时快照与事后结果快照分开：后续实际成交是复盘证据，不反写成当时预测；只在结果截止后可见的数据才能参与相应revision，不用未来修订回填旧版本。缺成交/标注为user_input_missing，缺价格/基准/公式为no_source，结果期未结束为not_yet_published；无证书只影响行情派生字段，仍返回用户笔记和计划。
+复盘接口正式契约已在 [`docs/api-contract.md` §7.8](../api-contract.md) 定稿，版本为 v0.2.11（T-A217，2026-11-21）。该节统一规定列表、详情、创建、版本读取与创建、本人隔离、幂等键、`VERSION_CONFLICT`、字段可空性、状态缺口、指标卡口径与 `as_of` 截断。
 
-**契约草案**（所有新字段/子路由均为§7.8增量）：
-- GET `/reviews?security_code=&plan_id=&limit=&cursor=` → `{items:[{id,plan_id,security_code,name,period_start,period_end,current_version_no,created_at,DataStatusBlock}],next_cursor}`；GET `/reviews/{id}`→头＋current_version＋timeline，均按本人过滤。
-- POST `/reviews`：`{plan_id:uuid|null,security_code:string|null,period_start:date,period_end:date,plan_version_ids:uuid[],trade_ids:uuid[],lessons:string|null,tags:string[],judgement:[{condition_text:string,fulfilled:boolean|null,note:string|null}]}`；judgement只存用户对计划条件的兑现标注（plan能力5），不能传计算指标为“事实”；201返回完整复盘。plan与证券至少一项，日期有序、关联版本/成交归属一致，否则400；具体数值指标由服务端计算。
-- GET `/reviews/{id}/versions?limit=&cursor=`、GET `/reviews/{id}/versions/{version_no}`；POST `/reviews/{id}/versions`同内容字段加base_version_no→201新不可变版本；并发base不符→409 VERSION_CONFLICT（API §4）。原版本不开放PATCH/DELETE，未开放的方法405。
-- version：`{id,version_no,plan_version_ids,trade_ids,snapshot_id,lessons,tags,attribution:{judgement,execution,market},outcome_metrics:{holding_return,benchmark_return,excess_return,max_drawdown},created_at,DataStatusBlock}`。各指标沿API §5.1 Stat结构；U5未定时value=null、n为真实可用样本数、window为period、small_sample沿§5.1阈值，不伪造样本量。attribution.judgement保留用户标注，execution/market为TextWithEvidence数组；timeline元素 `{kind,at,resource_id,version_no:null|int,evidence_ids}`，证据附在详情evidence[]中。
-- 受影响入口验收：浏览器 `/reviews`列表/新建、`/reviews/:id`详情及版本切换均显示空值原因；计划详情深链携带固定plan_version_id；`/portfolio`成交引用能定位实际trade_id；建议tracking入口清楚标“模拟”，不得计入实际成交；历史版本重读不随当前日线/计划变化；市场归因引用该复盘期间冻结数据，缺市场环境不阻止保存手写经验。
-
-| 别名｜建议单号 | 范围/净增上限 | 依赖 | 验收 |
-| --- | --- | --- | --- |
-| V1｜T-B待编排者编号-V1 | 后端复盘模型、列表/详情/版本读取，330行 | 已有表、契约草案 | 仅本人、稳定分页、旧版本不可变、空指标可解析。 |
-| V2｜T-B待编排者编号-V2 | 后端创建与版本保存，380行 | V1 | 关联归属、幂等、base冲突、快照冻结、手写结论区分事实。 |
-| V3｜T-B待编排者编号-V3 | 后端计划/成交时间线与三分归因证据，350行 | V2 | 不按证券粗匹配别人的成交；无证据项保持未知；双时点不混。 |
-| V4｜T-B待编排者编号-V4 | 后端结果指标适配，350行 | V3；U5 | 仅实现已定公式；费用/基准缺项null；模拟不混实际；未结束不出终值。 |
-| V5｜T-F待编排者编号-V5 | 前端列表、创建和版本入口，330行 | V1/V2 | 替换占位、复用计划/证券选择；保存返回真实版本号。 |
-| V6｜T-F待编排者编号-V6 | 前端时间线、归因、结果和差异，350行 | V3/V4/V5 | 原貌与当前对照明确、缺口可读、实际/模拟标识明确。 |
-| V7｜T-B待编排者编号-V7 | 后端隔离测试，380行 | V1–V4 | 跨用户、并发保存、迟到日线、未结束期间、真实缺费用、旧版本哈希不变。 |
-| V8｜T-F待编排者编号-V8 | 前端入口与版本测试，260行 | V5/V6 | 列表空态、深链版本、null/gap、错误保存不丢用户输入。 |
-
+本节此前的接口草案不再作为事实来源。实现与前端均以正式契约为准，未纳入正式契约的收益费用、现金流、分红、未平仓和行业基准细节继续按正式契约标记缺口，不得用模拟跟踪结果替代实际成交。
 ## 6. ④/discover 发现
 
 先交付入口：按plan §2.4将 `/discover` 跳转 `/strategies`，移出PLACEHOLDERS，不做另一套策略库。现有 `src/backend/app/api/v1/strategy_cards.py:strategy_list`支持horizon/lifecycle/risk_level、limit/cursor，响应Page含id/key/name/horizons/risk_level/current_version/health；security_code适配目前503 MAINTENANCE(applicability_evaluator_pending)，不能伪装已支持。
