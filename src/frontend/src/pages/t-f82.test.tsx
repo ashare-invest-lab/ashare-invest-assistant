@@ -99,8 +99,12 @@ describe('T-F82 stream consumption', () => {
     expect(isQuoteStale('2026-11-02T15:00:00+08:00', { now: '2026-11-02T15:00:20+08:00', session: 'closed' })).toBe(false);
     expect(isQuoteStale('2026-10-30T15:00:00+08:00', { now: '2026-11-02T09:20:00+08:00', session: 'call_auction', tradeDate: '2026-11-02' })).toBe(false);
     expect(isQuoteStale('2026-10-30T15:00:00+08:00', { now: '2026-11-02T09:00:00+08:00', session: 'pre_open', tradeDate: '2026-11-02' })).toBe(false);
-    expect(isQuoteStale('2026-11-02T09:00:00+08:00', { now: '2026-11-02T09:31:00+08:00', session: 'pre_open', tradeDate: '2026-11-02' })).toBe(false);
-    expect(isQuoteStale('2026-11-02T09:15:00+08:00', { now: '2026-11-02T09:46:00+08:00', session: 'call_auction', tradeDate: '2026-11-02' })).toBe(false);
+    expect(isQuoteStale('2026-09-30T14:59:29+08:00', { now: '2026-10-05T09:00:00+08:00', session: 'non_trading_day', tradeDate: '2026-09-30' })).toBe(true);
+    expect(isQuoteStale('2026-09-30T14:59:30+08:00', { now: '2026-10-05T09:00:00+08:00', session: 'non_trading_day', tradeDate: '2026-09-30' })).toBe(false);
+    expect(isQuoteStale('2026-09-30T15:00:00+08:00', { now: '2026-10-05T09:00:00+08:00', session: 'non_trading_day', tradeDate: '2026-09-30' })).toBe(false);
+    expect(isQuoteStale('2026-09-30T00:00:00+08:00', { now: '2026-10-05T09:00:00+08:00', session: 'non_trading_day', tradeDate: '2026-09-30' })).toBe(true);
+    expect(isQuoteStale('2026-11-02T09:00:00+08:00', { now: '2026-11-02T09:31:00+08:00', session: 'pre_open', tradeDate: '2026-11-02' })).toBe(true);
+    expect(isQuoteStale('2026-11-02T09:15:00+08:00', { now: '2026-11-02T09:46:00+08:00', session: 'call_auction', tradeDate: '2026-11-02' })).toBe(true);
   });
 
   it('/quotes 条件读取返回 304，复用 ETag', async () => {

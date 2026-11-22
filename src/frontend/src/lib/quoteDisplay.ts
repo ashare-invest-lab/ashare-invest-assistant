@@ -20,30 +20,30 @@ function localParts(now: Date): { date: string; minutes: number } {
   return { date: `${value('year')}-${value('month')}-${value('day')}`, minutes: Number(value('hour')) * 60 + Number(value('minute')) };
 }
 
-function previousWeekday(day: string): string | null {
-  const parsed = Date.parse(`${day}T00:00:00+08:00`);
-  if (!Number.isFinite(parsed)) return null;
-  const date = new Date(parsed);
-  do {
-    date.setUTCDate(date.getUTCDate() - 1);
-  } while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
-  return date.toISOString().slice(0, 10);
+function isDateString(value: string | undefined): value is string {
+  return value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function referenceTime(now: Date, session?: string, tradeDate?: string, quoteAt?: number): number {
+function atClose(day: string | undefined): number | null {
+  if (!isDateString(day)) return null;
+  const parsed = Date.parse(`${day}T15:00:00+08:00`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function referenceTime(now: Date, session?: string, tradeDate?: string, quoteAt?: number): number | null {
   const local = localParts(now);
   const quoteDay = quoteAt === undefined ? undefined : localParts(new Date(quoteAt)).date;
-  const day = tradeDate && /^\d{4}-\d{2}-\d{2}$/.test(tradeDate) ? tradeDate : local.date;
+  const day = isDateString(tradeDate) ? tradeDate : local.date;
   const minutes = local.minutes;
   if (session === 'lunch_break' || (!session && minutes >= 11 * 60 + 30 && minutes < 13 * 60)) return Date.parse(`${day}T11:30:00+08:00`);
   if (session === 'closed' || (!session && minutes >= 15 * 60)) return Date.parse(`${day}T15:00:00+08:00`);
   if (session === 'call_auction' || session === 'pre_open' || session === 'non_trading_day' || (!session && minutes < 9 * 60 + 30)) {
-    // 当天交易日的盘前与集合竞价参照上一开市日收盘，避免用当前时钟给当天盘前行情计龄。
-    if (session !== 'non_trading_day' && quoteDay === local.date) {
-      const previous = previousWeekday(local.date);
-      if (previous !== null) return Date.parse(`${previous}T15:00:00+08:00`);
-    }
-    return Date.parse(`${quoteDay ?? day}T15:00:00+08:00`);
+    // 非交易日的 trade_date 是后端给出的最近开市日，直接作为收盘参考。
+    if (session === 'non_trading_day') return atClose(isDateString(tradeDate) ? tradeDate : undefined);
+    // 交易日盘前只接受行情项已给出的日期作为上一开市日，不在前端推算日历。
+    if (isDateString(tradeDate) && quoteDay !== undefined && quoteDay < tradeDate) return atClose(quoteDay);
+    // 缺少上一开市日时由调用方按 now 计龄，保持保守口径。
+    return null;
   }
   return now.getTime();
 }
@@ -55,7 +55,7 @@ export function isQuoteStale(t: unknown, options: QuoteFreshnessOptions = {}): b
   if (!Number.isFinite(quoteAt)) return false;
   const now = options.now === undefined ? new Date() : new Date(options.now);
   if (!Number.isFinite(now.getTime())) return false;
-  const reference = referenceTime(now, options.session, options.tradeDate, quoteAt);
+  const reference = referenceTime(now, options.session, options.tradeDate, quoteAt) ?? now.getTime();
   const threshold = options.staleThresholdS ?? QUOTE_STALE_THRESHOLD_S;
   return Number.isFinite(reference) && reference - quoteAt > Math.max(0, threshold) * 1000;
 }
