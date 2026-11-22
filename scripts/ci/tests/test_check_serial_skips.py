@@ -47,6 +47,62 @@ def test_failed_zero_passed_and_thresholds_fail(tmp_path: Path) -> None:
     assert check.main(_inputs(tmp_path, 3, 0, failed=1)) == 1
 
 
+def test_trusted_baseline_rejects_relaxation_and_uses_trusted_thresholds(
+    tmp_path: Path, capsys
+) -> None:
+    args = _inputs(tmp_path, 3, 2)
+    config = Path(args[args.index("--config") + 1])
+    config.write_text(
+        json.dumps({"serial_pg": {"max_skipped": 9999, "min_passed": 0}}),
+        encoding="utf-8",
+    )
+    trusted = tmp_path / "trusted.json"
+    trusted.write_text(
+        json.dumps({"serial_pg": {"max_skipped": 2, "min_passed": 3}}),
+        encoding="utf-8",
+    )
+    assert check.main([*args, "--trusted-config", str(trusted)]) == 1
+    output = capsys.readouterr().out
+    assert "max_skipped=2 min_passed=3" in output
+    assert "基线放宽须先单独合入 main" in output
+
+
+def test_trusted_baseline_allows_tightening(tmp_path: Path) -> None:
+    args = _inputs(tmp_path, 3, 2)
+    config = Path(args[args.index("--config") + 1])
+    config.write_text(
+        json.dumps({"serial_pg": {"max_skipped": 1, "min_passed": 4}}),
+        encoding="utf-8",
+    )
+    trusted = tmp_path / "trusted.json"
+    trusted.write_text(
+        json.dumps({"serial_pg": {"max_skipped": 2, "min_passed": 3}}),
+        encoding="utf-8",
+    )
+    assert check.main([*args, "--trusted-config", str(trusted)]) == 0
+
+
+def test_missing_trusted_baseline_falls_back_to_config(tmp_path: Path, capsys) -> None:
+    args = _inputs(tmp_path, 3, 2)
+    missing = tmp_path / "trusted.json"
+    assert check.main([*args, "--trusted-config", str(missing)]) == 0
+    assert "退回使用 --config" in capsys.readouterr().out
+
+
+def test_corrupt_trusted_baseline_fails_closed(tmp_path: Path) -> None:
+    args = _inputs(tmp_path, 3, 2)
+    trusted = tmp_path / "trusted.json"
+    trusted.write_text("{", encoding="utf-8")
+    assert check.main([*args, "--trusted-config", str(trusted)]) == 1
+
+
+def test_trusted_baseline_missing_field_fails_closed(tmp_path: Path) -> None:
+    args = _inputs(tmp_path, 3, 2)
+    trusted = tmp_path / "trusted.json"
+    trusted.write_text(json.dumps({"serial_pg": {"max_skipped": 2}}), encoding="utf-8")
+    assert check.main([*args, "--trusted-config", str(trusted)]) == 1
+
+
 def test_reference_baseline_has_sources_and_requested_floors() -> None:
     baseline = json.loads(
         Path("scripts/ci/serial-skip-baseline.json").read_text(encoding="utf-8")

@@ -40,15 +40,38 @@ def test_flattened_artifacts_pass(tmp_path: Path) -> None:
     assert check.check(flat, 6) == []
 
 
-def test_missing_duplicate_and_out_of_range_are_all_reported(tmp_path: Path) -> None:
+def test_duplicate_coverage_shard_numbers_are_reported(tmp_path: Path) -> None:
     _make_tree(tmp_path)
-    (tmp_path / "backend-shard-1" / ".coverage.shard1").unlink()
-    (tmp_path / "backend-shard-0" / ".coverage.shard9").write_bytes(b"x")
     (tmp_path / "duplicate").mkdir()
     (tmp_path / "duplicate" / ".coverage.shard0").write_bytes(b"x")
     issues = check.check(tmp_path, 6)
-    assert any("coverage 文件应有 6 个" in issue for issue in issues)
-    assert any("编号应为" in issue for issue in issues)
+    assert "coverage 存在重复分片编号" in issues
+
+
+def test_duplicate_junit_shard_numbers_are_reported(tmp_path: Path) -> None:
+    _make_tree(tmp_path)
+    (tmp_path / "duplicate").mkdir()
+    (tmp_path / "duplicate" / "backend-pytest-shard0.xml").write_text(
+        '<testsuite><testcase name="duplicate"/></testsuite>', encoding="utf-8"
+    )
+    issues = check.check(tmp_path, 6)
+    assert "JUnit 存在重复分片编号" in issues
+
+
+def test_missing_shard_is_reported(tmp_path: Path) -> None:
+    _make_tree(tmp_path)
+    (tmp_path / "backend-shard-1" / ".coverage.shard1").unlink()
+    issues = check.check(tmp_path, 6)
+    assert "coverage 文件应有 6 个，实际 5 个" in issues
+    assert "coverage 编号应为 [0, 1, 2, 3, 4, 5]，实际 [0, 2, 3, 4, 5]" in issues
+
+
+def test_out_of_range_shard_is_reported(tmp_path: Path) -> None:
+    _make_tree(tmp_path)
+    (tmp_path / "backend-shard-0" / ".coverage.shard9").write_bytes(b"x")
+    issues = check.check(tmp_path, 6)
+    assert "coverage 文件应有 6 个，实际 7 个" in issues
+    assert "coverage 编号应为 [0, 1, 2, 3, 4, 5]，实际 [0, 1, 2, 3, 4, 5, 9]" in issues
 
 
 def test_empty_coverage_and_invalid_junit_fail(tmp_path: Path) -> None:
