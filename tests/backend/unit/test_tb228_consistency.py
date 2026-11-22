@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,7 @@ import pytest
 from app.aggregates import models as aggregate_models
 from app.aggregates.market_overview import _dedupe_gaps
 from app.api.v1.notifications import _bj_iso as notification_iso
-from app.api.v1.restrictions import _bj_iso as restriction_iso, _row_out
+from app.api.v1.restrictions import _bj_iso as restriction_iso, _project_row
 from app.reviews.service import _bj_iso as review_iso
 from app.schemas.enums import GapReason
 
@@ -37,7 +38,7 @@ def test_review_restriction_and_heartbeat_times_use_beijing_offset() -> None:
     assert notification_iso(stamp) == expected
 
 
-def test_restriction_row_out_keeps_null_until() -> None:
+def test_restriction_project_row_keeps_null_until(monkeypatch) -> None:
     row = SimpleNamespace(
         id="id",
         kind="cooling_off",
@@ -46,7 +47,16 @@ def test_restriction_row_out_keeps_null_until() -> None:
         until=None,
         reason=None,
         created_at=dt.datetime(2026, 11, 21, 13, 0, tzinfo=dt.UTC),
+        removed_at=None,
     )
-    result = _row_out(row)
+    monkeypatch.setattr(
+        "app.api.v1.restrictions._target_name",
+        lambda *_args, **_kwargs: "合成",
+    )
+    result, gaps = _project_row(
+        SimpleNamespace(), row, uuid.UUID(int=1), dt.datetime(2026, 11, 21, 13, 0, tzinfo=dt.UTC)
+    )
+    assert gaps == []
     assert result["until"] is None
+    assert result["removed_at"] is None
     assert result["created_at"] == "2026-11-21T21:00:00+08:00"
