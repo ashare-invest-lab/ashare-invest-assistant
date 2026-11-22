@@ -256,6 +256,7 @@ def test_stock_facts_are_kept_without_index_cards() -> None:
     assert result.indices == []
     assert result.basis is not None and result.basis.observed == 2
     assert result.breadth is not None and (result.breadth.up, result.breadth.down) == (1, 1)
+    assert result.data_status is DataStatus.PARTIAL
     assert result.turnover_total == "200.00"
     assert any(
         gap.key == "market.indices"

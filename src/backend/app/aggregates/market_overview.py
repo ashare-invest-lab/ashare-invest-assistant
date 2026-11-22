@@ -527,7 +527,7 @@ def _overview(
             or intraday_stale
         ):
             component_gap = any(
-                item.key in {"market.breadth", "market.turnover_total"}
+                item.key in {"market.breadth", "market.turnover_total", "market.indices"}
                 or item.key.startswith("market.indices.")
                 for item in gaps
             )
