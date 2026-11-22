@@ -215,36 +215,76 @@ def recheck_restriction(
     if code is None:
         return [], [], []
 
-    reason_rows = [
-        row
-        for row in conn.execute(
-            select(reasons)
-            .where(
-                reasons.c.user_id == user_id,
-                reasons.c.code == code,
-                reasons.c.status == "active",
-            )
-            .order_by(reasons.c.id)
-            .with_for_update()
-        ).all()
-        if getattr(row, "signal_id", None) is not None
+    restriction_created_at = restriction.created_at
+    candidate_conditions = [
+        signals.c.user_id == user_id,
+        signals.c.created_at < at,
     ]
+    candidate_conditions.append(signals.c.created_at >= restriction_created_at)
+    restriction_until = restriction.until
+    if restriction_until is not None:
+        candidate_conditions.append(signals.c.created_at < restriction_until)
+    candidate_query = select(signals)
+    if restriction.target_type == "security":
+        candidate_conditions.append(signals.c.security_code == restriction.target_id)
+    elif restriction.target_type == "instance":
+        candidate_conditions.append(signals.c.instance_id == restriction.target_id)
+    elif restriction.target_type == "strategy":
+        try:
+            strategy_id = uuid.UUID(str(restriction.target_id))
+        except ValueError:
+            return (
+                [],
+                [],
+                [
+                    {
+                        "key": f"restriction:{restriction.id}",
+                        "reason": "no_source",
+                        "message": "关联策略标识无效，无法重查",
+                    }
+                ],
+            )
+        candidate_query = candidate_query.join(
+            versions, versions.c.id == signals.c.strategy_version_id
+        )
+        candidate_conditions.append(versions.c.strategy_id == strategy_id)
+    else:
+        return (
+            [],
+            [],
+            [
+                {
+                    "key": f"restriction:{restriction.id}",
+                    "reason": "no_source",
+                    "message": "限制目标类型未知，无法重查",
+                }
+            ],
+        )
+
+    # Lock candidates before locking their reasons.  The delete endpoint has
+    # already marked the restriction removed in this same transaction, while
+    # candidate.created_at keeps the historical point-in-time boundary.
+    candidate_rows = conn.execute(
+        candidate_query.where(*candidate_conditions).with_for_update()
+    ).all()
+    candidate_by_id = {row.id: row for row in candidate_rows}
+    candidate_ids = set(candidate_by_id)
+    if not candidate_ids:
+        return [], [], []
+    reason_conditions = [
+        reasons.c.user_id == user_id,
+        reasons.c.code == code,
+        reasons.c.status == "active",
+    ]
+    reason_conditions.append(reasons.c.signal_id.in_(candidate_ids))
+    reason_rows = conn.execute(
+        select(reasons).where(*reason_conditions).order_by(reasons.c.id).with_for_update()
+    ).all()
     if not reason_rows:
         return [], [], []
 
-    reason_signal_ids = {row.signal_id for row in reason_rows}
-    signal_rows = (
-        conn.execute(
-            select(signals)
-            .where(signals.c.id.in_(reason_signal_ids), signals.c.user_id == user_id)
-            .with_for_update()
-        ).all()
-        if reason_signal_ids
-        else []
-    )
-    signals_by_id = {row.id: row for row in signal_rows}
     strategy_ids = {
-        row.strategy_version_id for row in signal_rows if row.strategy_version_id is not None
+        row.strategy_version_id for row in candidate_rows if row.strategy_version_id is not None
     }
     strategy_rows = (
         conn.execute(
@@ -255,11 +295,13 @@ def recheck_restriction(
     )
     strategies_by_version = {row.id: row.strategy_id for row in strategy_rows}
     remaining_restrictions = conn.execute(
-        select(user_restrictions).where(
+        select(user_restrictions)
+        .where(
             user_restrictions.c.user_id == user_id,
-            user_restrictions.c.removed_at.is_(None),
             user_restrictions.c.id != restriction.id,
+            user_restrictions.c.removed_at.is_(None),
         )
+        .with_for_update()
     ).all()
 
     def matches_target(candidate: Any, r: Any = restriction) -> bool:
@@ -275,11 +317,15 @@ def recheck_restriction(
         return False
 
     def covered_by_other_restriction(candidate: Any) -> bool:
+        candidate_created_at = candidate.created_at
         for other in remaining_restrictions:
             if other.kind != restriction.kind or not matches_target(candidate, other):
                 continue
-            if other.until is None or other.until > at:
-                return True
+            if other.created_at > candidate_created_at:
+                continue
+            if other.until is not None and candidate_created_at >= other.until:
+                continue
+            return True
         return False
 
     released: list[uuid.UUID] = []
@@ -288,8 +334,9 @@ def recheck_restriction(
     released_signal_ids: set[uuid.UUID] = set()
     for reason in reason_rows:
         reason_id = reason.id
-        candidate = signals_by_id.get(reason.signal_id)
+        candidate = candidate_by_id.get(reason.signal_id)
         if candidate is None:
+            remaining.append(reason_id)
             gaps.append(
                 {
                     "key": f"reason:{reason_id}",
@@ -582,7 +629,11 @@ def write_candidate(
         for restriction in locked.execute(
             select(user_restrictions).where(
                 user_restrictions.c.user_id == user_id,
-                user_restrictions.c.removed_at.is_(None),
+                user_restrictions.c.created_at <= content.created_at,
+                or_(
+                    user_restrictions.c.removed_at.is_(None),
+                    user_restrictions.c.removed_at > content.created_at,
+                ),
                 or_(
                     and_(
                         user_restrictions.c.target_type == "security",

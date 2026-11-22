@@ -4,7 +4,7 @@ import type {
   ReleaseKind, RiskControl, RiskLevel, Severity, SuggestionOrigin, SuggestionStatus, RuleRole, StrategyEvalState, MarketSession, SignalKind,
   DataProvider, ExecutabilityStatus, ConsensusStatus, ReconciliationStatus, NotificationTargetType, PlanDraftStatus,
   SecurityType, Board, ListingStatus, SecurityRiskFlag, SecurityMatchKind, ReportPeriod, AnnouncementCategory, IndustryTaxonomy, InstanceOrigin,
-  AlertStatus, AlertOrigin, PlanConditionKind, DataGapScope,
+  AlertStatus, AlertOrigin, PlanConditionKind, DataGapScope, RestrictionKind, RestrictionTargetType,
 } from '../api/enums';
 
 /** 动作：短标签（徽标用）与完整措辞（plan §2.5.0 措辞约定：规则信号 + 候选） */
@@ -178,6 +178,15 @@ export const ALERT_STATUS: Record<AlertStatus, string> = { new: '未读', read: 
 export const ALERT_ORIGIN: Record<AlertOrigin, string> = { plan_condition: '计划条件', holding_event: '持仓事件', user_custom: '自定义提醒' };
 export const PLAN_CONDITION_KIND: Record<PlanConditionKind, string> = { trigger: '计划条件', invalidation: '失效条件' };
 export const DATA_GAP_SCOPE: Record<DataGapScope, string> = { user: '本人', account: '账户', security: '证券', market: '市场' };
+export const RESTRICTION_KIND: Record<RestrictionKind, string> = {
+  blocklist: '禁投', cooling_off: '冷静期', mute: '屏蔽',
+};
+export const RESTRICTION_TARGET_TYPE: Record<RestrictionTargetType, string> = {
+  security: '证券', strategy: '策略', instance: '策略实例',
+};
+export const RESTRICTION_STATUS: Record<'active' | 'expired' | 'removed', { text: string; color: string }> = {
+  active: { text: '生效中', color: 'orange' }, expired: { text: '已过期', color: 'default' }, removed: { text: '已删除', color: 'default' },
+};
 /**
  * factor_category 键名【待 T003 补测】：已知的示例键给中文名，未知键原样显示
  */

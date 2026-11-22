@@ -12,6 +12,7 @@ from fastapi import APIRouter, Header, Response
 
 from app.aggregates import models, service
 from app.aggregates.calendar import market_clock
+from app.aggregates.market_overview import MarketOverview
 from app.auth.deps import AuthDep, EngineDep, SettingsDep
 
 router = APIRouter(tags=["aggregates"])
@@ -76,16 +77,21 @@ def today(
     return response(value, if_none_match)
 
 
-@router.get("/market/overview", response_model=models.MarketOverview)
+@router.get("/market/overview", response_model=MarketOverview)
 def overview(
     auth: AuthDep,
     engine: EngineDep,
     settings: SettingsDep,
     if_none_match: str | None = Header(default=None),
 ) -> Response:
+    query_as_of = dt.datetime.now(dt.UTC)
     with engine.connect() as conn:
         value = service.market(
-            market_clock(conn, dt.datetime.now(dt.UTC), settings.business.market_rules)
+            conn,
+            auth.user_id,
+            market_clock(conn, query_as_of, settings.business.market_rules),
+            query_as_of,
+            settings.business.realtime.intervals.effective_stale_threshold_s,
         )
     return response(value, if_none_match)
 
