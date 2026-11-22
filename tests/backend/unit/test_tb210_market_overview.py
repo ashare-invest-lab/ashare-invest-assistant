@@ -227,6 +227,7 @@ def test_complete_intraday_fixture_uses_owner_same_batch_and_decimal_ratios() ->
         result.basis.eligible,
         result.basis.observed,
     ) == ("intraday", 3, 3)
+    assert result.basis.observed_date == DAY
     assert result.breadth is not None
     assert (result.breadth.up, result.breadth.down, result.breadth.flat) == (1, 1, 1)
     assert (
@@ -239,6 +240,46 @@ def test_complete_intraday_fixture_uses_owner_same_batch_and_decimal_ratios() ->
         "0.3333",
     )
     assert result.turnover_total == "300.00"
+
+
+def test_stock_facts_are_kept_without_index_cards() -> None:
+    conn = Connection(
+        quotes=[
+            quote("600000.SH", pct="2", amount="120.00"),
+            quote("000001.SZ", pct="-1", amount="80.00"),
+        ]
+    )
+    conn.indices = []
+
+    result = overview(conn, dt.datetime(2031, 2, 3, 10, 1, tzinfo=BEIJING))
+
+    assert result.indices == []
+    assert result.basis is not None and result.basis.observed == 2
+    assert result.breadth is not None and (result.breadth.up, result.breadth.down) == (1, 1)
+    assert result.data_status is DataStatus.PARTIAL
+    assert result.turnover_total == "200.00"
+    assert any(
+        gap.key == "market.indices"
+        and gap.reason is GapReason.NO_SOURCE
+        and gap.message == "没有配置可展示的指数卡片。"
+        for gap in result.gaps
+    )
+
+
+def test_unbatched_intraday_rows_are_excluded_from_aggregate() -> None:
+    conn = Connection(
+        quotes=[
+            quote("600000.SH", batch_id=None),
+            quote("000001.SZ", batch_id=None),
+        ]
+    )
+
+    result = overview(conn, dt.datetime(2031, 2, 3, 10, 1, tzinfo=BEIJING))
+
+    assert result.data_status is DataStatus.UNAVAILABLE
+    assert result.breadth is None
+    assert result.turnover_total is None
+    assert result.indices[0].price is None
 
 
 def test_intraday_missing_volume_amount_is_partial_and_not_zero() -> None:
@@ -411,6 +452,32 @@ def test_pre_open_and_non_trading_use_previous_final_bar_as_stale(
         and result.basis is not None
         and result.basis.mode == "close"
     )
+    assert result.basis.observed_date == previous
+
+
+def test_previous_close_fallback_does_not_mix_trade_dates() -> None:
+    previous = DAY - dt.timedelta(days=1)
+    older = DAY - dt.timedelta(days=2)
+    result = overview(
+        Connection(
+            daily_rows=[
+                daily("600000.SH", trade_date=previous, amount="100.00"),
+                daily("000001.SZ", trade_date=older, amount="999.00"),
+                daily("000300.SH", trade_date=previous),
+            ]
+        ),
+        dt.datetime(2031, 2, 3, 8, tzinfo=BEIJING),
+        MarketSession.PRE_OPEN,
+    )
+    assert result.basis is not None
+    assert (result.basis.observed_date, result.basis.observed, result.basis.missing) == (
+        previous,
+        1,
+        1,
+    )
+    assert result.breadth is not None and (result.breadth.up, result.breadth.down) == (1, 0)
+    assert result.turnover_total is None
+    assert result.data_status is DataStatus.PARTIAL
 
 
 def test_bj_gate_stays_closed_below_twenty_confirmed_codes() -> None:

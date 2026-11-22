@@ -157,9 +157,11 @@ tests:
   - {"file": "tests/backend/unit/test_tb163r_trade_date_and_decimal.py", "group": "parallel", "keywords": ["pure _trade_date and confirm precision", "synthetic fixtures", "no database connection"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb195_intraday_field_fixtures.py", "group": "parallel", "keywords": ["read-only synthetic JSON and Pydantic models", "no network, PG, Redis or Docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb197_p0_plan.py", "group": "parallel", "keywords": ["pure in-memory planner", "socket monkeypatch; zero timer/thread", "synthetic calendar and universe"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb200_restrictions.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
   - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt107_i3_p0_plan.py", "group": "parallel", "keywords": ["只读/纯内存计划器", "socket 拒绝出网", "无 PG/Redis/Docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}

@@ -194,24 +194,38 @@ def _latest_intraday(
             c.code.in_(codes),
             c.source == "mairui",
             c.source_licence_id == licence,
-            c.ts <= as_of,
-            c.fetched_at <= as_of,
         )
-        .order_by(c.ts.desc(), c.fetched_at.desc(), c.code)
+        .order_by(c.code, c.ts, c.fetched_at)
     ).all()
-    eligible = [
-        row
-        for row in rows
-        if _same_day(_aware(_row_value(row, "ts")), day)
-        and _aware(_row_value(row, "fetched_at")) is not None
-    ]
-    if not eligible:
+    batches: dict[tuple[object, dt.date], list[object]] = {}
+    for row in rows:
+        batch_id = _row_value(row, "batch_id")
+        timestamp = _aware(_row_value(row, "ts"))
+        fetched = _aware(_row_value(row, "fetched_at"))
+        if batch_id is None or timestamp is None or fetched is None:
+            continue
+        if not _same_day(timestamp, day):
+            continue
+        key = (batch_id, timestamp.astimezone(BEIJING).date())
+        batches.setdefault(key, []).append(row)
+
+    visible: list[tuple[dt.datetime, dt.datetime, list[object]]] = []
+    for batch_rows in batches.values():
+        timestamps = [_aware(_row_value(row, "ts")) for row in batch_rows]
+        fetched_values = [_aware(_row_value(row, "fetched_at")) for row in batch_rows]
+        if any(value is None or value > as_of for value in (*timestamps, *fetched_values)):
+            continue
+        valid_timestamps = [value for value in timestamps if value is not None]
+        valid_fetched = [value for value in fetched_values if value is not None]
+        if len(valid_timestamps) != len(batch_rows) or len(valid_fetched) != len(batch_rows):
+            continue
+        max_fetched = max(valid_fetched)
+        max_timestamp = max(valid_timestamps)
+        visible.append((max_fetched, max_timestamp, batch_rows))
+    if not visible:
         return []
-    batch_ts = _row_value(eligible[0], "ts")
-    batch_id = _row_value(eligible[0], "batch_id")
-    if batch_id is not None:
-        return [row for row in eligible if _row_value(row, "batch_id") == batch_id]
-    return [row for row in eligible if _row_value(row, "ts") == batch_ts]
+    _max_fetched, _max_timestamp, selected = max(visible, key=lambda item: (item[0], item[1]))
+    return selected
 
 
 def _daily_rows(
@@ -256,6 +270,15 @@ def _daily_rows(
             and isinstance(trade_day := _row_value(row, "trade_date"), dt.date)
             and fetched >= dt.datetime.combine(trade_day, FINAL_AFTER, BEIJING)
         ]
+        latest_trade_date = max(
+            (
+                trade_day
+                for row in rows
+                if isinstance(trade_day := _row_value(row, "trade_date"), dt.date)
+            ),
+            default=None,
+        )
+        rows = [row for row in rows if _row_value(row, "trade_date") == latest_trade_date]
     chosen: dict[str, object] = {}
     for row in rows:
         chosen.setdefault(str(_row_value(row, "code")), row)
@@ -320,6 +343,19 @@ def _row_time(row: object, close_mode: bool) -> dt.datetime | None:
     return _aware(_row_value(row, "ts"))
 
 
+def _observed_date(rows: list[object], close_mode: bool) -> dt.date | None:
+    for row in rows:
+        if close_mode:
+            trade_date = _row_value(row, "trade_date")
+            if isinstance(trade_date, dt.date):
+                return trade_date
+            continue
+        timestamp = _aware(_row_value(row, "ts"))
+        if timestamp is not None:
+            return timestamp.astimezone(BEIJING).date()
+    return None
+
+
 def _overview(
     conn: Connection,
     user_id: uuid.UUID,
@@ -332,25 +368,23 @@ def _overview(
     cards = _index_cards(conn)
     gaps: list[m.Gap] = []
     if not cards:
-        return _empty(
-            clock,
-            [],
-            [
-                _gap("market.indices", "没有配置可展示的指数卡片。"),
-                _gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"),
-            ],
-        )
+        gaps.append(_gap("market.indices", "没有配置可展示的指数卡片。"))
     from app.marketdata.daily_snapshot import active_licence_id
 
     licence = active_licence_id(conn, user_id, query_as_of)
     if licence is None:
+        gaps.append(
+            _gap("market.indices", "本人数据证书不可用。", GapReason.DATA_LICENCE_UNAVAILABLE)
+        )
         gaps.extend(
             [
-                _gap("market.indices", "本人数据证书不可用。", GapReason.DATA_LICENCE_UNAVAILABLE),
                 _gap("market.breadth", "没有可验证的本人行情来源。"),
                 _gap("market.turnover_total", "没有可验证的本人行情来源。"),
             ]
         )
+        if not cards:
+            gaps.append(_gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"))
+            return _empty(clock, cards, gaps)
         gaps.append(_gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"))
         return _empty(clock, cards, gaps)
 
@@ -361,7 +395,14 @@ def _overview(
     index_codes = [card.security_code for card in cards]
     codes = tuple(dict.fromkeys((*stock_codes, *index_codes)))
     rows = (
-        _daily_rows(conn, codes, licence, clock.trade_date, query_as_of, exact_day=True)
+        _daily_rows(
+            conn,
+            codes,
+            licence,
+            clock.trade_date,
+            query_as_of,
+            exact_day=True,
+        )
         if close_mode
         else (
             []
@@ -370,10 +411,16 @@ def _overview(
         )
     )
     used_previous_close = False
+    if close_mode and clock.session == MarketSession.NON_TRADING_DAY and not rows:
+        rows = _daily_rows(conn, codes, licence, clock.trade_date, query_as_of, exact_day=False)
+        used_previous_close = bool(rows)
     if not rows and not close_mode:
         close_mode = True
         rows = _daily_rows(conn, codes, licence, clock.trade_date, query_as_of, exact_day=False)
         used_previous_close = bool(rows)
+    if not rows and not cards:
+        gaps.append(_gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"))
+        return _empty(clock, cards, gaps)
     by_code = {str(_row_value(row, "code")): row for row in rows}
     as_of_values: list[dt.datetime] = []
     for row in rows:
@@ -447,7 +494,7 @@ def _overview(
         gaps.append(_gap("market.turnover_total", "成交额批次覆盖或单位未验证。"))
     basis = (
         m.MarketBasis(
-            observed_date=clock.trade_date,
+            observed_date=_observed_date(rows, close_mode) or clock.trade_date,
             mode="close" if close_mode else "intraday",
             eligible=len(candidate),
             observed=len(observed),
@@ -480,16 +527,17 @@ def _overview(
             or intraday_stale
         ):
             component_gap = any(
-                item.key in {"market.breadth", "market.turnover_total"}
+                item.key in {"market.breadth", "market.turnover_total", "market.indices"}
                 or item.key.startswith("market.indices.")
                 for item in gaps
             )
             if not component_gap:
                 status = DataStatus.STALE
     if not rows:
+        if cards:
+            gaps.append(_gap("market.indices", "交易日行情全部缺失。"))
         gaps.extend(
             [
-                _gap("market.indices", "交易日行情全部缺失。"),
                 _gap("market.breadth", "交易日行情全部缺失。"),
                 _gap("market.turnover_total", "交易日行情全部缺失。"),
             ]
