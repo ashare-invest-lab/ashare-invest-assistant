@@ -10,6 +10,11 @@ usage() {
 from_ref="2dbfdee"
 to_ref="origin/main"
 keep=0
+
+export_safe_runtime_env() {
+  export APP_ENV=test MAIRUI_MODE=replay DAILY_BARS_SOURCE=off INTRADAY_ENABLED=false
+}
+
 while (($#)); do
   case "$1" in
     --from)
@@ -36,6 +41,15 @@ while (($#)); do
       ;;
   esac
 done
+
+if [[ "${DRILL_SELFTEST_ENV:-0}" == 1 ]]; then
+  export_safe_runtime_env
+  printf 'export APP_ENV=%s\n' "$APP_ENV"
+  printf 'export MAIRUI_MODE=%s\n' "$MAIRUI_MODE"
+  printf 'export DAILY_BARS_SOURCE=%s\n' "$DAILY_BARS_SOURCE"
+  printf 'export INTRADAY_ENABLED=%s\n' "$INTRADAY_ENABLED"
+  exit 0
+fi
 
 command -v git >/dev/null 2>&1 || { echo '缺少 git' >&2; exit 2; }
 command -v docker >/dev/null 2>&1 || { echo '缺少 docker' >&2; exit 2; }
@@ -91,7 +105,7 @@ announce_keep() {
 summary() {
   printf '{"from_head":"%s","to_head":"%s","steps":{' "$from_head" "$to_head"
   local key first=1
-  for key in from_upgrade fake_data pg_dump to_upgrade rollback_a rollback_b; do
+  for key in from_upgrade fake_data pg_dump backup_verify to_upgrade rollback_a rollback_b; do
     ((first)) || printf ','
     first=0
     printf '"%s":{"seconds":%s,"result":"%s"}' \
@@ -158,7 +172,7 @@ done
 
 database_url="postgresql://$db_user:$db_password@127.0.0.1:$host_port/$db_name"
 export DATABASE_URL="$database_url"
-export APP_ENV=test MAIRUI_MODE=replay DAILY_BARS_SOURCE=off INTRADAY_ENABLED=false
+export_safe_runtime_env
 
 db_psql() {
   docker exec -i -e PGPASSWORD="$db_password" "$container" \
@@ -171,14 +185,12 @@ db_psql -d "$db_name" -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' \
 run_alembic() {
   local dir="$1"
   shift
-  (cd "$dir" && DATABASE_URL="$database_url" APP_ENV=test MAIRUI_MODE=replay \
-    DAILY_BARS_SOURCE=off INTRADAY_ENABLED=false uv run --frozen alembic "$@")
+  (cd "$dir" && DATABASE_URL="$database_url" uv run --frozen alembic "$@")
 }
 
 alembic_head() {
   local dir="$1"
-  (cd "$dir" && DATABASE_URL="$database_url" APP_ENV=test MAIRUI_MODE=replay \
-    DAILY_BARS_SOURCE=off INTRADAY_ENABLED=false uv run --frozen alembic heads \
+  (cd "$dir" && DATABASE_URL="$database_url" uv run --frozen alembic heads \
     | awk 'NF { print $1; exit }')
 }
 
@@ -243,6 +255,47 @@ step_pg_dump() {
   printf 'pg_dump -Fc 已写入临时目录。\n'
 }
 
+copy_dump_to_container() {
+  docker cp "$dump_file" "$container:$dump_in" >/dev/null || return 1
+  docker exec -e PGPASSWORD="$db_password" "$container" chmod 644 "$dump_in"
+}
+
+restore_dump_to_db() {
+  local target_db="$1" restore_rc=0 unexpected
+  db_psql -d "$target_db" -c 'SELECT timescaledb_pre_restore()' || return 1
+  docker exec -e PGPASSWORD="$db_password" "$container" \
+    pg_restore -U "$db_user" -d "$target_db" -j 1 --no-password "$dump_in" \
+    2>"$restore_err" || restore_rc=$?
+  unexpected="$(grep -E 'error:' "$restore_err" \
+    | grep -vE 'extension "timescaledb" already exists|COMMENT ON EXTENSION' || true)"
+  if [[ -n "$unexpected" || ("$restore_rc" -ne 0 && ! -s "$restore_err") ]]; then
+    cat "$restore_err" >&2
+    printf 'pg_restore 失败，rc=%s\n' "$restore_rc" >&2
+    return 1
+  fi
+  [[ "$restore_rc" -eq 0 ]] || echo 'pg_restore 仅报告预创建 TimescaleDB 扩展的已知告警。'
+  db_psql -d "$target_db" -c 'SELECT timescaledb_post_restore()' || return 1
+  db_psql -d "$target_db" -q -c 'ANALYZE' || return 1
+}
+
+step_backup_verify() {
+  copy_dump_to_container || return 1
+  docker exec -e PGPASSWORD="$db_password" "$container" \
+    pg_restore --list "$dump_in" >/dev/null || return 1
+  local verify_db="aia_o131_verify_$$" verify_rc=0
+  db_psql -d postgres -c "CREATE DATABASE \"$verify_db\"" || return 1
+  db_psql -d "$verify_db" -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' || verify_rc=1
+  if [[ "$verify_rc" -eq 0 ]]; then
+    restore_dump_to_db "$verify_db" || verify_rc=1
+  fi
+  if [[ "$verify_rc" -eq 0 ]]; then
+    assert_version "$verify_db" "$from_head" || verify_rc=1
+    assert_fixture "$verify_db" || verify_rc=1
+  fi
+  db_psql -d postgres -c "DROP DATABASE IF EXISTS \"$verify_db\"" || verify_rc=1
+  return "$verify_rc"
+}
+
 step_to_upgrade() {
   run_alembic "$to_dir" upgrade head || return 1
   assert_version "$db_name" "$to_head" || return 1
@@ -260,25 +313,8 @@ step_rollback_a() {
 step_rollback_b() {
   db_psql -d postgres -c "CREATE DATABASE \"$restore_db\"" || return 1
   db_psql -d "$restore_db" -c 'CREATE EXTENSION IF NOT EXISTS timescaledb' || return 1
-  db_psql -d "$restore_db" -c 'SELECT timescaledb_pre_restore()' || return 1
-  docker cp "$dump_file" "$container:$dump_in" >/dev/null || return 1
-  docker exec -e PGPASSWORD="$db_password" "$container" chmod 644 "$dump_in" \
-    || return 1
-  local restore_rc=0
-  docker exec -e PGPASSWORD="$db_password" "$container" \
-    pg_restore -U "$db_user" -d "$restore_db" -j 1 --no-password "$dump_in" \
-    2>"$restore_err" || restore_rc=$?
-  local unexpected
-  unexpected="$(grep -E 'error:' "$restore_err" \
-    | grep -vE 'extension "timescaledb" already exists|COMMENT ON EXTENSION' || true)"
-  if [[ -n "$unexpected" || ("$restore_rc" -ne 0 && ! -s "$restore_err") ]]; then
-    cat "$restore_err" >&2
-    printf 'pg_restore 失败，rc=%s\n' "$restore_rc" >&2
-    return 1
-  fi
-  [[ "$restore_rc" -eq 0 ]] || echo 'pg_restore 仅报告预创建 TimescaleDB 扩展的已知告警。'
-  db_psql -d "$restore_db" -c 'SELECT timescaledb_post_restore()' || return 1
-  db_psql -d "$restore_db" -q -c 'ANALYZE' || return 1
+  copy_dump_to_container || return 1
+  restore_dump_to_db "$restore_db" || return 1
   assert_version "$restore_db" "$from_head" || return 1
   assert_fixture "$restore_db"
 }
@@ -311,9 +347,10 @@ run_step() {
 run_step from_upgrade '① from 代码 upgrade head' step_from_upgrade
 run_step fake_data '② 写入虚构数据' step_fake_data
 run_step pg_dump '③ pg_dump -Fc 备份' step_pg_dump
-run_step to_upgrade '④ to 代码 upgrade head' step_to_upgrade
-run_step rollback_a '⑤ 回滚 A：downgrade 到 from 后再 upgrade' step_rollback_a
-run_step rollback_b '⑥ 回滚 B：新库 pg_restore 备份' step_rollback_b
+run_step backup_verify '④ 备份可恢复性校验' step_backup_verify
+run_step to_upgrade '⑤ to 代码 upgrade head' step_to_upgrade
+run_step rollback_a '⑥ 回滚 A：downgrade 到 from 后再 upgrade' step_rollback_a
+run_step rollback_b '⑦ 回滚 B：新库 pg_restore 备份' step_rollback_b
 
 printf '演练完成。\n'
 announce_keep

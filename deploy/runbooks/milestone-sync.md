@@ -1,5 +1,7 @@
 # 里程碑同步预案（T-O131）
 
+**本脚本默认真跑：会建容器、执行 `uv sync`，不是 dry-run。**
+
 本单只提供预案和隔离演练，不在用户电脑执行同步，不连接用户电脑，不调用麦蕊。当前核对的引用是工作树中的 Git 对象，旧环境为 `2dbfdee`（迁移头 0036），主线为 `origin/main=ee76304b`（迁移头 0039）。
 
 ## 1. 迁移清单
@@ -67,14 +69,15 @@ git diff 2dbfdee origin/main -- deploy/compose/
      --container "$PG_CONTAINER" --protect
    ```
    `/srv/aia-backups` 是示例路径，实际备份目录未验证。`db-backup.sh` 生成 `pg_dump -Fc`、同名 meta 文件并校验 TimescaleDB 版本。不要加 `--rotate`，不要删除旧备份。
-5. 在 `main-live` 工作树中执行 `git checkout --detach ee76304b`，或 checkout 已核验的等价目标提交。禁止执行 worktree prune。记录 checkout 后的提交。
-6. 按现有 `deploy/scripts/up.sh` 和 `deploy/scripts/compose.sh` 的方式重建。默认开发模式只用于回放验收，示例为：
+5. 升级前校验备份可恢复，通过后才执行升级。先用 `pg_restore --list` 校验 dump，再恢复到本步骤创建的临时库，核对 0036 和虚构数据夹具后删除临时库。校验失败立即停止，不得执行升级。
+6. 在 `main-live` 工作树中执行 `git checkout --detach ee76304b`，或 checkout 已核验的等价目标提交。禁止执行 worktree prune。记录 checkout 后的提交。
+7. 按现有 `deploy/scripts/up.sh` 和 `deploy/scripts/compose.sh` 的方式重建。默认开发模式只用于回放验收，示例为：
    ```bash
    AIA_PROFILE=dev deploy/scripts/up.sh --build
    ```
    该流程按依赖顺序启动 postgres/redis，运行 migrate 服务的 `alembic upgrade head`，再运行 `timescale-apply` 和常驻服务。不要执行 `docker compose down -v`，不要改卷名，不要改 HALT。
-7. 完成下一节验收。确认数据库为 0039、ingest 为 replay，四项冒烟和两个健康端点均达到预期。任一项失败都保留日志和旧备份，停止后续操作。
-8. 全部验收通过后，确认无并发任务，再删除本次写入的 `stack-busy-T-O131.txt`。只删除本脚本或本步骤创建的标记。
+8. 完成下一节验收。确认数据库为 0039、ingest 为 replay，四项冒烟和两个健康端点均达到预期。任一项失败都保留日志和旧备份，停止后续操作。
+9. 全部验收通过后，确认无并发任务，再删除本次写入的 `stack-busy-T-O131.txt`。只删除本脚本或本步骤创建的标记。
 
 ## 5. 回滚
 
@@ -129,6 +132,7 @@ deploy/scripts/db-restore.sh /srv/aia-backups/aia-<UTC时间>.dump \
 | from 代码 upgrade head | 3 | 通过 | 空库+虚构数据 |
 | 虚构数据写入与保留 | 0 | 通过 | 空库+虚构数据 |
 | pg_dump -Fc | 0 | 通过 | 空库+虚构数据 |
+| 备份可恢复性校验 | 0 | 通过 | `pg_restore --list`、临时库恢复后核对 0036 与虚构数据 |
 | to 代码 upgrade head | 2 | 通过 | 空库+虚构数据 |
 | 回滚 A：downgrade/upgrade | 1 | 通过 | 空库+虚构数据 |
 | 回滚 B：新库 pg_restore | 2 | 通过 | 空库+虚构数据 |
