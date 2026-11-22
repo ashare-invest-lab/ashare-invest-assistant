@@ -4,6 +4,7 @@
 - `G7: ☐`
 - 角色：策略研究员。本卡只整理可审计的候选信号口径，不构成荐股、交易指令或生产开启授权。
 - 范围：T-A219 中 `market.overview.limit_counts.enabled`、`market.overview.coverage_threshold.enabled`、F25/G-02 `regime`。本卡不改任何默认值。
+- 凡涉及 T-A219、T-R102 或 #359 的开关、gap、计数和集合映射，均为**候选口径（#359 未合入）**。现行主线只核对 `docs/api-contract.md:933` 的 `/market/overview` 字段形状与可空性，其中 `breadth`、`regime`、`regime_position_range` 可为空；该行没有批准候选开关或 gap 规则。
 
 ## 1. 统一时点、来源和禁止前视
 
@@ -17,27 +18,27 @@
 
 | 编号 | 外部公开来源与用途 | 本轮状态 |
 |---|---|---:|
-| R1 | [上海证券交易所交易规则（2026 年修订）](https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml)，主板风险警示生效段、科创板 20%、无涨跌幅日、限制价公式与取整 | 200 |
-| R2 | [深圳证券交易所交易规则（2026 年修订）](https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf)，主板、创业板 20%、无涨跌幅日、限制价公式与取整 | 200 |
-| R3 | [深交所风险警示板交易事项指南（2026 年修订）](https://www.szse.cn/lawrules/service/member/t20260630_621404.html)，2026-07-06 起主板风险警示制度调整的生效说明 | 200 |
+| R1 | [上海证券交易所交易规则（2026 年修订）](https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml)，上证发〔2026〕41号，发布日期 2026-04-24，网页通知一至二及附件1入口；主板风险警示、科创板 20%、无涨跌幅日的附件条款页码未验证 | 200，部分锚点已验证 |
+| R2 | [深圳证券交易所交易规则（2026 年修订）](https://docs.static.szse.cn/www/lawrules/rule/trade/current/W020260424690713155663.pdf)，深证上〔2026〕551号，发布日期 2026-04-24，PDF 第 13–14 页第 3.3.13–3.3.19 条，主板、创业板比例、无涨跌幅日、公式与取整 | 200，锚点已验证 |
+| R3 | [深交所风险警示板交易事项指南（2026 年修订）](https://www.szse.cn/lawrules/service/member/t20260630_621404.html)，2026-07-06 起主板风险警示制度调整的生效说明；页面超时，版本和条款锚点未验证 | 200，锚点未验证 |
 | R4 | [北交所交易规则发布页](https://www.bse.cn/jygl_list/200028217.html) | 403，未验证 |
-| R5 | [北交所投教问答 PDF](https://www.bse.cn/uploads/6/file/public/202509/20250916143055_4sxt0kkec4.pdf)，30%和上市首日、退市整理期首日无涨跌幅的投教说明 | 200，扫描 PDF |
-| R6 | [上交所市场数据文件交换接口规格说明书](https://www.sse.com.cn/services/tradingtech/development/c/10822594/files/2096257019bf484f9b9935fa73f94721.pdf)，价格、前收、开高低收、量额、最小价位单位字段 | 200 |
-| R7 | [深交所数据文件交换接口规范目录](https://www.szse.cn/marketServices/technicalservice/interface/index.html)，深市行情字段公开接口入口 | 200 |
-| R8 | [中证指数公司沪深 300 指数编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000300_Index_Methodology_cn.pdf)，000300.SH 身份和编制依据 | 200 |
-| R9 | [上交所指数概览](https://www.sse.com.cn/market/sseindex/overview/)，上证指数公开发布范围 | 200 |
-| R10 | [深交所指数编制方案目录](https://www.szse.cn/marketServices/message/index/project/)，深证指数公开编制入口 | 200 |
-| R11 | [上交所交易规则（2023 年修订，已失效）](https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/c_20250612_10824490.shtml)，历史主板风险警示 5% | 200，历史规则 |
-| R12 | [深交所风险警示股票问答（2021）](https://www.szse.cn/www/investor/knowledge/stock/deal/t20210127_584469.html)，历史主板风险警示 5% | 200，历史问答 |
-| R13 | [北交所交易规则征求意见稿 PDF](https://www.bse.cn/uploads/6/file/public/202604/20260410155845_1uju6jlbe3.pdf)，30%、上市首日与退市整理期首日、最小价位单位和停牌条款 | 200，征求意见稿 |
-| R14 | [北交所相关条款实施公告转载](https://www.investor.org.cn/zczx/qwzx/hsjysfb/202608/t20260824_929235.shtml)，正式规则发布及部分条款生效日期 | 200 |
-| R15 | [北交所相关条款实施公告转载](https://www.investor.org.cn/zczx/qwzx/hsjysfb/202610/t20261019_937859.shtml)，正式规则后续条款生效日期 | 200 |
-| R16 | [北交所核心交易规则图解](https://www.investor.org.cn/xxzx/tzzkt/gp/jczs/202610/t20261008_935993.shtml)，正式规则施行后的上市首日和次日起 30%说明 | 200，图文材料 |
-| R17 | [证监会系统转载的 A 股交易新规说明](https://www.csrc.gov.cn/shanghai/c105566/c7643909/content.shtml)，北交所规则施行及 30%说明 | 200，转载 |
-| R18 | [北交所修订发布交易规则新闻稿转载](https://www.investor.org.cn/zczx/qwzx/hsjysfb/202604/t20260427_908650.shtml)，正式规则修订发布事实 | 200 |
-| P1 | [Market Breadth Indicators，爱丁堡大学公开论文 PDF](https://www.pure.ed.ac.uk/ws/portalfiles/portal/16837254/Jacobsen_SSRN_id2449344.pdf)，论文采用上涨、下跌和总数构造市场宽度 | 200 |
-| P2 | [Two Centuries of Trend Following，arXiv](https://arxiv.org/abs/1404.3274)，论文采用历史价格趋势信号 | 200 |
-| P3 | [Improving on the Markov-Switching Regression Model，arXiv](https://arxiv.org/abs/2208.11574)，论文采用市场状态或 regime 分段 | 200 |
+| R5 | [北交所投教问答 PDF](https://www.bse.cn/uploads/6/file/public/202509/20250916143055_4sxt0kkec4.pdf)，文件发布日期 2025-09-16，30%和上市首日、退市整理期首日无涨跌幅说明；扫描 PDF 页码和条款锚点未验证 | 200，扫描 PDF，锚点未验证 |
+| R6 | [上交所市场数据文件交换接口规格说明书](https://www.sse.com.cn/services/tradingtech/development/c/10822594/files/2096257019bf484f9b9935fa73f94721.pdf)，3.540 版，2026-06；第 3.11 节及 PDF 第 99–100 页的 `csiYYYYMMDD`/`mktdte` 文件与行情字段 | 200，锚点已验证 |
+| R7 | [深交所数据文件交换接口规范目录](https://www.szse.cn/marketServices/technicalservice/interface/index.html)，深市行情字段公开接口入口；目录版本、具体文件名及页码未验证 | 200，锚点未验证 |
+| R8 | [中证指数公司沪深 300 指数编制方案](https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000300_Index_Methodology_cn.pdf)，文件名 `000300_Index_Methodology_cn.pdf`，第 4.3 节实时计算、第 12.1–12.2 节代码与发布渠道；发布日期/版本号未验证 | 200，条款锚点已验证 |
+| R9 | [上交所指数概览](https://www.sse.com.cn/market/sseindex/overview/)，页面标题“上证系列指数简介”，正文“上证指数体系与多层次蓝筹股市场”段；页面版本/发布日期未标注 | 200，锚点未验证 |
+| R10 | [深交所指数编制方案目录](https://www.szse.cn/marketServices/message/index/project/)，深证指数公开编制入口；目录版本、具体方案文件和条款页码未验证 | 200，锚点未验证 |
+| R11 | [上交所交易规则（2023 年修订，已失效）](https://www.sse.com.cn/lawandrules/sselawsrules2025/repeal/rules/c/c_20250612_10824490.shtml)，上证发〔2023〕32号，发布日期 2023-02-17，失效规则附件1；历史主板风险警示 5%对应条款页码未验证 | 200，历史规则，锚点未验证 |
+| R12 | [深交所风险警示股票问答（2021）](https://www.szse.cn/www/investor/knowledge/stock/deal/t20210127_584469.html)，页面发布日期/版本和历史主板风险警示 5%对应问答段落未验证 | 200，历史问答，锚点未验证 |
+| R13 | [北交所交易规则征求意见稿 PDF](https://www.bse.cn/uploads/6/file/public/202604/20260410155845_1uju6jlbe3.pdf)，文件发布日期 2026-04-10，30%、上市首日与退市整理期首日、最小价位单位和停牌条款页码未验证 | 200，征求意见稿，锚点未验证 |
+| R14 | [北交所相关条款实施公告转载](https://www.investor.org.cn/zczx/qwzx/hsjysfb/202608/t20260824_929235.shtml)，页面发布日期 2026-08-24；转载正文条款锚点未验证 | 200，转载，锚点未验证 |
+| R15 | [北交所相关条款实施公告转载](https://www.investor.org.cn/zczx/qwzx/hsjysfb/202610/t20261019_937859.shtml)，页面发布日期 2026-10-19；转载正文条款锚点未验证 | 200，转载，锚点未验证 |
+| R16 | [北交所核心交易规则图解](https://www.investor.org.cn/xxzx/tzzkt/gp/jczs/202610/t20261008_935993.shtml)，页面发布日期 2026-10-08；图解页码/条款锚点未验证 | 200，图文材料，锚点未验证 |
+| R17 | [证监会系统转载的 A 股交易新规说明](https://www.csrc.gov.cn/shanghai/c105566/c7643909/content.shtml)，转载页面版本/发布日期及北交所 30%段落锚点未验证 | 200，转载，锚点未验证 |
+| R18 | [北交所修订发布交易规则新闻稿转载](https://www.investor.org.cn/zczx/qwzx/hsjysfb/202604/t20260427_908650.shtml)，页面发布日期 2026-04-27；新闻稿具体条款锚点未验证 | 200，转载，锚点未验证 |
+| P1 | [Market Breadth Indicators，爱丁堡大学公开论文 PDF](https://www.pure.ed.ac.uk/ws/portalfiles/portal/16837254/Jacobsen_SSRN_id2449344.pdf)，章节“Daily Total Market Advances & Declines”及公式“Percentage Net Advances”；论文版本/发布日期和页码未验证 | 200，锚点未验证 |
+| P2 | [Two Centuries of Trend Following，arXiv](https://arxiv.org/abs/1404.3274)，arXiv:1404.3274v1，提交 2014-04-12，摘要段及 17 页说明趋势跟随 | 200，锚点已验证 |
+| P3 | [Improving on the Markov-Switching Regression Model，arXiv](https://arxiv.org/abs/2208.11574)，arXiv:2208.11574v1，提交 2022-08-24，摘要段说明 regime detection 与多状态分段 | 200，锚点已验证 |
 
 P1–P3 只能证明文献采用过相近指标或方法。它们不证明本卡阈值对 A 股有效，A 股有效性均为**未验证（待复测）**。交易所接口来源只证明字段公开存在，不证明供应商已完成全市场批次。
 
@@ -70,47 +71,47 @@ limit_down = count_i(close_i = limit_down_price_i)
 | 创业板 | 有价格涨跌幅限制日取 20% | R2，200 |
 | 科创板 | 有价格涨跌幅限制日取 20% | R1，200 |
 | 北交所 | 单列时取 30%，默认排除，不混入沪深分母 | R5、R13、R16、R17，200；R4 为 403，正式规则条款完整性未验证 |
-| 开启门槛 | 来源封板字段，或规则版本、逐证券状态、最小价位单位和同批行情均可追溯；任一缺失则 `enabled=false`、字段 `null`、`no_source` | T-A219/T-R102 为仓内定义，外部规则见 R1–R7 |
+| 开启门槛 | **候选口径（T-A219/T-R102，#359 未合入）**。来源封板字段，或规则版本、逐证券状态、最小价位单位和同批行情均可追溯；任一缺失时候选输出 `enabled=false`、字段 `null`、`no_source` | 外部规则见 R1–R7；现行主线字段形状与可空性见 `docs/api-contract.md:933` |
 
 交易所没有公开统一的“涨停家数达到多少才算市场信号”阈值。任何数量阈值或情绪分级均为**未验证、待回测**，本卡不设默认数值。
 
 ### 3.3 建议
 
-**建议保持关闭，不建议开启。** 可评估开启的前置条件是：取得 T 日逐证券规则版本和生效段，能审计 ST/板块/新股状态、最小价位单位、无涨跌幅日和同批行情，完成来源覆盖与单位复核，并在不含未来数据的回测中预注册计数阈值。当前主线契约仍要求 `limit_up/limit_down=null` 和 `no_source` gap。
+**建议保持关闭，不建议开启。** 可评估开启的前置条件是：取得 T 日逐证券规则版本和生效段，能审计 ST/板块/新股状态、最小价位单位、无涨跌幅日和同批行情，完成来源覆盖与单位复核，并在不含未来数据的回测中预注册计数阈值。`limit_up/limit_down=null` 与 `no_source` gap 属于 **T-A219/T-R102 候选口径（#359 未合入）**。现行主线只在 `docs/api-contract.md:933` 规定 `/market/overview` 的字段形状和可空性。
 
 ## 4. 指标二：数据覆盖率
 
 ### 4.1 口径和公式
 
-对同一 T、同一来源批次定义资格池 `Q_T`。`Q_T` 由沪深股票组成，T 日上市状态可确认，非 ETF、基金、指数、债券，北交所默认排除。停牌、零成交量、缺收盘或缺前收的行不进入可观测集合，但应计入缺口审计。
+对同一 T、同一来源批次定义资格池 `Q_T`。`Q_T` 只包含沪深股票，且证券代码、交易所、证券类型、T 日上市状态均能在 `query_as_of` 时点按 PIT 证明。ETF、基金、指数、债券和北交所默认排除。以下五个集合是 **T-A219/T-R102 候选口径（#359 未合入）**，并与候选 `MarketBasis` 计数使用同一划分。
 
-字段定义如下：
+字段和时点先冻结。每个证券都读取 `security_code`、`exchange`、`security_type`、`listing_status_T`、`suspended_flag_T`、`trade_date`、`close`、`pre_close`、`volume`、来源批次、`fetched_at` 和 `available_from`。主数据字段须满足 `available_from <= query_as_of`。行情行须满足 `trade_date=T`、行情逻辑时点为北京时间 15:00、`fetched_at <= query_as_of`、来源批次可解释并满足日线 `FINAL_AFTER=17:10`。任何字段都不得读取 T+1 或之后的值，不能用当前时钟替代 `query_as_of`。
 
-```text
-eligible_T = |Q_T|
-observed_T = count(i ∈ Q_T where close, pre_close, volume,
-                   trading_status and source batch are complete)
-coverage_T = observed_T / eligible_T       if eligible_T > 0
-coverage_T = null                          if eligible_T = 0
-```
+集合定义按优先级确定，因此天然两两不交。
 
-`observed_T` 只能统计 `fetched_at <= query_as_of`、行情时点属于 T、来源和批次可解释的完整行。停牌和零量既不进入 `observed_T`，也不应被补成平盘，具体排除数量分别进入 `suspended` 和 `missing` 审计字段。若资格池历史成员无法按 T 日 PIT 确认，`eligible_T` 和覆盖率均为 `null`。覆盖率不能用指数成分数、样本数、持仓数或成交额反推全市场覆盖。
+- `suspended_T` 包含 `Q_T` 中 `suspended_flag_T=true` 的证券。该分类优先于成交量和价格字段，停牌行即使 `volume=0` 或价格字段缺失仍只计入 `suspended_T`。
+- `trading_T` 包含 `Q_T` 中 `suspended_flag_T=false`、来源批次和行情行均可见、`trade_date=T`、`close` 与 `pre_close` 完整且为有效数值、`volume>0` 的证券。
+- `missing_T` 包含 `Q_T` 中未进入前两集合的其余证券，包括没有可见 T 日行情行、`volume` 缺失、`volume=0`、`close` 或 `pre_close` 缺失或无效、来源批次不可解释，以及 `suspended_flag_T` 缺失的证券。若停牌标记缺失，即使有非零量，也归入 `missing_T`，不得猜作交易或停牌。
+- `eligible_T` 是 `Q_T` 的证券数，亦即五集合中的资格总数。
+- `observed_T` 与 `trading_T` 完全相同，只统计有完整可见字段且 `volume>0` 的成交行。零量、停牌和任何缺字段均不进入 `observed_T`。
+
+闭合关系如下。`eligible_T = trading_T ∪ suspended_T ∪ missing_T`，三者两两不交。计数形式为 `|eligible_T| = |trading_T| + |suspended_T| + |missing_T|`，`|observed_T| = |trading_T|`。因此候选覆盖率为 `coverage_T = |observed_T| / |eligible_T|`（`eligible_T>0`），零分母时为 `null`。若 `Q_T` 的 PIT 资格成员本身无法确认，候选 `eligible_T` 与覆盖率均为 `null`，不能用样本数、指数成分数、持仓数或成交额反推。
 
 ### 4.2 阈值和出处
 
 | 参数或门槛 | 当前口径 | 出处与状态 |
 |---|---|---|
 | 分母 | T 日沪深合资格股票数 `eligible_T` | 资格池、排除条件和分母是**仓内定义**；R6、R7（200）仅证明行情字段接口 |
-| 分子 | 同批次、完整字段、PIT 可见行数 `observed_T` | 同批次和 PIT 是**仓内定义**；R6、R7（200）不证明供应商覆盖 |
+| 分子 | 同批次、完整字段、PIT 可见且 `volume>0` 的 `observed_T=trading_T` | **候选口径（T-A219/T-R102，#359 未合入）**；R6、R7（200）不证明供应商覆盖 |
 | 比例 | `observed_T / eligible_T`，Decimal，范围 `[0,1]` | 公式是**仓内定义**，无交易所统一覆盖率标准，**未验证** |
 | 放行阈值 | 没有外部公开数值；任何候选数值均标**待回测**，本轮不设默认放行值 | 未找到交易所、证监会或指数公司统一门槛，**未验证** |
-| 零分母 | `eligible_T=0` 时返回 `null` 和 `no_source`，不返回 0 | T-A219/T-R102 **仓内定义** |
+| 零分母 | **候选口径（T-A219/T-R102，#359 未合入）**。`eligible_T=0` 时返回 `null`，是否附 `no_source` 仍属候选 gap；不返回 0 | 现行主线只规定字段形状与可空性，见 `docs/api-contract.md:933` |
 
 P1 的文献宽度分母是研究定义，不能替代本卡资格池。R6、R7 的公开字段也不能证明某一供应商达到 90%、95% 或 100% 覆盖。
 
 ### 4.3 建议
 
-**建议保持关闭，不建议开启。** 可评估开启的前置条件是：有 T 日 PIT 证券主数据、上市状态历史、停牌和零量事实，能证明同一批次的来源完成事实，并在回测中比较不同覆盖率候选阈值的缺失偏差和稳定性。当前 `market.overview.coverage_threshold.enabled=false`，不得用任意百分比放行或把部分样本外推成全市场。
+**建议保持关闭，不建议开启。** 可评估开启的前置条件是：有 T 日 PIT 证券主数据、上市状态历史、停牌和零量事实，能证明同一批次的来源完成事实，并在回测中比较不同覆盖率候选阈值的缺失偏差和稳定性。`market.overview.coverage_threshold.enabled=false` 及缺失时的 `null`/`no_source` 是 **T-A219/T-R102 候选口径（#359 未合入）**，不能写成当前主线契约。现行主线只在 `docs/api-contract.md:933` 规定 `/market/overview` 的字段形状和可空性，不得用任意百分比放行或把部分样本外推成全市场。
 
 ## 5. 指标三：大盘环境（regime）
 
@@ -150,7 +151,7 @@ F25 输入字段为 `market.feature_bars_daily.values` 的候选特征、000300.
 
 ### 5.3 建议
 
-**建议保持关闭，不建议开启。** 可评估开启的前置条件是：冻结版本化公式和参数，取得可审计的 000300.SH 正式收盘及宽度完整窗口，逐项通过 PIT 检查，并用 A 股历史样本做样本外复测、交易成本和结构变化敏感性分析。前置条件完成前，`regime=null`、`regime_position_range=null`、`no_source` gap，不能生成仓位区间或交易动作。
+**建议保持关闭，不建议开启。** 可评估开启的前置条件是：冻结版本化公式和参数，取得可审计的 000300.SH 正式收盘及宽度完整窗口，逐项通过 PIT 检查，并用 A 股历史样本做样本外复测、交易成本和结构变化敏感性分析。`regime=null`、`regime_position_range=null` 与 `no_source` gap 的组合属于 **T-A219/T-R102 候选口径（#359 未合入）**。现行主线仅在 `docs/api-contract.md:933` 规定这两个字段的形状和可空性，不能据此生成仓位区间或交易动作。
 
 ## 6. A 股约束逐条对照
 
@@ -171,4 +172,4 @@ F25 输入字段为 `market.feature_bars_daily.values` 的候选特征、000300.
 
 三项均保持默认关闭。涨跌停统计有交易所规则出处，但来源字段、逐证券规则映射和批次覆盖尚未形成可审计闭环。覆盖率只有仓内分母和公式，未找到外部统一门槛。regime 有指数身份和文献采用出处，窗口、阈值、参考区间及 A 股有效性仍未验证。
 
-后续只能以“候选信号”方式复测。任何开启前都必须补齐版本化规则、PIT 可见时点、来源覆盖、A 股样本外回测和缺失偏差审计。未满足条件时输出 `null` 与 `no_source`，不以默认值、前一日值或当前时间收盘状态替代缺证。
+后续只能以“候选信号”方式复测。任何开启前都必须补齐版本化规则、PIT 可见时点、来源覆盖、A 股样本外回测和缺失偏差审计。未满足条件时输出 `null` 与 `no_source` 的组合属于 **T-A219/T-R102 候选口径（#359 未合入）**，不以默认值、前一日值或当前时间收盘状态替代缺证。
