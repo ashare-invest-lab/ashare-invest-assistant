@@ -8,7 +8,7 @@ import { isNotificationInput, latestNotifications, projectNotification, notifica
  * - 未知事件类型忽略（契约后续加事件时前端不报错）；data 不是合法 JSON 的事件丢弃。
  */
 import type { InfiniteData, QueryClient, QueryKey } from '@tanstack/react-query';
-import type { Notification, Paged, TerminalResponse } from '../api/types';
+import type { Notification, Paged, QuoteItem, TerminalResponse } from '../api/types';
 import { isStreamEventType, type StreamEventMap, type StreamEventType } from '../api/streamTypes';
 import type { SseMessage } from '../lib/sseParser';
 
@@ -37,24 +37,54 @@ const inv = (qc: QueryClient, ...keys: QueryKey[]) => {
 /** 首页与终端都是聚合视图：多数业务事件都会让它们变化（ETag 未变时服务端回 304，代价很小） */
 const AGGREGATES: QueryKey[] = [['terminal'], ['today']];
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const own = (value: Record<string, unknown>, key: string) => Object.hasOwn(value, key);
+
+function quotePatch(value: unknown): { code: string; patch: Partial<{ name: string; price: string; change_pct: string; amount: string; t: string }> } | null {
+  if (!isRecord(value) || !own(value, 'security_code') || typeof value.security_code !== 'string' || value.security_code === '') return null;
+  const patch: Partial<{ name: string; price: string; change_pct: string; amount: string; t: string }> = {};
+  for (const key of ['name', 'price', 'change_pct', 'amount', 't'] as const) {
+    if (!own(value, key) || typeof value[key] !== 'string') return null;
+    patch[key] = value[key] as string;
+  }
+  return { code: value.security_code, patch };
+}
+
 export function applyStreamEvent(qc: QueryClient, e: ParsedStreamEvent) {
   switch (e.type) {
     case 'heartbeat':
       return;
     case 'quote': {
-      const d = e.data as StreamEventMap['quote'];
-      const byCode = new Map(d.items.map((q) => [q.security_code, q]));
+      const d = e.data as unknown;
+      if (!isRecord(d) || !own(d, 'items') || !Array.isArray(d.items) || !own(d, 'data_as_of') || typeof d.data_as_of !== 'string') return;
+      const updates = d.items.map(quotePatch).filter((q): q is NonNullable<ReturnType<typeof quotePatch>> => q !== null);
+      const byCode = new Map(updates.map((q) => [q.code, q.patch]));
       qc.setQueriesData<TerminalResponse>({ queryKey: ['terminal'] }, (old) => {
         if (!old) return old;
         let changed = false;
         const rows = old.rows.map((r) => {
-          const q = byCode.get(r.security_code);
-          if (!q) return r;
+          const patch = byCode.get(r.security_code);
+          if (!patch) return r;
+          const terminalPatch = { price: patch.price!, change_pct: patch.change_pct!, amount: patch.amount!, t: patch.t! };
+          const next = r.quote ? { ...r.quote, ...terminalPatch } : {
+            price: terminalPatch.price, change_pct: terminalPatch.change_pct, amount: terminalPatch.amount, t: terminalPatch.t,
+          };
+          if (r.quote && Object.entries(terminalPatch).every(([key, value]) => r.quote?.[key as keyof typeof r.quote] === value)) return r;
           changed = true;
-          return { ...r, quote: { price: q.price, change_pct: q.change_pct, amount: q.amount, t: q.t } };
+          return { ...r, quote: next };
         });
         return changed ? { ...old, rows } : old;
       });
+      for (const { code, patch } of updates) {
+        const key = ['quotes', code] as const;
+        if (!qc.getQueryData(key)) continue;
+        qc.setQueryData<QuoteItem>(key, (old) => {
+          if (!old) return old;
+          const next = { ...old, ...patch };
+          next.data_as_of = d.data_as_of as string;
+          return next;
+        });
+      }
       return;
     }
     case 'suggestion': {
