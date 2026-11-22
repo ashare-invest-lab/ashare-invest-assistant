@@ -15,6 +15,7 @@
 
 - §5.1 新增 `MarketBasis`，§5.3 和 §7.3 在四个公开市场块复用同一结构。日报市场增状态块并按归档内容作只读投影。
 - `/meta/enums.version` 同步为 `v0.2.11`，沿用内容 ETag 和既有枚举、错误码。
+- 同版补充（T-A232）：行情五项口径见 `docs/contracts/T-A232-quote-semantics.md`，不升契约版本。
 - T-A219 补充 `GET /market/overview` 的字段来源、沪深京资格池、PIT 与盘中/收盘切换、宽度比例、成交额、错误空态和虚构夹具；F25/G-02 未批准参数继续 `enabled=false`，不升版本、不新增枚举或错误码。详细实现契约见 [`docs/contracts/T-A219-market-overview.md`](contracts/T-A219-market-overview.md)。
 - T-A215（2026-11-21）：§7.5 将 `/restrictions` 的目标可见性、`until`、响应投影、删除重查与 PIT 口径定稿，幂等沿用 §1.3，不新增错误码或公共枚举。
 - T-A215 第2轮（2026-11-21）：统一 §7.5 与 T-A209 的 PIT 口径；明确已删除限制重复 DELETE 的 `200`、原 `removed_at` 与无事件幂等语义；补充按 `target_type` 的删除重查关联、行锁、保留与释放规则；主线尚未实现 restrictions 路由的现状改为未验证。
@@ -946,6 +947,10 @@
 | GET | `/today` 🔒 ⚖ | 首页聚合（ETag；前端首页为 `/today`，`/` 重定向到 `/today`，v0.2.8）：`{account_id: string(uuid) \| null, server_time, trade_date, session: market_session, market: {regime, regime_position_range, data_status}, focus: {items: TerminalRow[], more: boolean}, pending_plan_drafts: {items: [{id, security_code, name, action, valid_until, status: plan_draft_status}], more}, released_reasons: {items: [{reason_id, signal_id, code: reason_code, security_code, name, released_at}], more}, risk_flags: {items: [RiskFlag & {security_code: string \| null, name: string \| null, risk_event_id: uuid \| null（v0.2.7）}], more}, invalidations_today: {items: [{suggestion_id, security_code, name, strategy_key, text, at}], more}, daily_report: {date, status: "ready" \| "generating" \| "not_yet"}, reconciliation: {status: reconciliation_status, as_of, diff_count, important_count}, unread_notifications: int}`；v0.2.7 新增 `alerts`、`plan_triggers`、`data_gaps`、`evidence` 四个顶层字段，见下方 `/today` 补充。每个列表最多 50 条，`more=true` 时的去向见下方“查看全部”去向表（v0.2.7）。**v0.2.11**：`market` 保留原字段，增 `basis: MarketBasis \| null` 用于市场来源说明；既有市场缺口仅在对应输入已补齐时移除，其余缺口保留 |
 
 - **T-A169 裁定（顶层 `data_as_of`，A-12 落地到 `/terminal`、`/today`；目标口径）**：两个端点顶层 DataStatusBlock 的 `data_as_of` 按 A-12 取**本次实际返回行**中非 null `data_as_of` 的最早值（统一按瞬时比较），全部为 null 或无行时为 `null`；不取 `server_time`、生成时刻或 `account` 计算时刻。「实际返回行」指：`/terminal` 为截断/`scope` 过滤后的 `rows[]`（被 300 行截断丢弃的行不计）；`/today` 为 `focus.items[]`。`account`、`market` 块本身没有 `data_as_of` 字段，不参与；本裁定不改字段、不改 `data_status` 判定、不改 ETag 规则（值变化自然改变 ETag）。受影响入口与验收（L-046；已由 #284@66760086 落地，勘误 2026-11-21）：① `GET /terminal`：`test_terminal_top_data_as_of_min_of_returned_rows`、`test_terminal_top_data_as_of_null_when_rows_all_null`、`test_terminal_top_data_as_of_ignores_truncated_rows`；② `GET /today`：`test_today_top_data_as_of_min_of_focus_items`、`test_today_top_data_as_of_null_when_no_focus`。验收须覆盖 `/terminal` 的 `scope` 过滤及 300 行截断、`/today` 的 `focus.items[]`、两端点全空/空列表、跨时区偏移的瞬时比较，以及顶层时点变化时 ETag 改变、内容未变且 `If-None-Match` 匹配时返回 304。落地状态（勘误 2026-11-21，S12-DOC-ALIGN）：`app.aggregates.service.terminal()`/`today()` 已按实际返回行取最早非空瞬时值（aggregates/service.py:300/:429），上述五个具名测试见 `tests/backend/unit/test_ta169_top_data_as_of.py`（#284@66760086 合入，验证以该 PR 实测为准）。
+
+#### T-A232 行情口径
+
+五项裁定统一见 [`docs/contracts/T-A232-quote-semantics.md`](contracts/T-A232-quote-semantics.md)。本补充不改 `/quotes` 行或 §8 `quote` 字段清单；行尾时段表以 PR #387 为准。
 
 **因子集版本（v0.2.9 内，O-CI1-PROFILE-CONTRACT，2026-11-12 Chief 裁定）**：`factor_set_version` 必须出现，类型为 `string | null`。没有适用于该证券的真实因子集，或没有可用且版本可核实的真实因子集时，空响应为 `items=[]`、`counts={total:0, by_category:{}}`、`data_status="unavailable"`，并按实际原因给出 `factors` gap，此时版本为 `null`；本版 ETF 固定为上述空响应、`reason="not_applicable"`、版本必为 `null`。无来源用 `no_source`，本人证书不可用用 `data_licence_unavailable`，不得用 `not_applicable` 掩盖其他原因。完全无数据时 `data_as_of=null`，不得补造采集或计算时点。
 
