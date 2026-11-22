@@ -149,6 +149,33 @@ describe('T-F81 复盘指标口径', () => {
     expect(metricValueText({ value: Number.NaN })).toBe('—');
   });
 
+  it('详情指标把数值 0 显示为 0，并与 null 的横线空态区分', async () => {
+    const version = {
+      id: 'review-f81-zero-version', version_no: 1, plan_version_ids: [], trade_ids: [], snapshot_id: null,
+      lessons: '零值与缺失值示例', tags: [], attribution: { judgement: [], execution: [], market: [] },
+      outcome_metrics: {
+        holding_return: { value: 0, n: 1, window: '2026-11-01/2026-11-20', small_sample: false },
+        benchmark_return: emptyStat(), excess_return: emptyStat(), max_drawdown: emptyStat(),
+      },
+      created_at: '2026-11-20T10:00:00+08:00', data_status: 'partial', data_as_of: null,
+      gaps: [{ key: 'outcome_metrics.benchmark_return', reason: 'no_source', message: '缺少指标来源' }],
+    };
+    const body = {
+      id: 'review-f81-zero', plan_id: null, security_code: '600000.SH', name: '示例银行', period_start: '2026-11-01', period_end: '2026-11-20',
+      current_version_no: 1, created_at: version.created_at, data_status: version.data_status, data_as_of: null,
+      gaps: version.gaps, current_version: version, timeline: [], evidence: [],
+    };
+    server.use(
+      http.get(`${API}/reviews/review-f81-zero`, () => HttpResponse.json(body)),
+      http.get(`${API}/reviews/review-f81-zero/versions`, () => HttpResponse.json({ items: [version], next_cursor: null })),
+    );
+    renderAt('/reviews/review-f81-zero');
+    await screen.findByTestId('metric-holding_return');
+    const page = screen.getByTestId('review-detail');
+    expect(within(page).getByTestId('metric-holding_return')).toHaveTextContent('0');
+    expect(within(page).getByTestId('metric-benchmark_return')).toHaveTextContent('—');
+  });
+
   it('收到污染的 outcome_metrics 时仍只显示四项空指标和对应缺口', async () => {
     const outcomeMetrics = JSON.parse(JSON.stringify({
       holding_return: emptyStat(), benchmark_return: emptyStat(), excess_return: emptyStat(), max_drawdown: emptyStat(),
