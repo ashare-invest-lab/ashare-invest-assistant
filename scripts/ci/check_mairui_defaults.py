@@ -30,6 +30,12 @@ ALLOWED = {
     SOURCE: {"off", "${DAILY_BARS_SOURCE:-off}"},
 }
 CONFIG_DEFAULT = re.compile(r'daily_bars_source:\s*Literal\[[^\]]*\]\s*=\s*"off"')
+GENERIC_KEY = re.compile(
+    r"^(?:MAIRUI_[A-Z0-9_]*|[A-Z0-9_]*_SOURCE|[A-Z0-9_]*(?:REALTIME|QUOTES|INTRADAY)[A-Z0-9_]*_ENABLED)$"
+)
+GENERIC_ENV_VAR = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-(?:off|false|replay|0)?)?\}$|^\$[A-Za-z_][A-Za-z0-9_]*$")
+GENERIC_LITERAL = {"", "off", "false", "replay", "0"}
+EXEMPT_SUFFIX = re.compile(r"_(?:URL|TIMEOUT[A-Z0-9_]*|KEY[A-Z0-9_]*|TOKEN[A-Z0-9_]*|FILE|DIR|PATH)$")
 
 
 class _ComposeLoader(yaml.SafeLoader):
@@ -61,6 +67,22 @@ def _environment_items(environment: object):
                     yield str(key), value
 
 
+def _is_closed_value(value: object) -> bool:
+    if value is None or value is False or value == 0:
+        return True
+    if isinstance(value, str):
+        return value in GENERIC_LITERAL or bool(GENERIC_ENV_VAR.fullmatch(value))
+    return False
+
+
+def _is_generic_switch(key: str) -> bool:
+    if key in ALLOWED:
+        return False
+    if not GENERIC_KEY.fullmatch(key):
+        return False
+    return not (key.startswith("MAIRUI_") and EXEMPT_SUFFIX.search(key))
+
+
 def _check_compose_file(path: Path, repo: Path, errs: list[str]) -> dict | None:
     rel = path.relative_to(repo).as_posix()
     try:
@@ -82,10 +104,10 @@ def _check_compose_file(path: Path, repo: Path, errs: list[str]) -> dict | None:
         if not isinstance(definition, dict):
             continue
         for key, value in _environment_items(definition.get("environment")):
-            if key not in ALLOWED:
-                continue
-            if not isinstance(value, str) or value not in ALLOWED[key]:
+            if key in ALLOWED and (not isinstance(value, str) or value not in ALLOWED[key]):
                 errs.append(f"{rel}:{service}/{key}: 值必须是 {sorted(ALLOWED[key])}（发现 {value!r}）")
+            elif _is_generic_switch(key) and not _is_closed_value(value):
+                errs.append(f"{rel}:services/{service}/{key}：默认必须关闭")
     return document
 
 
@@ -128,6 +150,10 @@ def _check_env_example(repo: Path, errs: list[str]) -> None:
             value = stripped.split("=", 1)[1]
             if value != "off":
                 errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {value!r}）")
+        elif "=" in stripped and not stripped.startswith("#"):
+            key, value = stripped.split("=", 1)
+            if _is_generic_switch(key) and not _is_closed_value(value):
+                errs.append(f"{rel}:{key}：默认必须关闭")
     if not mode_seen:
         errs.append(f"{rel}:{MODE}: 必须有一行 MAIRUI_MODE=replay")
 

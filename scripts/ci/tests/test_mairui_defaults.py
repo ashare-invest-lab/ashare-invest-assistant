@@ -63,3 +63,28 @@ def test_config_mairui_default_is_rejected(tmp_path: Path) -> None:
     baseline(tmp_path)
     write(tmp_path, "src/backend/app/config.py", 'daily_bars_source: Literal["off", "mairui"] = "mairui"\n')
     assert any("config.py:daily_bars_source" in error for error in cmd.check(tmp_path))
+
+
+def test_new_switch_live_is_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_ENABLED: true\n")
+    errors = cmd.check(tmp_path)
+    assert any("services/api/MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in errors)
+
+
+def test_new_switch_off_is_accepted(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED:-off}\n      INTRADAY_QUOTES_ENABLED: false\n      PRICES_SOURCE: replay\n")
+    assert cmd.check(tmp_path) == []
+
+
+def test_non_switch_mairui_key_is_exempt(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_URL: https://example.invalid\n      MAIRUI_QUOTES_TIMEOUT_S: 30\n      MAIRUI_QUOTES_TOKEN_FILE: /run/secrets/token\n")
+    assert cmd.check(tmp_path) == []
+
+
+def test_env_example_open_switch_is_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=replay\nDAILY_BARS_SOURCE=off\nMAIRUI_QUOTES_ENABLED=true\n")
+    assert any(".env.example:MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in cmd.check(tmp_path))
