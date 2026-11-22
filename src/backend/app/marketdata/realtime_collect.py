@@ -45,7 +45,6 @@ log = logging.getLogger("app.marketdata.realtime_collect")
 # 麦蕊既有 egress halt 路径；不为实时任务另造 halt 文件。
 HALT = DAILY_HALT
 SOURCE = "mairui"
-REALTIME_QUOTES_FETCH: Final = "market.realtime_quotes_fetch"
 # Endpoint documented in docs/plan.md §2.1 and §0A.6.
 PATH = "/hsrl/ssjy_more?stock_codes="
 # docs/plan.md §0A.6 / §2.1: the multi-stock endpoint accepts at most 20 codes.
