@@ -242,6 +242,46 @@ def test_complete_intraday_fixture_uses_owner_same_batch_and_decimal_ratios() ->
     assert result.turnover_total == "300.00"
 
 
+def test_stock_facts_are_kept_without_index_cards() -> None:
+    conn = Connection(
+        quotes=[
+            quote("600000.SH", pct="2", amount="120.00"),
+            quote("000001.SZ", pct="-1", amount="80.00"),
+        ]
+    )
+    conn.indices = []
+
+    result = overview(conn, dt.datetime(2031, 2, 3, 10, 1, tzinfo=BEIJING))
+
+    assert result.indices == []
+    assert result.basis is not None and result.basis.observed == 2
+    assert result.breadth is not None and (result.breadth.up, result.breadth.down) == (1, 1)
+    assert result.data_status is DataStatus.PARTIAL
+    assert result.turnover_total == "200.00"
+    assert any(
+        gap.key == "market.indices"
+        and gap.reason is GapReason.NO_SOURCE
+        and gap.message == "没有配置可展示的指数卡片。"
+        for gap in result.gaps
+    )
+
+
+def test_unbatched_intraday_rows_are_excluded_from_aggregate() -> None:
+    conn = Connection(
+        quotes=[
+            quote("600000.SH", batch_id=None),
+            quote("000001.SZ", batch_id=None),
+        ]
+    )
+
+    result = overview(conn, dt.datetime(2031, 2, 3, 10, 1, tzinfo=BEIJING))
+
+    assert result.data_status is DataStatus.UNAVAILABLE
+    assert result.breadth is None
+    assert result.turnover_total is None
+    assert result.indices[0].price is None
+
+
 def test_intraday_missing_volume_amount_is_partial_and_not_zero() -> None:
     conn = Connection(
         quotes=[
