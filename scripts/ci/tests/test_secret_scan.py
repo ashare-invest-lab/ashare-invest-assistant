@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tomllib
@@ -294,8 +295,16 @@ def test_allow_yaml_matches_gitleaks_toml() -> None:
 def test_gitleaks_config_has_s1_to_s9() -> None:
     cfg = tomllib.loads((REPO / ".gitleaks.toml").read_text(encoding="utf-8"))
     assert cfg["extend"]["useDefault"] is True
-    ids = {r["id"].split("-")[0] for r in cfg["rules"]}
-    assert ids == {f"S{i}" for i in range(1, 10)}
+    custom = [r for r in cfg["rules"] if r["id"] != "generic-api-key"]
+    assert {r["id"].split("-")[0] for r in custom} == {f"S{i}" for i in range(1, 10)}
+    # 唯一允许的默认规则扩展：generic-api-key 只加精确 allowlist（路径 AND 字面量），不带 regex/path
+    generic = [r for r in cfg["rules"] if r["id"] == "generic-api-key"]
+    assert len(generic) == 1 and set(generic[0]) == {"id", "allowlists"}
+    assert generic[0]["allowlists"] == [{
+        "condition": "AND", "regexTarget": "secret",
+        "paths": [r"^src/frontend/src/mocks/marketFixtures\.ts$"],
+        "regexes": [r"^market\.indices\.000300\.SH$"],
+    }]
     s7 = next(r for r in cfg["rules"] if r["id"].startswith("S7"))
     paths = [p for a in s7["allowlists"] for p in a.get("paths", [])]
     # 与 secret_scan.S7_EXEMPT_PATH 一致：docs/ 顶层 *.md + 夹具目录整个豁免
@@ -311,6 +320,35 @@ def test_gitleaks_config_has_s1_to_s9() -> None:
         if not r["id"].startswith("S7"):
             for a in r.get("allowlists", []):
                 assert not any(re.fullmatch(p, "docs/plan.md") for p in a.get("paths", [])), r["id"]
+
+
+def test_gitleaks_default_allowlist_is_exact(tmp_path: Path) -> None:
+    gl = gitleaks_bin()
+    if not gl:
+        pytest.skip("未安装 gitleaks（CI 中由 GITLEAKS_BIN 提供）")
+    value = "market.indices." + "000300.SH"
+    cases = [
+        ("ok", "src/frontend/src/mocks/marketFixtures.ts", value, set()),
+        ("path", "src/frontend/src/mocks/other.ts", value, {"generic-api-key"}),
+        ("value", "src/frontend/src/mocks/marketFixtures.ts", "market.indices." + "000905.SH", {"generic-api-key"}),
+        ("key", "src/frontend/src/mocks/marketFixtures.ts", "sk-" + secrets.token_urlsafe(24), None),
+    ]
+    for name, path, secret, expected in cases:
+        repo = tmp_path / name
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        field = "api_key" if expected is None else "key"
+        write(repo, path, field + ": '" + secret + "', reason: 'x', message: 'x'\n")
+        commit_all(repo, name)
+        report = repo.parent / (name + ".json")
+        subprocess.run([gl, "git", str(repo), "--no-banner", "-c", str(REPO / ".gitleaks.toml"),
+                        "--ignore-gitleaks-allow", "--log-opts=--all", "-f", "json", "-r", str(report),
+                        "--exit-code", "0", "-l", "error"], check=True, capture_output=True, text=True)
+        ids = {f["RuleID"] for f in json.loads(report.read_text())}
+        if expected is None:
+            assert "S2-sk-heuristic" in ids or "generic-api-key" in ids
+        else:
+            assert ids == expected
 
 
 def test_config_files_do_not_trip_scanner() -> None:
