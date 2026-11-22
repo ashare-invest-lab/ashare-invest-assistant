@@ -336,6 +336,8 @@ jobs:
           pattern: backend-shard-*
           merge-multiple: true
           path: ${{ runner.temp }}/cov
+      - name: 核对分片归档完整性
+        run: python3 scripts/ci/check_shard_artifacts.py --dir "$RUNNER_TEMP/cov" --shards 6
       - name: 合并覆盖率
         shell: bash
         run: |
@@ -360,6 +362,27 @@ jobs:
       - name: 确认 A1s–A32 与 t_t41 已执行（未因缺库 skip）
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         run: python3 scripts/ci/assert_a1s_a32_ran.py "${RUNNER_TEMP}/backend-pytest.xml"
+      - name: 确认 serial_pg 用例未悄悄变成跳过
+        if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          trusted_args=()
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # base 引用必须可达；只有 base 上确实没有该文件（首次引入）才退回 --config。
+            git rev-parse --verify --quiet "origin/${BASE_REF}^{commit}" >/dev/null \
+              || { echo "::error title=serial-skips::取不到 origin/${BASE_REF}"; exit 1; }
+            if git cat-file -e "origin/${BASE_REF}:scripts/ci/serial-skip-baseline.json" 2>/dev/null; then
+              git show "origin/${BASE_REF}:scripts/ci/serial-skip-baseline.json" \
+                > "$RUNNER_TEMP/serial-skip-baseline.base.json"
+            fi
+            trusted_args=(--trusted-config "$RUNNER_TEMP/serial-skip-baseline.base.json")
+          fi
+          uv run --no-project --with "pyyaml==${PYYAML_VERSION}" \
+            python scripts/ci/check_serial_skips.py "${RUNNER_TEMP}/backend-pytest.xml" \
+            --groups tests/ci-groups.yaml --config scripts/ci/serial-skip-baseline.json \
+            "${trusted_args[@]}"
       - name: 冻结可信 base 覆盖率棘轮基线
         if: ${{ !cancelled() && hashFiles('src/backend/.venv/bin/python') != '' }}
         env:
