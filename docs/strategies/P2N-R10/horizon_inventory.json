@@ -1113,6 +1113,10 @@
       "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
       "scope_role": "enumerated_identity_source",
       "note": "T-R88b：sw_ma_trend_pullback v2 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/T-R112/params.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity"
     }
   ],
   "records": [
