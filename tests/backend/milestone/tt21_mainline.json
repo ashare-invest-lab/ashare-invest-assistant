@@ -1,7 +1,7 @@
 {
   "baseline": "18e27b3aadc3bd3fb21e829f1a97c25498cbf0d2",
   "main_migration_baseline": "465e02046fa8d971897603742497444f884e89a2",
-  "expected_head": "0038",
+  "expected_head": "0039",
   "previous_baseline": "6190fbb17057094843e22d2e7a7935c9a270c770",
   "purpose": "PR141 be/T-B143 candidate 18e27b3 adds 0036 after the previously pinned 0035 graph. Pin the complete candidate migration graph for T-T81c; this does not assert PR141 is merged. main_migration_baseline retains the historical main reference. Updating requires a new reviewed manifest commit.",
   "migrations": [
@@ -152,6 +152,10 @@
     {
       "migration_file": "0038_tb172b1b_horizon_completion_evidence.py",
       "sha256_checksum": "c7a46bf4cabeddc88a95c2e749db17708a3002018fe584f5b17673cb0017d523"
+    },
+    {
+      "migration_file": "0039_intraday_ownership_i2.py",
+      "sha256_checksum": "1c743a69fd64bbce5932efa63498a02ceac3d0f1669738b7525b3594fcc49c36"
     }
   ]
 }
