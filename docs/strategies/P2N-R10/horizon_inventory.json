@@ -1113,6 +1113,11 @@
       "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v2.md",
       "scope_role": "enumerated_identity_source",
       "note": "T-R88b：sw_ma_trend_pullback v2 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/T-R115/tracking_validation_plan.md",
+      "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
+      "note": "T-R115：25 项未验证参数的持仓/自选/建议跟踪方案；非策略身份"
     }
   ],
   "records": [
@@ -3032,5 +3037,16 @@
     "historical_frozen": 7,
     "runtime_changed": false,
     "change": "scope 205→235；身份45→48、来源身份文件23→26、冻结身份4→7；H-01 v4、S-01 v3、W-01 v3；保留两侧历史刷新记录，不推断运行态"
+  },
+  "t_r115_refresh": {
+    "basis": "T-R115 用户任务：登记新增跟踪验证方案，保持身份统计与运行态不变",
+    "previous_scope_files": 239,
+    "scope_files": 240,
+    "added_paths": [
+      "docs/strategies/T-R115/tracking_validation_plan.md"
+    ],
+    "identity_records_unchanged": true,
+    "runtime_changed": false,
+    "change": "scope 239→240；新增 1 个非策略身份跟踪方案文件，records/stats 不变"
   }
 }
