@@ -50,6 +50,14 @@ def test_mapping_live_is_rejected(tmp_path: Path) -> None:
     assert any("docker-compose.yml:ingest/MAIRUI_MODE" in error for error in cmd.check(tmp_path))
 
 
+def test_mixed_case_spaced_keys_are_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  ingest:\n    environment:\n      ' mairui_mode': live\n")
+    assert any("docker-compose.yml:ingest/MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+    write(tmp_path, ".github/workflows/ci.yml", "env:\n  ' Daily_Bars_Source ': mairui\n")
+    assert any(".github/workflows/ci.yml:env/DAILY_BARS_SOURCE" in error for error in cmd.check(tmp_path))
+
+
 def test_list_live_interpolation_is_rejected(tmp_path: Path) -> None:
     baseline(tmp_path)
     write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  ingest:\n    environment:\n      - MAIRUI_MODE=${MAIRUI_MODE:-live}\n")
@@ -129,6 +137,12 @@ def test_workflow_yaml_suffix_is_checked(tmp_path: Path) -> None:
     baseline(tmp_path)
     write(tmp_path, ".github/workflows/extra.yaml", "env:\n  MAIRUI_MODE: live\n")
     assert any(".github/workflows/extra.yaml:env/MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_compose_yaml_suffix_is_checked(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/extra.yaml", "services:\n  ingest:\n    environment:\n      MAIRUI_MODE: live\n")
+    assert any("extra.yaml:ingest/MAIRUI_MODE" in error for error in cmd.check(tmp_path))
 
 
 def test_workflow_unquoted_allowed_values_are_accepted(tmp_path: Path) -> None:

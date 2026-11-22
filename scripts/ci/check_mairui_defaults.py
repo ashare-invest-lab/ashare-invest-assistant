@@ -33,6 +33,10 @@ ALLOWED = {
 }
 
 
+def _allowed_key(key: object) -> str | None:
+    return next((allowed for allowed in ALLOWED if allowed.casefold() == str(key).strip().casefold()), None)
+
+
 class _ComposeLoader(yaml.SafeLoader):
     """按 Compose 使用的 YAML 1.2 布尔值规则解析，保留未加引号的 off 字符串。"""
 
@@ -83,7 +87,8 @@ def _check_compose_file(path: Path, repo: Path, errs: list[str]) -> dict | None:
         if not isinstance(definition, dict):
             continue
         for key, value in _environment_items(definition.get("environment")):
-            if key not in ALLOWED:
+            key = _allowed_key(key)
+            if key is None:
                 continue
             if not isinstance(value, str) or value not in ALLOWED[key]:
                 errs.append(f"{rel}:{service}/{key}: 值必须是 {sorted(ALLOWED[key])}（发现 {value!r}）")
@@ -100,7 +105,7 @@ def _check_dev_ingest(repo: Path, document: dict | None, errs: list[str]) -> Non
     if not isinstance(ingest, dict):
         errs.append(f"{where}: dev compose 必须存在 ingest 服务，且 MAIRUI_MODE 必须为字面量 replay")
         return
-    values = [value for key, value in _environment_items(ingest.get("environment")) if key == MODE]
+    values = [value for key, value in _environment_items(ingest.get("environment")) if _allowed_key(key) == MODE]
     if values != ["replay"]:
         found = values[0] if values else None
         errs.append(f"{where}: dev compose 必须为字面量 replay（发现 {found!r}）")
@@ -120,15 +125,13 @@ def _check_env_example(repo: Path, errs: list[str]) -> None:
     mode_seen = False
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith(f"{MODE}="):
+        key, _, value = stripped.partition("=")
+        if _allowed_key(key) == MODE:
             mode_seen = True
-            value = stripped.split("=", 1)[1]
             if value != "replay":
                 errs.append(f"{rel}:{MODE}: 值必须为 replay（发现 {value!r}）")
-        elif stripped.startswith(f"{SOURCE}="):
-            value = stripped.split("=", 1)[1]
-            if value != "off":
-                errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {value!r}）")
+        elif _allowed_key(key) == SOURCE and value != "off":
+            errs.append(f"{rel}:{SOURCE}: 值必须为 off（发现 {value!r}）")
     if not mode_seen:
         errs.append(f"{rel}:{MODE}: 必须有一行 MAIRUI_MODE=replay")
 
@@ -137,7 +140,8 @@ def _check_workflow_environment(
     environment: object, rel: str, location: str, errs: list[str]
 ) -> None:
     for key, value in _environment_items(environment):
-        if key not in ALLOWED:
+        key = _allowed_key(key)
+        if key is None:
             continue
         if not isinstance(value, str) or value not in ALLOWED[key]:
             errs.append(f"{rel}:{location}/{key}: 值必须是 {sorted(ALLOWED[key])}（发现 {value!r}）")
@@ -265,9 +269,9 @@ def check(repo: Path) -> list[str]:
     if not compose_dir.is_dir():
         errs.append(f"{COMPOSE_DIR.as_posix()}:services/{MODE}: 缺少 compose 目录")
     else:
-        files = sorted(compose_dir.glob("*.yml"))
+        files = sorted({*compose_dir.glob("*.yml"), *compose_dir.glob("*.yaml")})
         if not files:
-            errs.append(f"{COMPOSE_DIR.as_posix()}:services/{MODE}: 没有 *.yml compose 文件")
+            errs.append(f"{COMPOSE_DIR.as_posix()}:services/{MODE}: 没有 *.yml 或 *.yaml compose 文件")
         for path in files:
             documents[path.relative_to(repo)] = _check_compose_file(path, repo, errs)
     dev_document = documents.get(DEV_COMPOSE)
