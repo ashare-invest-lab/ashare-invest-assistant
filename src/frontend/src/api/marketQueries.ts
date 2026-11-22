@@ -36,13 +36,16 @@ export const useSecurityProfile = (code: string | undefined) =>
     enabled: opt(code),
   });
 
+/** 未验证：/quotes 的轮询间隔暂沿用 15 秒，§8 不规定 /quotes 的间隔。 */
+const QUOTE_POLL_INTERVAL_MS_UNVERIFIED = 15_000;
+
 /** 契约 §7.3 /quotes（只读缓存）；单只证券取 items[0] */
 export const useQuote = (code: string | undefined) =>
   useQuery({
     queryKey: mk.quote(code ?? ''),
     queryFn: ({ signal }) => apiGet<{ items: QuoteItem[] }>('/quotes', { codes: code }, signal).then((r) => r.items.find((q) => q.security_code === code) ?? null),
     enabled: opt(code),
-    refetchInterval: 15_000,
+    refetchInterval: QUOTE_POLL_INTERVAL_MS_UNVERIFIED,
   });
 
 /**
