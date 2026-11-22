@@ -12,6 +12,7 @@ from app.reviews import service
 from app.reviews.metrics import period_pending, period_pending_state, project_metrics
 
 OWNER = uuid.UUID("11111111-1111-4111-8111-111111111111")
+ACCOUNT = uuid.UUID(int=900)
 
 
 def test_a_weekend_does_not_reopen_friday_period() -> None:
@@ -142,6 +143,21 @@ class TradeConnection:
         return SimpleNamespace(all=lambda: self.rows)
 
 
+class BatchTradeConnection(TradeConnection):
+    def __init__(
+        self, rows: list[SimpleNamespace], batches: list[SimpleNamespace]
+    ) -> None:
+        super().__init__(rows)
+        self.batches = batches
+        self.batch_calls = 0
+
+    def execute(self, statement: object) -> SimpleNamespace:
+        if "import_batches" in str(statement):
+            self.batch_calls += 1
+            return SimpleNamespace(all=lambda: self.batches)
+        return super().execute(statement)
+
+
 def _trade(
     number: int,
     *,
@@ -151,11 +167,14 @@ def _trade(
     traded_at: dt.datetime,
     created_at: dt.datetime | None = None,
     source: str = "import",
+    account_id: uuid.UUID | None = None,
+    import_batch_id: uuid.UUID | None = None,
     voided_at: dt.datetime | None = None,
     epistemic_type: str = "execution",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.UUID(int=number),
+        account_id=account_id or ACCOUNT,
         security_code="600000.SH",
         trade_date=traded_at.date(),
         side=side,
@@ -164,9 +183,148 @@ def _trade(
         traded_at=traded_at,
         created_at=created_at or traded_at,
         source=source,
+        import_batch_id=import_batch_id,
         voided_at=voided_at,
         epistemic_type=epistemic_type,
     )
+
+
+def _batch(
+    identifier: uuid.UUID,
+    *,
+    owner: uuid.UUID = OWNER,
+    account_id: uuid.UUID = ACCOUNT,
+    committed_at: dt.datetime | None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=identifier,
+        user_id=owner,
+        account_id=account_id,
+        committed_at=committed_at,
+    )
+
+
+def test_tb216_committed_at_after_snapshot_is_not_visible_without_gap() -> None:
+    batch_id = uuid.UUID(int=700)
+    row = _trade(
+        701,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        import_batch_id=batch_id,
+    )
+    conn = BatchTradeConnection(
+        [row],
+        [_batch(batch_id, committed_at=dt.datetime(2026, 1, 11, tzinfo=dt.UTC))],
+    )
+    _, evidence, data_as_of, gaps = service._compute_outcome_metrics(
+        conn,
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [row.id],
+        dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert conn.batch_calls == 1
+    assert evidence == [] and data_as_of is None
+    assert "trades.import_commit_unproven" not in gaps
+
+
+def test_tb216_uncommitted_batch_is_hidden_and_flattened_gap_is_deduplicated() -> None:
+    batch_id = uuid.UUID(int=710)
+    row = _trade(
+        711,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        import_batch_id=batch_id,
+    )
+    conn = BatchTradeConnection([row], [_batch(batch_id, committed_at=None)])
+    snapshot = service._snapshot_items(
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        None,
+        [],
+        [],
+        True,
+        conn=conn,
+        owner=OWNER,
+        trade_ids=[row.id],
+        calculation_as_of=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    matching = [
+        gap for gap in snapshot["gaps"] if gap["key"] == "trades.import_commit_unproven"
+    ]
+    assert conn.batch_calls == 1
+    assert snapshot["evidence"] == [] and snapshot["data_as_of"] is None
+    assert matching == [
+        {
+            "key": "trades.import_commit_unproven",
+            "reason": "no_source",
+            "message": "导入批次提交时点不可证实",
+        }
+    ]
+
+
+def test_tb216_other_owner_or_account_batch_is_hidden() -> None:
+    batch_id = uuid.UUID(int=720)
+    row = _trade(
+        721,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        import_batch_id=batch_id,
+    )
+    for batch in (
+        _batch(
+            batch_id,
+            owner=uuid.UUID(int=901),
+            committed_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
+        ),
+        _batch(
+            batch_id,
+            account_id=uuid.UUID(int=902),
+            committed_at=dt.datetime(2026, 1, 3, tzinfo=dt.UTC),
+        ),
+    ):
+        conn = BatchTradeConnection([row], [batch])
+        _, evidence, data_as_of, gaps = service._compute_outcome_metrics(
+            conn,
+            OWNER,
+            dt.date(2026, 1, 1),
+            dt.date(2026, 1, 5),
+            [row.id],
+            dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+        )
+        assert evidence == [] and data_as_of is None
+        assert gaps["trades.import_commit_unproven"] == ["no_source"]
+
+
+def test_tb216_manual_trade_keeps_created_and_traded_visibility() -> None:
+    row = _trade(
+        730,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        created_at=dt.datetime(2026, 1, 4, tzinfo=dt.UTC),
+        source="manual",
+    )
+    conn = BatchTradeConnection([row], [])
+    _, evidence, data_as_of, gaps = service._compute_outcome_metrics(
+        conn,
+        OWNER,
+        dt.date(2026, 1, 1),
+        dt.date(2026, 1, 5),
+        [row.id],
+        dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert conn.batch_calls == 0
+    assert evidence and data_as_of == row.created_at
+    assert "trades.import_commit_unproven" not in gaps
 
 
 def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:

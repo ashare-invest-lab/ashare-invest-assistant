@@ -8,14 +8,14 @@ import datetime as dt
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import Connection, Row, insert, select, update
 
 from app.common.errors import AppError, ErrorCode
-from app.db.tables.accounts import trades
+from app.db.tables.accounts import import_batches, trades
 from app.db.tables.market import daily_bars, securities
 from app.db.tables.research import action_plans, plan_versions
 from app.db.tables.reviews import data_snapshots, review_versions, reviews
@@ -123,8 +123,13 @@ def _executed_at(row: Any) -> dt.datetime | None:
     return _as_datetime(row.traded_at)
 
 
-def _available_at(row: Any) -> dt.datetime | None:
+def _available_at(row: Any, *, committed_at: dt.datetime | None = None) -> dt.datetime | None:
     values = [_executed_at(row), _as_datetime(row.created_at)]
+    if row.import_batch_id is not None:
+        committed = _as_datetime(committed_at)
+        if committed is None:
+            return None
+        values.append(committed)
     available = [value for value in values if value is not None]
     return max(available) if available else None
 
@@ -145,6 +150,41 @@ def _trade_rows(conn: Connection, owner: uuid.UUID, trade_ids: Sequence[uuid.UUI
     return list(conn.execute(select(trades).where(trades.c.id.in_(trade_ids), trades.c.user_id == owner)).all())
 
 
+def _batch_commitments(
+    conn: Connection, owner: uuid.UUID, rows: Sequence[Any]
+) -> tuple[dict[uuid.UUID, dt.datetime], set[uuid.UUID]]:
+    batch_ids = {row.import_batch_id for row in rows if row.import_batch_id is not None}
+    if not batch_ids:
+        return {}, set()
+    batch_rows = conn.execute(
+        select(
+            import_batches.c.id,
+            import_batches.c.user_id,
+            import_batches.c.account_id,
+            import_batches.c.committed_at,
+        ).where(
+            import_batches.c.id.in_(batch_ids),
+            import_batches.c.user_id == owner,
+        )
+    ).all()
+    by_batch_account = {
+        (batch.id, batch.account_id): _as_datetime(batch.committed_at)
+        for batch in batch_rows
+        if batch.user_id == owner
+    }
+    committed_at: dict[uuid.UUID, dt.datetime] = {}
+    unproven: set[uuid.UUID] = set()
+    for row in rows:
+        if row.import_batch_id is None:
+            continue
+        stamp = by_batch_account.get((row.import_batch_id, row.account_id))
+        if stamp is None:
+            unproven.add(row.id)
+        else:
+            committed_at[row.id] = stamp
+    return committed_at, unproven
+
+
 def _trade_date(row: Any) -> dt.date | None:
     value = row.trade_date
     if isinstance(value, dt.date):
@@ -158,6 +198,7 @@ def _visible_trade_rows(
     period_start: dt.date,
     period_end: dt.date,
     knowledge: object | None = None,
+    batch_committed_at: Mapping[uuid.UUID, dt.datetime] | None = None,
 ) -> tuple[list[Any], dt.datetime | None]:
     visible: list[Any] = []
     data_as_of: dt.datetime | None = None
@@ -173,7 +214,8 @@ def _visible_trade_rows(
         row_date = _trade_date(row)
         if traded_at is None or row_date is None:
             continue
-        available_at = _available_at(row)
+        committed_at = batch_committed_at.get(row.id) if batch_committed_at is not None else None
+        available_at = _available_at(row, committed_at=committed_at)
         if available_at is None or available_at > calculation_as_of_normalized:
             continue
         if row_date < period_start or row_date > period_end:
@@ -376,9 +418,15 @@ def _observations(
     period_start: dt.date,
     period_end: dt.date,
     knowledge: object | None = None,
+    batch_committed_at: Mapping[uuid.UUID, dt.datetime] | None = None,
 ) -> tuple[list[Decimal], list[Decimal], list[Decimal], list[str], dt.datetime | None, bool]:
     visible, data_as_of = _visible_trade_rows(
-        rows, calculation_as_of, period_start, period_end, knowledge
+        rows,
+        calculation_as_of,
+        period_start,
+        period_end,
+        knowledge,
+        batch_committed_at,
     )
     evidence_ids: list[str] = []
     for row in rows:
@@ -400,8 +448,10 @@ def _trade_provider(source: str) -> str:
     return "user_input" if source == "manual" else "user_import"
 
 
-def _trade_evidence(row: Any) -> dict[str, Any] | None:
-    available_at = _available_at(row)
+def _trade_evidence(
+    row: Any, *, committed_at: dt.datetime | None = None
+) -> dict[str, Any] | None:
+    available_at = _available_at(row, committed_at=committed_at)
     if available_at is None:
         return None
     stamp = available_at.isoformat()
@@ -458,19 +508,31 @@ def _compute_outcome_metrics(
     calculation_as_of: dt.datetime,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dt.datetime | None, dict[str, list[str]]]:
     window = f"{start.isoformat()}/{end.isoformat()}"
+    rows = _trade_rows(conn, owner, trade_ids)
+    batch_committed_at, unproven_imports = _batch_commitments(conn, owner, rows)
     pending, calendar_available = period_pending_state(end, now=calculation_as_of, conn=conn)
     if pending:
         pending_gaps = ["not_yet_published"]
         if not calendar_available:
             pending_gaps.append("no_source")
-        return {name: _stat(window) for name in METRIC_NAMES}, [], None, dict.fromkeys(
-            METRIC_NAMES, pending_gaps
-        )
-    rows = _trade_rows(conn, owner, trade_ids)
+        metric_reasons = dict.fromkeys(METRIC_NAMES, pending_gaps)
+        if unproven_imports:
+            metric_reasons["trades.import_commit_unproven"] = ["no_source"]
+        return {name: _stat(window) for name in METRIC_NAMES}, [], None, metric_reasons
     holding, _, _, _, data_as_of, has_open_positions = _observations(
-        rows, calculation_as_of, start, end
+        rows,
+        calculation_as_of,
+        start,
+        end,
+        batch_committed_at=batch_committed_at,
     )
-    visible_rows, _ = _visible_trade_rows(rows, calculation_as_of, start, end)
+    visible_rows, _ = _visible_trade_rows(
+        rows,
+        calculation_as_of,
+        start,
+        end,
+        batch_committed_at=batch_committed_at,
+    )
     pairs = _closed_trade_observations(visible_rows)
     benchmark, drawdowns, excess, market_as_of = _benchmark_and_drawdowns(
         conn, pairs, calculation_as_of
@@ -496,7 +558,7 @@ def _compute_outcome_metrics(
         metric_gaps["excess_return"] = ["no_source"]
     evidence: list[dict[str, Any]] = []
     for row in visible_rows:
-        item = _trade_evidence(row)
+        item = _trade_evidence(row, committed_at=batch_committed_at.get(row.id))
         if item is not None:
             evidence.append(item)
     if not benchmark:
@@ -507,6 +569,8 @@ def _compute_outcome_metrics(
         for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
             metrics[name]["value"] = None
             metric_gaps[name] = ["no_source"]
+    if unproven_imports:
+        metric_gaps["trades.import_commit_unproven"] = ["no_source"]
     return metrics, evidence, data_as_of, metric_gaps
 
 
@@ -555,16 +619,17 @@ def _snapshot_items(
     metric_gaps = []
     for name, reasons in metric_reasons.items():
         for reason in reasons:
-            message = metric_messages[name]
+            message = (
+                "导入批次提交时点不可证实"
+                if name == "trades.import_commit_unproven"
+                else metric_messages[name]
+            )
             if reason == "no_source" and "not_yet_published" in reasons:
                 message = "交易日历缺失，发布时点未验证"
-            metric_gaps.append(
-                {
-                    "key": f"outcome_metrics.{name}",
-                    "reason": reason,
-                    "message": message,
-                }
-            )
+            key = name if name == "trades.import_commit_unproven" else f"outcome_metrics.{name}"
+            gap = {"key": key, "reason": reason, "message": message}
+            if gap not in metric_gaps:
+                metric_gaps.append(gap)
     if metric_gaps:
         block["gaps"] = metric_gaps
     plan_snapshot = {
@@ -762,13 +827,14 @@ def _timeline_data(
         result.extend({"kind": "plan_version", "at": r.created_at.isoformat(), "resource_id": str(r.id), "version_no": r.version_no, "evidence_ids": [plan_evidence[str(r.id)]] if str(r.id) in plan_evidence else []} for r in plan_rows)
     if current is not None and current.trade_ids:
         trade_rows = conn.execute(select(trades).where(trades.c.id.in_(current.trade_ids), trades.c.user_id == owner)).all()
+        batch_committed_at, _ = _batch_commitments(conn, owner, trade_rows)
         trade_evidence = {
             str(item.get("value")): str(item.get("id"))
             for item in _snapshot(conn, owner, current.snapshot_id).get("evidence", [])
             if item.get("key") == "trade"
         }
         for row in trade_rows:
-            available_at = _available_at(row)
+            available_at = _available_at(row, committed_at=batch_committed_at.get(row.id))
             if available_at is None:
                 continue
             result.append(
