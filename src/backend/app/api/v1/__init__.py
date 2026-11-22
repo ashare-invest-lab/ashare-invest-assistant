@@ -24,6 +24,7 @@ from app.api.v1 import (
     promotions,
     quotes,
     restrictions,
+    reviews,
     risk_controls,
     sector_flows,
     securities,
@@ -82,6 +83,7 @@ router.include_router(daily_reports.router)
 router.include_router(promotions.router)
 router.include_router(restrictions.router)
 router.include_router(risk_controls.router)
+router.include_router(reviews.router)
 
 router.include_router(tracking_router)
 router.include_router(plans_router)

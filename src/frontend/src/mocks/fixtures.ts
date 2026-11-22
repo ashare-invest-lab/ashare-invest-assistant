@@ -567,7 +567,7 @@ export const TERMINAL_ACCOUNT: TerminalAccount = {
 };
 
 export const TERMINAL_ROWS: TerminalRow[] = (() => {
-  const rows = SPECS.map((s): TerminalRow & { _w: number; _added: number } => {
+  const rows = SPECS.map((s): TerminalRow & { security_type: 'stock' | null; _w: number; _added: number } => {
     const sg = suggestionOf(s.code)!;
     const q = QUOTES.find((x) => x.security_code === s.code)!;
     const pos = PORTFOLIO.positions.find((p) => p.security_code === s.code);

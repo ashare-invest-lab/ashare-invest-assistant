@@ -30,7 +30,7 @@ wrapup_log "回滚代码目标：$WRAPUP_ROLLBACK_HEAD（部署前 team-b 头，
 
 NEWDB="${WRAPUP_PG_DB:-}"
 if [ -z "$NEWDB" ]; then
-  NEWDB="aia_rollback_$(date -u +%Y%m%dT%H%M%S)"
+  NEWDB="aia_rollback_$(date -u +%Y%m%dt%H%M%S)"
   # 本机模拟必须 o69_
   case "${WRAPUP_PG_CONTAINER:-}" in
     o61-pg|o61-*) NEWDB="o69_rollback_dst" ;;
