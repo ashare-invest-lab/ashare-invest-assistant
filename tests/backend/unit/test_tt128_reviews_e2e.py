@@ -395,14 +395,32 @@ def test_timeline_separates_simulated_tracking_from_actual_trade_evidence(http: 
     _require_route(http, "/api/v1/reviews/{identifier}")
     review_id, version_id, snapshot_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     window = "2025-01-02/2025-01-08"
-    simulated = {
-        name: {"value": "12.00", "n": 10, "window": window, "small_sample": True}
+    empty_metrics = {
+        name: {"value": None, "n": 0, "window": window, "small_sample": True}
         for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown")
+    }
+    simulated_tracking = {
+        "source": "simulated_tracking",
+        "results": [
+            {
+                "state": "complete",
+                "entry_at": "2025-01-02T01:30:00+00:00",
+                "entry_price": "10.00",
+                "exit_at": "2025-01-08T08:00:00+00:00",
+                "exit_price": "11.20",
+                "benchmark_code": BENCHMARK,
+                "return_pct": "12.00",
+                "benchmark_return_pct": "3.00",
+                "excess_pct": "9.00",
+                "max_drawdown_pct": "-1.00",
+            }
+        ],
     }
     items = {
         "period_start": "2025-01-02",
         "period_end": "2025-01-08",
-        "outcome_metrics": simulated,
+        "outcome_metrics": empty_metrics,
+        "simulated_tracking": simulated_tracking,
         "attribution": {"judgement": [], "execution": [], "market": []},
         "evidence": [],
         "data_status": "partial",
@@ -413,7 +431,7 @@ def test_timeline_separates_simulated_tracking_from_actual_trade_evidence(http: 
         conn.execute(insert(reviews).values(id=review_id, user_id=OWNER, security_code=CODE, period_start=dt.date(2025, 1, 2), period_end=DAY, current_version_id=None))
         raw = hashlib.sha256(str(snapshot_id).encode()).hexdigest()
         conn.execute(insert(data_snapshots).values(id=snapshot_id, user_id=OWNER, purpose="review", items=items, hash=raw))
-        conn.execute(insert(review_versions).values(id=version_id, review_id=review_id, version_no=1, plan_version_ids=[], trade_ids=[], outcome_metrics=simulated, attribution=items["attribution"], tags=[], snapshot_id=snapshot_id))
+        conn.execute(insert(review_versions).values(id=version_id, review_id=review_id, version_no=1, plan_version_ids=[], trade_ids=[], outcome_metrics=empty_metrics, attribution=items["attribution"], tags=[], snapshot_id=snapshot_id))
         conn.execute(update(reviews).where(reviews.c.id == review_id).values(current_version_id=version_id))
     response = http.get(f"/api/v1/reviews/{review_id}")
     assert response.status_code == 200, response.text
@@ -421,6 +439,7 @@ def test_timeline_separates_simulated_tracking_from_actual_trade_evidence(http: 
     assert payload["evidence"] == []
     assert [item["kind"] for item in payload["timeline"]] == ["review_version"]
     assert payload["current_version"]["attribution"]["execution"] == []
+    assert payload["current_version"]["outcome_metrics"] == empty_metrics
     for metric in payload["current_version"]["outcome_metrics"].values():
         assert metric["value"] is None
         assert metric["n"] == 0
