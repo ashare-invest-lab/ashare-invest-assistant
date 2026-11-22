@@ -2,7 +2,9 @@
 from __future__ import annotations
 import asyncio
 import datetime as dt
+import inspect
 import json
+import socket
 import uuid
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -111,6 +113,22 @@ async def _read_stream(app: object, last_id: str | None) -> str:
         if not task.done():
             task.cancel()
     return b"".join(messages).decode()
+
+
+@pytest.fixture(autouse=True)
+def deny_network(monkeypatch: pytest.MonkeyPatch):
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+        raise AssertionError("禁止真实网络连接")
+
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    yield
+    assert calls == []
+
+
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     rds = FakeRedis()
@@ -130,6 +148,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr("app.workers.jobs._engine", lambda _settings: engine)
     monkeypatch.setattr(realtime_collect, "_open_clock", lambda *_args: SimpleNamespace(
         trade_date=NOW.date(), session=SimpleNamespace(value="morning")))
+    monkeypatch.setattr(realtime_collect, "verification_is_offline", lambda: False, raising=False)
     monkeypatch.setattr(realtime_collect, "active_licence_id", lambda *_args: uuid.UUID(int=2))
     monkeypatch.setattr(realtime_collect, "_owned_codes", lambda *_args: [row["code"] for row in state.rows])
     monkeypatch.setattr(realtime_collect, "_fetch_with_egress", lambda *_args, **_kwargs: (200, state.rows))
@@ -139,7 +158,10 @@ def world(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return SimpleNamespace(app=app, rds=rds, state=state, settings=settings)
 def _run(world: SimpleNamespace, source: str | None = None) -> int:
     settings = world.settings if source is None else _settings(source)
-    return realtime_collect.realtime_quotes_task(settings, owner=OWNER, now=NOW)
+    task = realtime_collect.realtime_quotes_task
+    if "redis_client" in inspect.signature(task).parameters:
+        return task(settings, owner=OWNER, now=NOW, redis_client=world.rds)
+    return task(settings, owner=OWNER, now=NOW)
 
 def _seed_stream_anchor(rds: FakeRedis) -> str:
     rds.seq += 1
