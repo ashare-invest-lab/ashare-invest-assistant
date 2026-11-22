@@ -227,6 +227,7 @@ def test_complete_intraday_fixture_uses_owner_same_batch_and_decimal_ratios() ->
         result.basis.eligible,
         result.basis.observed,
     ) == ("intraday", 3, 3)
+    assert result.basis.observed_date == DAY
     assert result.breadth is not None
     assert (result.breadth.up, result.breadth.down, result.breadth.flat) == (1, 1, 1)
     assert (
@@ -411,6 +412,32 @@ def test_pre_open_and_non_trading_use_previous_final_bar_as_stale(
         and result.basis is not None
         and result.basis.mode == "close"
     )
+    assert result.basis.observed_date == previous
+
+
+def test_previous_close_fallback_does_not_mix_trade_dates() -> None:
+    previous = DAY - dt.timedelta(days=1)
+    older = DAY - dt.timedelta(days=2)
+    result = overview(
+        Connection(
+            daily_rows=[
+                daily("600000.SH", trade_date=previous, amount="100.00"),
+                daily("000001.SZ", trade_date=older, amount="999.00"),
+                daily("000300.SH", trade_date=previous),
+            ]
+        ),
+        dt.datetime(2031, 2, 3, 8, tzinfo=BEIJING),
+        MarketSession.PRE_OPEN,
+    )
+    assert result.basis is not None
+    assert (result.basis.observed_date, result.basis.observed, result.basis.missing) == (
+        previous,
+        1,
+        1,
+    )
+    assert result.breadth is not None and (result.breadth.up, result.breadth.down) == (1, 0)
+    assert result.turnover_total is None
+    assert result.data_status is DataStatus.PARTIAL
 
 
 def test_bj_gate_stays_closed_below_twenty_confirmed_codes() -> None:
