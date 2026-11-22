@@ -9,8 +9,10 @@ with a hand-built MarketOverview.
 from __future__ import annotations
 
 import datetime as dt
+import operator
 import socket
 import uuid
+from collections.abc import Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -20,12 +22,29 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.elements import (
+    BooleanClauseList,
+    BindParameter,
+    False_,
+    Grouping,
+    Null,
+    True_,
+    UnaryExpression,
+)
 
 from app.aggregates import models as aggregate_models
 from app.api.v1 import aggregates as routes
 from app.auth import deps
 from app.auth.sessions import SESSION_COOKIE
 from app.common.errors import install_exception_handlers
+from app.db.tables.licences import user_data_licence_holds, user_data_licence_status
+from app.db.tables.market import (
+    daily_bars,
+    quotes_snapshot,
+    securities,
+    security_listing_status_history,
+)
 from app.schemas.enums import MarketSession
 
 
@@ -35,6 +54,19 @@ LICENCE_B = uuid.UUID("00000000-0000-0000-0000-00000000a220")
 QUERY = dt.datetime(2026, 11, 13, 10, 0, tzinfo=dt.timezone.utc)
 TRADE_DATE = dt.date(2026, 11, 13)
 SHANGHAI = dt.timezone(dt.timedelta(hours=8))
+
+
+def fixture_settings() -> SimpleNamespace:
+    # config/realtime.yaml sets quote_interval_s=15 and stale_threshold_s=null.
+    # RealtimeIntervals.effective_stale_threshold_s therefore evaluates to 30.
+    return SimpleNamespace(
+        business=SimpleNamespace(
+            market_rules={},
+            realtime=SimpleNamespace(
+                intervals=SimpleNamespace(effective_stale_threshold_s=30)
+            ),
+        )
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -79,11 +111,303 @@ class OverviewState:
     )
 
 
+class FixtureRow:
+    def __init__(self, mapping: Mapping[str, object]) -> None:
+        self._mapping = dict(mapping)
+
+
+class FixtureResult:
+    def __init__(self, rows: list[FixtureRow]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[FixtureRow]:
+        return self._rows
+
+    def first(self) -> FixtureRow | None:
+        return self._rows[0] if self._rows else None
+
+    def scalar_one_or_none(self) -> object | None:
+        if len(self._rows) > 1:
+            raise AssertionError("fixture scalar query returned multiple rows")
+        row = self.first()
+        return next(iter(row._mapping.values())) if row is not None else None
+
+
+def _table_key(table: object) -> tuple[object, object]:
+    return (getattr(table, "schema", None), getattr(table, "name", None))
+
+
+def _record(table: object, values: Mapping[str, object]) -> dict[tuple[tuple[object, object], str], object]:
+    return {
+        (_table_key(table), column.name): values.get(column.name)
+        for column in table.c
+    }
+
+
+def _expression_value(expression: object, values: Mapping[tuple[tuple[object, object], str], object]) -> object:
+    if isinstance(expression, Null):
+        return None
+    if isinstance(expression, True_):
+        return True
+    if isinstance(expression, False_):
+        return False
+    if isinstance(expression, BindParameter):
+        return expression.value
+    if isinstance(expression, Grouping):
+        return _expression_value(expression.element, values)
+    if isinstance(expression, UnaryExpression):
+        return _expression_value(expression.element, values)
+    table = getattr(expression, "table", None)
+    name = getattr(expression, "name", None)
+    if table is not None and name is not None:
+        key = (_table_key(table), name)
+        if key not in values:
+            raise AssertionError(f"unknown fixture SQL column: {expression!r}")
+        return values[key]
+    raise AssertionError(f"unsupported fixture SQL value: {expression!r}")
+
+
+def _matches(expression: object, values: Mapping[tuple[tuple[object, object], str], object]) -> bool:
+    if isinstance(expression, BooleanClauseList):
+        parts = [_matches(part, values) for part in expression.clauses]
+        if expression.operator is operators.and_:
+            return all(parts)
+        if expression.operator is operators.or_:
+            return any(parts)
+        raise AssertionError(f"unsupported fixture boolean operator: {expression.operator!r}")
+    if isinstance(expression, UnaryExpression):
+        if expression.operator is operators.inv:
+            return not _matches(expression.element, values)
+        return bool(_expression_value(expression, values))
+    left = _expression_value(expression.left, values)
+    right = _expression_value(expression.right, values)
+    operation = expression.operator
+    if operation in {operator.eq, operators.eq}:
+        return left == right
+    if operation in {operator.ne, operators.ne}:
+        return left != right
+    if operation in {operator.lt, operators.lt}:
+        return left is not None and right is not None and left < right
+    if operation in {operator.le, operators.le}:
+        return left is not None and right is not None and left <= right
+    if operation in {operator.gt, operators.gt}:
+        return left is not None and right is not None and left > right
+    if operation in {operator.ge, operators.ge}:
+        return left is not None and right is not None and left >= right
+    if operation is operators.in_op:
+        return left in (right or ())
+    if operation is operators.not_in_op:
+        return left not in (right or ())
+    if operation is operators.is_:
+        return left is right
+    if operation is operators.is_not:
+        return left is not right
+    raise AssertionError(f"unsupported fixture SQL operator: {operation!r}")
+
+
+def _fact_day(fact: MarketFact) -> dt.date:
+    return fact.ts.astimezone(SHANGHAI).date()
+
+
 class FixtureConnection:
-    """Read-only connection holder for future T-B210 production queries."""
+    """Read-only SQLAlchemy-shaped connection over the test's fictional facts."""
 
     def __init__(self, state: OverviewState) -> None:
         self.state = state
+
+    def _securities(self) -> list[dict[tuple[tuple[object, object], str], object]]:
+        names = {"600000.SH": "示例银行", "000001.SZ": "演示电子"}
+        by_code: dict[str, MarketFact] = {}
+        for fact in self.state.facts:
+            by_code.setdefault(fact.code, fact)
+        return [
+            _record(
+                securities,
+                {
+                    "code": fact.code,
+                    "type": fact.kind,
+                    "name": names.get(fact.code, fact.code),
+                    "exchange": fact.code.rsplit(".", 1)[-1],
+                    "listing_status": fact.listing_status,
+                    "list_date": None,
+                    "delist_date": None,
+                    "risk_flag": fact.risk_flag,
+                },
+            )
+            for fact in by_code.values()
+        ]
+
+    def _listing_history(self) -> list[dict[tuple[tuple[object, object], str], object]]:
+        by_code: dict[str, dict[dt.date, str]] = {}
+        for fact in self.state.facts:
+            by_code.setdefault(fact.code, {})[_fact_day(fact)] = fact.listing_status
+        rows: list[dict[tuple[tuple[object, object], str], object]] = []
+        for code, statuses in by_code.items():
+            days = sorted(statuses)
+            for index, day in enumerate(days):
+                rows.append(
+                    _record(
+                        security_listing_status_history,
+                        {
+                            "code": code,
+                            "listing_status": statuses[day],
+                            "valid_from": day,
+                            "valid_until": days[index + 1] if index + 1 < len(days) else None,
+                        },
+                    )
+                )
+        return rows
+
+    def _quotes(self) -> list[dict[tuple[tuple[object, object], str], object]]:
+        rows = []
+        for fact in self.state.facts:
+            if fact.close is not None:
+                continue
+            payload = {
+                key: value
+                for key, value in {
+                    "pct_change": fact.pct_change,
+                    "volume": fact.volume,
+                    "amount": fact.amount,
+                    "is_suspended": fact.is_suspended,
+                }.items()
+                if value is not None
+            }
+            rows.append(
+                _record(
+                    quotes_snapshot,
+                    {
+                        "code": fact.code,
+                        "ts": fact.ts,
+                        "price": fact.price,
+                        "pct_change": fact.pct_change,
+                        "payload": {"price": fact.price, **payload},
+                        "source": fact.source,
+                        "source_licence_id": fact.source_licence_id,
+                        "row_id": uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"quote:{fact.code}:{fact.ts}:{fact.fetched_at}:{fact.source_licence_id}",
+                        ),
+                        "revision": 0,
+                        "content_fingerprint": None,
+                        "volume": fact.volume,
+                        "amount": fact.amount,
+                        "is_suspended": fact.is_suspended,
+                        "limit_up": None,
+                        "limit_down": None,
+                        "batch_id": None,
+                        "fetched_at": fact.fetched_at,
+                    },
+                )
+            )
+        return rows
+
+    def _daily_bars(self) -> list[dict[tuple[tuple[object, object], str], object]]:
+        return [
+            _record(
+                daily_bars,
+                {
+                    "code": fact.code,
+                    "trade_date": _fact_day(fact),
+                    "adj_type": "none",
+                    "close": fact.close,
+                    "pre_close": fact.pre_close,
+                    "volume": fact.volume,
+                    "amount": fact.amount,
+                    "is_suspended": fact.is_suspended,
+                    "source": fact.source,
+                    "source_licence_id": fact.source_licence_id,
+                    "fetched_at": fact.fetched_at,
+                },
+            )
+            for fact in self.state.facts
+            if fact.close is not None
+        ]
+
+    def _licences(self) -> list[dict[tuple[tuple[object, object], str], object]]:
+        owned_facts = [fact for fact in self.state.facts if fact.source == "mairui"]
+        licence = next(
+            (
+                fact.source_licence_id
+                for fact in owned_facts
+                if fact.source_licence_id is not None
+            ),
+            None,
+        )
+        if licence is None:
+            licence = next(
+                (
+                    fact.source_licence_id
+                    for fact in self.state.facts
+                    if fact.source_licence_id is not None
+                ),
+                None,
+            )
+        if licence is None:
+            return []
+        return [
+            {
+                **_record(
+                    user_data_licence_status,
+                    {
+                        "id": licence,
+                        "user_id": OWNER,
+                        "status": "active",
+                        "deleted_at": None,
+                        "paused_until": None,
+                        "expires_on": None,
+                    },
+                ),
+                **_record(user_data_licence_holds, {"user_id": None}),
+            }
+        ]
+
+    def _candidates(self, statement: Any) -> list[dict[tuple[tuple[object, object], str], object]]:
+        selected = list(statement.selected_columns)
+        if not selected:
+            raise AssertionError(f"fixture cannot execute statement without columns: {statement!r}")
+        table = getattr(selected[0], "table", None)
+        name = getattr(table, "name", None)
+        if name == securities.name:
+            return self._securities()
+        if name == security_listing_status_history.name:
+            return self._listing_history()
+        if name == quotes_snapshot.name:
+            return self._quotes()
+        if name == daily_bars.name:
+            return self._daily_bars()
+        if name == user_data_licence_status.name:
+            return self._licences()
+        raise AssertionError(f"unknown fixture SELECT source: {statement!r}")
+
+    def execute(self, statement: Any) -> FixtureResult:
+        if not hasattr(statement, "selected_columns") or not hasattr(statement, "_where_criteria"):
+            raise AssertionError(f"fixture only executes SQLAlchemy SELECT statements: {statement!r}")
+        candidates = [
+            values
+            for values in self._candidates(statement)
+            if all(_matches(clause, values) for clause in statement._where_criteria)
+        ]
+        for ordering in reversed(list(statement._order_by_clauses)):
+            descending = isinstance(ordering, UnaryExpression) and ordering.modifier is operators.desc_op
+            expression = ordering.element if isinstance(ordering, UnaryExpression) else ordering
+            candidates.sort(
+                key=lambda values: (
+                    _expression_value(expression, values) is None,
+                    _expression_value(expression, values),
+                ),
+                reverse=descending,
+            )
+        rows = [
+            FixtureRow(
+                {
+                    column.key: _expression_value(column, values)
+                    for column in statement.selected_columns
+                }
+            )
+            for values in candidates
+        ]
+        return FixtureResult(rows)
 
 
 class FixtureEngine:
@@ -164,7 +488,7 @@ def close_fact(
 def world(monkeypatch: pytest.MonkeyPatch) -> OverviewState:
     state = OverviewState()
     engine = FixtureEngine(state)
-    settings = SimpleNamespace(business=SimpleNamespace(market_rules={}))
+    settings = fixture_settings()
 
     class FrozenDateTime(dt.datetime):
         @classmethod
@@ -270,9 +594,7 @@ def test_market_overview_requires_authentication(monkeypatch: pytest.MonkeyPatch
     app.include_router(routes.router, prefix="/api/v1")
     app.dependency_overrides[deps.get_engine] = lambda: FixtureEngine(OverviewState())
     app.dependency_overrides[deps.get_session_store] = lambda: SimpleNamespace(get=lambda _: None)
-    app.dependency_overrides[deps.get_settings] = lambda: SimpleNamespace(
-        business=SimpleNamespace(market_rules={})
-    )
+    app.dependency_overrides[deps.get_settings] = fixture_settings
     monkeypatch.setattr(routes, "market_clock", lambda conn, now, rules: OverviewState().clock)
     response = TestClient(app).get("/api/v1/market/overview")
     assert response.status_code == 401
