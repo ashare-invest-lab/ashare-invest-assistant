@@ -1,4 +1,5 @@
 """Coverage policy counterexamples use synthetic counts, no services or network."""
+import ast
 import io
 import json
 import os
@@ -316,6 +317,90 @@ def test_wait_timeout_and_invalid_artifact_fail_without_fallback(monkeypatch):
     sleep.assert_not_called()
 
 
+def _workflow_if(expression, event, base_ref):
+    expression = expression.removeprefix("${{").removesuffix("}}").strip()
+    expression = expression.replace("!cancelled()", "True")
+    expression = expression.replace("hashFiles('src/backend/.venv/bin/python') != ''", "True")
+    expression = expression.replace("github.event_name", repr(event))
+    expression = expression.replace("github.base_ref", repr(base_ref))
+    tree = ast.parse(expression.replace("&&", " and ").replace("||", " or "), mode="eval")
+    return _eval_workflow_ast(tree.body)
+
+
+def _eval_workflow_ast(node):
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.BoolOp):
+        values = [_eval_workflow_ast(value) for value in node.values]
+        if isinstance(node.op, ast.And):
+            return all(values)
+        if isinstance(node.op, ast.Or):
+            return any(values)
+    if isinstance(node, ast.Compare):
+        assert len(node.ops) == len(node.comparators) == 1
+        left, right = _eval_workflow_ast(node.left), _eval_workflow_ast(node.comparators[0])
+        if isinstance(node.ops[0], ast.Eq):
+            return left == right
+        if isinstance(node.ops[0], ast.NotEq):
+            return left != right
+    raise AssertionError(f"Unsupported workflow expression: {ast.dump(node)}")
+
+
+def _assert_coverage_event_routing(workflow):
+    jobs = workflow["jobs"]
+    ready_steps = jobs["coverage-base"]["steps"]
+    notice = next(
+        step for step in ready_steps if step.get("name") == "叠加 PR 跳过 main 覆盖率棘轮"
+    )
+    wait = next(step for step in ready_steps
+                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", ""))
+    backend_steps = jobs["backend"]["steps"]
+    freezes = [step for step in backend_steps
+               if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
+    ratchets = [step for step in backend_steps if step.get("id") == "coverage_ratchet"]
+    assert len(freezes) == len(ratchets) == 1
+    freeze, ratchet_step = freezes[0], ratchets[0]
+
+    scenarios = [("pull_request", "be/T-B213", False),
+                 ("pull_request", "main", True),
+                 ("push", "", True)]
+    for event, base_ref, trusted in scenarios:
+        assert _workflow_if(notice["if"], event, base_ref) is (
+            event == "pull_request" and not trusted
+        )
+        assert _workflow_if(wait["if"], event, base_ref) is trusted
+        assert _workflow_if(freeze["if"], event, base_ref) is trusted
+        assert _workflow_if(ratchet_step["if"], event, base_ref) is trusted
+
+
+def test_coverage_workflow_routes_only_trusted_main_measurements():
+    import yaml
+
+    path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    _assert_coverage_event_routing(workflow)
+
+
+def test_coverage_workflow_condition_mutation_fails():
+    import yaml
+
+    path = Path(__file__).resolve().parents[3] / ".github/workflows/ci.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    mutant = deepcopy(workflow)
+    ready_steps = mutant["jobs"]["coverage-base"]["steps"]
+    wait = next(step for step in ready_steps
+                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", ""))
+    wait["if"] = "${{ True }}"
+    for step in mutant["jobs"]["backend"]["steps"]:
+        if ("scripts/ci/coverage_ratchet_base.py" in step.get("run", "")
+                or step.get("id") == "coverage_ratchet"):
+            step["if"] = step["if"].replace(
+                "(github.event_name != 'pull_request' || github.base_ref == 'main') && ", ""
+            )
+    with pytest.raises(AssertionError):
+        _assert_coverage_event_routing(mutant)
+
+
 def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     import yaml
 
@@ -339,9 +424,15 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
     assert ready["name"] == "trusted main coverage readiness"
     assert ready["timeout-minutes"] == 35
     assert ready["permissions"] == {"contents": "read", "actions": "read"}
-    commands = [step["run"] for step in ready["steps"] if "run" in step]
+    commands = [step["run"] for step in ready["steps"]
+                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
     assert len(commands) == 1 and "--wait-for-main-seconds 1800" in commands[0]
     assert "pytest" not in commands[0] and "rerun" not in commands[0]
+    notice = next(step for step in ready["steps"]
+                  if step.get("name") == "叠加 PR 跳过 main 覆盖率棘轮")
+    assert notice["if"] == "${{ github.event_name == 'pull_request' && github.base_ref != 'main' }}"
+    wait = next(step for step in ready["steps"] if step.get("run") == commands[0])
+    assert wait["if"] == "${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}"
     steps = backend["steps"]
     freezes = [i for i, step in enumerate(steps)
                if "scripts/ci/coverage_ratchet_base.py" in step.get("run", "")]
@@ -355,6 +446,10 @@ def test_backend_runs_in_parallel_then_freezes_base_before_ratchet():
                              '--wait-for-main-seconds 1800 --output "${RUNNER_TEMP}/coverage-base.json" '
                              '--coverage-output "${RUNNER_TEMP}/coverage-base-coverage.json"')
     assert frozen["if"] == steps[ratchet_index]["if"]
+    assert frozen["if"] == (
+        "${{ !cancelled() && (github.event_name != 'pull_request' || "
+        "github.base_ref == 'main') && hashFiles('src/backend/.venv/bin/python') != '' }}"
+    )
     assert frozen["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert not frozen.get("continue-on-error", False)
 
@@ -397,7 +492,9 @@ def test_backend_pytest_adds_durations_preserving_argv_and_exit(tmp_path, monkey
     monkeypatch.setenv("RUNNER_TEMP", str(runner_temp))
     for name in ("PYTEST_COV_VERSION", "REQUESTS_VERSION", "URLLIB3_VERSION"):
         monkeypatch.setenv(name, "test-only")
-    result = subprocess.run(["bash", "-c", command], cwd=tmp_path, capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        ["bash", "-c", command], check=False, cwd=tmp_path, capture_output=True, text=True, timeout=10
+    )
     assert result.returncode == exit_code, result.stdout + result.stderr
     assert json.loads((runner_temp / "argv.json").read_text(encoding="utf-8")) == [
         "-m", "pytest", "-p", "scripts.ci.pytest_safe_failures",
