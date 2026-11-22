@@ -110,6 +110,7 @@ def _run(
     config_text: str | None = None,
     config_missing: bool = False,
     stale_override: str | None = None,
+    future_tolerance: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     source = tmp_path / "source"
     source.mkdir(parents=True, exist_ok=True)
@@ -144,6 +145,8 @@ def _run(
         env["INTRADAY_QUOTES_TS_KEY"] = "quotes:timestamp"
     if stale_override is not None:
         env["INTRADAY_QUOTES_STALE_S"] = stale_override
+    if future_tolerance is not None:
+        env["INTRADAY_QUOTES_FUTURE_TOLERANCE_S"] = future_tolerance
     return subprocess.run(
         ["sh", str(SCRIPT), "--from-dir", str(source), "--now", str(now)],
         capture_output=True,
@@ -348,8 +351,10 @@ def test_intraday_health_quotes_config_and_override(tmp_path: Path) -> None:
     ("minute_delta", "expected"),
     [
         (-30, "状态=正常"),
+        (-31, "状态=非交易时段"),
         (90, "状态=正常"),
         (91, "状态=非交易时段"),
+        (179, "状态=非交易时段"),
         (180, "状态=正常"),
         (300, "状态=正常"),
         (301, "状态=非交易时段"),
@@ -395,10 +400,55 @@ def test_intraday_health_quotes_future_timestamp(tmp_path: Path) -> None:
         heartbeat=_heartbeat(now),
         quotes_ts=now + 1,
         quotes_source="fake",
+        future_tolerance="0",
     )
     assert result.returncode == 2
     assert "状态=行情时间异常" in result.stdout
     assert "行情时间差=-1秒" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("offset", "tolerance", "expected_rc", "expected_state"),
+    [
+        (1, "5", 0, "状态=正常"),
+        (5, "5", 0, "状态=正常"),
+        (6, "5", 2, "状态=行情时间异常"),
+    ],
+)
+def test_intraday_health_quotes_future_tolerance(
+    tmp_path: Path,
+    offset: int,
+    tolerance: str,
+    expected_rc: int,
+    expected_state: str,
+) -> None:
+    now = _epoch()
+    result = _run(
+        tmp_path,
+        now=now,
+        heartbeat=_heartbeat(now),
+        quotes_ts=now + offset,
+        quotes_source="fake",
+        future_tolerance=tolerance,
+    )
+    assert result.returncode == expected_rc
+    assert expected_state in result.stdout
+    if offset <= int(tolerance):
+        assert "行情龄=0秒" in result.stdout
+
+
+def test_intraday_health_quotes_future_tolerance_invalid(tmp_path: Path) -> None:
+    now = _epoch()
+    result = _run(
+        tmp_path,
+        now=now,
+        heartbeat=_heartbeat(now),
+        quotes_ts=now,
+        quotes_source="fake",
+        future_tolerance="-1",
+    )
+    assert result.returncode == 2
+    assert "状态=配置错误" in result.stdout
 
 
 def test_intraday_health_quotes_enabled_without_timestamp_key(tmp_path: Path) -> None:

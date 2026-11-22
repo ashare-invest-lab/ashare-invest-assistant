@@ -1,6 +1,7 @@
 #!/bin/sh
 # 盘中行情只读健康检查。队列键默认不接入，待 I4 定稿，可由环境变量覆盖。
 # 行情时间戳由 ingest 写入 Redis，写入方待后端实现，未验证。
+# INTRADAY_QUOTES_FUTURE_TOLERANCE_S 默认 5 秒为工程参数，未验证。
 # 时区用 POSIX 串 CST-8（=Asia/Shanghai，无夏令时）：redis alpine 镜像不带 tzdata，写地名会静默回落 UTC。
 set -eu
 heartbeat_key=${INTRADAY_HEARTBEAT_KEY:-${INGEST_HEARTBEAT_KEY:-ingest:heartbeat}}
@@ -11,6 +12,7 @@ quotes_source=${REALTIME_QUOTES_SOURCE:-off}
 realtime_config=${INTRADAY_REALTIME_CONFIG:-/app/config/realtime.yaml}
 stale_after=${INTRADAY_STALE_AFTER_S:-120}
 queue_zero_alert=${INTRADAY_QUEUE_ZERO_ALERT_S:-900}
+quotes_future_tolerance=${INTRADAY_QUOTES_FUTURE_TOLERANCE_S:-5}
 health_log=${INTRADAY_HEALTH_LOG:-${AIA_RUNTIME:-/var/log/aia}/intraday-health.log}
 health_dir=$(dirname "$health_log")
 health_state=${INTRADAY_HEALTH_STATE:-$health_dir/intraday-health.state}
@@ -181,8 +183,8 @@ if [ "$in_session" != true ]; then
     emit "$(format_time) 状态=非交易时段 心跳龄=- 队列=- 说明=节假日未判定"
     exit 0
 fi
-if ! is_uint "$stale_after" || ! is_uint "$queue_zero_alert"; then
-    printf '%s\n' 'INTRADAY_STALE_AFTER_S 与 INTRADAY_QUEUE_ZERO_ALERT_S 必须是非负整数' >&2
+if ! is_uint "$stale_after" || ! is_uint "$queue_zero_alert" || ! is_uint "$quotes_future_tolerance"; then
+    emit "$(format_time) 状态=配置错误 心跳龄=- 队列=- 说明=INTRADAY_STALE_AFTER_S、INTRADAY_QUEUE_ZERO_ALERT_S 与 INTRADAY_QUOTES_FUTURE_TOLERANCE_S 必须是非负整数"
     exit 2
 fi
 heartbeat=''
@@ -291,7 +293,8 @@ elif [ "$quotes_connected" = true ]; then
         if [ "$config_stale" = null ]; then quote_stale_after=$((quote_interval * 2)); else quote_stale_after=$config_stale; fi
     fi
     quote_age=$((now - quotes_ts))
-    if [ "$quote_age" -lt 0 ]; then quote_state=时间异常
+    if [ "$quote_age" -lt "-$quotes_future_tolerance" ]; then quote_state=时间异常
+    elif [ "$quote_age" -lt 0 ]; then quote_age=0; quote_state=正常
     elif [ "$quote_age" -gt "$quote_stale_after" ]; then quote_state=过期
     else quote_state=正常
     fi
