@@ -85,6 +85,11 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
                 for code in codes
             ]
             result.__iter__.side_effect = lambda: iter(rows)
+        elif table == "app.user_data_licence_status":
+            result.first.return_value = None
+            result.scalar_one_or_none.return_value = None
+        elif table == "market.security_listing_status_history":
+            result.all.return_value = []
         elif table == "app.broker_position_snapshots":
             result.first.return_value = None
         elif table == "app.notifications":
@@ -120,7 +125,7 @@ def world(monkeypatch: pytest.MonkeyPatch) -> Any:
         business=SimpleNamespace(
             market_rules=None,
             realtime=SimpleNamespace(
-                intervals=SimpleNamespace(pro_tier1_interval_s=60)
+                intervals=SimpleNamespace(pro_tier1_interval_s=60, effective_stale_threshold_s=180)
             ),
         )
     )

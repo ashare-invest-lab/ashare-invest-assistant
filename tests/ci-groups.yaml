@@ -13,6 +13,7 @@
 # 对账命令：env -u MAIRUI_LICENCE PYTHONPATH=src/backend python -m pytest -c tests/pytest.ini tests/backend tests/replay --collect-only -q
 version: 1
 tests:
+  - {"file": "tests/backend/unit/test_tb199_g6_history.py", "group": "parallel", "keywords": ["synthetic history provider", "no network/PG/Redis/docker"], "unverified": false}
   - {"file": "src/backend/tests/test_daily_snapshot_ready.py", "group": "parallel", "keywords": ["MagicMock Connection/monkeypatch", "no real PG/Redis/docker/network"], "unverified": false}
   - {"file": "src/backend/tests/test_market_read_tb185.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic database and Redis; no external IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb163r4_bj_lock.py", "group": "parallel", "keywords": ["MagicMock/monkeypatch", "synthetic BJ list; no real PG", "read-only AST/SQL guards"], "unverified": false}
@@ -130,6 +131,7 @@ tests:
   - {"file": "tests/backend/unit/test_set_licence_retain_id_t_b141.py", "group": "serial_pg", "keywords": ["world->daily_bars_t70_support._open_temp_db", "real PG"], "unverified": false}
   - {"file": "tests/backend/unit/test_signal_rt_offline_cov_s6b.py", "group": "parallel", "keywords": ["fake Consumer/Redis/engine/runner", "socket connections denied", "runpy and automatically restored monkeypatch"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta169_top_data_as_of.py", "group": "parallel", "keywords": ["synthetic read-only connection and quote batch", "ASGI TestClient without network", "socket connections denied and monkeypatch restored"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb210_market_overview.py", "group": "parallel", "keywords": ["synthetic market rows", "offline migration structure", "no real database/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta172_confirmation_material.py", "group": "parallel", "keywords": ["synthetic raw bytes", "isolated hash list", "MagicMock or monkeypatch，不连真实 PG/Redis/docker/网络"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta172_entry_bj_gates.py", "group": "parallel", "keywords": ["read-only source/static scan", "monkeypatch", "tmp_path", "no real PG/Redis or docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta173_quotes_unusable_licence.py", "group": "serial_pg", "keywords": ["TT41_DATABASE_URL", "create_engine real PG", "fake DB/ASGI TestClient", "monkeypatch"], "unverified": false}
@@ -155,12 +157,20 @@ tests:
   - {"file": "tests/backend/unit/test_tb163r_trade_date_and_decimal.py", "group": "parallel", "keywords": ["pure _trade_date and confirm precision", "synthetic fixtures", "no database connection"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb195_intraday_field_fixtures.py", "group": "parallel", "keywords": ["read-only synthetic JSON and Pydantic models", "no network, PG, Redis or Docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb197_p0_plan.py", "group": "parallel", "keywords": ["pure in-memory planner", "socket monkeypatch; zero timer/thread", "synthetic calendar and universe"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb200_restrictions.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb202_restrictions_pit.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb239b_restriction_recheck.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb200c_restrictions_contract.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb228_consistency.py", "group": "parallel", "keywords": ["pure functions on synthetic gaps and datetimes", "no real PG/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_import_offline.py", "group": "parallel", "keywords": ["DbDeps fake", "deny_network monkeypatch", "tmp_path"], "unverified": false}
   - {"file": "tests/backend/unit/test_tdx_local_offline_s2.py", "group": "parallel", "keywords": ["deny_network monkeypatch", "tmp_path files and audit directories"], "unverified": false}
   - {"file": "tests/backend/unit/test_to63_gate_missing_apply_t_t44.py", "group": "serial_pg", "keywords": ["subprocess psql/apply-roles", "PGHOST", "real PG", "shared template connections"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt107_i3_p0_plan.py", "group": "parallel", "keywords": ["只读/纯内存计划器", "socket 拒绝出网", "无 PG/Redis/Docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb201_reviews.py", "group": "parallel", "keywords": ["pure metrics", "synthetic request validation", "no real DB/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb204_reviews_followup.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real DB/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt99_market_clock_fixed.py", "group": "serial_pg", "keywords": ["conn->pg_url", "market.trading_calendar on isolated PG; per-case truncate and rollback", "fixed aware instants and repository market_rules"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt99b_rc1_load_clock_fixed.py", "group": "serial_pg", "keywords": ["pg_url 隔离 PG / 每例事务回滚", "固定时刻 rc1.load / 冻结墙钟", "合成行情 / 无外网"], "unverified": false}
   - {"file": "tests/backend/unit/test_unix_test_resources_r_b2.py", "group": "parallel", "keywords": ["socket.connect/create_connection monkeypatch denies all connections", "synthetic /tmp paths", "no real PG/redis or docker/services"], "unverified": false}
@@ -178,3 +188,7 @@ tests:
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata and purge wiring", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "synthetic evidence"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt112_restrictions_r5_r6.py", "group": "parallel", "keywords": ["synthetic fixtures", "fake connection", "no network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt109_restrictions_r1_r3.py", "group": "parallel", "keywords": ["in-memory fake Engine/Connection", "socket connections denied", "synthetic UUID restrictions; no PG/Redis/docker/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt113_market_overview.py", "group": "parallel", "keywords": ["offline TestClient", "deny socket", "虚构夹具", "env -u MAIRUI_LICENCE", "不连 PG/Redis/外网"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt118_ingest_collection.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "denied sockets", "synthetic transport", "UUID batch idempotence"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt127_restrictions_e2e.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "create_app + TestClient HTTP", "虚构用户和证券", "env -u MAIRUI_LICENCE", "不连外网/麦蕊", "并发删除"], "unverified": false}
