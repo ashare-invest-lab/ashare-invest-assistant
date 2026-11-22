@@ -33,4 +33,4 @@
 ## 已知缺口（开启前必须先解决）
 
 - `market.realtime_quotes_fetch` 经 jobs 单一队列由 worker 消费，而 worker 只接 `aia_internal`（internal: true），没有 `aia_egress`；按 2026-11-09 编排者裁定 worker 不开出网，只有 ingest 可出网。
-- 因此仅把开关改为 `mairui` 无法连到麦蕊。需先裁定：任务改由 ingest（已有出网与单出口）执行，或另行审批给 worker 出网。本 PR 不改网络，也不改任务路由。
+- 因此仅把开关改为 `mairui` 无法连到麦蕊。2026-11-21 编排者裁定：不给 worker 出网，采集改由 ingest 单一出口执行（后端 T-B221）；该改动合入前不得开启。本文不改网络与任务路由。
