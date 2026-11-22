@@ -97,6 +97,7 @@ export const ENUMS = {
   plan_status: ['active', 'triggered', 'done', 'cancelled'],
   plan_condition_type: ['price_above', 'price_below', 'pct_change', 'indicator', 'event', 'date', 'custom'],
   plan_origin: ['manual', 'plan_draft'],
+  restriction_kind: ['blocklist', 'cooling_off', 'mute'],
   data_gap_scope: ['user', 'account', 'security', 'market'],
   // v0.2.9 内，T-A04（#33 ③）：证券主数据对账，只出现在 /admin/securities/reconciliation
   security_reconciliation_kind: ['vendor_stale_listed', 'vendor_unknown', 'quote_missing', 'quote_conflict', 'field_mismatch'],
@@ -186,6 +187,10 @@ export type PlanConditionKind = E<'plan_condition_kind'>;
 export type PlanStatus = E<'plan_status'>;
 export type PlanConditionType = E<'plan_condition_type'>;
 export type PlanOrigin = E<'plan_origin'>;
+export type RestrictionKind = E<'restriction_kind'>;
+/** 契约 §7.5 行内取值；§3 无独立枚举名，不进 ENUMS /meta/enums。 */
+export const RESTRICTION_TARGET_TYPES = ['security', 'strategy', 'instance'] as const;
+export type RestrictionTargetType = (typeof RESTRICTION_TARGET_TYPES)[number];
 export type DataGapScope = E<'data_gap_scope'>;
 export type SecurityReconciliationKind = E<'security_reconciliation_kind'>;
 export type SecurityReconciliationSource = E<'security_reconciliation_source'>;
