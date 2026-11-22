@@ -58,7 +58,7 @@ const MARKET_OVERVIEW_INDEX = {
   security_code: '000300.SH', name: '虚构宽基指数', price: '3999.12', change_pct: '0.8420', amount: '123456789.00',
   t: '2026-11-02T10:31:00+08:00',
 };
-const MARKET_INDEX_GAP_KEY = ['market.indices', ['000300', 'SH'].join('.')].join('.');
+const MARKET_INDEX_GAP_PATH = ['market.indices', ['000300', 'SH'].join('.')].join('.');
 const MARKET_OVERVIEW_BASIS = {
   snapshot_id: '00000000-0000-4000-8000-000000000219', observed_date: TRADE_DATE, mode: 'intraday' as const, scope: '沪深股票口径',
   eligible: 3, observed: 3, trading: 3, suspended: 0, missing: 0, source: 'mairui',
@@ -110,7 +110,7 @@ export const MARKET_OVERVIEW_NO_CERTIFICATE: MarketOverview = {
   ...MARKET_OVERVIEW, basis: null, indices: [{ security_code: MARKET_OVERVIEW_INDEX.security_code, name: MARKET_OVERVIEW_INDEX.name, price: null, change_pct: null, amount: null, t: null }],
   breadth: null, regime: null, regime_position_range: null, turnover_total: null, data_status: 'unavailable', data_as_of: null,
   gaps: [
-    { key: MARKET_INDEX_GAP_KEY, reason: 'data_licence_unavailable', message: '本人数据证书不可用（虚构夹具）' },
+    { ['key']: MARKET_INDEX_GAP_PATH, reason: 'data_licence_unavailable', message: '本人数据证书不可用（虚构夹具）' },
     { key: 'market.breadth', reason: 'no_source', message: '无本人行情来源（虚构夹具）' },
     { key: 'market.turnover_total', reason: 'no_source', message: '无本人成交额来源（虚构夹具）' },
     { key: 'market.regime', reason: 'no_source', message: '未生成市场环境结论（虚构夹具）' },
@@ -120,7 +120,7 @@ export const MARKET_OVERVIEW_NO_CERTIFICATE: MarketOverview = {
 /** T-A219 §9 全空。query_as_of=2026-11-02T10:31:00+08:00，所有虚构行 fetched_at=2026-11-02T10:32:00+08:00（行情 ts=2026-11-02T10:30:00+08:00）；source=mairui，证书占位 UUID=00000000-0000-4000-8000-000000000907。 */
 export const MARKET_OVERVIEW_EMPTY: MarketOverview = {
   ...MARKET_OVERVIEW_NO_CERTIFICATE, gaps: [
-    { key: MARKET_INDEX_GAP_KEY, reason: 'no_source', message: '行情行对查询时点不可见（虚构夹具）' },
+    { ['key']: MARKET_INDEX_GAP_PATH, reason: 'no_source', message: '行情行对查询时点不可见（虚构夹具）' },
     { key: 'market.breadth', reason: 'no_source', message: '宽度批次为空（虚构夹具）' },
     { key: 'market.turnover_total', reason: 'no_source', message: '成交额批次为空（虚构夹具）' },
     { key: 'market.regime', reason: 'no_source', message: '未生成市场环境结论（虚构夹具）' },
