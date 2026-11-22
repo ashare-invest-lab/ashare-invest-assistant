@@ -107,6 +107,7 @@ def test_cli_uses_pr_three_dot_diff_and_detects_source_moved_into_docs(tmp_path)
 def _condition(expression, event, docs_only):
     """Evaluate the workflow's small boolean expressions, rejecting other syntax."""
     expression = expression.removeprefix("${{").removesuffix("}}").strip()
+    expression = expression.replace("!cancelled()", "True")
     expression = expression.replace("github.event_name", repr(event))
     expression = expression.replace("needs.changes.outputs.docs_only", repr(docs_only))
     tree = ast.parse(expression.replace("&&", " and ").replace("||", " or "), mode="eval")
@@ -126,14 +127,18 @@ EMPTY_DOCS_JOBS = {
 
 def test_required_check_routing_and_audited_empty_jobs():
     jobs = WORKFLOW["jobs"]
-    assert set(jobs) == {"changes", *CHECKS, "contract-docs", *EMPTY_DOCS_JOBS}
+    assert set(jobs) == {"changes", "backend-lint", "backend-shard", *CHECKS,
+                         "contract-docs", *EMPTY_DOCS_JOBS}
     for key, name in CHECKS.items():
         assert jobs[key]["name"] == name
         if key in ALWAYS_RUN:
             assert "needs" not in jobs[key] and "if" not in jobs[key]
         else:
             assert jobs[key + "-docs"]["name"] == name
-            assert jobs[key]["needs"] == jobs[key + "-docs"]["needs"] == "changes"
+            if key == "backend":
+                assert jobs[key]["needs"][0] == jobs[key + "-docs"]["needs"] == "changes"
+            else:
+                assert jobs[key]["needs"] == jobs[key + "-docs"]["needs"] == "changes"
     for key, job in jobs.items():
         if _condition(job.get("if", "True"), "pull_request", "true"):
             commands = [line.strip() for step in job["steps"]
@@ -316,7 +321,9 @@ def test_workflow_ignores_pythonpath_injection(workflow_repo, tmp_path):
 
 
 @pytest.mark.parametrize("key,commands", [
-    ("backend", ["uv sync --frozen", "ruff check", "mypy", "-m pytest", "scripts/ci/check_coverage.py"]),
+    ("backend-lint", ["uv sync --frozen", "ruff check", "mypy"]),
+    ("backend-shard", ["uv sync --frozen", "-m pytest", "scripts/ci/shard_backend_tests.py"]),
+    ("backend", ["uv sync --frozen", "scripts/ci/check_coverage.py"]),
     ("frontend", ["pnpm install --frozen-lockfile", "pnpm exec eslint", "pnpm exec tsc",
                   "pnpm exec vitest run", "pnpm audit"]),
     ("contract", ["scripts/ci/check_contract.py", "schemathesis run"]),
