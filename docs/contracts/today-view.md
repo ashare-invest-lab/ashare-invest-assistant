@@ -124,7 +124,7 @@
 { server_time: "2026-11-10T10:40:00Z", trade_date: "2026-11-10", session: "closed",
   reconciliation: { status: "matched", as_of: null, diff_count: 0, important_count: 0 },
   daily_report: { date: "2026-11-10", status: "ready" },
-  focus: { items: [{ security_code: "000001.SZ", name: "示例甲", holding: { weight_pct: "12.5" }, suggestion: null }], more: false },
+  focus: { items: [{ security_code: "000001.SZ", name: "示例甲", security_type: "stock", holding: { weight_pct: "12.5" }, suggestion: null }], more: false },
   data_gaps: { items: [], more: false }, gaps: [] /* 其余块为空块 */ }
 // GET /daily-reports/2026-11-10
 { date: "2026-11-10", account: null,
