@@ -21,6 +21,7 @@ usage() {
            先 backup.sh，再在新工作树 start-stack.sh（迁移/重建/启动），再 halt-check（不 --repair）
            与 verify.sh；任一步失败则 rollback.sh --apply --backup-dir <本轮 DEST> --rollback-head <同步前 HEAD>（不传源库 --db）后退出。
   仓库根：AIA_SYNC_ROOT，或本脚本向上三级，或已存在的 /mnt/f/ashare-invest-assistant。
+  --source-env PATH：运行中原工作树的 .env 路径，默认 <仓库根>/deploy/env/.env。
   Windows：在 WSL 里执行，不要用 cmd.exe。不要 down -v。
 EOF
 }
@@ -42,11 +43,17 @@ if printf '%s' "$joined" | grep -Eq -- '(^|[[:space:]])down[[:space:]]+-v([[:spa
 fi
 
 APPLY=0
+SOURCE_ENV_ARG=""
 PASSTHRU=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --apply) APPLY=1; PASSTHRU+=("$1"); shift ;;
+    --source-env)
+      [ $# -ge 2 ] || { echo "ERROR: --source-env 需要路径" >&2; exit 2; }
+      SOURCE_ENV_ARG="$2"
+      shift 2
+      ;;
     --backup-dir|--target|--rollback-head|--volume-prefix|--container|--db|--volume|--out-dir)
       PASSTHRU+=("$1" "$2"); shift 2 ;;
     --repair)
@@ -96,6 +103,7 @@ resolve_root() {
 }
 
 ROOT="$(resolve_root)"
+SOURCE_ENV="${SOURCE_ENV_ARG:-$ROOT/deploy/env/.env}"
 git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "不是 git 仓库：$ROOT"
 [ -x "$WRAPUP_DIR/backup.sh" ] && [ -x "$WRAPUP_DIR/start-stack.sh" ] && [ -x "$WRAPUP_DIR/rollback.sh" ] \
   && [ -x "$WRAPUP_DIR/halt-check.sh" ] && [ -x "$WRAPUP_DIR/verify.sh" ] \
@@ -159,10 +167,26 @@ else
   git -C "$ROOT" worktree add --detach "$WT" "$TARGET"
 fi
 
-# 沿用原树 deploy/env（含项目名与卷前缀），不打印 .env 内容
-if [ -e "$ROOT/deploy/env" ] && [ ! -e "$WT/deploy/env" ]; then
-  ln -s "$ROOT/deploy/env" "$WT/deploy/env"
-  log "已把新工作树 deploy/env 符号链接到原仓库（不打印内容，以沿用 COMPOSE_PROJECT_NAME / AIA_VOLUME_PREFIX）"
+# 沿用原树 .env（含项目名与卷前缀），不打印 .env 内容。新工作树的
+# deploy/env 目录可能已由版本控制创建，因此只处理 .env 文件本身。
+target_env="$WT/deploy/env/.env"
+target_example="$WT/deploy/env/.env.example"
+if [ ! -e "$target_env" ] || {
+  [ -f "$target_env" ] && [ -f "$target_example" ] && cmp -s "$target_env" "$target_example"
+}; then
+  if [ ! -f "$SOURCE_ENV" ]; then
+    die "源 .env 不存在：$SOURCE_ENV；请用 --source-env 指定"
+  fi
+  mkdir -p "$(dirname "$target_env")"
+  if ! install -m 600 -- "$SOURCE_ENV" "$target_env"; then
+    die "安装源 .env 失败：$SOURCE_ENV"
+  fi
+  log "已复制原工作树 .env 到新工作树（缺失或占位文件，权限 600，不打印内容）"
+elif [ -f "$target_env" ]; then
+  if ! chmod 600 -- "$target_env"; then
+    die "无法收紧已有 .env 权限为 600：$target_env"
+  fi
+  log "已保留新工作树已有真实 .env，并收紧权限为 600"
 fi
 
 log "先备份"

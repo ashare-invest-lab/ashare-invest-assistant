@@ -6,7 +6,7 @@ import { withDailyDimensions } from './phase2Fixtures';
  * 不联网，不调用后端或麦蕊接口。生成过程是确定性的（固定种子），便于截图与测试复现。
  */
 import type {
-  Action, ConfidenceLevel, DataStatus, Dimension, DimensionView, Horizon, Lifecycle, ReasonCode, StrategyEvalState, TLeg,
+  Action, ConfidenceLevel, DataStatus, Dimension, DimensionView, Horizon, Lifecycle, ReasonCode, SecurityType, StrategyEvalState, TLeg,
   CandidateSignalState, RiskLevel,
 } from '../api/enums';
 import { ENUMS } from '../api/enums';
@@ -17,6 +17,7 @@ import type {
   SignalEvent, StrategyConclusion, Suggestion, SuggestionListItem, SuggestionSummary, TerminalAccount, TerminalRow,
   TextWithEvidence, WatchlistItem, WatchlistResponse, Divergence, HorizonAssessment, HorizonCap, HorizonReason,
 } from '../api/types';
+import type { StreamEventMap } from '../api/streamTypes';
 
 export const SAMPLE_LABEL = '示例数据';
 export const NOW = '2026-11-02T10:31:00+08:00';
@@ -158,13 +159,6 @@ function quoteGaps(s: SecSpec): Gap[] {
   return [];
 }
 
-// ---------------- 行情 / 自选 / 持仓 ----------------
-export const QUOTES: QuoteItem[] = SPECS.map((s) => ({
-  security_code: s.code, name: s.name, price: f2(s.price), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100),
-  volume: String(s.volume_lots * 100), amount: f2(s.volume_lots * 100 * s.price), t: s.data_as_of,
-  data_status: s.data_status, data_as_of: s.data_as_of, gaps: quoteGaps(s),
-}));
-
 // 来源元数据仅用于示例夹具，不增加 /quotes 响应键。
 export const STALE_QUOTE_EXAMPLE = {
   source: '示例',
@@ -174,6 +168,34 @@ export const STALE_QUOTE_EXAMPLE = {
     data_status: 'stale', data_as_of: '2026-11-02T08:20:00+08:00', gaps: [],
   } satisfies QuoteItem,
 };
+
+// ---------------- 行情 / 自选 / 持仓 ----------------
+export const QUOTES: QuoteItem[] = SPECS.map((s) => {
+  const quote: QuoteItem = {
+    security_code: s.code, name: s.name, price: f2(s.price), change_pct: f2(((s.price - s.prev_close) / s.prev_close) * 100),
+    volume: String(s.volume_lots * 100), amount: f2(s.volume_lots * 100 * s.price), t: s.data_as_of,
+    data_status: s.data_status, data_as_of: s.data_as_of, gaps: quoteGaps(s),
+  };
+  return s.code === STALE_QUOTE_EXAMPLE.item.security_code ? { ...quote, ...STALE_QUOTE_EXAMPLE.item } : quote;
+});
+
+/** 证书不可用的完整 /quotes 项，仅用于隔离测试。 */
+export const LICENCE_UNAVAILABLE_QUOTE_EXAMPLE: QuoteItem = {
+  security_code: '688099.SH', name: '示例证书不可用', price: null, change_pct: null, volume: null, amount: null, t: null,
+  data_status: 'unavailable', data_as_of: null,
+  gaps: [{ key: 'quotes', reason: 'data_licence_unavailable', message: '示例数据证书不可用' }],
+};
+
+/** GET /stream quote 事件夹具。data_as_of 取块内最早的可信行情时点。 */
+export const STREAM_QUOTE_EXAMPLE = {
+  items: [
+    { security_code: '688001.SH', name: '演示芯片', price: '86.90', change_pct: '-1.81', amount: '1200000', t: '2026-11-02T10:20:00+08:00' },
+    { security_code: '600000.SH', name: '示例银行', price: '10.24', change_pct: '2.20', amount: '4200000', t: '2026-11-02T10:15:00+08:00' },
+  ],
+  data_as_of: '2026-11-02T10:15:00+08:00',
+} satisfies StreamEventMap['quote'];
+
+// 接 T-B213 真接口时沿用现有 IS_MOCK（VITE_USE_MOCK=false 配合 VITE_API_PROXY），不新增开关。
 
 export const WATCHLIST: WatchlistResponse = {
   items: SPECS.filter((s) => s.in_watchlist).map((s, i): WatchlistItem => ({
@@ -567,7 +589,7 @@ export const TERMINAL_ACCOUNT: TerminalAccount = {
 };
 
 export const TERMINAL_ROWS: TerminalRow[] = (() => {
-  const rows = SPECS.map((s): TerminalRow & { security_type: 'stock' | null; _w: number; _added: number } => {
+  const rows = SPECS.map((s): TerminalRow & { security_type: SecurityType | null; _w: number; _added: number } => {
     const sg = suggestionOf(s.code)!;
     const q = QUOTES.find((x) => x.security_code === s.code)!;
     const pos = PORTFOLIO.positions.find((p) => p.security_code === s.code);
@@ -578,7 +600,7 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
       holding: pos ? { qty: pos.qty, sellable_qty: pos.sellable_qty, cost_price: pos.cost_price, weight_pct: pos.weight_pct, pnl: pos.pnl, pnl_pct: pos.pnl_pct, security_type: pos.security_type, estimated: pos.estimated } : null,
       suggestion: summarize(sg),
       active_reason_count: REASONS.filter((r) => r.status === 'active' && sg.candidate_signal_ids.includes(r.signal_id)).length,
-      max_risk_level: maxLevel, data_status: s.data_status, data_as_of: s.data_status === 'unavailable' ? null : s.data_as_of,
+      max_risk_level: maxLevel, data_status: s.data_status, data_as_of: s.data_status === 'unavailable' ? null : q.data_as_of,
       _w: pos ? Number(pos.weight_pct) : -1, _added: SPECS.indexOf(s),
     };
   });
@@ -590,6 +612,12 @@ export const TERMINAL_ROWS: TerminalRow[] = (() => {
     if (ga === 0) return b._w - a._w;
     return a._added - b._added;
   });
+  rows.push({
+    security_code: '510001.SH', name: '示例沪深300ETF', in_watchlist: true, focus: true, security_type: 'etf',
+    quote: { price: '3.94', change_pct: null, amount: null, t: NOW }, holding: null, suggestion: null,
+    active_reason_count: 0, max_risk_level: null, data_status: 'fresh', data_as_of: NOW,
+    _w: -1, _added: rows.length,
+  });
   return rows.map(({ _w, _added, ...row }) => { void _w; void _added; return row; });
 })();
 
@@ -599,6 +627,22 @@ export const TERMINAL_NULL_QUOTE_EXAMPLE: TerminalRow = {
   ...TERMINAL_ROWS.find((r) => r.security_code === STALE_QUOTE_EXAMPLE.item.security_code)!,
   quote: { price: STALE_QUOTE_EXAMPLE.item.price, change_pct: null, amount: null, t: STALE_QUOTE_EXAMPLE.item.t },
   data_status: 'stale', data_as_of: STALE_QUOTE_EXAMPLE.item.data_as_of,
+};
+
+/** 终端行级的证书不可用夹具，不向 TerminalRow 增加 /quotes 的 gaps。 */
+export const TERMINAL_LICENCE_UNAVAILABLE_EXAMPLE: TerminalRow = {
+  ...TERMINAL_ROWS.find((r) => r.security_code === '688001.SH')!,
+  security_code: LICENCE_UNAVAILABLE_QUOTE_EXAMPLE.security_code,
+  name: LICENCE_UNAVAILABLE_QUOTE_EXAMPLE.name,
+  in_watchlist: false,
+  focus: false,
+  quote: null,
+  holding: null,
+  suggestion: null,
+  active_reason_count: 0,
+  max_risk_level: null,
+  data_status: 'unavailable',
+  data_as_of: null,
 };
 
 export function tradingDays(end: string, n: number): string[] {
