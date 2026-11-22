@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -14,15 +15,73 @@ SCRIPT = REPO / "deploy/scripts/intraday-health.sh"
 COMPOSE = REPO / "deploy/compose/docker-compose.yml"
 
 
+def _heartbeat_payload(ts: int) -> dict[str, object]:
+    return {
+        "ts": ts,
+        "instance_id": "ingest-fixture-01",
+        "leader": True,
+        "version": "0.0.0-fixture",
+        "budget_used_last_minute": 0,
+        "queue_depth": {"p0": 0, "p1": 0, "p2": 0},
+    }
+
+
 def _epoch() -> int:
     return int(datetime(2026, 11, 20, 2, 0, tzinfo=UTC).timestamp())
 
 
-def _heartbeat(ts: int) -> str:
-    return (
-        f'{{"ts":{ts},"instance_id":"x","leader":true,"version":"v",'
-        '"budget_used_last_minute":0,"queue_depth":{"p0":0,"p1":0,"p2":0}}'
+def _heartbeat(
+    ts: int, *, indent: int | None = None, separators: tuple[str, str] = (",", ":")
+) -> str:
+    return json.dumps(_heartbeat_payload(ts), indent=indent, separators=separators)
+
+
+def test_heartbeat_fixture_matches_producer_shape() -> None:
+    source = (REPO / "src/backend/app/workers/ingest.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    heartbeat_functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "heartbeat_payload"
+    ]
+    assert heartbeat_functions, "heartbeat_payload function not found"
+
+    dumps_calls = [
+        node
+        for node in ast.walk(heartbeat_functions[0])
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+        and node.func.attr == "dumps"
+    ]
+    assert dumps_calls, "heartbeat_payload json.dumps call not found"
+    dumps_call = dumps_calls[0]
+    assert dumps_call.args and isinstance(dumps_call.args[0], ast.Dict), (
+        "heartbeat_payload json.dumps dict literal not found"
     )
+    payload_dict = dumps_call.args[0]
+    keys = [key.value for key in payload_dict.keys if isinstance(key, ast.Constant)]
+    assert keys == list(_heartbeat_payload(0))
+
+    queue_node = next(
+        (
+            value
+            for key, value in zip(payload_dict.keys, payload_dict.values)
+            if isinstance(key, ast.Constant) and key.value == "queue_depth"
+        ),
+        None,
+    )
+    assert isinstance(queue_node, ast.Dict), "queue_depth dict literal not found"
+    queue_keys = [key.value for key in queue_node.keys if isinstance(key, ast.Constant)]
+    assert queue_keys == list(_heartbeat_payload(0)["queue_depth"])
+
+    separators = next(
+        (kw.value for kw in dumps_call.keywords if kw.arg == "separators"),
+        None,
+    )
+    assert isinstance(separators, ast.Tuple) and len(separators.elts) == 2
+    assert [elt.value for elt in separators.elts] == [",", ":"]
 
 
 def _reference_parse_heartbeat_ts(raw: str) -> int | None:
@@ -119,6 +178,31 @@ def test_intraday_health_offline_states(tmp_path: Path) -> None:
     missing = _run(tmp_path / "missing", now=now, queue="2")
     assert missing.returncode == 2
     assert "状态=心跳缺失" in missing.stdout
+
+
+@pytest.mark.parametrize(
+    "heartbeat",
+    [
+        _heartbeat(_epoch()),
+        _heartbeat(_epoch(), indent=2),
+        _heartbeat(_epoch(), separators=(", ", ": ")),
+    ],
+)
+def test_intraday_health_fresh_heartbeat_whitespace_variants(
+    tmp_path: Path, heartbeat: str
+) -> None:
+    result = _run(tmp_path, now=_epoch(), heartbeat=heartbeat)
+    assert result.returncode == 0
+    assert "状态=正常" in result.stdout
+
+
+@pytest.mark.parametrize("suffix", ["", ","])
+def test_intraday_health_fresh_heartbeat_malformed_suffix(tmp_path: Path, suffix: str) -> None:
+    heartbeat = _heartbeat(_epoch())
+    malformed = heartbeat[:-1] if not suffix else heartbeat + suffix
+    result = _run(tmp_path, now=_epoch(), heartbeat=malformed)
+    assert result.returncode == 2
+    assert "心跳格式无效" in result.stdout
 
 
 @pytest.mark.parametrize(
