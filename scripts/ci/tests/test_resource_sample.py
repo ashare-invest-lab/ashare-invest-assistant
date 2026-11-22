@@ -68,7 +68,7 @@ def test_zero_samples_writes_header(tmp_path: Path) -> None:
     output = tmp_path / "空.csv"
     env = {**os.environ, "AIA_DOCKER": str(docker), "FAKE_DOCKER_STATE": str(tmp_path / "次数")}
     result = subprocess.run(
-        [str(SCRIPT), "--samples", "0", "--interval", "0", "--out", str(output)],
+        [str(SCRIPT), "--project", "aia", "--samples", "0", "--interval", "0", "--out", str(output)],
         capture_output=True,
         text=True,
         env=env,
@@ -76,3 +76,21 @@ def test_zero_samples_writes_header(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert output.read_text(encoding="utf-8").splitlines() == ["ts,container,cpu_pct,mem_usage,mem_limit,mem_pct,pids"]
+
+
+def test_missing_project_fails_without_touching_compose(tmp_path: Path) -> None:
+    docker = fake_docker(tmp_path)
+    env = {k: v for k, v in os.environ.items() if k != "COMPOSE_PROJECT"}
+    env.update(AIA_DOCKER=str(docker), FAKE_DOCKER_STATE=str(tmp_path / "次数"))
+    result = subprocess.run(
+        [str(SCRIPT), "--samples", "0"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 2
+    assert "compose.sh" not in SCRIPT.read_text(encoding="utf-8")
+    assert (tmp_path / "次数").read_text(encoding="utf-8") == "0"
+    assert not (tmp_path / ".env").exists()

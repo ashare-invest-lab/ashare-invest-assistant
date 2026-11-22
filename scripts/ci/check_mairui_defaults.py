@@ -33,7 +33,8 @@ CONFIG_DEFAULT = re.compile(r'daily_bars_source:\s*Literal\[[^\]]*\]\s*=\s*"off"
 GENERIC_KEY = re.compile(
     r"^(?:MAIRUI_[A-Z0-9_]*|[A-Z0-9_]*_SOURCE|[A-Z0-9_]*(?:REALTIME|QUOTES|INTRADAY)[A-Z0-9_]*_ENABLED)$"
 )
-GENERIC_ENV_VAR = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-(?:off|false|replay|0)?)?\}$|^\$[A-Za-z_][A-Za-z0-9_]*$")
+# 只接受带关闭默认值（含空串）的插值；裸 $VAR、无默认值的 ${VAR} 不算关闭。
+GENERIC_ENV_VAR = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:?-(?:off|false|replay|0)?\}$")
 GENERIC_LITERAL = {"", "off", "false", "replay", "0"}
 EXEMPT_SUFFIX = re.compile(r"_(?:URL|TIMEOUT[A-Z0-9_]*|KEY[A-Z0-9_]*|TOKEN[A-Z0-9_]*|FILE|DIR|PATH)$")
 
@@ -68,7 +69,10 @@ def _environment_items(environment: object):
 
 
 def _is_closed_value(value: object) -> bool:
-    if value is None or value is False or value == 0:
+    # None 表示 YAML 空值或无等号的列表项，compose 会从主机环境继承，不算关闭。
+    if value is None:
+        return False
+    if value is False or (value == 0 and not isinstance(value, bool)):
         return True
     if isinstance(value, str):
         return value in GENERIC_LITERAL or bool(GENERIC_ENV_VAR.fullmatch(value))

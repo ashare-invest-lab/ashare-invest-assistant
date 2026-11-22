@@ -88,3 +88,27 @@ def test_env_example_open_switch_is_rejected(tmp_path: Path) -> None:
     baseline(tmp_path)
     write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=replay\nDAILY_BARS_SOURCE=off\nMAIRUI_QUOTES_ENABLED=true\n")
     assert any(".env.example:MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in cmd.check(tmp_path))
+
+
+def test_inherited_switch_values_are_rejected(tmp_path: Path) -> None:
+    # 空值、无等号列表项、裸 $VAR、无默认值 ${VAR} 都会继承主机环境。
+    for env in (
+        "      MAIRUI_QUOTES_ENABLED:\n",
+        "      MAIRUI_QUOTES_ENABLED: $MAIRUI_QUOTES_ENABLED\n",
+        "      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED}\n",
+        "      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED:-true}\n",
+    ):
+        baseline(tmp_path)
+        write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n" + env)
+        errors = cmd.check(tmp_path)
+        assert any("services/api/MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in errors), env
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      - INTRADAY_QUOTES_ENABLED\n")
+    errors = cmd.check(tmp_path)
+    assert any("services/api/INTRADAY_QUOTES_ENABLED：默认必须关闭" in error for error in errors)
+
+
+def test_empty_fallback_interpolation_is_accepted(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED:-}\n")
+    assert cmd.check(tmp_path) == []

@@ -4,7 +4,6 @@ set -euo pipefail
 
 SAMPLES="${SAMPLES:-5}"
 INTERVAL_S="${INTERVAL_S:-60}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT="${COMPOSE_PROJECT:-}"
 OUT="-"
 
@@ -46,7 +45,7 @@ done
 
 case "$SAMPLES" in ''|*[!0-9]*) usage ;; esac
 case "$INTERVAL_S" in ''|*[!0-9]*) usage ;; esac
-[ -n "$PROJECT" ] || PROJECT="$("$ROOT/deploy/scripts/compose.sh" --get COMPOSE_PROJECT_NAME 2>/dev/null || true)"
+# 项目名必须显式给出（--project 或 COMPOSE_PROJECT）；不调用 compose 封装入口，避免生成 .env 或密钥。
 [ -n "$PROJECT" ] || usage
 
 read -r -a DOCKER <<< "${AIA_DOCKER:-docker}"
