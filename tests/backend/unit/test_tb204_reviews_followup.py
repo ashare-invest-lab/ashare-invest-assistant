@@ -102,7 +102,20 @@ def test_a_gap_reason_and_simulation_source_are_preserved() -> None:
     assert holding["source"] == "simulated_tracking"
     assert holding["label"] == "模拟跟踪"
     assert holding["value"] is None
+    assert holding["n"] == 0 and holding["small_sample"] is True
     assert "gaps" not in holding
+
+
+def test_b_project_metrics_freezes_nonempty_inputs_before_contract_final() -> None:
+    projected = project_metrics(
+        {name: {"value": "9.9", "n": 7} for name in service.METRIC_NAMES},
+        period_end=dt.date(2026, 1, 5),
+        now=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert all(
+        item["value"] is None and item["n"] == 0 and item["small_sample"] is True
+        for item in projected.values()
+    )
 
 
 def test_b_frozen_as_of_is_kept_in_snapshot() -> None:
@@ -359,7 +372,8 @@ def test_c_actual_trades_are_used_and_missing_sources_are_gaps() -> None:
     )
     for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
         assert metrics[name]["value"] is None
-        assert metrics[name]["n"] == (5 if name == "holding_return" else 0)
+        assert metrics[name]["n"] == 0
+        assert metrics[name]["small_sample"] is True
         assert metric_gaps[name] == ["no_source"]
 
 
@@ -402,7 +416,8 @@ def test_c_complete_sources_stay_unpublished_until_outcome_metric_contract_is_fi
     )
     for name in ("holding_return", "benchmark_return", "excess_return", "max_drawdown"):
         assert metrics[name]["value"] is None
-        assert metrics[name]["n"] == (5 if name == "holding_return" else 1)
+        assert metrics[name]["n"] == 0
+        assert metrics[name]["small_sample"] is True
         assert metric_gaps[name] == ["no_source"]
 
 
@@ -576,7 +591,7 @@ def test_c_non_execution_and_missing_dates_are_not_visible() -> None:
     assert holding == [] and evidence == ["trade:" + str(base.id)] and open_positions
 
 
-def test_d_trade_evidence_uses_provider_and_skips_missing_timestamp() -> None:
+def test_d_trade_evidence_uses_provider_and_trade_date_fallback() -> None:
     manual = _trade(
         67,
         side="buy",
@@ -586,12 +601,14 @@ def test_d_trade_evidence_uses_provider_and_skips_missing_timestamp() -> None:
         source="manual",
     )
     assert service._trade_evidence(manual)["provider"] == "user_input"
-    assert (
-        service._trade_evidence(
-            SimpleNamespace(**{**vars(manual), "traded_at": None, "created_at": None})
-        )
-        is None
+    fallback = service._trade_evidence(
+        SimpleNamespace(**{**vars(manual), "traded_at": None, "created_at": None})
     )
+    assert fallback is not None
+    assert fallback["data_as_of"] == "2026-01-02T07:00:00+00:00"
+    assert service._trade_evidence(
+        SimpleNamespace(**{**vars(manual), "trade_date": None, "traded_at": None, "created_at": None})
+    ) is None
 
 
 def test_d_plan_evidence_requires_connection_owner_and_created_at() -> None:
@@ -976,11 +993,10 @@ def test_g_status_for_preserves_top_level_and_metric_gaps() -> None:
         "outcome_metrics.benchmark_return",
         "outcome_metrics.excess_return",
         "outcome_metrics.max_drawdown",
-        "outcome_metrics.holding_return",
     ]
     assert [gap["reason"] for gap in status["gaps"][:4]] == ["no_source"] * 4
     metric_status = service._status_for({**snap, "gaps": []}, dt.date(2026, 1, 2))
-    assert [gap["reason"] for gap in metric_status["gaps"]] == ["user_input_missing"]
+    assert [gap["reason"] for gap in metric_status["gaps"]] == ["no_source"] * 4
 
 
 def test_g_status_for_pending_keeps_non_outcome_snapshot_gaps() -> None:
@@ -996,6 +1012,30 @@ def test_g_status_for_pending_keeps_non_outcome_snapshot_gaps() -> None:
     }
     status = service._status_for(snap, dt.date(2099, 1, 5))
     assert {(gap["key"], gap["reason"]) for gap in status["gaps"]} >= {
-        ("outcome_metrics.holding_return", "not_yet_published"),
+        ("outcome_metrics.holding_return", "no_source"),
         ("trades.import_commit_unproven", "no_source"),
     }
+
+
+def test_g_pending_snapshot_keeps_visible_trades_and_uses_no_source() -> None:
+    row = _trade(
+        880,
+        side="buy",
+        quantity="10",
+        net_amount="-100",
+        traded_at=dt.datetime(2026, 1, 5, tzinfo=dt.UTC),
+    )
+    snapshot = service._snapshot_items(
+        dt.date(2026, 1, 1),
+        dt.date(2099, 1, 5),
+        None,
+        [],
+        [],
+        True,
+        conn=TradeConnection([row]),
+        owner=OWNER,
+        trade_ids=[row.id],
+        calculation_as_of=dt.datetime(2026, 1, 10, tzinfo=dt.UTC),
+    )
+    assert any(item["key"] == "trade" for item in snapshot["evidence"])
+    assert all(gap["reason"] == "no_source" for gap in snapshot["gaps"])
