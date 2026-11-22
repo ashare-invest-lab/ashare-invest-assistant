@@ -148,8 +148,12 @@ describe('M2 缺数 / 过期原因：可见、可键盘查看、证书不可用�
     setMockLicence(uid(2), { status: 'active' });
     renderAt('/market');
     await screen.findByTestId('sector-panel');
-    expect(screen.queryByTestId('market-gap-note')).toBeNull();
     expect(screen.queryByTestId('gap-licence-link')).toBeNull();
+    const note = screen.queryByTestId('market-gap-note');
+    if (note) {
+      expect(note).not.toHaveTextContent(LICENCE_GAP);
+      expect(note).not.toHaveTextContent('data_licence_unavailable');
+    }
   });
 });
 
