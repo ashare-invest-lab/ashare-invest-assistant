@@ -104,7 +104,7 @@ def test_task_reuses_supplied_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         realtime_collect,
         "_fetch_with_egress",
-        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "ts": NOW}]),
+        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "dm": "600000", "ts": NOW}]),
     )
     monkeypatch.setattr(realtime_collect, "_write_rows", lambda *_args: 1)
     engine_factory = Mock(side_effect=AssertionError("supplied engine must be reused"))
@@ -165,6 +165,31 @@ def test_missing_core_fails_closed_before_credential_load(
     secret_loader.assert_not_called()
 
 
+def test_missing_egress_lease_fails_closed_before_credential_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(realtime_collect, "get_ingest_core", lambda: object())
+    monkeypatch.setattr(realtime_collect, "single_egress", lambda _engine: _Context(None))
+    secret_loader = Mock(side_effect=AssertionError("credential must not load without lease"))
+
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="egress_lease_unavailable"
+    ):
+        realtime_collect._fetch_with_egress(
+            Mock(),
+            SimpleNamespace(),
+            owner=OWNER,
+            licence_id=LICENCE,
+            now=NOW,
+            path="/synthetic",
+            upstream=None,
+            secret_loader=secret_loader,
+            stop=tmp_path / "STOP",
+            halt=tmp_path / "HALT",
+        )
+    secret_loader.assert_not_called()
+
+
 def test_credential_load_waits_for_egress_lease(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -206,6 +231,38 @@ def test_credential_load_waits_for_egress_lease(
 
     assert (status, body) == (204, [])
     assert events == ["lease_enter", "credential", "request", "lease_exit"]
+
+
+def test_missing_egress_lease_stops_before_credential_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _NoLease:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+    secret_loader = Mock(side_effect=AssertionError("credential must wait for a lease"))
+    monkeypatch.setattr(realtime_collect, "get_ingest_core", lambda: object())
+    monkeypatch.setattr(realtime_collect, "single_egress", lambda _engine: _NoLease())
+
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="egress_lease_unavailable"
+    ):
+        realtime_collect._fetch_with_egress(
+            Mock(),
+            SimpleNamespace(),
+            owner=OWNER,
+            licence_id=LICENCE,
+            now=NOW,
+            path="/synthetic",
+            upstream=None,
+            secret_loader=secret_loader,
+            stop=tmp_path / "STOP",
+            halt=tmp_path / "HALT",
+        )
+    secret_loader.assert_not_called()
 
 
 def test_config_switch_defaults_off() -> None:
@@ -270,6 +327,7 @@ def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:
         [
             {
                 "code": "600000.SH",
+                "dm": "600000",
                 "ts": "2030-06-11T10:00:00+08:00",
                 "price": "12.34",
                 "pct_change": "1.2",
@@ -296,9 +354,24 @@ def test_normalization_maps_unique_dm_code_from_ssjy_more_response() -> None:
     assert rows[0]["code"] == "600000.SH"
 
 
+def test_normalization_rejects_code_without_dm() -> None:
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_invalid"
+    ):
+        realtime_collect._normalise_rows(
+            ["600000.SH"],
+            [{"code": "600000.SH", "ts": NOW}],
+            NOW,
+        )
+
+
 @pytest.mark.parametrize(
     "row",
-    [{"ts": "2030-06-11T10:00:00+08:00"}, {"dm": "600001.SH", "ts": NOW}],
+    [
+        {"code": "600000.SH", "ts": "2030-06-11T10:00:00+08:00"},
+        {"ts": "2030-06-11T10:00:00+08:00"},
+        {"dm": "600001.SH", "ts": NOW},
+    ],
 )
 def test_normalization_rejects_missing_or_out_of_range_code(
     row: dict[str, object],
@@ -335,6 +408,7 @@ def test_nonmapped_response_keys_do_not_populate_snapshot_fields() -> None:
         [
             {
                 "code": "600000.SH",
+                "dm": "600000",
                 "ts": NOW,
                 "p": "99.99",
                 "z": "99",
@@ -370,7 +444,10 @@ def test_missing_quote_timestamp_stops_before_any_write(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         realtime_collect,
         "_fetch_with_egress",
-        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "price": "12.34"}]),
+        lambda *_args, **_kwargs: (
+            200,
+            [{"code": "600000.SH", "dm": "600000", "price": "12.34"}],
+        ),
     )
     writes: list[object] = []
     monkeypatch.setattr(realtime_collect, "_write_rows", lambda *_args: writes.append(True) or 1)
@@ -407,7 +484,7 @@ def test_stop_and_halt_after_response_prevent_write(
 
     def fetch(*_args: object, **_kwargs: object) -> tuple[int, object]:
         (stop if flag == "stop" else halt).write_text("", encoding="utf-8")
-        return 200, [{"code": "600000.SH", "ts": NOW}]
+        return 200, [{"code": "600000.SH", "dm": "600000", "ts": NOW}]
 
     monkeypatch.setattr(realtime_collect, "_fetch_with_egress", fetch)
     writes: list[object] = []
@@ -434,7 +511,9 @@ def test_normalization_rejects_partial_batch() -> None:
         realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_invalid"
     ):
         realtime_collect._normalise_rows(
-            ["600000.SH", "000001.SZ"], [{"code": "600000.SH", "ts": NOW}], NOW
+            ["600000.SH", "000001.SZ"],
+            [{"code": "600000.SH", "dm": "600000", "ts": NOW}],
+            NOW,
         )
 
 
@@ -568,7 +647,7 @@ def test_each_batch_refreshes_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     def fetch(*_args: object, **kwargs: object) -> tuple[int, object]:
         seen.append(kwargs["now"])  # type: ignore[arg-type]
         codes = str(kwargs["path"]).split("=")[-1].split(",")
-        return 200, [{"code": code, "ts": NOW} for code in codes]
+        return 200, [{"code": code, "dm": code.split(".", 1)[0], "ts": NOW} for code in codes]
 
     monkeypatch.setattr(realtime_collect, "_fetch_with_egress", fetch)
     monkeypatch.setattr(realtime_collect, "_write_rows", lambda *_args: 1)
@@ -638,7 +717,7 @@ def test_response_batch_has_single_batch_id_at_write_boundary(
     monkeypatch.setattr(
         realtime_collect,
         "_fetch_with_egress",
-        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "ts": NOW}]),
+        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "dm": "600000", "ts": NOW}]),
     )
     seen: list[uuid.UUID] = []
     monkeypatch.setattr(
@@ -691,7 +770,7 @@ def test_http_fetch_runs_before_write_transaction(monkeypatch: pytest.MonkeyPatc
 
     def fetch(*_args: object, **_kwargs: object) -> tuple[int, object]:
         fetch_states.append(fake_engine.write_open)
-        return 200, [{"code": "600000.SH", "ts": NOW}]
+        return 200, [{"code": "600000.SH", "dm": "600000", "ts": NOW}]
 
     monkeypatch.setattr(realtime_collect, "_fetch_with_egress", fetch)
     monkeypatch.setattr(realtime_collect, "_write_rows", lambda *_args: 1)

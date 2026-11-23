@@ -137,16 +137,17 @@ def _normalise_rows(
         # 既有测试入口使用规范 code，ssjy_more 的响应使用六位无后缀 dm。
         code_value = _mapped_value(row, "code")
         dm_value = row.get("dm")
-        if dm_value is not None:
-            if not isinstance(dm_value, str) or not re.fullmatch(r"\d{6}", dm_value):
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            dm_candidates = raw_codes.get(dm_value, [])
-            if len(dm_candidates) != 1:
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            dm_code = dm_candidates[0]
-            if code_value is not None and code_value != dm_code:
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            code_value = dm_code
+        if dm_value is None:
+            raise RealtimeCollectionStoppedError("realtime_code_invalid")
+        if not isinstance(dm_value, str) or not re.fullmatch(r"\d{6}", dm_value):
+            raise RealtimeCollectionStoppedError("realtime_code_invalid")
+        dm_candidates = raw_codes.get(dm_value, [])
+        if len(dm_candidates) != 1:
+            raise RealtimeCollectionStoppedError("realtime_code_invalid")
+        dm_code = dm_candidates[0]
+        if code_value is not None and code_value != dm_code:
+            raise RealtimeCollectionStoppedError("realtime_code_invalid")
+        code_value = dm_code
         if not isinstance(code_value, str) or code_value not in expected or code_value in found:
             raise RealtimeCollectionStoppedError("realtime_code_invalid")
         found.add(code_value)
@@ -370,6 +371,8 @@ def _fetch_with_egress(
         raise RealtimeCollectionStoppedError("ingest_core_unavailable")
     try:
         with single_egress(engine) as lease:
+            if lease is None:
+                raise RealtimeCollectionStoppedError("egress_lease_unavailable")
             secret = secret_loader(engine, licence_id)
             result = realtime_quotes_seam(
                 mairui_get,
