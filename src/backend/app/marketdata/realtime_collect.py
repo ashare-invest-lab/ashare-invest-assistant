@@ -11,6 +11,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -48,6 +49,9 @@ PATH = "/hsrl/ssjy_more?stock_codes="
 # docs/plan.md §0A.6 / §2.1: the multi-stock endpoint accepts at most 20 codes.
 MAX_CODES_PER_REQUEST = 20
 OPEN_SESSIONS = frozenset({"morning", "afternoon"})
+_TIMESTAMP_TEXT = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 # 原始字段名均未验证（U8，T-B195）。每个系统字段只允许一个原始字段名。
 REALTIME_FIELD_MAP: Final[Mapping[str, str]] = {
@@ -322,12 +326,10 @@ def _fetch_with_egress(
 ) -> tuple[int, object]:
     if stop.is_file() or halt.is_file():
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
-    secret = secret_loader(engine, licence_id)
     core = get_ingest_core()
     if core is None:
-        from app.ingest.core import IngestCore
-
-        core = IngestCore(cfg=settings.business.ingest.licences, engine=engine)
+        raise RealtimeCollectionStoppedError("ingest_core_unavailable")
+    secret = secret_loader(engine, licence_id)
     try:
         with single_egress(engine) as lease:
             result = realtime_quotes_seam(

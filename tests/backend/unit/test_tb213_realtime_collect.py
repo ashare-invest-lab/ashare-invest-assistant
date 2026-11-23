@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -79,6 +80,50 @@ def test_replay_mode_skips_engine_licence_and_egress(monkeypatch: pytest.MonkeyP
     secret.assert_not_called()
     lease.assert_not_called()
     client.assert_not_called()
+
+
+def test_task_reuses_supplied_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = SimpleNamespace(realtime_quotes_source="mairui")
+    engine = _Engine()
+    clock = SimpleNamespace(trade_date=NOW.date(), session=SimpleNamespace(value="morning"))
+    monkeypatch.setattr(realtime_collect, "_approved_owners", lambda _conn: [OWNER])
+    monkeypatch.setattr(realtime_collect, "_open_clock", lambda *_args: clock)
+    monkeypatch.setattr(realtime_collect, "active_licence_id", lambda *_args: LICENCE)
+    monkeypatch.setattr(realtime_collect, "_owned_codes", lambda *_args: ["600000.SH"])
+    monkeypatch.setattr(
+        realtime_collect,
+        "_fetch_with_egress",
+        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "ts": NOW}]),
+    )
+    monkeypatch.setattr(realtime_collect, "_write_rows", lambda *_args: 1)
+    engine_factory = Mock(side_effect=AssertionError("supplied engine must be reused"))
+    monkeypatch.setattr(jobs, "_engine", engine_factory)
+
+    assert realtime_collect.realtime_quotes_task(settings, owner=OWNER, now=NOW, engine=engine) == 1
+    engine_factory.assert_not_called()
+
+
+def test_missing_core_fails_closed_before_credential_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(realtime_collect, "get_ingest_core", lambda: None)
+    secret_loader = Mock(side_effect=AssertionError("credential must not load without core"))
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="ingest_core_unavailable"
+    ):
+        realtime_collect._fetch_with_egress(
+            Mock(),
+            SimpleNamespace(),
+            owner=OWNER,
+            licence_id=LICENCE,
+            now=NOW,
+            path="/synthetic",
+            upstream=None,
+            secret_loader=secret_loader,
+            stop=tmp_path / "STOP",
+            halt=tmp_path / "HALT",
+        )
+    secret_loader.assert_not_called()
 
 
 def test_config_switch_defaults_off() -> None:
