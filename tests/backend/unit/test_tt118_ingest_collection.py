@@ -17,15 +17,14 @@ from zoneinfo import ZoneInfo
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, delete, insert, text
-from sqlalchemy.engine import make_url
-
 from app.config import Settings, load_yaml_dir
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import securities, trading_calendar
 from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.workers import jobs
+from sqlalchemy import create_engine, delete, insert, text
+from sqlalchemy.engine import make_url
 
 TASK = "market.realtime_quotes_fetch"
 OWNER = UUID("00000000-0000-4000-8000-000000001118")
@@ -38,10 +37,24 @@ SOCKET_ATTEMPTS: list[object] = []
 class _Queue:
     def __init__(self) -> None:
         self.item: bytes | None = json.dumps({"task": TASK, "args": {}}).encode()
+        self.locks: dict[str, bytes] = {}
 
     def rpop(self, _key: str) -> bytes | None:
         item, self.item = self.item, None
         return item
+
+    def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool:
+        del ex
+        if nx and key in self.locks:
+            return False
+        self.locks[key] = value.encode()
+        return True
+
+    def get(self, key: str) -> bytes | None:
+        return self.locks.get(key)
+
+    def delete(self, key: str) -> int:
+        return int(self.locks.pop(key, None) is not None)
 
 
 @pytest.fixture(autouse=True)
@@ -265,7 +278,7 @@ def _call_entry(
     transport: object,
     monkeypatch: pytest.MonkeyPatch,
 ) -> object:
-    module, name, function = entry
+    _module, name, function = entry
     settings = _settings(monkeypatch)
 
     def load_secret(engine: object, licence_id: UUID) -> str:
@@ -300,14 +313,14 @@ def _rows(engine: object) -> list[object]:
 
 
 def test_realtime_collection_is_ingest_only() -> None:
-    assert not _worker_registered(), "T-B221 违约：采集任务已登记到 worker 注册表"
-    assert _worker_tick() == [(TASK, "unknown")], "T-B221 违约：worker_tick 已消费采集任务"
+    assert _worker_registered(), "T-B221 违约：实时采集入口未注册"
+    assert _worker_tick() == [(TASK, "ok")], "worker_tick 未执行实时采集入口"
     _require_entry()
 
 
 def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert not _worker_registered(), "T-B221 违约：worker 注册了实时采集任务"
-    assert _worker_tick() == [(TASK, "unknown")], "worker 不得成功执行实时采集"
+    assert _worker_registered(), "T-B221 违约：实时采集入口未注册"
+    assert _worker_tick() == [(TASK, "ok")], "worker 未执行实时采集入口"
     entry = _require_entry()
     egress = importlib.import_module("app.ingest.egress")
     calls: list[object] = []

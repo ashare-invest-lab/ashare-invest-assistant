@@ -120,6 +120,15 @@ def bootstrap_ingest_core(settings: Settings) -> Engine:
     return engine
 
 
+def tick_realtime_quotes(settings: Settings, engine: Engine) -> int:
+    """Run the realtime collection route from the ingest service only."""
+    from app.marketdata.realtime_collect import realtime_quotes_task
+
+    if getattr(settings, "realtime_quotes_source", "off") != "mairui":
+        return 0
+    return realtime_quotes_task(settings, engine=engine)
+
+
 def write_heartbeat(settings: Settings) -> None:
     if not settings.redis_url:
         raise RuntimeError("REDIS_URL 未设置")
@@ -164,6 +173,8 @@ def write_heartbeat(settings: Settings) -> None:
                 if getattr(settings, "daily_bars_source", "off") == "mairui":
                     tick_bars(shared_engine)
                     wake_delayed(shared_engine, client)
+                if getattr(settings, "realtime_quotes_source", "off") == "mairui":
+                    tick_realtime_quotes(settings, shared_engine)
             elif settings.database_url is not None:
                 engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
                 try:
@@ -175,6 +186,8 @@ def write_heartbeat(settings: Settings) -> None:
                     if getattr(settings, "daily_bars_source", "off") == "mairui":
                         tick_bars(engine)
                         wake_delayed(engine, client)
+                    if getattr(settings, "realtime_quotes_source", "off") == "mairui":
+                        tick_realtime_quotes(settings, engine)
                 finally:
                     engine.dispose()
         # T-B113 / T-A84: every heartbeat round must tick IngestCore (pending IP-limit flush).

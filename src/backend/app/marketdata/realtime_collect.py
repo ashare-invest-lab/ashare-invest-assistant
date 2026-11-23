@@ -11,16 +11,17 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import re
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
-from sqlalchemy import Connection, Engine, select
+from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.aggregates.calendar import BEIJING, market_clock
+from app.aggregates.calendar import market_clock
 from app.aggregates.models import MarketClock
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
@@ -48,6 +49,10 @@ PATH = "/hsrl/ssjy_more?stock_codes="
 # docs/plan.md §0A.6 / §2.1: the multi-stock endpoint accepts at most 20 codes.
 MAX_CODES_PER_REQUEST = 20
 OPEN_SESSIONS = frozenset({"morning", "afternoon"})
+REALTIME_QUOTES_FETCH: Final = "market.realtime_quotes_fetch"
+_TIMESTAMP_TEXT = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 # 原始字段名均未验证（U8，T-B195）。每个系统字段只允许一个原始字段名。
 REALTIME_FIELD_MAP: Final[Mapping[str, str]] = {
@@ -105,22 +110,20 @@ def _quote_timestamp(value: object) -> dt.datetime:
         raise RealtimeCollectionStoppedError("realtime_timestamp_missing")
     if isinstance(value, dt.datetime):
         stamp = value
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        try:
-            stamp = dt.datetime.fromtimestamp(float(value), dt.UTC)
-        except (OverflowError, OSError, ValueError) as exc:
-            raise RealtimeCollectionStoppedError("realtime_timestamp_invalid") from exc
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
     elif isinstance(value, str):
-        text = value.strip().replace("Z", "+00:00")
+        text = value.strip()
+        if not _TIMESTAMP_TEXT.fullmatch(text):
+            raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
         try:
-            stamp = dt.datetime.fromisoformat(text)
+            stamp = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError as exc:
             raise RealtimeCollectionStoppedError("realtime_timestamp_invalid") from exc
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
     else:
         raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
-    if stamp.tzinfo is None:
-        # 无时区值按北京时区解析，原始时点语义未验证（U8，T-B195）。
-        stamp = stamp.replace(tzinfo=BEIJING)
     return stamp.astimezone(dt.UTC)
 
 
@@ -170,25 +173,96 @@ def _validate_response(status: int, body: object) -> list[Mapping[str, object]]:
 
 
 def _fingerprint(row: Mapping[str, object]) -> str:
+    stable = {
+        key: row.get(key)
+        for key in (
+            "price",
+            "pct_change",
+            "payload",
+            "volume",
+            "amount",
+            "is_suspended",
+            "limit_up",
+            "limit_down",
+        )
+    }
     return hashlib.sha256(
-        json.dumps(row, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        json.dumps(stable, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
+
+
+def _revision_key(row: Mapping[str, object]) -> str:
+    return "|".join(
+        (
+            str(row["code"]),
+            str(row["ts"]),
+            str(row["source"]),
+            str(row["source_licence_id"]),
+        )
+    )
+
+
+def _lock_revision_keys(conn: Connection, rows: Sequence[Mapping[str, object]]) -> None:
+    """Serialize revision allocation for each ownership key in this transaction."""
+    keys = sorted({_revision_key(row) for row in rows})
+    for key in keys:
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:revision_key, 0))"),
+            {"revision_key": key},
+        )
+
+
+def _reject_credential_echo(body: object, secret: str) -> None:
+    encoded = json.dumps(body, ensure_ascii=False, default=str)
+    if secret and (secret in encoded or quote(secret, safe="") in encoded):
+        raise RealtimeCollectionStoppedError("credential_echo_rejected")
 
 
 def _write_rows(conn: Connection, rows: Sequence[dict[str, object]], batch_id: uuid.UUID) -> int:
     if not rows:
         return 0
-    values = [
-        {
-            **row,
-            "source_licence_id": row["source_licence_id"],
-            "batch_id": batch_id,
-            "fetched_at": row["fetched_at"],
-            "revision": 0,
-            "content_fingerprint": _fingerprint(row),
-        }
-        for row in rows
-    ]
+    _lock_revision_keys(conn, rows)
+    fingerprints = [_fingerprint(row) for row in rows]
+    source_licences = {row["source_licence_id"] for row in rows}
+    codes = {row["code"] for row in rows}
+    timestamps = {row["ts"] for row in rows}
+    existing = conn.execute(
+        select(
+            quotes_snapshot.c.code,
+            quotes_snapshot.c.ts,
+            quotes_snapshot.c.source_licence_id,
+            quotes_snapshot.c.revision,
+            quotes_snapshot.c.content_fingerprint,
+        ).where(
+            quotes_snapshot.c.source == SOURCE,
+            quotes_snapshot.c.source_licence_id.in_(source_licences),
+            quotes_snapshot.c.code.in_(codes),
+            quotes_snapshot.c.ts.in_(timestamps),
+        )
+    ).mappings()
+    revisions: dict[tuple[object, object, object], list[tuple[int, object | None]]] = {}
+    for item in existing:
+        key = (item["code"], item["ts"], item["source_licence_id"])
+        revisions.setdefault(key, []).append((int(item["revision"]), item["content_fingerprint"]))
+    values: list[dict[str, object]] = []
+    for row, fingerprint in zip(rows, fingerprints, strict=True):
+        key = (row["code"], row["ts"], row["source_licence_id"])
+        known = revisions.setdefault(key, [])
+        same = next((revision for revision, fp in known if fp == fingerprint), None)
+        if same is None:
+            revision = max((item[0] for item in known), default=-1) + 1
+            known.append((revision, fingerprint))
+        else:
+            revision = same
+        values.append(
+            {
+                **row,
+                "batch_id": batch_id,
+                "fetched_at": row["fetched_at"],
+                "revision": revision,
+                "content_fingerprint": fingerprint,
+            }
+        )
     stmt = pg_insert(quotes_snapshot).values(values)
     stmt = stmt.on_conflict_do_nothing(
         index_elements=[
@@ -280,12 +354,10 @@ def _fetch_with_egress(
 ) -> tuple[int, object]:
     if stop.is_file() or halt.is_file():
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
-    secret = secret_loader(engine, licence_id)
     core = get_ingest_core()
     if core is None:
-        from app.ingest.core import IngestCore
-
-        core = IngestCore(cfg=settings.business.ingest.licences, engine=engine)
+        raise RealtimeCollectionStoppedError("ingest_core_unavailable")
+    secret = secret_loader(engine, licence_id)
     try:
         with single_egress(engine) as lease:
             result = realtime_quotes_seam(
@@ -305,6 +377,7 @@ def _fetch_with_egress(
             )
     except EgressDenied as exc:
         raise RealtimeCollectionStoppedError(f"egress_{exc.code}") from None
+    _reject_credential_echo(result.body, secret)
     return result.status, result.body
 
 
@@ -314,6 +387,7 @@ def collect_realtime_quotes(
     *,
     owner: uuid.UUID,
     now: dt.datetime | None = None,
+    clock: Callable[[], dt.datetime] | None = None,
     upstream: Transport | None = None,
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
@@ -328,31 +402,39 @@ def collect_realtime_quotes(
         return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
-    stamp = _now(now)
-    clock = _open_clock(conn, settings, stamp)
-    if clock is None:
+    read_clock = clock or (lambda: _now(now))
+    stamp = _now(read_clock())
+    initial_clock = _open_clock(conn, settings, stamp)
+    if initial_clock is None:
         return 0
-    if clock.session.value not in OPEN_SESSIONS:
-        log.info("实时行情跳过：交易时段为 %s", clock.session.value)
+    if initial_clock.session.value not in OPEN_SESSIONS:
+        log.info("实时行情跳过：交易时段为 %s", initial_clock.session.value)
         return 0
     licence_id = active_licence_id(conn, owner, stamp)
     if licence_id is None:
         log.info("实时行情跳过：用户没有 active 证书")
         return 0
-    codes = _owned_codes(conn, owner, clock.trade_date)
+    codes = _owned_codes(conn, owner, initial_clock.trade_date)
     if not codes:
         return 0
     if engine is None:
         raise ValueError("engine is required for a live realtime collection")
     fetched_rows: list[dict[str, object]] = []
     for group in _chunks(codes, MAX_CODES_PER_REQUEST):
+        request_stamp = _now(read_clock())
+        request_clock = _open_clock(conn, settings, request_stamp)
+        if request_clock is None or request_clock.session.value not in OPEN_SESSIONS:
+            raise RealtimeCollectionStoppedError("realtime_session_closed")
+        request_licence = active_licence_id(conn, owner, request_stamp)
+        if request_licence is None:
+            raise RealtimeCollectionStoppedError("realtime_licence_unavailable")
         path = PATH + quote(",".join(group), safe=",")
         status, body = _fetch_with_egress(
             engine,
             settings,
             owner=owner,
-            licence_id=licence_id,
-            now=stamp,
+            licence_id=request_licence,
+            now=request_stamp,
             path=path,
             upstream=hook,
             secret_loader=secret_loader,
@@ -362,10 +444,10 @@ def collect_realtime_quotes(
         fetched_rows.extend(
             {
                 **row,
-                "source_licence_id": licence_id,
-                "fetched_at": stamp,
+                "source_licence_id": request_licence,
+                "fetched_at": request_stamp,
             }
-            for row in _normalise_rows(group, _validate_response(status, body), stamp)
+            for row in _normalise_rows(group, _validate_response(status, body), request_stamp)
         )
     if stop.is_file() or halt.is_file():
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
@@ -377,20 +459,20 @@ def realtime_quotes_task(
     settings: Settings,
     *,
     now: dt.datetime | None = None,
+    clock: Callable[[], dt.datetime] | None = None,
     owner: uuid.UUID | str | None = None,
     upstream: Transport | None = None,
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
+    engine: Engine | None = None,
 ) -> int:
     """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
     hook = transport if transport is not None else upstream
     if verification_is_offline():
         log.info("实时行情跳过：当前为 replay/离线模式")
         return 0
-    if settings.realtime_quotes_source != "mairui":
+    if getattr(settings, "realtime_quotes_source", "off") != "mairui":
         return 0
-    from app.workers.jobs import _engine
-
     selected_owner: uuid.UUID | None
     if isinstance(owner, uuid.UUID):
         selected_owner = owner
@@ -401,8 +483,11 @@ def realtime_quotes_task(
             raise ValueError("owner must be a UUID string") from exc
     else:
         selected_owner = None
-    stamp = _now(now)
-    engine = _engine(settings)
+    read_clock = clock or (lambda: _now(now))
+    if engine is None:
+        from app.workers.jobs import _engine
+
+        engine = _engine(settings)
     if selected_owner is not None:
         owners = [selected_owner]
     else:
@@ -416,7 +501,7 @@ def realtime_quotes_task(
                 owner_conn,
                 settings,
                 owner=current_owner,
-                now=stamp,
+                clock=read_clock,
                 upstream=hook,
                 secret_loader=secret_loader,
                 engine=engine,
