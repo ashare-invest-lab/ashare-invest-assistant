@@ -59,7 +59,6 @@ def test_default_switch_is_off_and_does_not_create_engine(monkeypatch: pytest.Mo
     monkeypatch.setattr(jobs, "_engine", denied)
     assert realtime_collect.realtime_quotes_task(settings) == 0
     denied.assert_not_called()
-    assert realtime_collect.Settings.model_fields["realtime_quotes_source"].default == "off"
 
 
 def test_replay_mode_skips_engine_licence_and_egress(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,6 +83,10 @@ def test_replay_mode_skips_engine_licence_and_egress(monkeypatch: pytest.MonkeyP
     client.assert_not_called()
 
 
+def test_config_switch_defaults_off() -> None:
+    assert realtime_collect.Settings.model_fields["realtime_quotes_source"].default == "off"
+
+
 def test_worker_does_not_register_realtime_task() -> None:
     settings = SimpleNamespace(
         business=SimpleNamespace(
@@ -104,10 +107,14 @@ def test_upstream_status_stops_before_normalization(status: int) -> None:
         realtime_collect._validate_response(status, [])
 
 
-@pytest.mark.parametrize("body", [{"error": "synthetic"}, "not-json"])
-def test_invalid_json_stops_before_normalization(body: object) -> None:
+def test_json_error_stops_before_normalization() -> None:
     with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
-        realtime_collect._validate_response(200, body)
+        realtime_collect._validate_response(200, {"error": "synthetic"})
+
+
+def test_malformed_json_stops_before_normalization() -> None:
+    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
+        realtime_collect._validate_response(200, "not-json")
 
 
 def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:
