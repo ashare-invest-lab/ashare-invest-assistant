@@ -18,11 +18,11 @@ import redis
 from sqlalchemy import Connection, Engine, select, update
 from sqlalchemy.engine import RowMapping
 
+from app.bj_offline_volume import market_of
 from app.db.tables.daily_bars import outbox
 from app.db.tables.licences import user_data_licence_status as licences
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.users import users
-from app.bj_offline_volume import market_of
 from app.ingest import daily_bars as fetcher
 from app.ingest.daily_bars_plan import (
     BEIJING,
