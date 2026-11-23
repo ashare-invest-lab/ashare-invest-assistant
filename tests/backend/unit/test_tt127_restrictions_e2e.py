@@ -325,11 +325,6 @@ def test_concurrent_delete_rechecks_and_empty_state_are_http_visible(world: Worl
     assert listed.json()["items"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="T-T127 / §7.5 recheck gaps must return 200 with explicit no_source gap",
-)
 def test_delete_recheck_gap_is_not_reported_as_release(world: World) -> None:
     """Unknown target values model a future enum and must surface a gap, not success."""
     definition: str
@@ -374,11 +369,6 @@ def test_delete_recheck_gap_is_not_reported_as_release(world: World) -> None:
             )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="T-T127 / §7.5 future kind/status must render 未知 without HTTP response failure",
-)
 def test_unknown_kind_is_preserved_by_http_projection(world: World) -> None:
     definition: str
     identifier = uuid.uuid4()
