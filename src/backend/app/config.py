@@ -523,6 +523,8 @@ class Settings(BaseSettings):
     #: T-B127 / 契约 daily-bars-source §7：日 K 来源。默认 off；fake 仅 APP_ENV=test。
     #: 环境变量 ``DAILY_BARS_SOURCE``。mairui 在单 C 完成前为惰性（不拉、不写、不建连）。
     daily_bars_source: Literal["off", "fake", "mairui"] = "off"
+    #: 环境变量 ``REALTIME_QUOTES_SOURCE``。默认 off，打开前须由运维配置本人 active 证书。
+    realtime_quotes_source: Literal["off", "fake", "mairui"] = "off"
 
     # 认证（plan §3.6 / 契约 §1.3，T-B03）：注册模式与会话 Cookie 的 Secure 标记
     #: ``REGISTRATION_MODE``：closed（默认，``/auth/register`` → 503）/ invite / open
@@ -636,6 +638,8 @@ class Settings(BaseSettings):
             raise ValueError("SESSION_COOKIE_SECURE=false 只允许在 APP_ENV=local/test 使用")
         if self.daily_bars_source == "fake" and self.app_env != "test":
             raise ValueError("DAILY_BARS_SOURCE=fake 只允许在 APP_ENV=test 使用")
+        if self.realtime_quotes_source == "fake" and self.app_env != "test":
+            raise ValueError("REALTIME_QUOTES_SOURCE=fake 只允许在 APP_ENV=test 使用")
         return self
 
     @property

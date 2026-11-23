@@ -620,7 +620,9 @@ def worker_tick(settings: Settings, client: redis.Redis | None = None) -> list[t
                     stamp = dt.datetime.now(dt.UTC)
                     with _engine(settings).connect() as conn:
                         until = delayed_until(
-                            conn, stamp, args.get("batch_kind", "daily"),
+                            conn,
+                            stamp,
+                            args.get("batch_kind", "daily"),
                             args.get("window_trading_days"),
                         )
                     if until is not None:
