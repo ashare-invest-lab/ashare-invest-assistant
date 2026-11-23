@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Button, Input, Select, Space, Table, Tag } from 'antd';
+import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { ENUMS, RESTRICTION_TARGET_TYPES, type RestrictionKind, type RestrictionTargetType } from '../../api/enums';
 import { useCreateRestriction, useDeleteRestriction, useRestrictions, type RestrictionCreate } from '../../api/restrictionQueries';
-import type { Restriction } from '../../api/types';
+import { apiGet } from '../../api/client';
+import type { NonExecutableReason, Paged, Restriction } from '../../api/types';
 import { CursorPager } from '../../components/CursorPager';
 import { ErrorBox } from '../../components/common';
-import { GAP_REASON, RESTRICTION_KIND, RESTRICTION_STATUS, RESTRICTION_TARGET_TYPE } from '../../i18n/labels';
+import { CHECK_ON, GAP_REASON, REASON_CODE, RELEASE_KIND, RESTRICTION_KIND, RESTRICTION_STATUS, RESTRICTION_TARGET_TYPE } from '../../i18n/labels';
 import { fmtTime } from '../../lib/format';
 import { labelOf } from '../../lib/explanations';
 
@@ -29,6 +31,10 @@ export function RestrictionsPage() {
     target_type: parseChoice(searchParams.get('target_type'), TARGET_TYPES),
   };
   const list = useRestrictions(filter);
+  const cooldownReasons = useQuery({
+    queryKey: ['non-executable-reasons', 'restrictions-page', 'SAME_TEMPLATE_COOLDOWN'],
+    queryFn: ({ signal }) => apiGet<Paged<NonExecutableReason>>('/non-executable-reasons', { status: 'active', code: 'SAME_TEMPLATE_COOLDOWN' }, signal),
+  });
   const create = useCreateRestriction();
   const remove = useDeleteRestriction();
   const [form, setForm] = useState(EMPTY_FORM);
@@ -74,6 +80,29 @@ export function RestrictionsPage() {
         {form.kind === 'cooling_off' && !futureUntil ? <div className="warn small" role="alert" data-testid="cooling-off-validation">冷静期必须填写未来的截止时间</div> : null}
         {create.isError ? <ErrorBox error={create.error} /> : null}
       </section>
+
+      {cooldownReasons.data?.items.length ? (
+        <section className="panel" data-testid="same-template-cooldown-reasons">
+          <h4>同模板同证券冷却</h4>
+          {cooldownReasons.data.items.map((reason) => (
+            <article key={reason.id} data-testid={`same-template-cooldown-${reason.id}`}>
+              <div>
+                <Tag>{labelOf(REASON_CODE, reason.code) ?? '未知'}</Tag>
+                <span>{reason.name} <span className="mono muted">{reason.security_code}</span></span>
+              </div>
+              <div className="muted small">{reason.description}</div>
+              <div data-testid={`same-template-release-${reason.id}`}>
+                解除条件（{labelOf(RELEASE_KIND, reason.release_condition.kind) ?? '未知'}）：{reason.release_condition.human_text}
+                {reason.release_condition.at ? <span className="mono small">　到期：{fmtTime(reason.release_condition.at)}</span> : null}
+              </div>
+              <div className="muted small">
+                检查时机：{reason.release_condition.check_on.map((item) => labelOf(CHECK_ON, item) ?? '未知').join('、')} ·
+                {reason.release_condition.machine_checkable ? '系统自动检查' : '需您操作'}
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : null}
 
       <Space wrap style={{ margin: '12px 0' }}>
         <Select aria-label="筛选类型" value={filter.kind ?? ''} style={{ width: 150 }} onChange={(v: string) => setParam('kind', v)} options={[{ value: '', label: '全部类型' }, ...KINDS.map((k) => ({ value: k, label: labelOf(RESTRICTION_KIND, k) ?? '未知' }))]} />

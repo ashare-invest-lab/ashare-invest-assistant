@@ -96,6 +96,32 @@ describe('T-F72 复盘补充覆盖', () => {
     expect(page).toHaveTextContent('未知');
   });
 
+  it('未证导入批次保留 no_source 缺口且不进入成交时间线', async () => {
+    const response = await fetch(`${API}/reviews/review-example-import-unproven`);
+    const body = await response.json() as {
+      data_status: string;
+      data_as_of: string | null;
+      gaps: { key: string; reason: string }[];
+      current_version: { outcome_metrics: Record<string, { value: unknown; n: number; small_sample: boolean }> };
+      timeline: { kind: string }[];
+    };
+    expect(response.ok).toBe(true);
+    expect(body.data_status).toBe('partial');
+    expect(body.data_as_of).toBeNull();
+    expect(body.gaps).toEqual(expect.arrayContaining([
+      { key: 'trades.import_commit_unproven', reason: 'no_source', message: '导入批次提交时点不可证实' },
+    ]));
+    for (const key of outcomeMetricKeys) {
+      expect(body.current_version.outcome_metrics[key]).toEqual(expect.objectContaining({ value: null, n: 0, small_sample: true }));
+    }
+    expect(body.timeline.some((item) => item.kind === 'trade')).toBe(false);
+
+    renderAt('/reviews/review-example-import-unproven');
+    await screen.findByText('未证提交的成交不应进入时间线。');
+    expect(screen.getByTestId('review-gap')).toHaveTextContent('导入批次提交时点不可证实');
+    expect(screen.getByTestId('review-timeline')).not.toHaveTextContent('成交');
+  });
+
   it('保存失败仍保留用户输入', async () => {
     const user = userEvent.setup();
     server.use(http.post(`${API}/reviews`, () => HttpResponse.json({ error: { code: 'VALIDATION_ERROR', message: '保存失败示例', details: null, request_id: 'mock-f72' } }, { status: 400 })));
