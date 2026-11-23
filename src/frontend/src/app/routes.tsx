@@ -13,8 +13,6 @@ const lazyPage = <M,>(load: () => Promise<M>, pick: (m: M) => React.ComponentTyp
 
 /** 契约 §4 / plan 规划的页面；未实现的先给占位 */
 export const PLACEHOLDERS: [string, string][] = [
-  ['reviews', '复盘'],
-  ['restrictions', '禁投 / 冷静期 / 屏蔽'],
 ];
 
 export const routes: RouteObject[] = [
