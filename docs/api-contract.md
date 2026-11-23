@@ -21,6 +21,7 @@
 - T-A231（2026-11-21，不升版本）：补充 `/securities/{code}` 首导未完成错误口径与 `/quotes` 闭市日收盘回落 freshness 口径。
 - T-A215（2026-11-21）：§7.5 将 `/restrictions` 的目标可见性、`until`、响应投影、删除重查与 PIT 口径定稿，幂等沿用 §1.3，不新增错误码或公共枚举。
 - T-A215 第2轮（2026-11-21）：统一 §7.5 与 T-A209 的 PIT 口径；明确已删除限制重复 DELETE 的 `200`、原 `removed_at` 与无事件幂等语义；补充按 `target_type` 的删除重查关联、行锁、保留与释放规则；主线尚未实现 restrictions 路由的现状改为未验证。
+- T-A238（2026-11-22）：补齐 RT-03/RT-04、MK-01/MK-03/MK-04、RS-02/RS-03/RS-04、RV-03/RV-04/RV-06 的时点、来源、冷却、风控与复盘口径，并为每个受影响入口列验收。RS-02 新增公共原因码 `SAME_TEMPLATE_COOLDOWN`（公共枚举变更），以专用码表达同模板冷却窗口。RT-04 仅引用 PR #405 的待合入语义。以上为契约要求，逐入口实现和测试仍按验收清单核实，未宣称主线已实现。
 
 ### v0.2.10（2026-11-19，A2b：明确停牌的 K 线缺口与日报说明）
 
@@ -454,7 +455,7 @@
 | `research_candidate_status` | `researching` `watching` `dropped` `planned`（v0.2.9 T-A11；研究候选状态，§6.0；`planned` 只由系统写入） |
 | `research_candidate_origin` | `strategy_screen` `suggestion` `manual` `from_stock`（v0.2.9 T-A11；与库表 CHECK 一致；本版 `POST /candidates` 不接受 `strategy_screen`，§7.7A） |
 | `candidate_decision` | `continue` `watch` `drop`（v0.2.9 T-A11；分别把研究候选状态置为 `researching`、`watching`、`dropped`） |
-| `reason_code` | 见 6.1（22 个；v0.2.5 删 `PROFILE_OR_CONSENT_MISSING`） |
+| `reason_code` | 见 6.1（23 个；v0.2.5 删 `PROFILE_OR_CONSENT_MISSING`，T-A238 新增 `SAME_TEMPLATE_COOLDOWN`） |
 | `reason_status` | `active` `released` `obsolete` |
 | `check_on` | `tick` `daily_close` `schedule` `holding_change` `cash_update` `import` `plan_change` `user_action` |
 | `release_kind` | `expr` `time` `event` `user_action` |
@@ -844,9 +845,20 @@
 | `CONFLICTS_CONFIRMED_PLAN` | user_action | user_action | 是 |
 | `BLOCKLISTED` | user_action | user_action | 是（通过 `/restrictions`；`machine_checkable=true`，对其调用 `/release` → `409 REASON_NOT_MANUALLY_RELEASABLE`，v0.2.9） |
 | `COOLING_OFF` | time | schedule | 否 |
+| `SAME_TEMPLATE_COOLDOWN` | time | schedule | 否 |
 | `LOSS_STREAK_PAUSE` | user_action / time | user_action, schedule | 是 |
 | `STRATEGY_CONFLICT` | user_action / expr | user_action, tick | 是（`evidence` 中写明对方候选信号的 id，v0.2.9；#30 写明：每个对方信号一条 `Evidence`，`key="signal.conflict_signal_id"`（保留键，不进 feature_catalog）、`value` 为对方信号的 uuid、`unit=null`、`provider="system"`、`endpoint=null`、`epistemic_type="fact"`，`data_as_of`、`fetched_at` 为检测时刻；不另设字段） |
 | `USER_MUTED` | user_action / time | user_action, schedule | 是（通过 `/restrictions`；`machine_checkable=true`，对其调用 `/release` → `409 REASON_NOT_MANUALLY_RELEASABLE`，v0.2.9） |
+
+**RS-02 同模板冷却（新增 `SAME_TEMPLATE_COOLDOWN`）**：候选写入场景使用专用码 `SAME_TEMPLATE_COOLDOWN` 表示“同用户、同证券、同策略版本（模板）已有前序候选”，不使用 `COOLING_OFF`。前序候选的 `content.created_at` 必须在候选写入时点已可见，窗口为 `[previous.content.created_at, expiry_at)`，`expiry_at` 为该时点起算第 `config/risk_controls.yaml` `executability.same_template_cooldown_days` 个交易日的 15:00（北京时间），现值为 3。此口径出处为 `docs/plan.md` 第 9 节问题 30，已核实原文“同模板同证券冷却 3 个交易日”。交易日历缺失时不判定，写入 `gaps` 的 `no_source`，不得用自然日补齐。命中时写入 `NonExecutableReason`，其 `release_condition={kind:"time", at:expiry_at, event:null, action:null, check_on:["schedule"], human_text:"同模板同证券冷却至到期交易日15:00（北京时间）", machine_checkable:true}`。该原因自动解除，手动调用 release 返回 `409 REASON_NOT_MANUALLY_RELEASABLE`。计划场景仍沿用本表中 `SAME_DIRECTION_PLAN_EXISTS` 的 `plan_change` 检查时机。
+
+RS-02 受影响入口与验收（按入口）：
+
+- `signals.service.write_candidate`：以候选写入时可见的前序候选做同用户、同证券、同 `strategy_version_id` 匹配，按半开交易日窗口命中后写入 `SAME_TEMPLATE_COOLDOWN`。日历缺失只记 gap，不写阻断原因，不以 0 值代替。
+- `GET /candidate-signals`、`GET /candidate-signals/{id}`：返回 `SAME_TEMPLATE_COOLDOWN` 的 `code`、`release_condition`、`machine_checkable`、`status`，窗口到期前保持 `active`，到期后自动变为 `released`。
+- `GET /non-executable-reasons` 与 `POST /non-executable-reasons/{id}/release`：列表和详情保持 `SAME_TEMPLATE_COOLDOWN` 的同一原因投影。该自动原因的手动解除返回 `409 REASON_NOT_MANUALLY_RELEASABLE`，与 `COOLING_OFF` 一致，不新增 HTTP 错误码。
+- `signals.service.recheck_restriction`：删除 restriction 时不得释放 `SAME_TEMPLATE_COOLDOWN`。只重查对应的 `BLOCKLISTED`、`USER_MUTED`、`COOLING_OFF` 原因，`SAME_TEMPLATE_COOLDOWN` 不在 restriction 重查集合内，继续按时间检查。
+- 前端/测试须同步新码。只读 `git grep` 发现原因码全集硬编码于 `src/frontend/prototype/src/labels.ts`、`src/frontend/prototype/src/types/contract.ts`、`src/frontend/src/api/enums.ts`、`src/frontend/src/i18n/labels.ts`；`tests/` 未发现原因码全集列表。
 
 ### 6.2 周 K 口径（`freq=w`，v0.2.7）
 1. **聚合方式**：由日 K 按自然周（周一到周日，北京时间）聚合，复权方式与同一请求的日 K 完全相同（`qfq` 与 `hfq` 都先对日线复权再聚合；`adjust` 默认 `qfq`）。不直接使用麦蕊的周线。
@@ -938,7 +950,7 @@
 | GET | `/securities?q=` 🔒 | 证券搜索（不分页，最多 20 条）：`[{security_code, name}]`。**v0.2.7 起为 `/securities/search` 的别名**，`types` 和 `limit` 取默认值，返回结构保持不变；新代码请改用 `/securities/search` |
 | GET | `/securities/{code}` 🔒 | v0.2.7。`SecurityProfile`（§5.1），弱 ETag。不存在 → `404 NOT_FOUND`；北交所旧代码 → `404 NOT_FOUND{superseded_by}`。公开主数据每日 18:00 更新、次日 07:30 补拉（北京时间，周一至周五；T007 §6；v0.2.9 内 T-A04：来源为交易所公开列表，plan 4.6.5）；行业、概念、股本按本人证书每日盘后更新；`suspended` 每个交易日 09:15 前按本人证书刷新【待 T003 补测：停牌标记的来源端点】。首导未完成时与 `/securities/search` ⑥ 及 T-B94 同口径：`500 INTERNAL_ERROR{issue:"security_master_bootstrap_required"}`，不返回 `503`，不伪造 `master_as_of`。本接口触发见 `master.profile.profile`：`listing_status` 为空，或行上 `master_as_of` 为空且三所成功快照日（`master.search._MASTER_DATE`）不足 3 个。前端 `errorPolicy.isBootstrapRequired` 命中后，`components/common` 提示「证券主数据尚未完成首次导入，暂时查不到证券资料；请联系管理员完成主数据导入后再试」。属部署前置违规，测试不要求复现未部署态（`docs/reviews/T-B94-master-as-of-ruling.md`） |
 | GET | `/securities/{code}/financials` 🔒 | v0.2.7。`?report_period=`（可多值，默认全部）`&limit=`（默认 8，最大 40）`&as_of=`（日期，可选：只返回 `available_from ≤ as_of` 的报告期，时点视图）→ `{security_code, name, items: FinancialPeriod[]（period_end 降序）, sources: ProviderRef[], data_status, data_as_of, gaps}`，**不分页**。同一报告期有更正时只返回最新一版，`is_restated=true`。指数或无财务数据的证券：`200`，`items: []`，`data_status:"unavailable"`，`gaps:[{key:"financials", reason:"no_source"}]`。ETF（v0.2.8）：同样 `200`、`items: []`、`data_status:"unavailable"`，但 `gaps:[{key:"financials", reason:"not_applicable"}]`；指数保持 `no_source`。更新：每日盘后按本人证书增量拉取【待 T003 补测：财报端点与 `announce_date` 字段是否可得】 |
-| GET | `/securities/{code}/fund-flows` 🔒 | v0.2.7。`?days=`（默认 60，最大 250）或 `?from=&to=`（日期，区间不超过 250 个交易日；两种方式同时给出 → `400 VALIDATION_ERROR`）→ `{security_code, name, items: FundFlowDay[]（trade_date 升序）, sources, data_status, data_as_of, gaps}`，不分页。停牌日不出行。当日数据在盘后更新（15:40 后）【待 T003 补测：更新时刻】，入库前不出当日行；更新后还会再次校准的日期 `is_final=false`。指数 → `200` 空 `items` + `no_source` gap；ETF（v0.2.8）→ `200`、空 `items`、`data_status:"unavailable"`、`gaps:[{key:"fund_flows", reason:"not_applicable"}]` |
+| GET | `/securities/{code}/fund-flows` 🔒 | v0.2.7。`?days=`（默认 60，最大 250）或 `?from=&to=`（日期，区间不超过 250 个交易日；两种方式同时给出 → `400 VALIDATION_ERROR`）→ `{security_code, name, items: FundFlowDay[]（trade_date 升序）, sources, data_status, data_as_of, gaps}`，不分页。停牌日不出行。当日数据在盘后更新（15:40 后）【待 T003 补测：更新时刻】，入库前不出当日行；更新后还会再次校准的日期 `is_final=false`。**PIT 可用时点（T-R106 裁定，2026-11-21）**：回测、复盘、信号生成使用 d 日资金流时，最早可用时点取「d 的下一交易日 09:30（Asia/Shanghai）」与该行实际 `fetched_at` 中较晚者，不得在 d 日盘中或收盘时使用；15:40 仅为展示入库暂定时点（未验证），首次可见与修订关系确认前不改此口径。指数 → `200` 空 `items` + `no_source` gap；ETF（v0.2.8）→ `200`、空 `items`、`data_status:"unavailable"`、`gaps:[{key:"fund_flows", reason:"not_applicable"}]` |
 | GET | `/securities/{code}/factors` 🔒 | v0.2.7。`?trade_date=`（可选，默认最新）`&category=`（可多值）→ `{security_code, name, trade_date: string(date) \| null, factor_set_version: string \| null, counts: {total: int, by_category: object<factor_category, int>}, items: FactorValue[], sources, data_status, data_as_of, gaps}`，不分页。**T-A158 空态口径（与 O-CI1-PROFILE-CONTRACT 合并）**：请求带合法 `trade_date` 时原样返回；未指定且无可用批次时为 `null`，不造「最新日」。无真实可核实因子集时版本为 `null`，已知真实因子集即使筛选后空集仍保留真实版本，详见下方因子集版本规则。空态 `counts={total:0,by_category:{}}`；ETF 用 `not_applicable`、无来源用 `no_source`、本人证书不可用用 `data_licence_unavailable`，不互相覆盖。未知 `category` → `400 VALIDATION_ERROR`（`FactorCategory` 待 T003，当前空枚举维持）；合成版本/分类只供 fixture，不进生产响应。因子数量为 85 个（77 个日频 + 8 个日内）【待 T003 补测：最终数量与单位】。北向资金类因子取不到时 `value` 为 `null`，并带 `gaps[{key:"factor.<id>", reason:"no_source"}]`。**不提供行业内分位**（v0.2.7 未决 Q4）。每日盘后按本人证书更新。ETF（v0.2.8）→ `200`，`items: []`，`counts.total: 0`，`data_status:"unavailable"`，`gaps:[{key:"factors", reason:"not_applicable"}]` |
 | GET | `/securities/{code}/announcements` 🔒 | v0.2.7。§1.2 游标分页（默认 `published_at desc, id desc`）；`?from=&to=&category=` → `Paged<Announcement> & {disclaimer: string, sources, data_status, data_as_of, gaps}`。`disclaimer` 为固定文案：“公告内容以交易所及上市公司披露原文为准，本系统仅提供标题与原文链接。” 每日盘后按本人证书更新，盘中不刷新【待 T003 补测】。ETF（v0.2.8）：本版不收录基金公告 → `items: []`，`data_status:"unavailable"`，`gaps:[{key:"announcements", reason:"not_applicable"}]` |
 | GET | `/market/sector-flows` 🔒 | v0.2.7。`?kind=industry\|concept`（必填）`&sort=`（`sector_sort`，默认 `main_net_desc`）`&limit=`（默认 20，最大 100），不分页 → `{kind, taxonomy: industry_taxonomy \| null（concept 时为 null）, trade_date, items: SectorFlow[], sources, data_status, data_as_of, gaps}`。**盘后数据**：每个交易日 15:40 后按本人证书更新一次，盘中返回上一交易日的数据；不提供盘中实时数据，前端不必轮询（响应带弱 ETag）。**`data_as_of` 可空（A-12）**：本人证书从未取到资金流时 `data_status=unavailable`、`data_as_of=null` |
@@ -1278,6 +1290,23 @@ evidence: Evidence[]
 ③ `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions[/{n}]`：只读冻结快照，平铺三字段存在且与快照一致，不按当前时钟重算可见性。
 ④ 手工录入成交（`import_batch_id` 为空）：`available_at=max(traded_at, created_at)`，行为不变。
 
+**RV-03 复盘与模拟跟踪边界**：`ReviewOutcomeMetrics` 只代表本人实际成交，四项指标在口径定稿前固定为 `value=null`、`n=0`、`small_sample=true` 并带既有 `outcome_metrics.<指标>/no_source`。`TrackingResult` 只代表模拟跟踪，界面必须标注“模拟，不代表实际收益”。两者不得互填。复盘/跟踪聚合的 `profit_loss_ratio` 按 §7.11.3 T-A27② 取 `return_pct` 毛收益，净费用口径不在本契约中。
+
+RV-03 验收（按入口）：
+
+- `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions[/{n}]`：断言实际成交指标只读冻结复盘快照，定稿前为 null+gap，不读取模拟结果。
+- `GET /suggestions/{id}/tracking`：断言结果只投影 `TrackingResult`，显示模拟免责，`profit_loss_ratio` 只聚合毛 `return_pct`。
+- `tracking.engine/service`：断言模拟与实际成交使用独立输入、样本数不互填，缺证据不转零。
+- 复盘前端：断言实际指标和模拟跟踪分开呈现，并保留 null、gap 与“模拟，不代表实际收益”文案。
+
+**RV-06 复盘时点与费用快照**：本条精化 §7.8.4 原有作废判定。版本持久化时冻结 `calculation_as_of`，只纳入 `available_at <= calculation_as_of` 且在该时点尚未作废的 execution 成交，即 `voided_at` 为空或晚于截止时刻。截至时点已作废的成交排除。费用、费率快照字段及其形状【未验证】必须随版本证据保存，缺证据时相应指标为 `null` 并记既有 `no_source`，不得从模拟跟踪反推实际费用或收益。
+
+RV-06 验收（按入口）：
+
+- `POST /reviews`、`POST /reviews/{id}/versions`：断言保存时冻结 `calculation_as_of`，按 `available_at` 和 `voided_at` 截止关系筛选成交，旧版本不可变。
+- `GET /reviews`、`GET /reviews/{id}`、`GET /reviews/{id}/versions[/{n}]`：断言四个复盘读取入口只投影冻结快照，费用/费率缺证为 null+`no_source`，不因当前时钟重算。
+- `reviews.service`、`feedback.plan_source`：断言导入批次 `committed_at` 继续参与 `available_at`，作废时点和费用证据可追溯，模拟结果不作为回退来源。
+
 ### 7.9 管理端（🛡；非管理员（含未登录）访问任何 `/admin/*` 一律返回 404，不暴露其存在，见 §1.3）
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -1402,6 +1431,30 @@ evidence: Evidence[]
 - 当前评价不能回写历史建议；建议仍读取生成时的风控标记与 gap。实际风控事件由业务作业幂等写入，复用 §7.5 的 RiskEvent，不增加第二套事件状态机。
 - **T-A33（R4）**：`RiskEvaluation` 的 `DataStatusBlock.data_as_of` 取参与判定各输入时点中**最早**的非空值，全空为 null（同 T-A29 日报口径，不取最新、不取 evaluated_at）。
 
+**RV-04 RC6 未接通检查**：`feedback.plans._assess` 产出的三个稳定 gap key 为 `plan_check_not_connected:held_after_invalidation`、`plan_check_not_connected:buy_without_stop`、`plan_check_not_connected:buy_during_wait`【未验证】。对应 `RiskEvaluation.controls[RC6].state` 固定为 `unknown`，不得写成 `ok` 或 `disabled`，也不得进入候选可执行结论或被投影为已通过原因。原因投影沿用既有原因状态和错误码，不新增 HTTP 错误码。
+
+RV-04 验收（按入口）：
+
+- `RiskEvaluation.controls[RC6]`：断言三个 gap key 稳定、状态为 `unknown`，不生成通过 flag。
+- 候选原因投影、`GET /candidate-signals`、`GET /non-executable-reasons`：断言 RC6 未接检查保留 gap，不能把 unknown 转为可执行或 `ok`。
+- `POST /non-executable-reasons/{id}/release`：断言沿既有 `machine_checkable` 规则处理，不新增错误码或手动解除路径。
+
+**RS-03 止损后冷静期（T-A26 RC1 事件链）**：仅当 `cooling_off_after_stop.enabled=true` 时，`risk.rc1` 产生的止损事件才由 `risk.events/worker` 创建限制。`days=3` 按交易日计算，原因码为 `COOLING_OFF`。限制原因携带来源 `risk_event_id` 与到期交易日 15:00（北京时间）的 `release_condition`【未验证】。自动到期解除，不改变候选动作。开关关闭时只保留 RC1 事件，不创建限制、不阻断候选。默认 `enabled=false`、`days=3` 沿 `config/risk_controls.yaml`。
+
+RS-03 验收（按入口）：
+
+- `risk.rc1`：开关开时止损事件进入冷静期链，按交易日和北京时间 15:00 计算解除。开关关时只写事件。
+- `risk.events/worker`：断言事件到限制的幂等创建、来源 `risk_event_id`【未验证】和 `COOLING_OFF` 原因，不重复阻断。
+- `GET /restrictions`、`GET /candidate-signals`、`GET /non-executable-reasons`：断言限制、候选原因和自动解除状态一致，关闭开关时无新增限制。
+
+**RS-04 RC5/RC6 现值**：`loss_streak_drawdown`（RC5）和 `plan_violation`（RC6）在 `GET/PUT /risk-controls` 与 `RiskEvaluation` 中均保持 `enabled=true`。RC5 的 `pause_on_trigger=true` 也保持现值。RC5/RC6 阈值沿 `config/risk_controls.yaml` 现值【未验证】，不得因止损后冷静期或同模板冷却仍未接入而改成默认关闭。仅止损后冷静期与同模板冷却两项未实现能力可以写默认关闭。参数类型或范围错误继续返回 `422 RISK_CONTROL_INVALID_PARAMS`。
+
+RS-04 验收（按入口）：
+
+- `GET/PUT /risk-controls`：断言 RC5、RC6 的 enabled 与 RC5 `pause_on_trigger` 保持 true，阈值不被客户端默认覆盖。
+- `RiskEvaluation`：断言 RC5/RC6 未接通时为 `unknown`+gap，不冒充 `disabled`，现值开启仍参与评估。
+- 候选门控：断言 RC5/RC6 触发按现值生成已有原因和门控，参数错误只走 `RISK_CONTROL_INVALID_PARAMS`。
+
 **T-A52 裁定（status: 生效（T-A69，隔离 PG 复验 T-O54 与 tb95 22/22 T-T36b 通过后）；「清除覆盖」接口，v0.2.9 内；docs/reviews/T-A52-risk-control-reset-ruling.md）**：
 
 1. **语义**：`DELETE /risk-controls/{control}` 删除**操作者本人**该 control 的 `scope='user'` 覆盖、恢复继承（文件默认 → system 行 → 本人 user 行链回退），不是删除配置本身。**权限边界（用户裁定）**：只能删除本人 user 行；system 行与文件默认一律不可经本接口删除或改动；普通用户对 system 行无任何写/删路径（变体形状一律 `404 NOT_FOUND`，隐藏存在性，不提供 403 探测面）；不设管理员跨用户重置；system 行管理入口属独立管理员功能，不在本契约范围。
@@ -1425,6 +1478,8 @@ evidence: Evidence[]
 细化 §7.8 `GET /suggestions/{id}/tracking`：他人/不存在的建议返回 404；本人的建议返回 `200 {t1: Stat, t5: Stat, t20: Stat, results: TrackingResult[], DataStatusBlock}`。无结果 results=[] 并列 gap；GET 不触发行情拉取或补算。
 
 `TrackingResult`：`{strategy_version_id: uuid, instance_id: uuid|null, action: action, horizon_days: 1|5|20, state: "pending"|"complete"|"untradable"|"excluded"|"unavailable", entry_at: datetime|null, entry_price: string(decimal)|null, exit_at: datetime|null, exit_price: string(decimal)|null, benchmark_code: string, benchmark_entry_price: string(decimal)|null, benchmark_exit_price: string(decimal)|null, return_pct: string(decimal)|null, benchmark_return_pct: string(decimal)|null, excess_pct: string(decimal)|null, max_drawdown_pct: string(decimal)|null, max_runup_pct: string(decimal)|null, direction_correct: boolean|null, invalidation_triggered_at: datetime|null, exclusion_reason: string|null, price_basis: "qfq", cost_applied: boolean, evidence: Evidence[], evidence_ids: string[], gaps}`。
+
+RV-03 在本节的边界：`TrackingResult` 与 `ReviewOutcomeMetrics` 使用不同数据集和状态机。`profit_loss_ratio` 只按 T-A27② 的毛 `return_pct` 聚合，页面沿 §7.8.4 标示模拟结果，逐入口验收见该节。
 
 - 每策略版本/建议/跟踪期唯一；停牌、一字板、forced_hold、wait 的排除与方向定义按 plan §2.8，不把 sell/reduce 的标的区间收益强行取反；缺基准只把相关结果置 null + gap。pending 表示尚未到期；unavailable 表示到期但缺计算所需数据；untradable/excluded 必有 exclusion_reason，不进入有效样本 n。价格依据列入本条 result 的 evidence，evidence_ids 必须能解析；可成交性使用不复权实际价格，收益及 entry/exit_price 使用同一 as-of 的 qfq 序列，原价与复权价分开留证。分钟线若无可核实的复权衔接依据，该项 unavailable + gap，不混用 raw/qfq 或生成时参考价与模拟入场价。
 - `results` 是**单条观测**，其十进制结果是 §5.1“统计收益使用 Stat”的明确草案例外，不是胜率/业绩聚合；界面必须写“模拟，不代表实际收益”。旧 t1/t5/t20 保留 Stat 约束，不能把 n 虚增到 5 来显示单样本；新前端读 results。策略聚合继续只用 Stat，n<5 为 null、n<30 标 small_sample。

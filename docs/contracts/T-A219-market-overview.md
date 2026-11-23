@@ -74,6 +74,20 @@ RegimePositionRange { min_pct: string(decimal), max_pct: string(decimal) }
 
 `quotes_snapshot` 当前主键是 `(code, ts)`，无法隔离不同证书的同一时点。迁移前不得把无归属旧行冒领为本人 `source='mairui'` 行，也不得把 `realtime_quotes` 代替本任务要求的 `quotes_snapshot`。
 
+### 2.1 MK-03 来源与证据链补充
+
+本节为 MK-03 目标契约，`aggregates.service.market` 与 `GET /market/overview` 的逐入口实现验收仍未完成。
+
+`basis.source` 记录本次市场快照实际采用的来源标签，`basis.snapshot_id` 只引用该响应可见的 `data_snapshots.id`。来源或快照证据缺失时二者为 `null`，并给既有 `no_source`，不以零或应用版本填充。盘中批次的知识截止为同一 `batch_id` 的 `max(fetched_at)`，收盘知识截止为所选 T* 日线批次的可见 `fetched_at`。查询只接受不晚于 `query_as_of` 的证据。
+
+逐组件来源固定如下：指数卡的价格、涨跌幅和成交额来自同一可见批次的 `quotes_snapshot`，或收盘模式的同一 T* `daily_bars`。breadth 只用同一批次资格池成员的比较字段。`turnover_total` 只累加该批次合格成员的 `amount`。任一组件缺少来源、批次、知识截止或单位证据时，该组件字段为 `null` 并给 `market.<component>/no_source`，不得补零、跨批次拼接或从其他组件反推。
+
+MK-03 验收（按入口）：
+
+- `aggregates.service.market`：断言盘中/收盘分别绑定 `basis.source`、`snapshot_id`、批次知识截止，指数、breadth、turnover 不跨批次，缺证据为 null+`no_source`。
+- `GET /market/overview`：断言 `basis` 与三类组件的来源证据可追溯，`data_as_of` 取实际组件最早时点，不能把零值当作来源证明。
+- `basis`：断言 `snapshot_id` 只指向可见快照，来源缺失保持 null。指数、breadth、turnover 各自缺证据时只影响对应组件和 gap。
+
 ## 3. 资格池和 basis
 
 ### 3.1 资格池
@@ -179,6 +193,17 @@ BJ 门闩的收口依据是 PR #182 的 `docs/T-A172` 分支 `docs/contracts/dai
 - `market.regime`
 - `market.basis`
 
+### 6.1 MK-01 缺口稳定性与北京时间
+
+本节为 MK-01 目标契约，空态、部分态、跨日和重复 gap 的实现验收仍未完成。
+
+同一响应内的 gap 以 `(key, reason)` 去重，同键同原因只保留一条，`message` 使用稳定文案【未验证】。不同原因仍可并列。`trade_date` 是按北京时间交易日历确定的日期，`session` 按北京时间时段计算，所有相关时点字段（包括 `data_as_of`）使用带 `+08:00` 的 ISO 8601 表示，不能用服务器本地时区或当前时钟替代。
+
+MK-01 验收（按入口）：
+
+- `aggregates.service.market`：全空、部分输入、跨日选择和重复来源分别断言 gap 去重、稳定 message、单一 T* 与北京时间时点。
+- `GET /market/overview`：断言重复 `key+reason` 只返回一条，`trade_date`、`session`、`data_as_of` 与 Asia/Shanghai 计算一致。无输入仍为既有空态和错误码。
+
 ## 7. regime 规则
 
 T-R107 明确 F25/G-02 的窗口、阈值、防抖天数、最少有效值和参考区间均未获批准。后端必须把 regime 计算门控设为 `enabled=false`，不读取仓内候选值作为正式结论。
@@ -189,6 +214,18 @@ T-R107 明确 F25/G-02 的窗口、阈值、防抖天数、最少有效值和参
 - 增加 `market.regime` gap，`reason="no_source"`，message 写明“F25/G-02 参数未批准，未生成市场环境结论”；
 - 不沿用前一日 regime，不返回 `range` 作为默认，不用 F50 或 RC3 区间补出结论；
 - 仅当后续有版本化、PIT 可见且批准的 feature 产物，才读取 `feature_bars_daily.values`，并按 §3 的 `feature_catalog.status='verified_live'` 过滤。
+
+### 7.1 MK-04 默认关闭指标
+
+本节为 MK-04 目标契约，三项门控和前端空态的实现验收仍未完成。
+
+三项未批准指标固定列为 `market.regime`、`market.breadth.limit_counts`、`market.turnover_total` 的门控结果，分别对应市场环境、涨跌停计数和成交额汇总，三项默认均为 `enabled=false`。`market.regime` 与 F25/G-02 仍关闭。`market.breadth.limit_counts` 只有规则证据齐全才启用。`market.turnover_total` 只有同批次金额证据齐全才启用。各门控参数和版本来源沿本节与 `config/market_rules.yaml`，未有出处的参数标记【未验证】。关闭或证据不足时字段为 `null`，gap 分别使用 `market.regime/no_source`、`market.breadth.limit_counts/no_source`、`market.turnover_total/no_source`，禁止用阈值、零值或前一日值补结论。
+
+MK-04 验收（按入口）：
+
+- `aggregates.service.market`：断言三项门控默认值、参数/版本来源和关闭时 null+gap。未批准 regime/F25 仍返回 `market.regime/no_source`。
+- `GET /market/overview`：断言三项指标只在各自证据齐全时出值，不能互相填充或把 null 转成零。
+- 市场概览前端空态：断言保留字段级 gap 和未知枚举兜底，不将关闭指标渲染为阈值结论。
 
 ## 8. 错误和空态
 
