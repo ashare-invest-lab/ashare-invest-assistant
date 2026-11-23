@@ -36,6 +36,7 @@ from app.version import APP_VERSION
 from app.workers.runner import run
 
 INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
+_last_realtime_quotes_tick: float | None = None
 
 #: 已废弃的全站证书变量（T-A07）；只判断是否非空，从不读取或输出它的值
 LEGACY_LICENCE_ENV = "MAIRUI_LICENCE"
@@ -89,6 +90,34 @@ def heartbeat_payload(now: float | None = None) -> str:
         },
         separators=(",", ":"),
     )
+
+
+def tick_realtime_quotes(
+    settings: Settings, engine: Engine | None = None, now_monotonic: float | None = None
+) -> None:
+    """按配置间隔触发实时行情采集，失败时保留 ingest 心跳。"""
+    global _last_realtime_quotes_tick
+
+    if getattr(settings, "realtime_quotes_source", "off") != "mairui":
+        _last_realtime_quotes_tick = None
+        return
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    interval = settings.business.realtime.intervals.quote_interval_s
+    if (
+        _last_realtime_quotes_tick is not None
+        and now - _last_realtime_quotes_tick < interval
+    ):
+        return
+    _last_realtime_quotes_tick = now
+    try:
+        from app.marketdata.realtime_collect import realtime_quotes_task
+
+        if engine is None:
+            realtime_quotes_task(settings)
+        else:
+            realtime_quotes_task(settings, engine=engine)
+    except Exception as exc:  # noqa: BLE001 - collection must not stop heartbeat
+        logging.warning("realtime quotes tick failed: %s", type(exc).__name__)
 
 
 def bootstrap_ingest_core(settings: Settings) -> Engine:
@@ -164,6 +193,7 @@ def write_heartbeat(settings: Settings) -> None:
                 if getattr(settings, "daily_bars_source", "off") == "mairui":
                     tick_bars(shared_engine)
                     wake_delayed(shared_engine, client)
+                tick_realtime_quotes(settings, engine=shared_engine)
             elif settings.database_url is not None:
                 engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
                 try:
@@ -175,6 +205,7 @@ def write_heartbeat(settings: Settings) -> None:
                     if getattr(settings, "daily_bars_source", "off") == "mairui":
                         tick_bars(engine)
                         wake_delayed(engine, client)
+                    tick_realtime_quotes(settings, engine=engine)
                 finally:
                     engine.dispose()
         # T-B113 / T-A84: every heartbeat round must tick IngestCore (pending IP-limit flush).

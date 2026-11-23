@@ -1,6 +1,5 @@
 """T-B213 realtime collection gates and response handling; synthetic and offline."""
 
-# ruff: noqa: S101
 
 from __future__ import annotations
 
@@ -10,9 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from app.marketdata import realtime_collect
-from app.workers import jobs
+from app.workers import ingest, jobs
 
 OWNER = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1")
 LICENCE = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1")
@@ -53,6 +51,71 @@ class _Engine:
         return _Context(self.connection, lambda: setattr(self, "write_open", False))
 
 
+def test_write_rows_reuses_matching_fingerprint() -> None:
+    conn = Mock()
+    query = Mock()
+    row = {
+        "code": "600000.SH",
+        "ts": NOW,
+        "source_licence_id": LICENCE,
+        "fetched_at": NOW,
+    }
+    query.mappings.return_value = [
+        {
+            "code": "600000.SH",
+            "ts": NOW,
+            "source_licence_id": LICENCE,
+            "revision": 4,
+            "content_fingerprint": realtime_collect._fingerprint(row),
+        }
+    ]
+    conn.execute.side_effect = [query]
+    assert realtime_collect._write_rows(conn, [row], uuid.uuid4()) == 0
+    assert conn.execute.call_count == 1
+
+
+def test_write_rows_advances_after_fingerprint_change() -> None:
+    conn = Mock()
+    query = Mock()
+    query.mappings.return_value = [
+        {
+            "code": "600000.SH",
+            "ts": NOW,
+            "source_licence_id": LICENCE,
+            "revision": 2,
+            "content_fingerprint": "old",
+        }
+    ]
+    conn.execute.side_effect = [query, SimpleNamespace(rowcount=1)]
+    row = {
+        "code": "600000.SH",
+        "ts": NOW,
+        "source_licence_id": LICENCE,
+        "fetched_at": NOW,
+    }
+    assert realtime_collect._write_rows(conn, [row], uuid.uuid4()) == 1
+    values = conn.execute.call_args_list[1].args[0].compile().params
+    assert next(value for key, value in values.items() if key.startswith("revision")) == 3
+
+
+def test_ingest_tick_routes_realtime_task_at_configured_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(
+        realtime_quotes_source="mairui",
+        business=SimpleNamespace(
+            realtime=SimpleNamespace(intervals=SimpleNamespace(quote_interval_s=17))
+        ),
+    )
+    calls: list[object] = []
+    monkeypatch.setattr(ingest, "_last_realtime_quotes_tick", None)
+    monkeypatch.setattr(realtime_collect, "realtime_quotes_task", calls.append)
+    ingest.tick_realtime_quotes(settings, now_monotonic=10)
+    ingest.tick_realtime_quotes(settings, now_monotonic=26)
+    ingest.tick_realtime_quotes(settings, now_monotonic=27)
+    assert calls == [settings, settings]
+
+
 def test_default_switch_is_off_and_does_not_create_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = SimpleNamespace(realtime_quotes_source="off")
     denied = Mock(side_effect=AssertionError("off switch must return before engine creation"))
@@ -87,7 +150,7 @@ def test_config_switch_defaults_off() -> None:
     assert realtime_collect.Settings.model_fields["realtime_quotes_source"].default == "off"
 
 
-def test_worker_does_not_register_realtime_task() -> None:
+def test_worker_registers_realtime_task() -> None:
     settings = SimpleNamespace(
         business=SimpleNamespace(
             realtime=SimpleNamespace(intervals=SimpleNamespace(quote_interval_s=17))
@@ -96,9 +159,9 @@ def test_worker_does_not_register_realtime_task() -> None:
         import_rows_purge_interval_s=60,
         import_raw_purge_interval_s=60,
     )
-    assert "market.realtime_quotes_fetch" not in jobs.schedule(settings)
-    assert "market.realtime_quotes_fetch" not in jobs.TASKS
-    assert "market.realtime_quotes_fetch" not in jobs.LOCKED_TASKS
+    assert jobs.schedule(settings)["market.realtime_quotes_fetch"] == 17
+    assert jobs.TASKS["market.realtime_quotes_fetch"] is realtime_collect.realtime_quotes_task
+    assert "market.realtime_quotes_fetch" in jobs.LOCKED_TASKS
 
 
 @pytest.mark.parametrize("status", [101, 103, 429, 503, 500])
@@ -115,6 +178,22 @@ def test_json_error_stops_before_normalization() -> None:
 def test_malformed_json_stops_before_normalization() -> None:
     with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
         realtime_collect._validate_response(200, "not-json")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2030-06-11 10:00:00+08:00", "2030-06-11", "2030-06-11T10:00:00"],
+)
+def test_unknown_timestamp_formats_are_rejected(value: str) -> None:
+    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="timestamp_invalid"):
+        realtime_collect._quote_timestamp(value)
+
+
+def test_credential_echo_uses_fixed_diagnostic() -> None:
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="credential_echo_rejected"
+    ):
+        realtime_collect._reject_credential_echo({"echo": "synthetic-secret"}, "synthetic-secret")
 
 
 def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:
@@ -230,6 +309,34 @@ def test_calendar_gate_returns_without_transport(monkeypatch: pytest.MonkeyPatch
         == 0
     )
     transport.assert_not_called()
+
+
+def test_collection_refreshes_clock_before_batch_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = SimpleNamespace(realtime_quotes_source="mairui")
+    engine = _Engine()
+    clock = SimpleNamespace(
+        trade_date=NOW.astimezone(dt.timezone(dt.timedelta(hours=8))).date(),
+        session=SimpleNamespace(value="morning"),
+    )
+    clock_reader = Mock(side_effect=[clock, clock])
+    licence_reader = Mock(side_effect=[LICENCE, LICENCE])
+    monkeypatch.setattr(realtime_collect, "_open_clock", clock_reader)
+    monkeypatch.setattr(realtime_collect, "active_licence_id", licence_reader)
+    monkeypatch.setattr(realtime_collect, "_owned_codes", lambda *_args: ["600000.SH"])
+    monkeypatch.setattr(
+        realtime_collect,
+        "_fetch_with_egress",
+        lambda *_args, **_kwargs: (200, [{"code": "600000.SH", "ts": NOW}]),
+    )
+    monkeypatch.setattr(realtime_collect, "_write_rows", lambda *_args: 1)
+    assert (
+        realtime_collect.collect_realtime_quotes(
+            engine.connection, settings, owner=OWNER, now=NOW, engine=engine
+        )
+        == 1
+    )
+    assert clock_reader.call_count == 2
+    assert licence_reader.call_count == 2
 
 
 def test_owned_codes_include_etf_holdings_and_watchlist_but_exclude_index(
