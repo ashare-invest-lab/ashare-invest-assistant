@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { AppProviders } from './AppProviders';
 import { makeQueryClient } from './queryClient';
-import { routes } from './routes';
+import { PLACEHOLDERS, routes } from './routes';
 import { preloadRoutes } from '../test/preloadRoutes';
 import { DISCLAIMER_TEXT } from '../components/RiskDisclosure';
 import { REPORT_DATE, SUGGESTIONS } from '../mocks/fixtures';
@@ -69,6 +69,20 @@ describe('路由与页面（MSW 示例数据）', () => {
   it('/restrictions 渲染真实限制页', async () => {
     renderAt('/restrictions');
     expect(await screen.findByTestId('restrictions-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
+  });
+
+  it('/reviews 及详情渲染真实页，不回退占位', async () => {
+    const placeholderPaths = Object.fromEntries(PLACEHOLDERS.map(([path]) => [path, true]));
+    expect(Object.hasOwn(placeholderPaths, 'reviews')).toBe(false);
+    expect(Object.hasOwn(placeholderPaths, 'restrictions')).toBe(false);
+
+    const router = renderAt('/reviews');
+    expect(await screen.findByTestId('reviews-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
+    await router.navigate('/reviews/review-example-1');
+    expect(await screen.findByTestId('review-detail')).toBeInTheDocument();
+    expect(screen.queryByTestId('placeholder')).not.toBeInTheDocument();
   });
   it('未知路径', async () => {
     renderAt('/no-such-page');
