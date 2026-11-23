@@ -127,7 +127,13 @@ def test_upstream_status_stops_before_normalization(status: int) -> None:
 
 @pytest.mark.parametrize(
     "value",
-    [NOW.replace(tzinfo=None), "2030-06-11T10:00:00", 1_812_345_600],
+    [
+        NOW.replace(tzinfo=None),
+        "2030-06-11T10:00:00",
+        "2030-06-11 10:00:00+08:00",
+        "2030-06-11T10:00:00+0800",
+        1_812_345_600,
+    ],
 )
 def test_quote_timestamp_requires_verified_timezone(value: object) -> None:
     with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="timestamp_invalid"):
