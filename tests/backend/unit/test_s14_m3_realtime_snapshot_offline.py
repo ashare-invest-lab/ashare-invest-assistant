@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import socket
 import uuid
-from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import Mock
 

@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Connection, Row, select
 
 from app.common.errors import AppError, ErrorCode
-from app.db.tables.market import daily_bars, securities, trading_calendar
+from app.db.tables.market import daily_bars, quotes_snapshot, securities, trading_calendar
 from app.marketdata.subresource_read import DecimalText, Gap, Shape
 from app.schemas.enums import DataStatus, GapReason, SecurityType
 
@@ -65,6 +65,53 @@ def _daily_closes(
     return {row.code: row for row in rows}
 
 
+def _realtime_snapshots(
+    conn: Connection, codes: tuple[str, ...], licence: uuid.UUID, now: dt.datetime
+) -> dict[str, Row[*tuple[Any, ...]]]:
+    c = quotes_snapshot.c
+    rows = conn.execute(
+        select(c)
+        .where(
+            c.code.in_(codes),
+            c.source == "mairui",
+            c.source_licence_id == licence,
+            c.batch_id.is_not(None),
+            c.ts <= now,
+            c.fetched_at <= now,
+        )
+        .order_by(c.code, c.fetched_at.desc(), c.ts.desc(), c.revision.desc())
+    ).all()
+    batches: dict[object, list[Row[*tuple[Any, ...]]]] = {}
+    for row in rows:
+        timestamp = row.ts
+        fetched_at = row.fetched_at
+        if (
+            row.batch_id is None
+            or timestamp is None
+            or fetched_at is None
+            or timestamp.tzinfo is None
+            or fetched_at.tzinfo is None
+            or timestamp > now
+            or fetched_at > now
+        ):
+            continue
+        batches.setdefault(row.batch_id, []).append(row)
+    visible: list[tuple[dt.datetime, dt.datetime, list[Row[*tuple[Any, ...]]]]] = []
+    for batch_rows in batches.values():
+        fetched_values = [row.fetched_at for row in batch_rows]
+        timestamp_values = [row.ts for row in batch_rows]
+        visible.append((max(fetched_values), max(timestamp_values), batch_rows))
+    if not visible:
+        return {}
+    selected = max(visible, key=lambda item: (item[0], item[1]))[2]
+    result: dict[str, Row[*tuple[Any, ...]]] = {}
+    for row in selected:
+        previous = result.get(row.code)
+        if previous is None or row.revision > previous.revision:
+            result[row.code] = row
+    return result
+
+
 def _fresh_close_day(conn: Connection, now: dt.datetime) -> dt.date | None:
     local = now.astimezone(BEIJING)
     calendar = trading_calendar.c
@@ -97,12 +144,14 @@ def read_quotes(conn: Connection, owner: uuid.UUID, codes: tuple[str, ...]) -> Q
         raise AppError(ErrorCode.NOT_FOUND)
     now = dt.datetime.now(dt.UTC)
     licence = active_licence_id(conn, owner, now)
+    realtime = _realtime_snapshots(conn, codes, licence, now) if licence is not None else {}
     closes = _daily_closes(conn, codes, licence, now) if licence is not None else {}
     fresh_day = _fresh_close_day(conn, now) if closes else None
     reason = GapReason.NO_SOURCE if licence is not None else GapReason.DATA_LICENCE_UNAVAILABLE
     message = "本人行情缓存尚无可用读取源" if licence is not None else "本人数据证书不可用"
     items: list[QuoteItem] = []
     for code in codes:
+        realtime_row = realtime.get(code)
         row = closes.get(code)
         item = QuoteItem(
             security_code=code,
@@ -110,7 +159,30 @@ def read_quotes(conn: Connection, owner: uuid.UUID, codes: tuple[str, ...]) -> Q
             data_status=DataStatus.UNAVAILABLE,
             gaps=[Gap(key="quotes", reason=reason, message=message)],
         )
-        if row is not None:
+        if realtime_row is not None:
+            item.price = (
+                None
+                if realtime_row.price is None
+                else format(
+                    realtime_row.price,
+                    ".3f" if identities[code].type == SecurityType.ETF else "f",
+                )
+            )
+            item.change_pct = (
+                None
+                if realtime_row.pct_change is None
+                else format(realtime_row.pct_change, "f")
+            )
+            item.t = realtime_row.ts.astimezone(BEIJING).isoformat()
+            item.data_as_of = realtime_row.fetched_at.astimezone(BEIJING).isoformat()
+            item.volume = None if realtime_row.volume is None else format(realtime_row.volume, "f")
+            item.amount = None if realtime_row.amount is None else format(realtime_row.amount, "f")
+            age = (now - realtime_row.fetched_at).total_seconds()
+            item.data_status = (
+                DataStatus.FRESH if age <= 30 else DataStatus.STALE
+            )
+            item.gaps = []
+        elif row is not None:
             item.price = format(
                 row.close, ".3f" if identities[code].type == SecurityType.ETF else "f"
             )
