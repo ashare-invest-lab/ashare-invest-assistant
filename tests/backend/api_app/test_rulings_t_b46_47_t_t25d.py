@@ -223,15 +223,16 @@ def test_r6_daily_close_priority(pf: SimpleNamespace) -> None:
 
 
 def _snapshot_account(call: Rec, sql: Callable[..., Any], user_id: str, items: list[tuple[str, int, str, str]],
-                      cash: str | None = "1000.00") -> str:
+                      cash: str | None = "1000.00", current: bool = False) -> str:
     """只有一份已提交的券商持仓快照的账户（SQL 直写；无成交流水）。items: (代码, 数量, 成本价, 参考价)。"""
     acc = _account(call)
     batch = str(uuid.uuid4())
     snap = str(uuid.uuid4())
+    as_of = "now()" if current else "now() - interval '1 day'"
     sql("INSERT INTO app.import_batches (id, user_id, account_id, kind, status, committed_at) "
         "VALUES (:i, :u, :a, 'positions', 'committed', now())", i=batch, u=user_id, a=acc)
     sql("INSERT INTO app.broker_position_snapshots (id, account_id, import_batch_id, as_of, cash_balance, version_no) "
-        "VALUES (:i, :a, :b, now() - interval '1 day', :c, 1)", i=snap, a=acc, b=batch, c=cash)
+        f"VALUES (:i, :a, :b, {as_of}, :c, 1)", i=snap, a=acc, b=batch, c=cash)
     for code, qty, cost, ref in items:
         sql("INSERT INTO app.broker_position_snapshot_items (snapshot_id, security_code, quantity, sellable_quantity, "
             "broker_cost_price, last_price_ref) VALUES (:s, :c, :q, :q, :p, :r)", s=snap, c=code, q=qty, p=cost, r=ref)
@@ -257,6 +258,35 @@ def test_r6_snapshot_reference_price_used(session: Callable[..., SimpleNamespace
     row = _rows(_portfolio(c.call, acc))[code]
     assert row["estimated"] is False
     assert _dec(row["market_value"]) == decimal.Decimal("1100")
+
+
+def test_r6_snapshot_reference_price_stale(
+    session: Callable[..., SimpleNamespace],
+    sql: Callable[..., Any],
+    authdb: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R6：快照参考价早于最近收盘时点时，组合状态标为 stale。"""
+    c = _snap_ctx(session, sql)
+    portfolio = backend_module("app.api.v1.portfolio", O_R6)
+    real_latest_close_at = portfolio.latest_close_at
+    # Exercise the real calendar fallback on a Sunday before replacing the threshold
+    # with a deterministic old value for the stale assertion.
+    with authdb.engine.connect() as conn:
+        real_latest_close_at(conn, dt.datetime(2026, 11, 1, 12, tzinfo=dt.timezone(dt.timedelta(hours=8))))
+    monkeypatch.setattr(
+        portfolio,
+        "latest_close_at",
+        lambda *_args: dt.datetime(2099, 1, 1, 15, tzinfo=dt.timezone(dt.timedelta(hours=8))),
+    )
+    monkeypatch.setattr(portfolio, "snapshot_stale_message", lambda *_args: None)
+    code = f"{_uniq_code('601')}.SH"
+    _seed_security(sql, code)
+    acc = _snapshot_account(
+        c.call, sql, str(c.s.user.id), [(code, 100, "10.00", "11.00")], current=True
+    )
+    result = _portfolio(c.call, acc)
+    assert result["data_status"] == "stale", result.get("gaps")
 
 
 def test_r6_daily_close_beats_snapshot(session: Callable[..., SimpleNamespace], sql: Callable[..., Any]) -> None:
