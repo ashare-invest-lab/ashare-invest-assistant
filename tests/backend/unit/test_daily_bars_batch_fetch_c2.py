@@ -17,6 +17,12 @@ DAY = dt.date(2026, 11, 10)
 NOW = dt.datetime(2026, 11, 10, 10, tzinfo=dt.UTC)
 
 
+@pytest.fixture(autouse=True)
+def reset_batch_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 0)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 0)
+
+
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     state = SimpleNamespace(calls=[], grants=[], runs=[], root=tmp_path)
