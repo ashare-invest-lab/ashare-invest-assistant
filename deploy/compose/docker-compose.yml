@@ -183,6 +183,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: worker
+      # 日线来源门控：local/dev 默认 off，避免启动时触发外部行情请求；仅经运维批准才显式设为 mairui。
+      DAILY_BARS_SOURCE: ${DAILY_BARS_SOURCE:-off}
       # T-A04 ④（review-028c077 M1）：worker 以 aia_api 连库（不用属主）；所需 DML 见 deploy/db/roles/grants.sql $worker$
       DATABASE_URL: *db-api-url
       # 到期原始文件清理（imports.purge_expired_raw_files）的存储根目录，与 api 相同
@@ -229,6 +231,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: ingest
+      # 与 worker 使用同一来源门控；local/dev 默认 off，不能因 MAIRUI_MODE=replay 而绕过日线开关。
+      DAILY_BARS_SOURCE: ${DAILY_BARS_SOURCE:-off}
       DATABASE_URL: *db-ingest-url
       MAIRUI_MODE: ${MAIRUI_MODE:-replay}
       MAIRUI_REPLAY_DIR: ${MAIRUI_REPLAY_DIR:-/fixtures/mairui}
