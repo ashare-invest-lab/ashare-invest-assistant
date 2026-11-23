@@ -165,6 +165,49 @@ def test_missing_core_fails_closed_before_credential_load(
     secret_loader.assert_not_called()
 
 
+def test_credential_load_waits_for_egress_lease(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    events: list[str] = []
+
+    class _Lease:
+        def __enter__(self) -> object:
+            events.append("lease_enter")
+            return object()
+
+        def __exit__(self, *_args: object) -> bool:
+            events.append("lease_exit")
+            return False
+
+    def load_secret(*_args: object) -> str:
+        events.append("credential")
+        return "synthetic-secret"
+
+    monkeypatch.setattr(realtime_collect, "get_ingest_core", lambda: object())
+    monkeypatch.setattr(realtime_collect, "single_egress", lambda _engine: _Lease())
+    monkeypatch.setattr(
+        realtime_collect,
+        "mairui_get",
+        lambda **_kwargs: events.append("request")
+        or SimpleNamespace(status=204, body=[]),
+    )
+    status, body = realtime_collect._fetch_with_egress(
+        Mock(),
+        SimpleNamespace(),
+        owner=OWNER,
+        licence_id=LICENCE,
+        now=NOW,
+        path="/synthetic",
+        upstream=None,
+        secret_loader=load_secret,
+        stop=tmp_path / "STOP",
+        halt=tmp_path / "HALT",
+    )
+
+    assert (status, body) == (204, [])
+    assert events == ["lease_enter", "credential", "request", "lease_exit"]
+
+
 def test_config_switch_defaults_off() -> None:
     assert realtime_collect.Settings.model_fields["realtime_quotes_source"].default == "off"
 
@@ -271,6 +314,17 @@ def test_normalization_rejects_ambiguous_dm_prefix() -> None:
         realtime_collect._normalise_rows(
             ["600000.SH", "600000.SZ"],
             [{"dm": "600000", "ts": NOW}],
+            NOW,
+        )
+
+
+def test_normalization_rejects_mixed_valid_and_invalid_batch() -> None:
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_invalid"
+    ):
+        realtime_collect._normalise_rows(
+            ["600000.SH", "000001.SZ"],
+            [{"dm": "600000", "ts": NOW}, {"dm": "invalid", "ts": NOW}],
             NOW,
         )
 

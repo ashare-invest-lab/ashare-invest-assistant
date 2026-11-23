@@ -138,14 +138,9 @@ def _normalise_rows(
         code_value = _mapped_value(row, "code")
         dm_value = row.get("dm")
         if dm_value is not None:
-            if not isinstance(dm_value, str):
+            if not isinstance(dm_value, str) or not re.fullmatch(r"\d{6}", dm_value):
                 raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            if dm_value in expected:
-                dm_candidates = [dm_value]
-            elif re.fullmatch(r"\d{6}", dm_value):
-                dm_candidates = raw_codes.get(dm_value, [])
-            else:
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+            dm_candidates = raw_codes.get(dm_value, [])
             if len(dm_candidates) != 1:
                 raise RealtimeCollectionStoppedError("realtime_code_invalid")
             dm_code = dm_candidates[0]
@@ -373,9 +368,9 @@ def _fetch_with_egress(
     core = get_ingest_core()
     if core is None:
         raise RealtimeCollectionStoppedError("ingest_core_unavailable")
-    secret = secret_loader(engine, licence_id)
     try:
         with single_egress(engine) as lease:
+            secret = secret_loader(engine, licence_id)
             result = realtime_quotes_seam(
                 mairui_get,
                 lease=lease,
