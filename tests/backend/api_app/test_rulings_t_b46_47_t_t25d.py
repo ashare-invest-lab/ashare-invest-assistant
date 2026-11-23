@@ -263,11 +263,17 @@ def test_r6_snapshot_reference_price_used(session: Callable[..., SimpleNamespace
 def test_r6_snapshot_reference_price_stale(
     session: Callable[..., SimpleNamespace],
     sql: Callable[..., Any],
+    authdb: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R6：快照参考价早于最近收盘时点时，组合状态标为 stale。"""
     c = _snap_ctx(session, sql)
     portfolio = backend_module("app.api.v1.portfolio", O_R6)
+    real_latest_close_at = portfolio.latest_close_at
+    # Exercise the real calendar fallback on a Sunday before replacing the threshold
+    # with a deterministic old value for the stale assertion.
+    with authdb.engine.connect() as conn:
+        real_latest_close_at(conn, dt.datetime(2026, 11, 1, 12, tzinfo=dt.timezone(dt.timedelta(hours=8))))
     monkeypatch.setattr(
         portfolio,
         "latest_close_at",
