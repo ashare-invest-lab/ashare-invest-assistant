@@ -54,6 +54,12 @@ RELEASE = {
         "通过/restrictions取消屏蔽或到期",
     ),
     "COOLING_OFF": ("time", None, ["schedule"], "冷静期结束"),
+    "SAME_TEMPLATE_COOLDOWN": (
+        "time",
+        None,
+        ["schedule"],
+        "同模板同证券冷却至到期交易日15:00（北京时间）",
+    ),
 }
 
 RELEASE.update(
