@@ -253,26 +253,20 @@ def test_normalization_maps_unique_dm_code_from_ssjy_more_response() -> None:
     assert rows[0]["code"] == "600000.SH"
 
 
-def test_normalization_discards_missing_or_out_of_range_dm_and_records_gap(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize(
+    "row",
+    [{"ts": "2030-06-11T10:00:00+08:00"}, {"dm": "600001.SH", "ts": NOW}],
+)
+def test_normalization_rejects_missing_or_out_of_range_code(
+    row: dict[str, object],
 ) -> None:
-    rows = [
-        {"ts": "2030-06-11T10:00:00+08:00"},
-        {"dm": "600001", "ts": NOW},
-        {"dm": "600000.SH", "ts": NOW},
-        {"dm": "600000", "ts": "2030-06-11T10:00:00+08:00"},
-    ]
-    with caplog.at_level("WARNING", logger="app.marketdata.realtime_collect"), pytest.raises(
-        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_missing"
-    ):
-        realtime_collect._normalise_rows(["600000.SH", "000001.SZ"], rows, NOW)
-    assert "000001.SZ" in caplog.text
-    assert "discarded=3" in caplog.text
+    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="code"):
+        realtime_collect._normalise_rows(["600000.SH"], [row], NOW)
 
 
-def test_normalization_discards_ambiguous_dm_prefix() -> None:
+def test_normalization_rejects_ambiguous_dm_prefix() -> None:
     with pytest.raises(
-        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_missing"
+        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_invalid"
     ):
         realtime_collect._normalise_rows(
             ["600000.SH", "600000.SZ"],
@@ -382,7 +376,9 @@ def test_stop_and_halt_after_response_prevent_write(
 
 
 def test_normalization_rejects_partial_batch() -> None:
-    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="missing"):
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_invalid"
+    ):
         realtime_collect._normalise_rows(
             ["600000.SH", "000001.SZ"], [{"code": "600000.SH", "ts": NOW}], NOW
         )
