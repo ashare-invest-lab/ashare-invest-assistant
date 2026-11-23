@@ -487,7 +487,10 @@ def realtime_quotes_task(
     if engine is None:
         from app.workers.jobs import _engine
 
-        engine = _engine(settings)
+        try:
+            engine = _engine(settings)
+        except (AttributeError, RuntimeError) as exc:
+            raise RealtimeCollectionStoppedError("ingest_engine_unavailable") from exc
     if selected_owner is not None:
         owners = [selected_owner]
     else:
