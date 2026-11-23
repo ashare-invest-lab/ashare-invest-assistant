@@ -47,7 +47,8 @@ services:
     logging: *default-logging
     environment:
       <<: *dev-env
-      # local 只保留关闭闸门；不因 replay 配置自动启用日线采集。
+      # local/dev 日线来源固定关闭，防止回放层误触发真实行情请求。
+      # 只有获批的显式 mairui 配置才能打开生产日线来源。
       DAILY_BARS_SOURCE: "off"
     volumes:
       - ../../src/backend:/app/src/backend:ro
@@ -57,7 +58,7 @@ services:
     logging: *default-logging
     environment:
       <<: *dev-env
-      # local 仅 replay，不启用日线来源闸门，不触发真实采集。
+      # 日线来源门控与回放模式独立：dev 保持 replay，同时固定关闭日线出网来源。
       DAILY_BARS_SOURCE: "off"
       MAIRUI_MODE: replay
       MAIRUI_REPLAY_DIR: /fixtures/mairui
