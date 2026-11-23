@@ -134,18 +134,21 @@ def _normalise_rows(
     found: set[str] = set()
     output: list[dict[str, object]] = []
     for row in rows:
-        # 既有测试入口使用规范 code，ssjy_more 的实测字段使用无后缀 dm。
+        # 既有测试入口使用规范 code，ssjy_more 的响应使用六位无后缀 dm。
         code_value = _mapped_value(row, "code")
         dm_value = row.get("dm")
         if dm_value is not None:
             if not isinstance(dm_value, str):
                 raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            dm_candidates = expected.intersection({dm_value})
-            if not dm_candidates:
-                dm_candidates = set(raw_codes.get(dm_value, []))
+            if dm_value in expected:
+                dm_candidates = [dm_value]
+            elif re.fullmatch(r"\d{6}", dm_value):
+                dm_candidates = raw_codes.get(dm_value, [])
+            else:
+                raise RealtimeCollectionStoppedError("realtime_code_invalid")
             if len(dm_candidates) != 1:
                 raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            dm_code = next(iter(dm_candidates))
+            dm_code = dm_candidates[0]
             if code_value is not None and code_value != dm_code:
                 raise RealtimeCollectionStoppedError("realtime_code_invalid")
             code_value = dm_code

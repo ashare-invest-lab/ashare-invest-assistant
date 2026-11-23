@@ -17,15 +17,14 @@ from zoneinfo import ZoneInfo
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, delete, insert, text
-from sqlalchemy.engine import make_url
-
 from app.config import Settings, load_yaml_dir
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import securities, trading_calendar
 from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.workers import jobs
+from sqlalchemy import create_engine, delete, insert, text
+from sqlalchemy.engine import make_url
 
 TASK = "market.realtime_quotes_fetch"
 OWNER = UUID("00000000-0000-4000-8000-000000001118")
@@ -255,6 +254,8 @@ def _patch_replay(
         monkeypatch.setattr(collect_module, "single_egress", counting_single_egress)
     if collect_module is not None and getattr(collect_module, "verification_is_offline", None) is not None:
         monkeypatch.setattr(collect_module, "verification_is_offline", lambda: False)
+    if collect_module is not None and getattr(collect_module, "get_ingest_core", None) is not None:
+        monkeypatch.setattr(collect_module, "get_ingest_core", lambda: object())
     return replay_transport, audit
 
 
@@ -265,7 +266,7 @@ def _call_entry(
     transport: object,
     monkeypatch: pytest.MonkeyPatch,
 ) -> object:
-    module, name, function = entry
+    _module, name, function = entry
     settings = _settings(monkeypatch)
 
     def load_secret(engine: object, licence_id: UUID) -> str:
@@ -281,10 +282,17 @@ def _call_entry(
         "stop": tmp_path / "stop",
         "halt": tmp_path / "halt",
     }
-    if name == "collect_realtime_quotes":
-        with engine.connect() as conn:  # type: ignore[union-attr]
-            return function(conn, settings, **kwargs)
-    return function(settings, **kwargs)
+    from app.ingest.core import IngestCore
+    from app.ingest.runtime import set_ingest_core
+
+    set_ingest_core(IngestCore(cfg=settings.business.ingest.licences, engine=engine))  # type: ignore[arg-type]
+    try:
+        if name == "collect_realtime_quotes":
+            with engine.connect() as conn:  # type: ignore[union-attr]
+                return function(conn, settings, **kwargs)
+        return function(settings, **kwargs)
+    finally:
+        set_ingest_core(None)
 
 
 def _rows(engine: object) -> list[object]:

@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from app.marketdata import realtime_collect
 from app.workers import jobs
 
@@ -236,7 +235,7 @@ def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:
 def test_normalization_maps_dm_code_from_ssjy_more_response() -> None:
     rows = realtime_collect._normalise_rows(
         ["600000.SH"],
-        [{"dm": "600000.SH", "ts": "2030-06-11T10:00:00+08:00"}],
+        [{"dm": "600000", "ts": "2030-06-11T10:00:00+08:00"}],
         NOW,
     )
     assert rows[0]["code"] == "600000.SH"
