@@ -12,6 +12,8 @@ budget:
   priority_min_share:
     p0_intraday: 0.7            # 盘中 P0 至少 70%
     p2_backfill_intraday: 0.0   # 盘中 P2 份额为 0，夜间可用满剩余额度
+  daily_bars_batch_limit: 500          # 默认沿用 daily_bars.py:48 硬上限；限流依据 plan.md:197，服务端默认未验证
+  daily_bars_backfill_batch_limit: 2000 # 默认沿用 daily_bars.py:47 硬上限；限流依据 ingest.yaml budget，服务端默认未验证
 backoff:
   base_s: 1                     # ◇ 指数退避起点
   max_s: 60                     # ◇ 退避上限

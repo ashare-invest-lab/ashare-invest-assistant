@@ -1,8 +1,8 @@
 """日 K 分型批次预算与 ingest 侧拉取（C2，契约 §9.3）。
 
-日常与回填有效常量各自默认0（unset），仅接受各自硬界内的正整数。
-不进Settings、不读环境或回执放宽预算；移除旧unlimited路径。
-打开任一生效常量仍属单D，须用户本人批准，本模块不提供切换入口。
+模块导入时日常与回填门闩均为0（unset），由 ingest.yaml 的正整数配置在 worker 启动时应用。
+配置值仅接受各自硬界内的正整数，不读回执放宽预算；移除旧unlimited路径。
+打开任一生效常量仍须用户本人批准首次实调，本模块不提供其他切换入口。
 
 本模块不读证书、不调用 ``mairui_get``；出网只通过调用方注入的 transport。
 未注入时 fail-closed，不打开套接字。k 未测得前，单日按每标的一段计计划调用。
@@ -41,11 +41,22 @@ from app.marketdata.daily_bars import (
 from app.marketdata.daily_snapshot import FINAL_AFTER
 from app.reports.service import covered
 
-# C2 effective batch gates; opening either remains a separately authorized D change.
+# Effective batch gates. They remain closed until ingest startup applies ingest.yaml.
 DAILY_BARS_BATCH_LIMIT: int = 0
 DAILY_BARS_BACKFILL_BATCH_LIMIT: int = 0
 DAILY_BARS_BATCH_CEILING = 2000
 DAILY_BARS_DAILY_BATCH_CEILING = 500
+
+
+def configure_batch_limits(*, daily: int, backfill: int) -> None:
+    """Apply the strict ingest.yaml daily-bar limits to this process."""
+    if daily_bars_batch_budget(daily, "daily").kind != "capped":
+        raise ValueError("daily_bars_batch_limit must be an integer from 1 through 500")
+    if daily_bars_batch_budget(backfill, "backfill").kind != "capped":
+        raise ValueError("daily_bars_backfill_batch_limit must be an integer from 1 through 2000")
+    global DAILY_BARS_BATCH_LIMIT, DAILY_BARS_BACKFILL_BATCH_LIMIT
+    DAILY_BARS_BATCH_LIMIT = daily
+    DAILY_BARS_BACKFILL_BATCH_LIMIT = backfill
 AUTHORIZATION = Path("/run/aia/receipts/mairui-daily-bars.json")
 HALT = Path("/run/aia/state/halt/mairui-daily-bars.HALTED")
 # 日 K 回执与日 K outbox 共用。

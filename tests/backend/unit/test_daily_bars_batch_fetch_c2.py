@@ -84,6 +84,18 @@ def test_c2_removes_unlimited_and_keeps_both_effective_defaults_closed(
     )
 
 
+def test_a1_configured_limits_are_positive_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    ingest.configure_batch_limits(daily=500, backfill=2000)
+    assert ingest.DAILY_BARS_BATCH_LIMIT == 500
+    assert ingest.DAILY_BARS_BACKFILL_BATCH_LIMIT == 2000
+    with pytest.raises(ValueError):
+        ingest.configure_batch_limits(daily=501, backfill=2000)
+    with pytest.raises(ValueError):
+        ingest.configure_batch_limits(daily=500, backfill=2001)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 0)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 0)
+
+
 @pytest.mark.parametrize(
     "kind,daily,backfill,expected",
     [

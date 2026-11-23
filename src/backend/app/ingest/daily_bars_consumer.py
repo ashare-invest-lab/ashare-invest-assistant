@@ -10,6 +10,7 @@ import datetime as dt
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import redis
@@ -40,6 +41,97 @@ from app.master.vendor import licence_available
 
 GrantReader = Callable[[uuid.UUID], fetcher.DailyBarsGrant | None]
 RESUME_PENDING = "daily_bars_resume_pending"
+
+
+def _decimal_field(row: dict[str, object], name: str) -> Decimal | None:
+    value = row.get(name)
+    if value is None:
+        return None
+    return Decimal(str(value))
+
+
+def _decode_daily_bars(code: str, body: object) -> DailyBarsResult | None:
+    """Decode the documented list-shaped daily response without writing around the sink."""
+    rows: object = body
+    if isinstance(body, dict) and isinstance(body.get("data"), list):
+        rows = body["data"]
+    if not isinstance(rows, list):
+        return None
+    bars: list[DailyBar] = []
+    try:
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("daily_bars_payload_invalid")
+            raw_day = row.get("t") or row.get("trade_date")
+            if not isinstance(raw_day, str):
+                raise ValueError("daily_bars_payload_invalid")
+            day_text = raw_day[:10].replace("-", "")
+            day = dt.datetime.strptime(day_text, "%Y%m%d").date()
+
+            suspended = row.get("sf")
+            bars.append(
+                DailyBar(
+                    code=code,
+                    trade_date=day,
+                    adj_type="none",
+                    open=_decimal_field(row, "o"),
+                    high=_decimal_field(row, "h"),
+                    low=_decimal_field(row, "l"),
+                    close=_decimal_field(row, "c"),
+                    pre_close=_decimal_field(row, "pc"),
+                    volume=_decimal_field(row, "v"),
+                    amount=_decimal_field(row, "a"),
+                    is_suspended=None if suspended is None else bool(suspended),
+                )
+            )
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise DailyHaltError("daily_bars_payload_invalid") from exc
+    return DailyBarsResult(bars=tuple(bars))
+
+
+class MairuiDailyBarsTransport:
+    """Production transport adapter that keeps every request inside egress."""
+
+    def __init__(self, engine: Engine) -> None:
+        self.engine = engine
+
+    def __call__(
+        self,
+        *,
+        lease: object,
+        item: RowMapping,
+        grant: fetcher.DailyBarsGrant,
+        code: str,
+        start: dt.date,
+        end: dt.date,
+        clock: fetcher.Clock,
+        stop: Path,
+        halt: Path,
+    ) -> tuple[int, DailyBar | DailyBarsResult | None]:
+        from app.ingest.daily_lists import credential
+        from app.ingest.egress import mairui_get
+        from app.ingest.runtime import get_ingest_core
+        from app.ingest.state import Priority
+
+        route = "bj" if code.endswith(".BJ") else "hsstock"
+        path = (
+            f"/{route}/history/{code}/d/n/?st={start:%Y%m%d}"
+            f"&et={end:%Y%m%d}"
+        )
+        result = mairui_get(
+            lease=lease,
+            core=get_ingest_core(),
+            engine=self.engine,
+            licence_id=grant.licence_id,
+            user_id=item["user_id"],
+            path=path,
+            secret=credential(self.engine, grant.licence_id),
+            priority=Priority.P1,
+            clock=clock,
+            stop=stop,
+            halt=halt,
+        )
+        return result.status, _decode_daily_bars(code, result.body)
 
 
 class UpstreamHaltError(RuntimeError):
@@ -107,7 +199,7 @@ def process(
     engine: Engine,
     item_id: uuid.UUID,
     *,
-    transport: fetcher.Transport | None = None,
+    transport: fetcher.Transport | MairuiDailyBarsTransport | None = None,
     grant_reader: GrantReader | None = None,
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
     stop: Path = LISTS_STOP,
@@ -263,7 +355,23 @@ def process(
             if stop.exists() or halt.exists():
                 raise UpstreamHaltError()
             try:
-                status, bar = transport(code, start, end)
+                if isinstance(transport, MairuiDailyBarsTransport):
+                    grant = read(item["user_id"])
+                    if not isinstance(grant, fetcher.DailyBarsGrant):
+                        raise EgressDenied("licence_unavailable")
+                    status, bar = transport(
+                        lease=lease,
+                        item=item,
+                        grant=grant,
+                        code=code,
+                        start=start,
+                        end=end,
+                        clock=clock,
+                        stop=stop,
+                        halt=halt,
+                    )
+                else:
+                    status, bar = transport(code, start, end)
             except (DailyHaltError, EgressDenied):
                 raise UpstreamHaltError() from None
             if limited(status, bar) or (
@@ -548,7 +656,7 @@ def tick(
     engine: Engine,
     *,
     redis_client: redis.Redis | None = None,
-    transport: fetcher.Transport | None = None,
+    transport: fetcher.Transport | MairuiDailyBarsTransport | None = None,
     grant_reader: GrantReader | None = None,
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
     stop: Path = LISTS_STOP,

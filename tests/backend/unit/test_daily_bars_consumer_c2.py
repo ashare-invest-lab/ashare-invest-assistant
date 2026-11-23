@@ -327,6 +327,7 @@ def test_wrong_pipeline_identity_is_rejected_without_mutating_that_run(world):
 def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, source, paused):
     module = implementation()
     from app.ingest import daily_lists, runtime, verify_licence
+    from app.ingest.daily_bars_consumer import MairuiDailyBarsTransport
     from app.workers import ingest as worker
 
     monkeypatch.setattr(fetcher, "DAILY_BARS_BATCH_LIMIT", 0)
@@ -346,10 +347,12 @@ def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, 
     monkeypatch.setattr(verify_licence, "tick", lambda *a, **k: events.append("verify"))
     actual_tick = module.tick
 
-    def observed_tick(arg):
+    def observed_tick(arg, **kwargs):
         assert arg is engine
+        if source == "mairui" and not paused:
+            assert isinstance(kwargs.get("transport"), MairuiDailyBarsTransport)
         events.append("bars")
-        return actual_tick(arg)
+        return actual_tick(arg, **kwargs)
 
     monkeypatch.setattr(module, "tick", observed_tick)
     settings = SimpleNamespace(
