@@ -184,6 +184,8 @@ tests:
   - {"file": "tests/backend/unit/test_ta157_bj_routing.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
   - {"file": "tests/backend/unit/test_ta157_bj_writers.py", "group": "parallel", "keywords": ["probes + monkeypatch", "offline_only denies sockets and credential files", "fake transport and in-memory DB; no PG/Redis/docker", "synthetic data; tmp_path only"], "unverified": false}
   - {"file": "tests/backend/unit/test_aggregates_calendar_clock.py", "group": "parallel", "keywords": ["fixed aware datetime", "MagicMock connection", "read-only market_rules.yaml; no DB/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb213_realtime_collect.py", "group": "parallel", "keywords": ["fake transport and synthetic rows", "calendar/session gates", "no real PG/Redis/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tb221_ingest_realtime.py", "group": "parallel", "keywords": ["fake realtime task and ingest heartbeat gate", "no real PG/Redis/network"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata only", "no IO"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1a_horizon_versions_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "alembic upgrade"], "unverified": false}
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_offline.py", "group": "parallel", "keywords": ["migration graph", "metadata and purge wiring", "no IO"], "unverified": false}
@@ -193,5 +195,6 @@ tests:
   - {"file": "tests/backend/unit/test_tt129_market_overview.py", "group": "parallel", "keywords": ["create_app/TestClient", "read-only SQL-shaped fixture", "虚构市场概览", "no PG/Redis/vendor"], "unverified": false}
   # 页面测试 src/frontend/src/pages/market/t-t129.test.tsx 由前端 Vitest 配置收集；本清单校验范围不含 src/frontend。
   - {"file": "tests/backend/unit/test_tt118_ingest_collection.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "denied sockets", "synthetic transport", "UUID batch idempotence"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt130_same_template_cooldown.py", "group": "serial_pg", "keywords": ["isolated temporary PostgreSQL", "real signals.service.write_candidate", "build_enums reason-code entry point", "synthetic rows; no external services"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt127_restrictions_e2e.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "create_app + TestClient HTTP", "虚构用户和证券", "env -u MAIRUI_LICENCE", "不连外网/麦蕊", "并发删除"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt128_reviews_e2e.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "虚构用户/计划/成交/快照夹具", "create_app + TestClient + 真实 SQL", "env -u MAIRUI_LICENCE", "不连外网/麦蕊"], "unverified": false}
