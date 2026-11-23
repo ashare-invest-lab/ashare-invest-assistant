@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import socket
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,8 +19,11 @@ NOW = dt.datetime(2030, 6, 11, 2, 0, tzinfo=dt.UTC)
 
 
 @pytest.fixture(autouse=True)
-def _live_mode_for_collection_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+def _live_mode_for_collection_tests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("MAIRUI_MODE", "live")
+    monkeypatch.setattr(realtime_collect, "HALT", tmp_path / "default-HALT")
 
 
 class _Context:
@@ -554,6 +558,7 @@ def test_revision_fingerprint_reuse_and_content_change() -> None:
     conn.execute.side_effect = [
         SimpleNamespace(mappings=lambda: existing),
         SimpleNamespace(rowcount=1),
+        SimpleNamespace(rowcount=1),
     ]
     lock = Mock()
     original_lock = realtime_collect._lock_revision_keys
@@ -564,7 +569,11 @@ def test_revision_fingerprint_reuse_and_content_change() -> None:
         realtime_collect._lock_revision_keys = original_lock
 
     lock.assert_called_once()
-    statement = conn.execute.call_args_list[-1].args[0]
+    statement = next(
+        call.args[0]
+        for call in conn.execute.call_args_list
+        if "quotes_snapshot" in str(call.args[0]) and hasattr(call.args[0], "_multi_values")
+    )
     values = statement._multi_values[0]
     assert [value["revision"] for value in values] == [4, 5]
     assert values[0]["content_fingerprint"] == realtime_collect._fingerprint(base)
@@ -675,7 +684,9 @@ def test_response_batch_has_single_batch_id_at_write_boundary(
     assert isinstance(seen[0], uuid.UUID)
 
 
-def test_first_owner_rate_limit_stops_before_second_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_first_owner_rate_limit_stops_before_second_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     settings = SimpleNamespace(realtime_quotes_source="mairui")
     fake_engine = _Engine()
     owner_two = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2")
@@ -689,6 +700,7 @@ def test_first_owner_rate_limit_stops_before_second_owner(monkeypatch: pytest.Mo
     monkeypatch.setattr(realtime_collect, "_open_clock", lambda *_args: clock)
     monkeypatch.setattr(realtime_collect, "active_licence_id", lambda *_args: LICENCE)
     monkeypatch.setattr(realtime_collect, "_owned_codes", lambda *_args: ["600000.SH"])
+    monkeypatch.setattr(realtime_collect, "HALT", tmp_path / "HALT")
 
     def fetch(*_args: object, **kwargs: object) -> tuple[int, object]:
         calls.append(kwargs["owner"])  # type: ignore[arg-type]
@@ -730,3 +742,143 @@ def test_http_fetch_runs_before_write_transaction(monkeypatch: pytest.MonkeyPatc
     )
     assert fetch_states == [False]
     assert fake_engine.begin_calls == 1
+
+
+@pytest.mark.parametrize("status", [101, 103, 429, 503])
+def test_fatal_http_status_persists_halt(tmp_path: Path, status: int) -> None:
+    halt = tmp_path / "HALT"
+    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
+        realtime_collect._validate_response(status, [], halt=halt)
+    assert halt.is_file()
+
+
+def test_stop_gate_persists_halt_before_core_or_credential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stop = tmp_path / "STOP"
+    halt = tmp_path / "HALT"
+    stop.write_text("", encoding="utf-8")
+    secret_loader = Mock(side_effect=AssertionError("STOP must precede credential load"))
+    monkeypatch.setattr(realtime_collect, "get_ingest_core", Mock())
+
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="STOP_or_halt_present"
+    ):
+        realtime_collect._fetch_with_egress(
+            Mock(),
+            SimpleNamespace(),
+            owner=OWNER,
+            licence_id=LICENCE,
+            now=NOW,
+            path="/synthetic",
+            upstream=None,
+            secret_loader=secret_loader,
+            stop=stop,
+            halt=halt,
+        )
+    assert halt.is_file()
+    secret_loader.assert_not_called()
+
+
+def test_write_rows_mirrors_owner_snapshot_to_realtime_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = {
+        "code": "990000.SH",
+        "ts": NOW,
+        "source": "mairui",
+        "source_licence_id": LICENCE,
+        "price": "10.00",
+        "pct_change": "1.00",
+        "volume": "100",
+        "amount": "1000",
+        "payload": {"dm": "990000", "price": "10.00"},
+        "fetched_at": NOW,
+    }
+    conn = Mock()
+    monkeypatch.setattr(realtime_collect, "_lock_revision_keys", Mock())
+    conn.execute.side_effect = [
+        SimpleNamespace(mappings=list),
+        SimpleNamespace(rowcount=1),
+        SimpleNamespace(rowcount=1),
+    ]
+
+    assert realtime_collect._write_rows(conn, [row], uuid.uuid4()) == 1
+    statements = [call.args[0] for call in conn.execute.call_args_list]
+    rendered = [str(statement) for statement in statements]
+    assert any("quotes_snapshot" in statement for statement in rendered)
+    assert any("realtime_quotes" in statement for statement in rendered)
+    realtime_statement = next(
+        statement for statement in statements if "realtime_quotes" in str(statement)
+    )
+    values = realtime_statement._multi_values[0][0]
+    assert values["code"] == "990000.SH"
+    assert values["source"] == "ssjy_more"
+    assert values["source_licence_id"] is None
+
+
+def test_replay_mode_with_injected_transport_runs_collection_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(realtime_quotes_source="mairui")
+    engine = _Engine()
+    collect = Mock(return_value=1)
+    monkeypatch.setenv("MAIRUI_MODE", "replay")
+    monkeypatch.setattr(realtime_collect, "collect_realtime_quotes", collect)
+
+    assert (
+        realtime_collect.realtime_quotes_task(
+            settings, owner=OWNER, engine=engine, transport=Mock()
+        )
+        == 1
+    )
+    collect.assert_called_once()
+
+
+def test_replay_transport_runs_collection_without_socket_or_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    settings = SimpleNamespace(realtime_quotes_source="mairui")
+    engine = _Engine()
+    writes: list[list[dict[str, object]]] = []
+    calls: list[tuple[str, str]] = []
+    secret_loader = Mock(side_effect=AssertionError("replay must not load credentials"))
+    monkeypatch.setenv("MAIRUI_MODE", "replay")
+    monkeypatch.setattr(realtime_collect, "verification_is_offline", lambda: True)
+    monkeypatch.setattr(
+        realtime_collect,
+        "_open_clock",
+        lambda *_args: SimpleNamespace(
+            trade_date=NOW.date(), session=SimpleNamespace(value="morning")
+        ),
+    )
+    monkeypatch.setattr(realtime_collect, "active_licence_id", lambda *_args: LICENCE)
+    monkeypatch.setattr(realtime_collect, "_owned_codes", lambda *_args: ["990000.SH"])
+    monkeypatch.setattr(
+        realtime_collect,
+        "_write_rows",
+        lambda _conn, rows, _batch_id: writes.append(rows) or len(rows),
+    )
+    monkeypatch.setattr(socket.socket, "connect", Mock(side_effect=AssertionError("socket")))
+
+    def replay(path: str, secret: str) -> tuple[int, object]:
+        calls.append((path, secret))
+        return 200, [{"dm": "990000", "ts": "2030-06-11T10:00:00+08:00", "price": "12.34"}]
+
+    result = realtime_collect.collect_realtime_quotes(
+        engine.connection,
+        settings,
+        owner=OWNER,
+        now=NOW,
+        upstream=replay,
+        secret_loader=secret_loader,
+        engine=engine,
+        stop=tmp_path / "STOP",
+        halt=tmp_path / "HALT",
+    )
+
+    assert result == 1
+    assert calls == [("/hsrl/ssjy_more?stock_codes=990000.SH", "")]
+    assert len(writes) == 1
+    assert writes[0][0]["code"] == "990000.SH"
+    secret_loader.assert_not_called()

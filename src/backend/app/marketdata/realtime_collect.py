@@ -27,7 +27,7 @@ from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
 from app.common.errors import AppError
 from app.config import Settings
-from app.db.tables.market import quotes_snapshot, securities
+from app.db.tables.market import quotes_snapshot, realtime_quotes, securities
 from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.ingest.daily_lists import HALT as DAILY_HALT
@@ -44,6 +44,7 @@ log = logging.getLogger("app.marketdata.realtime_collect")
 # 麦蕊既有 egress halt 路径；不为实时任务另造 halt 文件。
 HALT = DAILY_HALT
 SOURCE = "mairui"
+REALTIME_TABLE_SOURCE = "ssjy_more"
 # Endpoint documented in docs/plan.md §2.1 and §0A.6.
 PATH = "/hsrl/ssjy_more?stock_codes="
 # docs/plan.md §0A.6 / §2.1: the multi-stock endpoint accepts at most 20 codes.
@@ -174,8 +175,12 @@ def _normalise_rows(
     return output
 
 
-def _validate_response(status: int, body: object) -> list[Mapping[str, object]]:
+def _validate_response(
+    status: int, body: object, *, halt: Path | None = None
+) -> list[Mapping[str, object]]:
     if status in (101, 103, 429, 503) or status != 200:
+        if status in (101, 103, 429, 503) and halt is not None:
+            _persist_halt(halt, f"realtime_http_{status}")
         if status in (103, 429):
             log.error("实时行情上游触发限流，停止本轮")
         raise RealtimeCollectionStoppedError(f"realtime_http_{status}")
@@ -207,6 +212,24 @@ def _fingerprint(row: Mapping[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(content, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
+
+
+def _realtime_fingerprint(row: Mapping[str, object]) -> str:
+    content = {
+        key: row.get(key)
+        for key in ("price", "open", "high", "low", "pre_close", "volume", "amount", "pct_change")
+    }
+    return hashlib.sha256(
+        json.dumps(content, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def _persist_halt(halt: Path, reason: str) -> None:
+    try:
+        halt.parent.mkdir(parents=True, exist_ok=True)
+        halt.touch(exist_ok=True)
+    except OSError:
+        log.exception("实时行情无法写入 HALT（%s）", reason)
 
 
 def _revision_key(row: Mapping[str, object]) -> str:
@@ -288,7 +311,36 @@ def _write_rows(conn: Connection, rows: Sequence[dict[str, object]], batch_id: u
         & quotes_snapshot.c.source.in_([SOURCE]),
     )
     result = conn.execute(stmt)
+    _write_realtime_rows(conn, values)
     return max(int(result.rowcount or 0), 0)
+
+
+def _write_realtime_rows(conn: Connection, rows: Sequence[Mapping[str, object]]) -> None:
+    """Mirror the replayed quote into the legacy realtime table boundary.
+
+    ``realtime_quotes`` only accepts its historical ``ssjy_more`` source label and
+    cannot carry owner licence data.  ``quotes_snapshot`` remains the owner-scoped
+    source of truth, while this insert preserves the existing realtime table feed.
+    """
+    if not rows:
+        return
+    values = [
+        {
+            "code": row["code"],
+            "ts": row["ts"],
+            "price": row.get("price"),
+            "pct_change": row.get("pct_change"),
+            "volume": row.get("volume"),
+            "amount": row.get("amount"),
+            "source": REALTIME_TABLE_SOURCE,
+            "source_licence_id": None,
+            "revision": row["revision"],
+            "content_fingerprint": _realtime_fingerprint(row),
+            "fetched_at": row.get("fetched_at", row["ts"]),
+        }
+        for row in rows
+    ]
+    conn.execute(pg_insert(realtime_quotes).values(values).on_conflict_do_nothing())
 
 
 def _owned_codes(conn: Connection, owner: uuid.UUID, trade_date: dt.date) -> list[str]:
@@ -364,8 +416,15 @@ def _fetch_with_egress(
     stop: Path,
     halt: Path,
 ) -> tuple[int, object]:
-    if stop.is_file() or halt.is_file():
+    if stop.is_file():
+        _persist_halt(halt, "STOP")
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
+    if halt.is_file():
+        raise RealtimeCollectionStoppedError("STOP_or_halt_present")
+    if upstream is not None and verification_is_offline():
+        # Replay transport is an explicit offline seam. It never loads a
+        # credential or enters the live egress path.
+        return upstream(path, "")
     core = get_ingest_core()
     if core is None:
         raise RealtimeCollectionStoppedError("ingest_core_unavailable")
@@ -408,11 +467,12 @@ def collect_realtime_quotes(
     secret_loader: SecretLoader = credential,
     engine: Engine | None = None,
     stop: Path = STOP,
-    halt: Path = HALT,
+    halt: Path | None = None,
 ) -> int:
     """采集一个用户持仓与自选的一轮行情，所有响应通过后才写库。"""
+    halt_path = HALT if halt is None else halt
     hook = transport if transport is not None else upstream
-    if verification_is_offline():
+    if verification_is_offline() and hook is None:
         log.info("实时行情跳过：当前为 replay/离线模式")
         return 0
     if settings.realtime_quotes_source != "mairui":
@@ -454,7 +514,7 @@ def collect_realtime_quotes(
             upstream=hook,
             secret_loader=secret_loader,
             stop=stop,
-            halt=halt,
+            halt=halt_path,
         )
         fetched_rows.extend(
             {
@@ -462,9 +522,11 @@ def collect_realtime_quotes(
                 "source_licence_id": request_licence,
                 "fetched_at": request_stamp,
             }
-            for row in _normalise_rows(group, _validate_response(status, body), request_stamp)
+            for row in _normalise_rows(
+                group, _validate_response(status, body, halt=halt_path), request_stamp
+            )
         )
-    if stop.is_file() or halt.is_file():
+    if stop.is_file() or halt_path.is_file():
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
     with engine.begin() as write_conn:
         return _write_rows(write_conn, fetched_rows, uuid.uuid4())
@@ -483,7 +545,7 @@ def realtime_quotes_task(
 ) -> int:
     """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
     hook = transport if transport is not None else upstream
-    if verification_is_offline():
+    if verification_is_offline() and hook is None:
         log.info("实时行情跳过：当前为 replay/离线模式")
         return 0
     if settings.realtime_quotes_source != "mairui":
