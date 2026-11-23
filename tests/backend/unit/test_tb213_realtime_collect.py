@@ -1,6 +1,5 @@
 """T-B213 realtime collection gates and response handling; synthetic and offline."""
 
-# ruff: noqa: S101
 
 from __future__ import annotations
 
@@ -10,7 +9,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from app.marketdata import realtime_collect
 from app.workers import jobs
 
@@ -115,6 +113,28 @@ def test_json_error_stops_before_normalization() -> None:
 def test_malformed_json_stops_before_normalization() -> None:
     with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
         realtime_collect._validate_response(200, "not-json")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [dt.datetime(2030, 6, 11, 10, 0), 1_813_000_000],
+)
+def test_timestamp_requires_explicit_timezone(value: object) -> None:
+    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="timestamp_invalid"):
+        realtime_collect._quote_timestamp(value)
+
+
+def test_credential_echo_is_rejected_before_normalization() -> None:
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="credential_echo_rejected"
+    ):
+        realtime_collect._reject_credential_echo("synthetic-secret", {"data": "synthetic-secret"})
+
+
+def test_content_fingerprint_ignores_fetch_time() -> None:
+    row = {"price": "12.34", "payload": {"code": "600000.SH"}, "fetched_at": NOW}
+    later = {**row, "fetched_at": NOW + dt.timedelta(seconds=30)}
+    assert realtime_collect._fingerprint(row) == realtime_collect._fingerprint(later)
 
 
 def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:

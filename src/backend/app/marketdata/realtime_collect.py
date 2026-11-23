@@ -20,7 +20,7 @@ from urllib.parse import quote
 from sqlalchemy import Connection, Engine, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.aggregates.calendar import BEIJING, market_clock
+from app.aggregates.calendar import market_clock
 from app.aggregates.models import MarketClock
 from app.aggregates.service import select_account
 from app.api.v1.portfolio import _account
@@ -105,11 +105,6 @@ def _quote_timestamp(value: object) -> dt.datetime:
         raise RealtimeCollectionStoppedError("realtime_timestamp_missing")
     if isinstance(value, dt.datetime):
         stamp = value
-    elif isinstance(value, (int, float)) and not isinstance(value, bool):
-        try:
-            stamp = dt.datetime.fromtimestamp(float(value), dt.UTC)
-        except (OverflowError, OSError, ValueError) as exc:
-            raise RealtimeCollectionStoppedError("realtime_timestamp_invalid") from exc
     elif isinstance(value, str):
         text = value.strip().replace("Z", "+00:00")
         try:
@@ -118,9 +113,8 @@ def _quote_timestamp(value: object) -> dt.datetime:
             raise RealtimeCollectionStoppedError("realtime_timestamp_invalid") from exc
     else:
         raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
-    if stamp.tzinfo is None:
-        # 无时区值按北京时区解析，原始时点语义未验证（U8，T-B195）。
-        stamp = stamp.replace(tzinfo=BEIJING)
+    if stamp.tzinfo is None or stamp.utcoffset() is None:
+        raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
     return stamp.astimezone(dt.UTC)
 
 
@@ -169,25 +163,73 @@ def _validate_response(status: int, body: object) -> list[Mapping[str, object]]:
     return _response_rows(body)
 
 
+def _reject_credential_echo(secret: str, body: object) -> None:
+    encoded = json.dumps(body, ensure_ascii=False, default=str)
+    if secret in encoded or quote(secret, safe="") in encoded:
+        raise RealtimeCollectionStoppedError("credential_echo_rejected")
+
+
 def _fingerprint(row: Mapping[str, object]) -> str:
+    content = {
+        key: row.get(key)
+        for key in (
+            "price",
+            "pct_change",
+            "payload",
+            "volume",
+            "amount",
+            "is_suspended",
+            "limit_up",
+            "limit_down",
+        )
+    }
     return hashlib.sha256(
-        json.dumps(row, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        json.dumps(content, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
+
+
+def _prepare_rows(conn: Connection, rows: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    prepared: list[dict[str, object]] = []
+    allocated: dict[tuple[object, object, object, object], int] = {}
+    for row in rows:
+        source_licence_id = row["source_licence_id"]
+        key = (row["code"], row["ts"], SOURCE, source_licence_id)
+        fingerprint = _fingerprint(row)
+        existing = conn.execute(
+            select(quotes_snapshot.c.revision, quotes_snapshot.c.content_fingerprint).where(
+                quotes_snapshot.c.code == row["code"],
+                quotes_snapshot.c.ts == row["ts"],
+                quotes_snapshot.c.source == SOURCE,
+                quotes_snapshot.c.source_licence_id == source_licence_id,
+            )
+        ).all()
+        if any(item.content_fingerprint == fingerprint for item in existing):
+            continue
+        highest = max((int(item.revision) for item in existing), default=-1)
+        revision = max(highest, allocated.get(key, -1)) + 1
+        allocated[key] = revision
+        prepared.append(
+            {
+                **row,
+                "revision": revision,
+                "content_fingerprint": fingerprint,
+            }
+        )
+    return prepared
 
 
 def _write_rows(conn: Connection, rows: Sequence[dict[str, object]], batch_id: uuid.UUID) -> int:
     if not rows:
         return 0
+    prepared = _prepare_rows(conn, rows)
+    if not prepared:
+        return 0
     values = [
         {
             **row,
-            "source_licence_id": row["source_licence_id"],
             "batch_id": batch_id,
-            "fetched_at": row["fetched_at"],
-            "revision": 0,
-            "content_fingerprint": _fingerprint(row),
         }
-        for row in rows
+        for row in prepared
     ]
     stmt = pg_insert(quotes_snapshot).values(values)
     stmt = stmt.on_conflict_do_nothing(
@@ -298,13 +340,15 @@ def _fetch_with_egress(
                 path=path,
                 secret=secret,
                 priority=Priority.P0,
-                clock=lambda: now,
+                clock=lambda: _now(None),
                 stop=stop,
                 halt=halt,
                 sender=upstream,
             )
     except EgressDenied as exc:
         raise RealtimeCollectionStoppedError(f"egress_{exc.code}") from None
+    if result.status == 200:
+        _reject_credential_echo(secret, result.body)
     return result.status, result.body
 
 
@@ -381,6 +425,7 @@ def realtime_quotes_task(
     upstream: Transport | None = None,
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
+    engine: Engine | None = None,
 ) -> int:
     """运维入口：``market.realtime_quotes_fetch``，依赖 DB、日历、market_rules 与 active 证书。"""
     hook = transport if transport is not None else upstream
@@ -389,7 +434,10 @@ def realtime_quotes_task(
         return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
-    from app.workers.jobs import _engine
+    if engine is None:
+        from app.workers.jobs import _engine
+
+        engine = _engine(settings)
 
     selected_owner: uuid.UUID | None
     if isinstance(owner, uuid.UUID):
