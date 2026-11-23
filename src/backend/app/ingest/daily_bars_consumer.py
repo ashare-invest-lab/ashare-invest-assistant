@@ -33,7 +33,7 @@ from app.ingest.daily_bars_plan import (
 from app.ingest.daily_bars_schedule import HistoryWindowDeferredError, delay, delayed_until
 from app.ingest.daily_lists import STOP as LISTS_STOP
 from app.ingest.daily_lists import DailyHaltError, daily_bars_seam, limited
-from app.ingest.egress import EgressDenied, single_egress
+from app.ingest.egress import EgressDenied, EgressLease, single_egress
 from app.marketdata import daily_bars_outbox as intents
 from app.marketdata.daily_bars import DailyBar, DailyBarsResult, _empty_stats
 from app.marketdata.daily_bars_outbox import batch_budget, valid_grant
@@ -98,7 +98,7 @@ class MairuiDailyBarsTransport:
     def __call__(
         self,
         *,
-        lease: object,
+        lease: EgressLease,
         item: RowMapping,
         grant: fetcher.DailyBarsGrant,
         code: str,
