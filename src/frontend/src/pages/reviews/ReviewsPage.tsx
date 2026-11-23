@@ -5,6 +5,7 @@ import { useCreateReview, useReviews } from '../../api/reviewQueries';
 import type { ReviewCreate, ReviewSummary } from '../../api/types';
 import { DataStatusTag, EmptyState, ErrorBox } from '../../components/common';
 import { fmtTime } from '../../lib/format';
+import { REVIEW_BENCHMARK_NOTE } from '../../lib/reviewMetrics';
 
 const trim = (value: string) => value.trim();
 
@@ -42,7 +43,7 @@ export function ReviewsPage() {
   return (
     <div className="page-scroll page" data-testid="reviews-page">
       <div className="detail-head"><h2 className="page-title" style={{ margin: 0 }}>复盘</h2><Button onClick={() => setCreating((v) => !v)} data-testid="new-review">新建复盘</Button></div>
-      <div className="muted small" style={{ marginBottom: 10 }}>记录计划与证券的复盘笔记。指标缺口和数据截至时间以接口返回为准，缺失时显示“未知”。</div>
+      <div className="muted small" style={{ marginBottom: 10 }}>记录计划与证券的复盘笔记。指标缺口和数据截至时间以接口返回为准，缺失时显示“未知”。<span data-testid="review-benchmark"> · {REVIEW_BENCHMARK_NOTE}</span></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <Input.Search aria-label="证券代码筛选" placeholder="证券代码" value={filter.security_code} onChange={(e) => setFilter('security_code', e.target.value)} onSearch={(v) => setFilter('security_code', v)} style={{ width: 190 }} data-testid="review-filter-security" />
         <Input.Search aria-label="计划筛选" placeholder="计划 ID" value={filter.plan_id} onChange={(e) => setFilter('plan_id', e.target.value)} onSearch={(v) => setFilter('plan_id', v)} style={{ width: 240 }} data-testid="review-filter-plan" />

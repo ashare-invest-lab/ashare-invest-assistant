@@ -1,11 +1,13 @@
 import { http, HttpResponse } from 'msw';
+import type { GapReason } from '../api/enums';
 import type { ReviewCreate, ReviewDetail, ReviewOutcomeMetrics, ReviewVersion, ReviewVersionCreate } from '../api/types';
 import { errorBody, notFound, page, validation } from './handlerUtils';
 
 const API = '/api/v1';
-const gap = (key: string, reason: 'no_source' | 'user_input_missing', message: string) => ({ key, reason, message });
+const gap = (key: string, reason: GapReason, message: string) => ({ key, reason, message });
 const outcomeMetricKeys = ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown'] as const;
 const outcomeMetricGaps = (message: string) => outcomeMetricKeys.map((key) => gap(`outcome_metrics.${key}`, 'no_source', message));
+// 口径未定稿，夹具不造具体指标数值。接入真接口沿用现有 IS_MOCK（VITE_USE_MOCK=false + VITE_API_PROXY），不新增开关或依赖。
 const emptyMetrics = (periodStart: string, periodEnd: string): ReviewOutcomeMetrics => {
   const stat = () => ({ value: null, n: 0, window: `${periodStart}/${periodEnd}`, small_sample: true });
   return { holding_return: stat(), benchmark_return: stat(), excess_return: stat(), max_drawdown: stat() };
@@ -26,6 +28,19 @@ const seed = (): ReviewDetail[] => {
     outcome_metrics: emptyMetrics('2026-11-10', '2026-12-31'),
     data_status: 'partial', gaps: outcomeMetricGaps('缺少价格、基准或公式来源，指标暂不计算'),
   };
+  const unprovenImport: ReviewVersion = {
+    ...complete,
+    id: 'review-version-import-unproven',
+    plan_version_ids: [],
+    trade_ids: ['trade-import-unproven'],
+    lessons: '未证提交的成交不应进入时间线。',
+    tags: ['成交待证实'],
+    attribution: { judgement: [], execution: [], market: [] },
+    gaps: [
+      ...outcomeMetricGaps('缺少价格、基准或公式来源，指标暂不计算'),
+      gap('trades.import_commit_unproven', 'no_source', '导入批次提交时点不可证实'),
+    ],
+  };
   const base = (id: string, planId: string | null, code: string | null, start: string, end: string, version: ReviewVersion): ReviewDetail => ({
     id, plan_id: planId, security_code: code, name: code ? '示例银行' : null, period_start: start, period_end: end,
     current_version_no: version.version_no, created_at: now, data_status: version.data_status, data_as_of: version.data_as_of,
@@ -38,7 +53,9 @@ const seed = (): ReviewDetail[] => {
     data_status: 'unavailable', data_as_of: null,
     gaps: [gap('outcome_metrics', 'no_source', '没有当前版本，结果指标暂无来源')], current_version: null, evidence: [], timeline: [],
   };
-  return [base('review-example-1', 'plan-example-1', '600000.SH', '2026-10-01', '2026-11-01', complete), base('review-example-2', null, '600000.SH', '2026-11-10', '2026-12-31', partialMetrics), legacy];
+  const unprovenReview = base('review-example-import-unproven', null, '600000.SH', '2026-11-01', '2026-11-20', unprovenImport);
+  unprovenReview.timeline = [{ kind: 'review_version', at: now, resource_id: unprovenReview.id, version_no: 1, evidence_ids: [] }];
+  return [base('review-example-1', 'plan-example-1', '600000.SH', '2026-10-01', '2026-11-01', complete), base('review-example-2', null, '600000.SH', '2026-11-10', '2026-12-31', partialMetrics), legacy, unprovenReview];
 };
 
 const initialReviews = seed();
