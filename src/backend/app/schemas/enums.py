@@ -466,6 +466,7 @@ class ReasonCode(StrEnum):  # 契约 §6.1；码类取值用大写（契约 §1 
     CONFLICTS_CONFIRMED_PLAN = "CONFLICTS_CONFIRMED_PLAN"
     BLOCKLISTED = "BLOCKLISTED"
     COOLING_OFF = "COOLING_OFF"
+    SAME_TEMPLATE_COOLDOWN = "SAME_TEMPLATE_COOLDOWN"
     LOSS_STREAK_PAUSE = "LOSS_STREAK_PAUSE"
     STRATEGY_CONFLICT = "STRATEGY_CONFLICT"
     USER_MUTED = "USER_MUTED"
@@ -938,6 +939,7 @@ REASON_CODE_TABLE: Final[tuple[ReasonCodeSpec, ...]] = (
         "通过 /restrictions；/release → 409 REASON_NOT_MANUALLY_RELEASABLE",
     ),
     ReasonCodeSpec(ReasonCode.COOLING_OFF, (_K.TIME,), (_C.SCHEDULE,), False),
+    ReasonCodeSpec(ReasonCode.SAME_TEMPLATE_COOLDOWN, (_K.TIME,), (_C.SCHEDULE,), False),
     ReasonCodeSpec(
         ReasonCode.LOSS_STREAK_PAUSE,
         (_K.USER_ACTION, _K.TIME),

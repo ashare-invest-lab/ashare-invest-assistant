@@ -6,6 +6,23 @@
 
 PR #387 的 `/quotes` 行尾时段表为准，引用要点如下。`[09:30,11:30)`、`[13:00,15:00)` 是盘中，午休参照当日 11:30，收盘后（含 15:00 整点）参照当日 15:00，盘前与闭市日参照上一开市日 15:00 收盘。该表由 `marketdata.quotes_read._reference_time`（#390）实现，本分支不复制或改写其端点行。
 
+RT-04：见 PR #405 docs/contracts/T-A233-*（合入后生效）。
+
+### 1.1 RT-03 时点、过期阈值与降级覆盖
+
+本节为 RT-03 目标契约，四个入口的实现验收仍未完成。
+
+- `marketdata.quotes_read._reference_time` 统一计算北京时间交易时段和查询时点。15:00 只确定市场收盘时点，`marketdata.quotes_read._daily_closes` 仍须等到 17:10 终值门槛并满足 `fetched_at <= query_as_of` 才能作为正式收盘输入。盘中行不会因当前时钟已过 15:00 而升级为收盘行。
+- `stale_threshold_s` 的唯一配置来源是 `config/realtime.yaml`，沿用 §7.9 的 `plan 0A.7` 初值 30 秒【未验证】。它只决定行情按 `t` 的 freshness，不得缩短 SSE 断线后的降级轮询间隔。§7.3、§8 的轮询下限保持每次至少 15 秒并带 `If-None-Match`，与 T-A232 同一版本口径覆盖 `/terminal`、`/today` 的聚合读链。
+- 四个读发布入口共同捕获 `query_as_of`，并按 `t`、`fetched_at` 的可见性做 PIT 过滤。`GET /quotes` 调 `_reference_time`/`_daily_closes`，`GET /terminal` 和 `GET /market/overview` 复用同一时段与 17:10 收口，`GET /stream` 的 `quote` 帧复用项级 `t` 和 `data_as_of`。午休、闭市、15:00、17:10、未来 `fetched_at` 均不得前视。
+
+RT-03 验收（按入口）：
+
+- `GET /quotes`：覆盖 15:00 前后、17:10 前后、午休、闭市和未来 `fetched_at`，断言盘中回退、stale 判定、`t`/`data_as_of` 及无新增错误码。
+- `GET /terminal`：断言行级行情沿用同一 `query_as_of`，SSE 断线后按至少 15 秒并带 `If-None-Match` 轮询，不能把旧盘中行当收盘。
+- `GET /market/overview`：断言 17:10 前不读正式日线收口，17:10 后只读单一可见交易日批次，跨日不拼接。
+- `GET /stream`：断言 `quote` 帧按项级 `t` 判 stale，帧级 `data_as_of` 取最早可信 `t`，断线降级不改变帧字段或错误码。
+
 ## 2. 五项裁定
 
 ### 2.1 市场收盘与日线终值
