@@ -232,6 +232,8 @@ def test_write_candidate_applies_restriction_interval_at_candidate_time(monkeypa
     monkeypatch.setattr(service, "assess", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(service, "live_snapshots", lambda _id: SimpleNamespace(
         order_by=lambda _order: SimpleNamespace(limit=lambda _limit: object())))
+    monkeypatch.setattr(service, "same_template_cooldown", lambda *_args, **_kwargs: (None, None))
     result = service.write_candidate(connection, user_id=USER_ID, instance_id=instance_id,
-                                     content=content, facts=facts, market_rules=market_rules)
+                                     content=content, facts=facts, market_rules=market_rules,
+                                     same_template_cooldown_days=3)
     assert result["diagnostic"] == "blocked"

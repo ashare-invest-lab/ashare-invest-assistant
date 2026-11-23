@@ -155,6 +155,8 @@ jobs:
     env:
       # CI 专用口令（与 contract/migrations 一致），不是真实密钥；驱动用 psycopg 与用例注释一致。
       TT41_DATABASE_URL: postgresql+psycopg://aia:ci-only@127.0.0.1:5432/aia
+      # 独立 head 测试库；AIA 测试会迁移、清理并写入该库，不能与 TT41 共用 aia。
+      AIA_TEST_DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/o67_aia_test
       DATABASE_URL: postgresql://aia:ci-only@127.0.0.1:5432/aia
       # T-O67：正式 A2–A31 读 PGHOST/PGPORT/PGUSER（缺则 skip）；口令走 PGPASSWORD / libpq，不进测试源码 URL。
       PGHOST: 127.0.0.1
