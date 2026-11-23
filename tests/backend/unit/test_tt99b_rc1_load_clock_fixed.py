@@ -1,6 +1,5 @@
 """T-T99b：隔离 PG、合成行情与固定北京时间；rc1.load 不访问外网。"""
 
-# ruff: noqa: S101
 from __future__ import annotations
 
 import datetime as dt
@@ -11,13 +10,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import Connection, create_engine, insert, text
-from sqlalchemy.engine import make_url
-
 from app.config import Settings, load_yaml_dir
-from app.db.tables.market import daily_bars, quotes_snapshot, realtime_quotes, trading_calendar
+from app.db.tables.market import (
+    daily_bars,
+    quotes_snapshot,
+    realtime_quotes,
+    trading_calendar,
+)
 from app.risk import rc1
 from app.risk.rc1 import SH, load
+from sqlalchemy import Connection, create_engine, insert, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import make_url
 
 STDLIB_DATETIME = dt.datetime
 DAY = dt.date(2030, 6, 11)
@@ -60,7 +64,14 @@ def rc1_conn(pg_url: str) -> Iterator[Connection]:
                 conn.execute(text("CREATE SCHEMA IF NOT EXISTS market"))
                 for table in (trading_calendar, realtime_quotes, quotes_snapshot, daily_bars):
                     table.create(conn, checkfirst=True)
-                conn.execute(insert(trading_calendar).values(date=DAY, is_open=True))
+                conn.execute(
+                    pg_insert(trading_calendar)
+                    .values(date=DAY, is_open=True)
+                    .on_conflict_do_update(
+                        index_elements=[trading_calendar.c.date],
+                        set_={"is_open": True},
+                    )
+                )
                 conn.execute(
                     insert(quotes_snapshot).values(
                         code=CODE,
@@ -76,10 +87,10 @@ def rc1_conn(pg_url: str) -> Iterator[Connection]:
                         code=CODE,
                         trade_date=DAY,
                         adj_type="none",
-                        open=Decimal("10"),
-                        low=Decimal("9"),
-                        high=Decimal("12"),
-                        close=Decimal("11"),
+                        open=Decimal(10),
+                        low=Decimal(9),
+                        high=Decimal(12),
+                        close=Decimal(11),
                         fetched_at=CLOSING,
                     )
                 )
@@ -117,8 +128,8 @@ def test_close_uses_fixed_at_daily_bar(
     )
     assert facts.mode == "close"
     assert facts.endpoint == "market.daily_bars:adj_type=none"
-    assert facts.low == Decimal("9")
-    assert facts.high == Decimal("12")
+    assert facts.low == Decimal(9)
+    assert facts.high == Decimal(12)
     assert facts.observed_at == CLOSING
     assert facts.fetched_at == CLOSING
     assert facts.last is None
@@ -175,7 +186,7 @@ def test_intraday_ignores_legacy_and_foreign_quotes(
         insert(realtime_quotes).values(
             code=CODE,
             ts=AT - dt.timedelta(seconds=2),
-            price=Decimal("99"),
+            price=Decimal(99),
             source="ssjy_more",
             fetched_at=AT,
         )
@@ -184,7 +195,7 @@ def test_intraday_ignores_legacy_and_foreign_quotes(
         insert(quotes_snapshot).values(
             code=CODE,
             ts=AT - dt.timedelta(seconds=1),
-            price=Decimal("88"),
+            price=Decimal(88),
             source="mairui",
             source_licence_id=uuid.UUID("00000000-0000-0000-0000-000000000098"),
             fetched_at=AT,
