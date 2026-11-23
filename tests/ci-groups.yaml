@@ -194,6 +194,7 @@ tests:
   - {"file": "src/backend/tests/test_tb172b1b_completion_evidence_pg.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL", "CREATE DATABASE per test", "synthetic evidence"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt109_restrictions_r1_r3.py", "group": "parallel", "keywords": ["in-memory fake Engine/Connection", "socket connections denied", "synthetic UUID restrictions; no PG/Redis/docker/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt113_market_overview.py", "group": "parallel", "keywords": ["offline TestClient", "deny socket", "虚构夹具", "env -u MAIRUI_LICENCE", "不连 PG/Redis/外网"], "unverified": false}
+  - {"file": "tests/backend/unit/test_tt114_realtime_read_chain.py", "group": "parallel", "keywords": ["offline TestClient", "deny socket", "虚构夹具", "env -u MAIRUI_LICENCE", "不连 PG/Redis/外网"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt129_market_overview.py", "group": "parallel", "keywords": ["create_app/TestClient", "read-only SQL-shaped fixture", "虚构市场概览", "no PG/Redis/vendor"], "unverified": false}
   # 页面测试 src/frontend/src/pages/market/t-t129.test.tsx 由前端 Vitest 配置收集；本清单校验范围不含 src/frontend。
   - {"file": "tests/backend/unit/test_tt118_ingest_collection.py", "group": "serial_pg", "keywords": ["AIA_TEST_DATABASE_URL / 真 PG", "denied sockets", "synthetic transport", "UUID batch idempotence"], "unverified": false}
