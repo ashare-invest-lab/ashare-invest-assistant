@@ -1118,6 +1118,21 @@
       "path": "docs/strategies/T-R103/review_tracking_metrics.md",
       "scope_role": "feature_calendar_compliance_rule_reference_or_tool_not_strategy_identity",
       "note": "T-R103 复盘与建议跟踪指标口径卡；候选信号研究支持文档，非策略身份"
+    },
+    {
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v4.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R108：hold_risk_monitor v4 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v3.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R108：sw_ma_trend_pullback v3 升版前原文冻结；历史身份，不晋级"
+    },
+    {
+      "path": "docs/strategies/cards/history/st_pullback_ma.v3.md",
+      "scope_role": "enumerated_identity_source",
+      "note": "T-R108：st_pullback_ma v3 升版前原文冻结；历史身份，不晋级"
     }
   ],
   "records": [
@@ -1152,7 +1167,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 43,
+          "line": 46,
           "quote": "v1 原文冻结在 `cards/history/hold_risk_monitor.v1.md`"
         }
       ],
@@ -1190,7 +1205,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 147,
+          "line": 153,
           "quote": "v2 原文冻结在 `cards/history/hold_risk_monitor.v2.md`"
         }
       ],
@@ -1225,7 +1240,7 @@
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 3,
+          "line": 5,
           "quote": "v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`"
         }
       ],
@@ -1260,7 +1275,7 @@
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 43,
+          "line": 46,
           "quote": "v1 原文冻结在 `cards/history/sw_ma_trend_pullback.v1.md`"
         }
       ],
@@ -1268,11 +1283,11 @@
       "release_condition": null
     },
     {
-      "record_id": "hold_risk_monitor@4:current_formal_L1_with_L2_spec",
+      "record_id": "hold_risk_monitor@5:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/hold_risk_monitor.md",
       "key": "hold_risk_monitor",
-      "version_no": 4,
-      "document_version": "v4",
+      "version_no": 5,
+      "document_version": "v5",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "intraday_t",
@@ -1288,29 +1303,29 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 49,
-          "quote": "version_no: 4"
+          "line": 52,
+          "quote": "version_no: 5"
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 52,
+          "line": 55,
           "quote": "horizons: [intraday_t, short, swing, long]"
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 4,
-          "quote": "> 正式卡"
+          "line": 6,
+          "quote": "> 正式卡。导入格式：plan 2.5.14 A 节三个带标签块。`mount_policy: system_only` 纯离场组件（G1 豁免依据，plan 2.5.14 T-R15 裁定②；用户 POST /strategy-instances → 422 `STRATEGY_SYSTEM_ONLY`）：规则只含 exit/weakening/counter/invalidation，`action_map` 不含 buy/add，**不产生任何新开仓**；只对持有中证券求值，未持有不出现在结论中；不能被用户实例化为普通模板。"
         }
       ],
       "gap_reason": "四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜",
       "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
     },
     {
-      "record_id": "sw_ma_trend_pullback@3:current_formal_L1_with_L2_spec",
+      "record_id": "sw_ma_trend_pullback@4:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
       "key": "sw_ma_trend_pullback",
-      "version_no": 3,
-      "document_version": "v3",
+      "version_no": 4,
+      "document_version": "v4",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "swing"
@@ -1323,18 +1338,18 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 50,
-          "quote": "version_no: 3"
+          "line": 53,
+          "quote": "version_no: 4"
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 53,
+          "line": 56,
           "quote": "horizons: [swing]"
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 4,
-          "quote": "> 正式卡"
+          "line": 6,
+          "quote": "> 正式卡（非 catalog 草案、非 `_template.md` 示例）。导入格式：plan 2.5.14 A 节三个带标签块（`strategy-card` / `strategy-spec` / `validation`），导入器只读这三块，正文存为 `narrative`。"
         }
       ],
       "gap_reason": null,
@@ -1489,11 +1504,11 @@
       "release_condition": "MVP后另派解除不可导入及G1–G7/版本审批；本轮不解除"
     },
     {
-      "record_id": "st_pullback_ma@3:current_formal_L1_with_L2_spec",
+      "record_id": "st_pullback_ma@4:current_formal_L1_with_L2_spec",
       "path": "docs/strategies/cards/st_pullback_ma.md",
       "key": "st_pullback_ma",
-      "version_no": 3,
-      "document_version": "v3",
+      "version_no": 4,
+      "document_version": "v4",
       "scope": "current_formal_L1_with_L2_spec",
       "horizons": [
         "short"
@@ -1506,18 +1521,18 @@
       "evidence": [
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 4,
-          "quote": "> 正式卡"
-        },
-        {
-          "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 45,
-          "quote": "version_no: 3"
-        },
-        {
-          "path": "docs/strategies/cards/st_pullback_ma.md",
           "line": 48,
+          "quote": "version_no: 4"
+        },
+        {
+          "path": "docs/strategies/cards/st_pullback_ma.md",
+          "line": 51,
           "quote": "horizons: [short]"
+        },
+        {
+          "path": "docs/strategies/cards/st_pullback_ma.md",
+          "line": 6,
+          "quote": "> 正式卡（由 T-R16/S-01_st_pullback_ma.md 草稿正式化；草稿保留过程记录）。导入格式：plan 2.5.14 A 节三个带标签块，导入器只读这三块，正文存为 `narrative`。"
         }
       ],
       "gap_reason": null,
@@ -2673,7 +2688,7 @@
         },
         {
           "path": "docs/strategies/cards/hold_risk_monitor.md",
-          "line": 2,
+          "line": 4,
           "quote": "v3 原文冻结在 `cards/history/hold_risk_monitor.v3.md`"
         }
       ],
@@ -2713,7 +2728,7 @@
         },
         {
           "path": "docs/strategies/cards/st_pullback_ma.md",
-          "line": 2,
+          "line": 4,
           "quote": "v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`"
         }
       ],
@@ -2753,8 +2768,131 @@
         },
         {
           "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
-          "line": 2,
+          "line": 4,
           "quote": "v2 原文冻结在 `cards/history/sw_ma_trend_pullback.v2.md`"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "hold_risk_monitor@4:historical_frozen",
+      "path": "docs/strategies/cards/history/hold_risk_monitor.v4.md",
+      "key": "hold_risk_monitor",
+      "version_no": 4,
+      "document_version": "v4",
+      "scope": "historical_frozen",
+      "horizons": [
+        "intraday_t",
+        "short",
+        "swing",
+        "long"
+      ],
+      "horizon": null,
+      "classification": "explicit_multi_no_unique_fallback",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v4.md",
+          "line": 49,
+          "quote": "version_no: 4"
+        },
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v4.md",
+          "line": 52,
+          "quote": "horizons: [intraday_t, short, swing, long]"
+        },
+        {
+          "path": "docs/strategies/cards/history/hold_risk_monitor.v4.md",
+          "line": 2,
+          "quote": ""
+        },
+        {
+          "path": "docs/strategies/cards/hold_risk_monitor.md",
+          "line": 2,
+          "quote": "> **v5 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v4 → v5；新增 `min_list_days` 整数交易日字段，默认 250 个交易日；**只用于 G6 历史样本资格筛选，不门控持仓风险实时求值**（新上市持仓照常体检），规则与 data_needs 不变。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v4 原文冻结在 `cards/history/hold_risk_monitor.v4.md`。"
+        }
+      ],
+      "gap_reason": "四周期通用持仓风控，无唯一版本周期；具体建议的该版本结论horizon缺失时不得猜",
+      "release_condition": "结论自带合法且该版本支持的horizon；否则架构师明确唯一周期/选择语义并遵从不可变版本规则"
+    },
+    {
+      "record_id": "sw_ma_trend_pullback@3:historical_frozen",
+      "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v3.md",
+      "key": "sw_ma_trend_pullback",
+      "version_no": 3,
+      "document_version": "v3",
+      "scope": "historical_frozen",
+      "horizons": [
+        "swing"
+      ],
+      "horizon": "swing",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v3.md",
+          "line": 50,
+          "quote": "version_no: 3"
+        },
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v3.md",
+          "line": 53,
+          "quote": "horizons: [swing]"
+        },
+        {
+          "path": "docs/strategies/cards/history/sw_ma_trend_pullback.v3.md",
+          "line": 2,
+          "quote": ""
+        },
+        {
+          "path": "docs/strategies/cards/sw_ma_trend_pullback.md",
+          "line": 2,
+          "quote": "> **v4 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v3 → v4；补充可直接读取的 `min_list_days` 整数交易日字段，默认 120 个交易日。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v3 原文冻结在 `cards/history/sw_ma_trend_pullback.v3.md`。"
+        }
+      ],
+      "gap_reason": null,
+      "release_condition": null
+    },
+    {
+      "record_id": "st_pullback_ma@3:historical_frozen",
+      "path": "docs/strategies/cards/history/st_pullback_ma.v3.md",
+      "key": "st_pullback_ma",
+      "version_no": 3,
+      "document_version": "v3",
+      "scope": "historical_frozen",
+      "horizons": [
+        "short"
+      ],
+      "horizon": "short",
+      "classification": "explicit_single",
+      "runtime_lifecycle": null,
+      "runtime_status_evidence": "未读取数据库；正式卡/规则规格不等于published/observing，未晋级；正式≠G7批准≠运行态",
+      "rc5_consume": "frozen_snapshot_not_default_template",
+      "evidence": [
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v3.md",
+          "line": 45,
+          "quote": "version_no: 3"
+        },
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v3.md",
+          "line": 48,
+          "quote": "horizons: [short]"
+        },
+        {
+          "path": "docs/strategies/cards/history/st_pullback_ma.v3.md",
+          "line": 2,
+          "quote": ""
+        },
+        {
+          "path": "docs/strategies/cards/st_pullback_ma.md",
+          "line": 2,
+          "quote": "> **v4 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v3 → v4；补充可直接读取的 `min_list_days` 整数交易日字段，默认 60 个交易日。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v3 原文冻结在 `cards/history/st_pullback_ma.v3.md`。"
         }
       ],
       "gap_reason": null,
@@ -2765,7 +2903,7 @@
     {
       "path": "docs/strategies/golden/hold_risk_monitor.card.tmpl",
       "key": "hold_risk_monitor",
-      "version_no": 4,
+      "version_no": 5,
       "horizons": [
         "intraday_t",
         "short",
@@ -2778,7 +2916,7 @@
     {
       "path": "docs/strategies/golden/sw_ma_trend_pullback.card.tmpl",
       "key": "sw_ma_trend_pullback",
-      "version_no": 3,
+      "version_no": 4,
       "horizons": [
         "swing"
       ],
@@ -2819,21 +2957,21 @@
     }
   ],
   "stats": {
-    "identity_records": 48,
-    "source_identity_files": 26,
+    "identity_records": 51,
+    "source_identity_files": 29,
     "scope_counts": {
-      "historical_frozen": 7,
+      "historical_frozen": 10,
       "current_formal_L1_with_L2_spec": 3,
       "research_blocked_not_importable": 15,
       "catalog_research_not_formal_card": 23
     },
     "explicit_single_distribution": {
-      "short": 11,
-      "swing": 12,
+      "short": 12,
+      "swing": 13,
       "long": 8,
       "intraday_t": 7
     },
-    "multi_records": 10,
+    "multi_records": 11,
     "source_field_repairs": 0,
     "missing_horizons": 0
   },
@@ -3037,5 +3175,10 @@
     "historical_frozen": 7,
     "runtime_changed": false,
     "change": "scope 205→235；身份45→48、来源身份文件23→26、冻结身份4→7；H-01 v4、S-01 v3、W-01 v3；保留两侧历史刷新记录，不推断运行态"
+  },
+  "t_r108_refresh": {
+    "basis": "T-R108：按 PR #335 G6 上市年龄资格读取要求补卡面字段",
+    "change": "H-01 v4、W-01 v3、S-01 v3 原文分别冻结为 history v4/v3/v3；当前卡升版为 H-01 v5、W-01 v4、S-01 v4；新增 min_list_days 交易日字段与公开出处登记，lifecycle 仍为 draft，G7 保持 ☐",
+    "source_boundary": "出处仅证明交易所或指数机构采用过相应上市年龄筛选；A股策略有效性未验证（待复测）"
   }
 }
