@@ -30,7 +30,7 @@ from sqlalchemy.engine import make_url
 TASK = "market.realtime_quotes_fetch"
 OWNER = UUID("00000000-0000-4000-8000-000000001118")
 LICENCE = UUID("00000000-0000-4000-8000-000000001119")
-CODES = ("SYN001.SH", "SYN002.SH")
+CODES = ("600001.SH", "600002.SH")
 NOW = dt.datetime(2030, 6, 11, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 SOCKET_ATTEMPTS: list[object] = []
 
@@ -208,6 +208,7 @@ def _patch_replay(
     body = [
         {
             "code": CODES[0],
+            "dm": "600001",
             "ts": "2030-06-11T10:00:00+08:00",
             "price": "10.00",
             "pct_change": "1.25",
@@ -216,6 +217,7 @@ def _patch_replay(
         },
         {
             "code": CODES[1],
+            "dm": "600002",
             "ts": "2030-06-11T10:00:00+08:00",
             "price": "20.00",
             "pct_change": "2.50",
