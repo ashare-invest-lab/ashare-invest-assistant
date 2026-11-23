@@ -39,7 +39,7 @@
 
 ```bash
 set -euo pipefail
-TMP_DIR="$(mktemp -d -t aia-mairui-receipts.XXXXXX)"
+TMP_DIR="$(mktemp -d -p /tmp aia-daily-receipts-XXXXXX)"
 IMAGE='alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab'
 cleanup_tmp() {
   docker run --rm --network none --user 0 \

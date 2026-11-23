@@ -170,6 +170,7 @@ tests:
   - {"file": "tests/backend/unit/test_tt62_o61_pg_guard_t_t62.py", "group": "parallel", "keywords": ["lookup_tcp_owner monkeypatched", "synthetic port numbers", "no actual PG/docker"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt81_multi_source_contract.py", "group": "parallel", "keywords": ["offline_only autouse monkeypatch", "tmp_path", "mock SQL", "localcontext"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt93_ci_groups.py", "group": "parallel", "keywords": ["read-only YAML and tree inventory", "no resource fixture"], "unverified": false}
+  - {"file": "tests/backend/unit/test_install_mairui_daily_receipts.py", "group": "parallel", "keywords": ["offline installer parameter and path guards", "fake Docker and tmp_path", "no vendor or external IO"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb201_reviews.py", "group": "parallel", "keywords": ["pure metrics", "synthetic request validation", "no real DB/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tb204_reviews_followup.py", "group": "parallel", "keywords": ["synthetic rows and fake connection", "no real DB/Redis/network"], "unverified": false}
   - {"file": "tests/backend/unit/test_tt99_market_clock_fixed.py", "group": "serial_pg", "keywords": ["conn->pg_url", "market.trading_calendar on isolated PG; per-case truncate and rollback", "fixed aware instants and repository market_rules"], "unverified": false}

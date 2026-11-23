@@ -97,19 +97,14 @@ if [[ -n "$volume" ]]; then
   mount="$volume:/run/aia/receipts"
   destination="具名卷"
 else
-  tmp_root="${TMPDIR:-/tmp}"
-  [[ "$tmp_root" = /* && -d "$tmp_root" && ! -L "$tmp_root" ]] || {
-    echo "TMPDIR 必须是现有的非符号链接绝对目录" >&2
-    exit 2
-  }
-  tmp_root="$(cd "$tmp_root" && pwd -P)"
+  fixed_prefix=/tmp/aia-daily-receipts-
   [[ "$target" = /* && "$target" != "/" ]] || {
     echo "临时目录必须是绝对路径且不能是根目录" >&2
     exit 2
   }
   target="$(realpath -m -- "$target")"
-  [[ "$target" == "$tmp_root"/* ]] || {
-    echo "临时目录必须位于 TMPDIR 白名单内" >&2
+  [[ "$target" == "$fixed_prefix"* ]] || {
+    echo "临时目录必须位于固定 /tmp/aia-daily-receipts- 白名单内" >&2
     exit 2
   }
   parent="$(dirname -- "$target")"
@@ -118,8 +113,8 @@ else
     exit 2
   }
   parent="$(cd "$parent" && pwd -P)"
-  [[ "$parent" == "$tmp_root"/* || "$parent" == "$tmp_root" ]] || {
-    echo "临时目录的父目录必须位于 TMPDIR 白名单内" >&2
+  [[ "$parent" = /tmp || "$parent" == "$fixed_prefix"* ]] || {
+    echo "临时目录的父目录必须位于固定白名单内" >&2
     exit 2
   }
   if [[ -e "$target" || -L "$target" ]]; then

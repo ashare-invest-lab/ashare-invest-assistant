@@ -29,7 +29,12 @@ ARGS = [
 ]
 
 
-def run_installer(tmp_path: Path, *extra: str, docker_result: str = "") -> subprocess.CompletedProcess[str]:
+def run_installer(
+    tmp_path: Path,
+    *extra: str,
+    docker_result: str = "",
+    tmpdir: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     fake_docker = tmp_path / "docker"
     fake_docker.write_text(
         "#!/bin/sh\n"
@@ -50,7 +55,7 @@ def run_installer(tmp_path: Path, *extra: str, docker_result: str = "") -> subpr
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "AIA_DOCKER": str(fake_docker),
         "AIA_DOCKER_LOG": str(log),
-        "TMPDIR": str(temp_root),
+        "TMPDIR": str(tmpdir or temp_root),
     }
     return subprocess.run(
         ["bash", str(SCRIPT), *ARGS, *extra],
@@ -100,11 +105,18 @@ def test_rejects_target_outside_tmpdir_and_nonempty_target(tmp_path: Path) -> No
     assert result.returncode == 2
 
 
-def test_target_dir_is_allowed_only_under_tmpdir(tmp_path: Path) -> None:
-    target = tmp_path / "tmp-root" / "new-target"
+def test_target_dir_is_allowed_under_fixed_prefix(tmp_path: Path) -> None:
+    target = Path("/tmp") / f"aia-daily-receipts-{tmp_path.name}"
     result = run_installer(tmp_path, "--target-dir", str(target))
     assert result.returncode == 0
     assert target.is_dir()
+    target.rmdir()
+
+
+def test_tmpdir_cannot_expand_fixed_prefix_whitelist(tmp_path: Path) -> None:
+    outside = Path("/var/lib/app") / f"aia-daily-receipts-{tmp_path.name}"
+    result = run_installer(tmp_path, "--target-dir", str(outside), tmpdir=Path("/var/lib/app"))
+    assert result.returncode == 2
 
 
 def test_missing_named_volume_fails_before_run(tmp_path: Path) -> None:
