@@ -40,6 +40,14 @@ def test_ingest_budget_accepts_limits_and_rejects_out_of_range() -> None:
         _budget(shares={"snapshot": 4, "minute_bars": 4, "other": 4})
 
 
+def test_ingest_budget_defaults_limits_for_legacy_config() -> None:
+    values = _budget().model_dump()
+    values.pop("daily_bars_batch_limit")
+    values.pop("daily_bars_backfill_batch_limit")
+    budget = IngestBudget.model_validate(values)
+    assert (budget.daily_bars_batch_limit, budget.daily_bars_backfill_batch_limit) == (500, 2000)
+
+
 def test_configure_batch_limits_is_fail_closed_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     fetcher.configure_batch_limits(daily=5, backfill=7)
     assert fetcher.DAILY_BARS_BATCH_LIMIT == 5
@@ -55,10 +63,11 @@ def test_configure_batch_limits_is_fail_closed_and_bounded(monkeypatch: pytest.M
 def test_decoder_accepts_trade_date_alias_and_decimal_failure() -> None:
     result = _decode_daily_bars(
         "000001.SH",
-        [{"trade_date": "20261112", "c": "10.25", "sf": True}],
+        [{"trade_date": "20261112", "c": "10.25", "v": "7", "sf": True}],
     )
     assert result is not None
     assert result.bars[0].close == 10.25
+    assert result.bars[0].volume == 700
     assert result.bars[0].is_suspended is True
     with pytest.raises(DailyHaltError, match="daily_bars_payload_invalid"):
         _decode_daily_bars("000001.SH", [{"t": "20261112", "c": "bad"}])

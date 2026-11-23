@@ -59,7 +59,7 @@
 - 库内价、量、额都是 MONEY = Numeric(20,4)（`app/db/base.py`）。
 - 价格：.day 为 uint32 ÷ 100（`DAY_PRICE_DIVISOR`）。.lc1 / .lc5 为 float32 元，**不 ÷100**，按 0.01 **ROUND_HALF_UP**（DS `splice.decode_lc1`；按 §5 C6，main 的 ROUND_HALF_EVEN 不用于分钟价）。HF 为 float64 元，DS 不另舍入，parquet 原值保存。麦蕊原值写入。
 - 成交量统一为**股**：麦蕊日线 v 是手，×100（T003 GAP2；`validate_bar`；T-T81 全库额 ÷（量 × 收）中位 1.0002）。.day、.lc1、.lc5、HF 本来就是股，不乘。麦蕊 1 分钟 v 的单位官方文档没写，**未验证**，核实前不写麦蕊分钟量。
-- 北交所 `/hsstock/history` 日线原始 v 仅按 ×100 规范化为股（`validate_bar` 的 `VOL_MULT`），价额按元原值。规范化与一只一日小样本不构成写库放行；所有来源（含 tdx_local）须先满足 [daily-bars-source.md](daily-bars-source.md) §10.2、§10.10–§10.11。当前真实批次确认与入口验收未完成，保持阻断。`reports/T-B146c.md` 的 1 只 920682.BJ、1 日 2026-11-13 仅为历史小样本事实（源契 §10.7 第 4 项），不是准入证据；虚构夹具 `test_ta157_bj_volume_lots_to_shares`（源契 §10.6）也只证明规范化。真实执行仍须既有任务授权。
+- 北交所 `/bj/history` 日线原始 v 仅按 ×100 规范化为股（`validate_bar` 的 `VOL_MULT`），价额按元原值。规范化与一只一日小样本不构成写库放行；所有来源（含 tdx_local）须先满足 [daily-bars-source.md](daily-bars-source.md) §10.2、§10.10–§10.11。当前真实批次确认与入口验收未完成，保持阻断。`reports/T-B146c.md` 的 1 只 920682.BJ、1 日 2026-11-13 仅为历史小样本事实（源契 §10.7 第 4 项），不是准入证据；虚构夹具 `test_ta157_bj_volume_lots_to_shares`（源契 §10.6）也只证明规范化。真实执行仍须既有任务授权。
 - 成交额统一为**元**，各源原值；入库（日线）按 MONEY 列量化到 4 位（日契 §3.3），万分之一元以下的 float32 尾数会被舍去，对元级成交额无实际影响；分钟 parquet 不舍入，同 DS。
 - 麦蕊陷阱：单股网络源 `/hsrl/ssjy/{code}` 的 v 是**万手**（T003 GAP2）；`ssjy/all` 的成交额取整到百元（T-B140）。这两个接口不作为历史入库源。
 - 分钟量合计与日量本来就差几十股（通达信自身如此，T-DATA-SRC），不做「合计等于日量」的强校验（分契 §1.2）。

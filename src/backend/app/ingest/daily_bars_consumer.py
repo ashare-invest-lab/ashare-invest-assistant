@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 import redis
 from sqlalchemy import Connection, Engine, select, update
@@ -21,6 +22,7 @@ from app.db.tables.daily_bars import outbox
 from app.db.tables.licences import user_data_licence_status as licences
 from app.db.tables.realtime import pipeline_runs
 from app.db.tables.users import users
+from app.bj_offline_volume import market_of
 from app.ingest import daily_bars as fetcher
 from app.ingest.daily_bars_plan import (
     BEIJING,
@@ -41,6 +43,7 @@ from app.master.vendor import licence_available
 
 GrantReader = Callable[[uuid.UUID], fetcher.DailyBarsGrant | None]
 RESUME_PENDING = "daily_bars_resume_pending"
+VOL_MULT = 100
 
 
 def _decimal_field(row: dict[str, object], name: str) -> Decimal | None:
@@ -48,6 +51,24 @@ def _decimal_field(row: dict[str, object], name: str) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def validate_bar(row: dict[str, object], expected_code: str) -> dict[str, Any]:
+    """Validate one vendor row and normalize its hands volume to shares."""
+    raw_day = row.get("t") or row.get("trade_date")
+    if not isinstance(raw_day, str) or row.get("code") not in (None, expected_code):
+        raise ValueError("daily_bars_payload_invalid")
+    day_text = raw_day[:10].replace("-", "")
+    day = dt.datetime.strptime(day_text, "%Y%m%d").date()
+    suspended = row.get("sf")
+    is_suspended = None if suspended is None else suspended in (1, "1", True, "true", "True")
+    if not is_suspended and any(row.get(name) is None for name in ("o", "h", "l", "c", "a")):
+        raise ValueError("daily_bars_payload_invalid")
+    volume_hands = _decimal_field(row, "v")
+    volume = None if volume_hands is None else volume_hands * VOL_MULT
+    if volume is not None and (volume < 0 or volume != volume.to_integral_value()):
+        raise ValueError("daily_bars_volume_invalid")
+    return {"trade_date": day, "volume": volume, "is_suspended": is_suspended}
 
 
 def _decode_daily_bars(code: str, body: object) -> DailyBarsResult | None:
@@ -62,26 +83,20 @@ def _decode_daily_bars(code: str, body: object) -> DailyBarsResult | None:
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("daily_bars_payload_invalid")
-            raw_day = row.get("t") or row.get("trade_date")
-            if not isinstance(raw_day, str):
-                raise ValueError("daily_bars_payload_invalid")
-            day_text = raw_day[:10].replace("-", "")
-            day = dt.datetime.strptime(day_text, "%Y%m%d").date()
-
-            suspended = row.get("sf")
+            normalized = validate_bar(row, code)
             bars.append(
                 DailyBar(
                     code=code,
-                    trade_date=day,
+                    trade_date=normalized["trade_date"],
                     adj_type="none",
                     open=_decimal_field(row, "o"),
                     high=_decimal_field(row, "h"),
                     low=_decimal_field(row, "l"),
                     close=_decimal_field(row, "c"),
                     pre_close=_decimal_field(row, "pc"),
-                    volume=_decimal_field(row, "v"),
+                    volume=normalized["volume"],
                     amount=_decimal_field(row, "a"),
-                    is_suspended=None if suspended is None else bool(suspended),
+                    is_suspended=normalized["is_suspended"],
                 )
             )
     except (InvalidOperation, TypeError, ValueError) as exc:
@@ -113,8 +128,10 @@ class MairuiDailyBarsTransport:
         from app.ingest.runtime import get_ingest_core
         from app.ingest.state import Priority
 
+        market = market_of(code.split(".", 1)[0])
+        route = "/bj/history" if market == "BJ" else "/hsstock/history"
         path = (
-            f"/hsstock/history/{code}/d/n/?st={start:%Y%m%d}"
+            f"{route}/{code}/d/n/?st={start:%Y%m%d}"
             f"&et={end:%Y%m%d}"
         )
         result = mairui_get(

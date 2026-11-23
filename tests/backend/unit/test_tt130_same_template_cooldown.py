@@ -14,20 +14,22 @@ import os
 import subprocess
 import sys
 import uuid
-from collections.abc import Iterator
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from collections.abc import Iterator
 
-import psycopg
 import pytest
-from app.api.v1.meta import build_enums
-from app.config_files import MarketRulesConfig
-from app.signals import service
-from app.signals.models import MarketFacts, SignalInput
+import psycopg
 from sqlalchemy import create_engine, literal, select, text
 from sqlalchemy.engine import make_url
+
+from app.config_files import MarketRulesConfig
+from app.api.v1.meta import build_enums
+from app.signals import service
+from app.signals.models import MarketFacts, SignalInput
+
 
 pytestmark = [pytest.mark.integration]
 
@@ -96,7 +98,7 @@ def isolated_pg() -> Iterator[SimpleNamespace]:
             try:
                 with psycopg.connect(admin_url, autocommit=True) as admin:
                     admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-            except (OSError, psycopg.Error):
+            except Exception as exc:
                 raise RuntimeError("T-T130 隔离 PostgreSQL 临时库清理失败") from None
 
 
@@ -262,7 +264,7 @@ def _seed_world(
         )
     prior_content = _signal_input(prior_snapshot_id, base_at, target_security)
     prior_facts = MarketFacts(
-        price=Decimal("12.5"), required_cash=Decimal(1250), is_suspended=False,
+        price=Decimal("12.5"), required_cash=Decimal("1250"), is_suspended=False,
         list_days=600, limit_locked_up=False, limit_locked_down=False,
     )
     target_content = _signal_input(snapshot_id, target_at, target_content_security)
@@ -353,7 +355,7 @@ def _seed_world(
 
 
 def _writer(monkeypatch: pytest.MonkeyPatch, world: SimpleNamespace, engine: Any) -> dict[str, Any]:
-    portfolio = SimpleNamespace(positions={}, cash=Decimal(10000))
+    portfolio = SimpleNamespace(positions={}, cash=Decimal("10000"))
     monkeypatch.setattr("app.api.v1.portfolio._account", lambda _conn, _id, _day: portfolio)
     monkeypatch.setattr(service, "lot_spec", lambda *_args, **_kwargs: SimpleNamespace(min_buy=100))
     monkeypatch.setattr(service, "board_in_universe", lambda *_args, **_kwargs: True)

@@ -160,8 +160,8 @@ class IngestBudget(_Strict):
     max_concurrency: PosInt
     shares: IngestShares
     priority_min_share: IngestPriorityMinShare
-    daily_bars_batch_limit: Annotated[int, Field(gt=0, le=500)]
-    daily_bars_backfill_batch_limit: Annotated[int, Field(gt=0, le=2000)]
+    daily_bars_batch_limit: Annotated[int, Field(gt=0, le=500)] = 500
+    daily_bars_backfill_batch_limit: Annotated[int, Field(gt=0, le=2000)] = 2000
 
     @model_validator(mode="after")
     def _check(self) -> IngestBudget:

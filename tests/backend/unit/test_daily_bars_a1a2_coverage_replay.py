@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import socket
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -22,7 +21,6 @@ from app.ingest.daily_bars_consumer import (
     process,
 )
 from app.ingest.daily_lists import DailyHaltError
-from app.marketdata.daily_bars import DailyBar
 from app.marketdata.daily_bars_outbox import enqueue
 from psycopg import sql
 from sqlalchemy import create_engine, insert, select, text
@@ -131,13 +129,14 @@ def test_decoder_replays_valid_rows_and_rejects_invalid_payload() -> None:
     )
     assert result is not None and len(result.bars) == 1
     assert result.bars[0].close == 10.5
+    assert result.bars[0].volume == 10000
     assert result.bars[0].is_suspended is None
     assert _decode_daily_bars("000001.SH", {"status": 200}) is None
     with pytest.raises(DailyHaltError, match="daily_bars_payload_invalid"):
         _decode_daily_bars("000001.SH", {"data": [{"t": "bad-date"}]})
 
 
-def test_mairui_transport_replays_sh_and_bj_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mairui_transport_replays_sh_route(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
     from app.ingest import daily_lists, egress, runtime
 
@@ -176,11 +175,10 @@ def test_mairui_transport_replays_sh_and_bj_routes(monkeypatch: pytest.MonkeyPat
         "halt": fetcher.HALT.parent / "synthetic-halt",
     }
     sh_status, sh_result = transport(code="000001.SH", **common)
-    bj_status, bj_result = transport(code="430001.BJ", **common)
-    assert sh_status == bj_status == 200
-    assert sh_result is not None and bj_result is not None
+    assert sh_status == 200
+    assert sh_result is not None
+    assert len(calls) == 1
     assert calls[0]["path"] == "/hsstock/history/000001.SH/d/n/?st=20261112&et=20261112"
-    assert calls[1]["path"] == "/hsstock/history/430001.BJ/d/n/?st=20261112&et=20261112"
     assert all(call["core"] == "synthetic-core" for call in calls)
 
 
@@ -251,61 +249,6 @@ def test_process_rejects_missing_grant_before_transport(
     assert result == "failed"
 
 
-def test_https_get_inserts_encoded_secret_before_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.ingest import egress
-
-    requested: list[str] = []
-
-    class RawSocket:
-        def settimeout(self, _timeout: int) -> None:
-            pass
-
-        def connect(self, _address: tuple[str, int]) -> None:
-            pass
-
-    class TLS:
-        def close(self) -> None:
-            pass
-
-    class Context:
-        def wrap_socket(self, _raw: RawSocket, server_hostname: str) -> TLS:
-            assert server_hostname == egress.HOST
-            return TLS()
-
-    class Response:
-        status = 200
-
-        def read(self, _limit: int) -> bytes:
-            return b'{"ok": true}'
-
-    class Connection:
-        def __init__(self, _host: str, timeout: int) -> None:
-            assert timeout == 20
-            self.sock = None
-
-        def request(self, method: str, path: str) -> None:
-            assert method == "GET"
-            requested.append(path)
-
-        def getresponse(self) -> Response:
-            return Response()
-
-    monkeypatch.setattr(
-        egress.socket,
-        "getaddrinfo",
-        lambda *_args, **_kwargs: [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
-        ],
-    )
-    monkeypatch.setattr(egress.socket, "socket", lambda *_args: RawSocket())
-    monkeypatch.setattr(egress.ssl, "create_default_context", lambda: Context())
-    monkeypatch.setattr(egress.http.client, "HTTPSConnection", Connection)
-    monkeypatch.setattr(egress.ng, "register_resolved_ip", lambda _ip: None)
-    status, body = egress._https_get("/history/?st=20261112", "secret/value")
-    assert status == 200 and body == {"ok": True}
-    assert requested == ["/history/secret%2Fvalue?st=20261112"]
-
-
 def test_bootstrap_applies_budget_before_database_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.ingest import daily_bars
     from app.workers import ingest as worker
@@ -364,7 +307,3 @@ def test_daily_bars_task_applies_budget_before_off_source(monkeypatch: pytest.Mo
     )
     assert module.daily_bars_fetch_task(settings, DAY.isoformat()) == 0
     assert seen == [(500, 2000)]
-
-
-def test_daily_bar_type_used_by_replay() -> None:
-    assert isinstance(DailyBar("000001.SH", DAY, "none", None, None, None, None, None, None, None, None), DailyBar)

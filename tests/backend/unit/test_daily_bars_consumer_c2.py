@@ -173,6 +173,30 @@ def test_consumer_finishes_original_run_and_redelivery_never_sends(world):
     assert process(world, bid) == "noop" and world.calls == CODES
 
 
+def test_process_transport_none_is_disabled_without_network_or_state_change(world):
+    bid = queue(world)
+    result = implementation().process(
+        world.engine,
+        bid,
+        transport=None,
+        grant_reader=lambda _: world.grant,
+        clock=lambda: NOW,
+        stop=world.root / "STOP",
+        halt=world.root / "HALTED",
+    )
+    assert result == "disabled"
+    items, runs, count = facts(world)
+    assert world.calls == [] and count == 0
+    assert items[0].status == "pending" and items[0].attempted_at is None
+    assert runs[0].status == "running"
+
+
+def test_tick_transport_none_is_disabled_without_network(world):
+    queue(world)
+    assert implementation().tick(world.engine, transport=None) == 0
+    assert world.calls == []
+
+
 def test_mairui_rerun_idempotent_no_extra_calls(world):
     assert process(world, queue(world)) == "done"
     assert process(world, queue(world, seq=1)) == "done"
