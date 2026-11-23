@@ -24,7 +24,7 @@
 
 ## 安装器行为
 
-`deploy/scripts/install-mairui-daily-receipts.sh` 使用下方固定摘要的 Alpine 镜像、root 用户和 `--network none`。它只在临时目录或指定的 `aia_receipts` 具名卷中写入两个文件，并且：
+`deploy/scripts/install-mairui-daily-receipts.sh` 使用固定镜像 `alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab`、root 用户和 `--network none`。它只在临时目录或指定的 `aia_receipts` 具名卷中写入两个文件，并且：
 
 - 创建或校验 root 所有、`0755` 的回执目录。
 - 创建 root:root、`0444` 的普通文件。
