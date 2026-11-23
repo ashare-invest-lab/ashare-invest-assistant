@@ -4,6 +4,13 @@
 { set +x; } 2>/dev/null
 set -euo pipefail
 
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    echo "错误：安装脚本必须在 Linux 或 WSL 中运行，不能在 Windows Git Bash/MSYS/Cygwin 下运行。" >&2
+    exit 2
+    ;;
+esac
+
 IMAGE="alpine:3.21@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab"
 DOCKER_SPEC="${AIA_DOCKER:-docker}"
 read -r -a DOCKER <<< "$DOCKER_SPEC"

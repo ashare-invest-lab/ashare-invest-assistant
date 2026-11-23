@@ -33,6 +33,8 @@
 
 ## 临时目录演练
 
+演练必须在 Linux 或 WSL 中运行。Windows Git Bash、MSYS 和 Cygwin 会被脚本拒绝，避免 Docker Desktop 把 POSIX 临时路径解释为命名卷。
+
 以下值全部是虚构演练值。演练过程不访问麦蕊，不连接应用栈：
 
 ```bash
