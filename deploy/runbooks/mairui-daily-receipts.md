@@ -73,12 +73,6 @@ docker run --rm --network none --user 10001:10001 \
     fi
   '
 
-docker run --rm --network none --user 0 \
-  -v "$TMP_DIR:/run/aia/receipts" "$IMAGE" sh -ceu '
-  chmod 0644 /run/aia/receipts/mairui-daily-bars.json /run/aia/receipts/mairui-daily.json
-'
-```
-
 在与后端依赖一致的 Linux/WSL 环境执行下面的只读校验。它只读取临时目录中的虚构回执，不读取证书或密钥：
 
 ```bash
@@ -98,12 +92,35 @@ assert read_grant(root / "mairui-daily.json") is not None
 assert read_daily_bars_grant(
     root / "mairui-daily-bars.json", now=now, user_id=user_id
 ) is not None
+print("receipt readers: valid 0444 permissions accepted")
+PY
+```
 
+docker run --rm --network none --user 0 \
+  -v "$TMP_DIR:/run/aia/receipts" "$IMAGE" sh -ceu '
+  chmod 0644 /run/aia/receipts/mairui-daily-bars.json /run/aia/receipts/mairui-daily.json
+'
+
+再执行下面的只读校验，确认放宽到 `0644` 后两份回执均被拒绝：
+
+```bash
+PYTHONPATH=src/backend uv run --offline --project src/backend python - "$TMP_DIR" <<'PY'
+import datetime as dt
+import sys
+import uuid
+from pathlib import Path
+
+from app.ingest.daily_bars import read_daily_bars_grant
+from app.master.daily_delivery import read_grant
+
+root = Path(sys.argv[1])
+user_id = uuid.UUID("11111111-1111-4111-8111-111111111111")
+now = dt.datetime(2027, 1, 1, tzinfo=dt.UTC)
 assert read_grant(root / "mairui-daily.json") is None
 assert read_daily_bars_grant(
     root / "mairui-daily-bars.json", now=now, user_id=user_id
 ) is None
-print("receipt readers: valid permissions accepted, 0644 rejected")
+print("receipt readers: 0644 rejected")
 PY
 ```
 
