@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import uuid
 from decimal import Decimal
@@ -30,10 +31,10 @@ from app.strategy.g6 import (
     QUOTA_UNKNOWN_REASON,
     Overlap,
     QuotaDelta,
-    compare,
     missing_history_gate,
     quota_delta,
 )
+from app.strategy.g6_history import build_report, history_gate_warnings
 from app.suggestions.risk import RiskContext, evaluate_risk
 
 
@@ -44,6 +45,8 @@ def prepare(
     settings: Settings,
     version_id: uuid.UUID | None = None,
     existing_review_id: uuid.UUID | None = None,
+    history_provider: object | None = None,
+    history_as_of: dt.datetime | None = None,
 ) -> uuid.UUID:
     card = conn.execute(select(strategy_cards).where(strategy_cards.c.id == card_id)).first()
     if card is None or card.owner_user_id not in {None, owner}:
@@ -115,7 +118,7 @@ def prepare(
         _, errors = preflight([document], registry)
     except ValueError:
         errors = [{"path": "strategy-card", "issue": "invalid_persisted_card_document"}]
-    categories: dict[str, list[dict[str, str]]] = {"G1": [], "G2": [], "G3": [], "G4": []}
+    categories: dict[str, list[dict[str, Any]]] = {"G1": [], "G2": [], "G3": [], "G4": []}
     for error in errors:
         path, issue = error["path"], error["issue"]
         gate = (
@@ -132,6 +135,43 @@ def prepare(
         categories[gate].append(error)
     needed = required_features(spec, fields)
     categories["G2"].extend(source_issues(registry, needed, "simulating"))
+    f21_detail: dict[str, Any] | None = None
+    is_w01 = (
+        "f.main_net_20d" in needed
+        or str(card.key).lower() in {"sw_ma_trend_pullback", "w-01"}
+        or str(fields.get("card_id", "")).upper() == "W-01"
+    )
+    if is_w01:
+        f21_detail = {
+            "feature_key": "f.main_net_20d",
+            "status": registry.get("f.main_net_20d", {}).get("status"),
+            "status_must_remain": "declared",
+            "missing_evidence": [
+                "unit",
+                "large_order_threshold",
+                "extra_large_order_threshold",
+                "post_close_finalization",
+                "first_visible_at",
+                "revision_relationship",
+            ],
+            "formula": "zmbtdcje + zmbddcje - zmstdcje - zmsddcje",
+            "source_status": "未验证",
+            "verification_status": "未验证",
+        }
+        f21_issues = [
+            f21_issue for f21_issue in categories["G2"] if f21_issue.get("path") == "f.main_net_20d"
+        ]
+        if not f21_issues:
+            categories["G2"].append(
+                {
+                    "path": "f.main_net_20d",
+                    "issue": "f21_source_unverified",
+                    "detail": f21_detail,
+                }
+            )
+        else:
+            for f21_issue in f21_issues:
+                f21_issue["detail"] = f21_detail
     fixtures = validation.get("fixtures", [])
     runs = (
         run_fixtures(fields, spec, fixtures, settings.business.market_rules, set(registry))
@@ -205,11 +245,52 @@ def prepare(
             },
         }
     )
-    overlap = compare(None, set(), [])
-    quota = quota_delta(validation.get("feature_requests"))
-    results.append(
-        missing_history_gate(fixture_ok, overlap, quota_unknown=quota.quota_delta_per_min is None)
+    digest_payload = {
+        "card_fields": cv.fields,
+        "field_epistemic": cv.field_epistemic,
+        "references": cv.references,
+        "config": version.config,
+        "params_schema": version.params_schema,
+        "rule_snippet_refs": version.rule_snippet_refs,
+        "feature_set_version": version.feature_set_version,
+        "kind": version.kind,
+        "code_entry": version.code_entry,
+    }
+    content_sha256 = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+    history_report = build_report(
+        provider=history_provider,
+        card_key=str(card.key),
+        card_id=str(fields.get("card_id", "")),
+        card_version=str(cv.id),
+        card_version_no=cv.version_no,
+        content_sha256=content_sha256,
+        spec={**spec, "feature_requests": validation.get("feature_requests")},
+        as_of=history_as_of,
     )
+    overlap = Overlap.model_validate(
+        {
+            "max_jaccard": history_report["max_jaccard"],
+            "max_jaccard_null_reason": history_report["max_jaccard_null_reason"],
+        }
+    )
+    quota = quota_delta(validation.get("feature_requests"))
+    g6_result = missing_history_gate(
+        fixture_ok,
+        overlap,
+        quota_unknown=quota.quota_delta_per_min is None,
+        warnings=history_gate_warnings(history_report),
+        history_status=history_report["history_status"],
+    )
+    g6_result["detail"]["history_report"] = history_report
+    results.append(g6_result)
     results.append(
         {
             "gate": "G7",
@@ -217,14 +298,12 @@ def prepare(
             "detail": {"issue": "human_review_pending", "actor": "本人管理员点击；代理不得批准"},
         }
     )
-    stat = {"value": None, "n": 0, "window": "120 trading days", "small_sample": True}
     # Keep unknown internal data explicit. Public serialization must not turn it into "0".
-    report = {
-        "trigger_rate": stat,
-        "coverage": stat,
-        **overlap.model_dump(),
-        **quota.model_dump(),
-    }
+    report = {**history_report, **overlap.model_dump(), **quota.model_dump()}
+    if f21_detail is not None:
+        next(
+            g["detail"].setdefault("source_evidence_gaps", {}) for g in results if g["gate"] == "G2"
+        )["f.main_net_20d"] = f21_detail
     review_id = existing_review_id or uuid.uuid4()
     old_lint: dict[str, Any] = {}
     operation: Any = insert(strategy_promotion_reviews)

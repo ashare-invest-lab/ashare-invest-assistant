@@ -113,6 +113,16 @@ def _gap(key: str, message: str, reason: GapReason = GapReason.NO_SOURCE) -> m.G
     return m.Gap(key=key, reason=reason, message=message)
 
 
+def _dedupe_gaps(gaps: list[m.Gap]) -> list[m.Gap]:
+    seen: set[str] = set()
+    result: list[m.Gap] = []
+    for gap in gaps:
+        if gap.key not in seen:
+            seen.add(gap.key)
+            result.append(gap)
+    return result
+
+
 def _empty(
     clock: m.MarketClock,
     indices: list[MarketIndexQuote],
@@ -130,7 +140,7 @@ def _empty(
         turnover_total=None,
         data_status=status,
         data_as_of=None,
-        gaps=gaps,
+        gaps=_dedupe_gaps(gaps),
     )
 
 
@@ -378,8 +388,6 @@ def _overview(
         raise ValueError("query_as_of must be timezone-aware")
     cards = _index_cards(conn)
     gaps: list[m.Gap] = []
-    if not cards:
-        gaps.append(_gap("market.indices", "没有配置可展示的指数卡片。"))
     from app.marketdata.daily_snapshot import active_licence_id
 
     licence = active_licence_id(conn, user_id, query_as_of)
@@ -401,6 +409,9 @@ def _overview(
             return _empty(clock, cards, gaps)
         gaps.append(_gap("market.regime", "F25/G-02 参数未批准，未生成市场环境结论。"))
         return _empty(clock, cards, gaps)
+
+    if not cards:
+        gaps.append(_gap("market.indices", "没有配置可展示的指数卡片。"))
 
     local = query_as_of.astimezone(BEIJING)
     close_mode = local.time() >= FINAL_AFTER or clock.session == MarketSession.NON_TRADING_DAY
@@ -574,7 +585,7 @@ def _overview(
         turnover_total=_text(turnover) if turnover_complete else None,
         data_status=status,
         data_as_of=min(as_of_values) if as_of_values else None,
-        gaps=gaps,
+        gaps=_dedupe_gaps(gaps),
     )
 
 
