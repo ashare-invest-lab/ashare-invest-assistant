@@ -133,26 +133,29 @@ def _normalise_rows(
         raw_codes.setdefault(code.split(".", 1)[0], []).append(code)
     found: set[str] = set()
     output: list[dict[str, object]] = []
+    discarded = 0
     for row in rows:
-        # 既有测试入口使用规范 code，ssjy_more 的响应使用六位无后缀 dm。
+        # 既有回放夹具使用规范 code，ssjy_more 的响应使用六位无后缀 dm。
         code_value = _mapped_value(row, "code")
         dm_value = row.get("dm")
         if dm_value is not None:
-            if not isinstance(dm_value, str):
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
-            if dm_value in expected:
-                dm_candidates = [dm_value]
-            elif re.fullmatch(r"\d{6}", dm_value):
-                dm_candidates = raw_codes.get(dm_value, [])
-            else:
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+            if not isinstance(dm_value, str) or not re.fullmatch(r"\d{6}", dm_value):
+                discarded += 1
+                continue
+            dm_candidates = raw_codes.get(dm_value, [])
             if len(dm_candidates) != 1:
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+                discarded += 1
+                continue
             dm_code = dm_candidates[0]
             if code_value is not None and code_value != dm_code:
-                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+                discarded += 1
+                continue
             code_value = dm_code
-        if not isinstance(code_value, str) or code_value not in expected or code_value in found:
+        # 保留 code-only 合成回放入口。真实 ssjy_more 行没有 dm 时会被丢弃。
+        if not isinstance(code_value, str) or code_value not in expected:
+            discarded += 1
+            continue
+        if code_value in found:
             raise RealtimeCollectionStoppedError("realtime_code_invalid")
         found.add(code_value)
         payload = dict(row)
@@ -173,7 +176,13 @@ def _normalise_rows(
                 "limit_down": None,
             }
         )
-    if found != expected:
+    missing = expected - found
+    if missing:
+        log.warning(
+            "实时行情响应存在代码缺口：missing=%s discarded=%d",
+            ",".join(sorted(missing)),
+            discarded,
+        )
         raise RealtimeCollectionStoppedError("realtime_code_missing")
     return output
 

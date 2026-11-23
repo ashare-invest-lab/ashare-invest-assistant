@@ -81,6 +81,18 @@ def test_replay_mode_skips_engine_licence_and_egress(monkeypatch: pytest.MonkeyP
     client.assert_not_called()
 
 
+def test_task_rejects_missing_engine_without_worker_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = SimpleNamespace(realtime_quotes_source="mairui")
+    engine_factory = Mock(side_effect=AssertionError("worker engine must not be built"))
+    monkeypatch.setattr(jobs, "_engine", engine_factory)
+
+    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="engine_unavailable"):
+        realtime_collect.realtime_quotes_task(settings, owner=OWNER, now=NOW)
+    engine_factory.assert_not_called()
+
+
 def test_task_reuses_supplied_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = SimpleNamespace(realtime_quotes_source="mairui")
     engine = _Engine()
@@ -232,7 +244,7 @@ def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:
     assert rows[0]["limit_down"] is None
 
 
-def test_normalization_maps_dm_code_from_ssjy_more_response() -> None:
+def test_normalization_maps_unique_dm_code_from_ssjy_more_response() -> None:
     rows = realtime_collect._normalise_rows(
         ["600000.SH"],
         [{"dm": "600000", "ts": "2030-06-11T10:00:00+08:00"}],
@@ -241,15 +253,32 @@ def test_normalization_maps_dm_code_from_ssjy_more_response() -> None:
     assert rows[0]["code"] == "600000.SH"
 
 
-@pytest.mark.parametrize(
-    "row",
-    [{"ts": "2030-06-11T10:00:00+08:00"}, {"dm": "600001.SH", "ts": NOW}],
-)
-def test_normalization_rejects_missing_or_out_of_range_code(
-    row: dict[str, object],
+def test_normalization_discards_missing_or_out_of_range_dm_and_records_gap(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError, match="code"):
-        realtime_collect._normalise_rows(["600000.SH"], [row], NOW)
+    rows = [
+        {"ts": "2030-06-11T10:00:00+08:00"},
+        {"dm": "600001", "ts": NOW},
+        {"dm": "600000.SH", "ts": NOW},
+        {"dm": "600000", "ts": "2030-06-11T10:00:00+08:00"},
+    ]
+    with caplog.at_level("WARNING", logger="app.marketdata.realtime_collect"), pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_missing"
+    ):
+        realtime_collect._normalise_rows(["600000.SH", "000001.SZ"], rows, NOW)
+    assert "000001.SZ" in caplog.text
+    assert "discarded=3" in caplog.text
+
+
+def test_normalization_discards_ambiguous_dm_prefix() -> None:
+    with pytest.raises(
+        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_missing"
+    ):
+        realtime_collect._normalise_rows(
+            ["600000.SH", "600000.SZ"],
+            [{"dm": "600000", "ts": NOW}],
+            NOW,
+        )
 
 
 def test_nonmapped_response_keys_do_not_populate_snapshot_fields() -> None:
