@@ -180,7 +180,7 @@ def test_mairui_transport_replays_sh_and_bj_routes(monkeypatch: pytest.MonkeyPat
     assert sh_status == bj_status == 200
     assert sh_result is not None and bj_result is not None
     assert calls[0]["path"] == "/hsstock/history/000001.SH/d/n/?st=20261112&et=20261112"
-    assert calls[1]["path"] == "/bj/history/430001.BJ/d/n/?st=20261112&et=20261112"
+    assert calls[1]["path"] == "/hsstock/history/430001.BJ/d/n/?st=20261112&et=20261112"
     assert all(call["core"] == "synthetic-core" for call in calls)
 
 

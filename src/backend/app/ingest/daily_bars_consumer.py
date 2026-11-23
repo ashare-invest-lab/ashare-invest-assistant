@@ -113,9 +113,8 @@ class MairuiDailyBarsTransport:
         from app.ingest.runtime import get_ingest_core
         from app.ingest.state import Priority
 
-        route = "bj" if code.endswith(".BJ") else "hsstock"
         path = (
-            f"/{route}/history/{code}/d/n/?st={start:%Y%m%d}"
+            f"/hsstock/history/{code}/d/n/?st={start:%Y%m%d}"
             f"&et={end:%Y%m%d}"
         )
         result = mairui_get(

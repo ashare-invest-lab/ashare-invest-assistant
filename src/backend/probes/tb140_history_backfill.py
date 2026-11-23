@@ -266,11 +266,9 @@ def business_limited(status: int, body: Any) -> bool:
 
 def _history_route(code: str, token: str, st: str | date | None, et: str | date | None) -> str:
     code = code.strip()
-    market = market_of(code)
     start, end = parse_window(st, et)
     query = urlencode({key: day.isoformat().replace("-", "") for key, day in (("st", start), ("et", end)) if day is not None})
-    route = "bj" if market == "BJ" else "hsstock"
-    path = f"/{route}/history/{qualified_code(code)}/d/n/{token}"
+    path = f"/hsstock/history/{qualified_code(code)}/d/n/{token}"
     return path + ("?" + query if query else "")
 
 

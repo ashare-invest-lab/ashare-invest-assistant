@@ -430,7 +430,7 @@ def test_ta157_history_routes(api, monkeypatch, tmp_path, capsys):
     for code in BJ_CODES[1:]:
         assert api.load.market_of(code) == "BJ"
     expected = {
-        "/bj/history/920997.BJ/d/n/" + quote(TOKEN, safe=""),
+        "/hsstock/history/920997.BJ/d/n/" + quote(TOKEN, safe=""),
         "/hsstock/history/600997.SH/d/n/" + quote(TOKEN, safe=""),
         "/hsstock/history/000997.SZ/d/n/" + quote(TOKEN, safe=""),
     }
@@ -485,7 +485,7 @@ def test_ta157_history_blocked_exit_code(api, monkeypatch, tmp_path, kind):
 def test_ta157_log_redaction(api, monkeypatch, tmp_path, capsys):
     problems = []
     encoded = quote(TOKEN, safe="")
-    for code, route in (("920997", "bj"), ("600997", "hsstock")):
+    for code, route in (("920997", "hsstock"), ("600997", "hsstock")):
         actual = api.backfill.history_path(code, TOKEN, "20100104", "20201231")
         logged = api.backfill.history_path_log(code, "20100104", "20201231")
         check(
