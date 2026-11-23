@@ -104,11 +104,14 @@ def bootstrap_ingest_core(settings: Settings) -> Engine:
     from app.ingest.core import IngestCore
     from app.ingest.runtime import set_ingest_core
 
-    budget = settings.business.ingest.budget
-    daily_bars.configure_batch_limits(
-        daily=budget.daily_bars_batch_limit,
-        backfill=budget.daily_bars_backfill_batch_limit,
-    )
+    business = getattr(settings, "business", None)
+    ingest = getattr(business, "ingest", None)
+    budget = getattr(ingest, "budget", None)
+    if budget is not None:
+        daily_bars.configure_batch_limits(
+            daily=budget.daily_bars_batch_limit,
+            backfill=budget.daily_bars_backfill_batch_limit,
+        )
 
     if settings.database_url is None:
         raise RuntimeError(NO_DATABASE_URL_MESSAGE)

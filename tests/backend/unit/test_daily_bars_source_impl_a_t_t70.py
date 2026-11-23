@@ -999,8 +999,8 @@ def test_task_user_scope_union_and_single(temp_db: SimpleNamespace) -> None:
     assert codes == {CODE_C, CODE_E}
 
 
-def test_mairui_before_c_is_inert(temp_db: SimpleNamespace, no_egress: None) -> None:
-    """§7 ① :207。"""
+def test_mairui_without_grant_is_skipped(temp_db: SimpleNamespace, no_egress: None) -> None:
+    """A1 opens the batch gate, while the missing grant still keeps ingest inert."""
     settings = _settings(app_env="test", daily_bars_source="mairui", database_url=temp_db.url)
     fn = _task_from_jobs()
     result = fn(settings, trade_date=OPEN_10.isoformat())
@@ -1008,7 +1008,7 @@ def test_mairui_before_c_is_inert(temp_db: SimpleNamespace, no_egress: None) -> 
     assert _daily_bar_count(temp_db.engine) == 0
     run = _latest_run(temp_db.engine)
     assert run.status == "skipped"
-    assert "daily_bars_http_budget_unset" in ((run.stats or {}).get("issues") or [])
+    assert "data_licence_unavailable" in ((run.stats or {}).get("issues") or [])
 
 
 def test_task_without_database_url_raises_no_write() -> None:
