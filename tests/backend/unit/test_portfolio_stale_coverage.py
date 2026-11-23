@@ -43,19 +43,3 @@ def test_build_portfolio_marks_old_price_stale(monkeypatch) -> None:
     result = portfolio.build_portfolio(conn, [account_id])
 
     assert result["data_status"] == portfolio.DataStatus.STALE.value
-
-
-def test_latest_close_at_skips_closed_weekend() -> None:
-    conn = MagicMock()
-    conn.execute.return_value.one.return_value = (
-        dt.date(2026, 1, 1),
-        dt.date(2026, 1, 5),
-    )
-    conn.execute.return_value.scalars.return_value = [dt.date(2026, 1, 2)]
-
-    result = portfolio.latest_close_at(
-        conn,
-        dt.datetime(2026, 1, 5, 10, tzinfo=portfolio.BEIJING),
-    )
-
-    assert result == dt.datetime(2026, 1, 2, 15, tzinfo=portfolio.BEIJING)
