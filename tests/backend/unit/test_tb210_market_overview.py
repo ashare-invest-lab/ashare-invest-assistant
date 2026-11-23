@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from contextlib import nullcontext
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.aggregates import models as m
 from app.aggregates.calendar import market_clock
 from app.aggregates.market_overview import build_market_overview
+from app.api.v1 import aggregates as aggregate_routes
 from app.auth import deps
 from app.common.errors import AppError, ErrorCode, install_exception_handlers
 from app.schemas.enums import DataStatus, GapReason, MarketSession
@@ -724,7 +726,7 @@ class ClockConnection:
         raise AssertionError(sql)
 
 
-def test_contract_errors_and_http_empty_method_paths() -> None:
+def test_contract_errors_and_http_empty_method_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(AppError) as covered:
         market_clock(
             ClockConnection(False),
@@ -758,5 +760,28 @@ def test_contract_errors_and_http_empty_method_paths() -> None:
     assert (
         response.status_code == 403 and response.json()["error"]["code"] == "ACCOUNT_NOT_APPROVED"
     )
+    app.dependency_overrides[deps.current_auth] = lambda: SimpleNamespace(user_id=OWNER)
+    app.dependency_overrides[deps.get_engine] = lambda: SimpleNamespace(
+        connect=lambda: nullcontext(Connection())
+    )
+    app.dependency_overrides[deps.get_settings] = lambda: SimpleNamespace(
+        business=SimpleNamespace(market_rules=SimpleNamespace(segment_for=lambda _day: None))
+    )
+    monkeypatch.setattr(
+        aggregate_routes,
+        "market_clock",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AppError(ErrorCode.CALENDAR_NOT_COVERED)
+        ),
+    )
+    response = client.get("/api/v1/market/overview")
+    assert response.status_code == 503 and response.json()["error"]["code"] == "CALENDAR_NOT_COVERED"
+    monkeypatch.setattr(
+        aggregate_routes,
+        "market_clock",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AppError(ErrorCode.MAINTENANCE)),
+    )
+    response = client.get("/api/v1/market/overview")
+    assert response.status_code == 503 and response.json()["error"]["code"] == "MAINTENANCE"
     assert client.post("/api/v1/market/overview").status_code == 405
     assert client.get("/api/v1/market/missing").status_code == 404
