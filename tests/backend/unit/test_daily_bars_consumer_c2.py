@@ -173,6 +173,30 @@ def test_consumer_finishes_original_run_and_redelivery_never_sends(world):
     assert process(world, bid) == "noop" and world.calls == CODES
 
 
+def test_process_transport_none_is_disabled_without_network_or_state_change(world):
+    bid = queue(world)
+    result = implementation().process(
+        world.engine,
+        bid,
+        transport=None,
+        grant_reader=lambda _: world.grant,
+        clock=lambda: NOW,
+        stop=world.root / "STOP",
+        halt=world.root / "HALTED",
+    )
+    assert result == "disabled"
+    items, runs, count = facts(world)
+    assert world.calls == [] and count == 0
+    assert items[0].status == "pending" and items[0].attempted_at is None
+    assert runs[0].status == "running"
+
+
+def test_tick_transport_none_is_disabled_without_network(world):
+    queue(world)
+    assert implementation().tick(world.engine, transport=None) == 0
+    assert world.calls == []
+
+
 def test_mairui_rerun_idempotent_no_extra_calls(world):
     assert process(world, queue(world)) == "done"
     assert process(world, queue(world, seq=1)) == "done"
@@ -327,6 +351,7 @@ def test_wrong_pipeline_identity_is_rejected_without_mutating_that_run(world):
 def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, source, paused):
     module = implementation()
     from app.ingest import daily_lists, runtime, verify_licence
+    from app.ingest.daily_bars_consumer import MairuiDailyBarsTransport
     from app.workers import ingest as worker
 
     monkeypatch.setattr(fetcher, "DAILY_BARS_BATCH_LIMIT", 0)
@@ -346,10 +371,12 @@ def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, 
     monkeypatch.setattr(verify_licence, "tick", lambda *a, **k: events.append("verify"))
     actual_tick = module.tick
 
-    def observed_tick(arg):
+    def observed_tick(arg, **kwargs):
         assert arg is engine
+        if source == "mairui" and not paused:
+            assert isinstance(kwargs.get("transport"), MairuiDailyBarsTransport)
         events.append("bars")
-        return actual_tick(arg)
+        return actual_tick(arg, **kwargs)
 
     monkeypatch.setattr(module, "tick", observed_tick)
     settings = SimpleNamespace(

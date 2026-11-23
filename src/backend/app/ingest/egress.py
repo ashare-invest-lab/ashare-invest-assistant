@@ -251,7 +251,13 @@ def _https_get(path: str, secret: str) -> tuple[int, object]:
         tls = ctx.wrap_socket(raw, server_hostname=HOST)
         conn = http.client.HTTPSConnection(HOST, timeout=20)
         conn.sock = tls
-        conn.request("GET", path + quote(secret, safe=""))
+        encoded_secret = quote(secret, safe="")
+        if "?" in path:
+            route, query = path.split("?", 1)
+            request_path = f"{route}{encoded_secret}?{query}"
+        else:
+            request_path = path + encoded_secret
+        conn.request("GET", request_path)
         response = conn.getresponse()
         if response.status in (103, 429):
             return response.status, None

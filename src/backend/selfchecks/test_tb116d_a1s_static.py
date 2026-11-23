@@ -170,6 +170,40 @@ def _registered_seam_call(tree: ast.Module, node: ast.Call, name: str) -> bool:
     return False
 
 
+def _inside_function(tree: ast.Module, node: ast.AST, name: str) -> bool:
+    return any(
+        isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and function.name == name
+        and any(candidate is node for candidate in ast.walk(function))
+        for function in tree.body
+    )
+
+
+def _registered_worker_daily_bars_call(tree: ast.Module, node: ast.Call) -> bool:
+    """Allow only the two exact egress-bound calls in write_heartbeat."""
+    if not _inside_function(tree, node, "write_heartbeat"):
+        return False
+    if not isinstance(node.func, ast.Name) or node.func.id != "tick_bars":
+        return False
+    if len(node.args) != 1 or len(node.keywords) != 1:
+        return False
+    engine_arg = node.args[0]
+    transport_kw = node.keywords[0]
+    if not isinstance(engine_arg, ast.Name) or engine_arg.id not in {"engine", "shared_engine"}:
+        return False
+    if transport_kw.arg != "transport" or not isinstance(transport_kw.value, ast.Call):
+        return False
+    transport_call = transport_kw.value
+    if not isinstance(transport_call.func, ast.Name) or transport_call.func.id != "MairuiDailyBarsTransport":
+        return False
+    return (
+        len(transport_call.args) == 1
+        and not transport_call.keywords
+        and isinstance(transport_call.args[0], ast.Name)
+        and transport_call.args[0].id == engine_arg.id
+    )
+
+
 def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
     """Return (rule, relpath, lineno, detail) violations."""
     base = root or BACKEND
@@ -332,6 +366,7 @@ def scan_tree(root: Path | None = None) -> list[tuple[str, str, int, str]]:
                         if kw.arg == "transport" and not (
                             (is_daily and _registered_seam_call(tree, node, "daily_bars_seam"))
                             or (is_realtime and _registered_seam_call(tree, node, "realtime_quotes_seam"))
+                            or (is_worker and _registered_worker_daily_bars_call(tree, node))
                         ):
                             violations.append(("S5", rel, node.lineno, "transport_kw"))
                         if kw.arg == "upstream" and func_name == "process":
@@ -448,6 +483,18 @@ def test_tb116d_a1s_s3_s5_s6_registered_exceptions() -> None:
         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "socket"
     }
     assert attrs <= {"gethostname"}
+    worker_transport_calls = [
+        node
+        for node in ast.walk(worker)
+        if isinstance(node, ast.Call)
+        and any(keyword.arg == "transport" for keyword in node.keywords)
+    ]
+    assert len(worker_transport_calls) == 2
+    assert all(_registered_worker_daily_bars_call(worker, node) for node in worker_transport_calls)
+    assert {node.args[0].id for node in worker_transport_calls if isinstance(node.args[0], ast.Name)} == {
+        "engine",
+        "shared_engine",
+    }
     daily = (BACKEND / "app/ingest/daily_lists.py").read_text(encoding="utf-8").splitlines()
     assert any('get_kwargs["transport"] = upstream' in line for line in daily[272:290])
     assert ("probes/p11_replay.py", 49) in S6_REGISTRY

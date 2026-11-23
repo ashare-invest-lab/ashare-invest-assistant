@@ -134,8 +134,18 @@ def bootstrap_ingest_core(settings: Settings) -> Engine:
     is wired).
     """
     from app.db.engine import engine_for
+    from app.ingest import daily_bars
     from app.ingest.core import IngestCore
     from app.ingest.runtime import set_ingest_core
+
+    business = getattr(settings, "business", None)
+    ingest = getattr(business, "ingest", None)
+    budget = getattr(ingest, "budget", None)
+    if budget is not None:
+        daily_bars.configure_batch_limits(
+            daily=budget.daily_bars_batch_limit,
+            backfill=budget.daily_bars_backfill_batch_limit,
+        )
 
     if settings.database_url is None:
         raise RuntimeError(NO_DATABASE_URL_MESSAGE)
@@ -165,8 +175,8 @@ def write_heartbeat(settings: Settings) -> None:
     try:
         client.set(settings.ingest_heartbeat_key, heartbeat_payload(), ex=hb.ttl_s)
         from app.db.engine import engine_for
+        from app.ingest.daily_bars_consumer import MairuiDailyBarsTransport, wake_delayed
         from app.ingest.daily_bars_consumer import tick as tick_bars
-        from app.ingest.daily_bars_consumer import wake_delayed
         from app.ingest.daily_lists import tick
         from app.ingest.runtime import get_ingest_core, tick_ingest_core
 
@@ -196,7 +206,10 @@ def write_heartbeat(settings: Settings) -> None:
                 except Exception:  # noqa: BLE001 - keep heartbeat running
                     logging.warning("verify_licence tick failed")
                 if getattr(settings, "daily_bars_source", "off") == "mairui":
-                    tick_bars(shared_engine)
+                    tick_bars(
+                        shared_engine,
+                        transport=MairuiDailyBarsTransport(shared_engine),
+                    )
                     wake_delayed(shared_engine, client)
                 tick_realtime_quotes(settings, engine=shared_engine)
             elif settings.database_url is not None:
@@ -208,7 +221,10 @@ def write_heartbeat(settings: Settings) -> None:
                     except Exception:  # noqa: BLE001 - keep heartbeat running
                         logging.warning("verify_licence tick failed")
                     if getattr(settings, "daily_bars_source", "off") == "mairui":
-                        tick_bars(engine)
+                        tick_bars(
+                            engine,
+                            transport=MairuiDailyBarsTransport(engine),
+                        )
                         wake_delayed(engine, client)
                     tick_realtime_quotes(settings, engine=engine)
                 finally:

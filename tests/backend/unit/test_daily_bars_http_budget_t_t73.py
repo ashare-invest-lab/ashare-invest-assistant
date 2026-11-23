@@ -56,6 +56,13 @@ OWNER = uuid.UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb1")
 AT = dt.datetime(2026, 11, 10, 15, 0, tzinfo=BEIJING)
 
 
+@pytest.fixture(autouse=True)
+def reset_batch_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    ingest = importlib.import_module(INGEST_MOD)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 0)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 0)
+
+
 @pytest.fixture
 def temp_db(no_egress: None) -> Iterator[SimpleNamespace]:  # noqa: F811
     # o61 模板库偶发被 Timescale 后台会话占用；只重试建库失败，不 skip、不改断言。
@@ -296,11 +303,12 @@ def test_http_budget_resolution_table() -> None:
 
 
 def test_no_switch_entry_and_not_settings() -> None:
-    """§8.1 :425–:428、:434–:439：旧哨兵已移除，两类批次默认0且无开启入口。
+    """§8.1：旧哨兵已移除，限额只在 ingest.yaml 的 budget 段配置。
 
-    限额不进 Settings、生产赋值仍为 0、CLI 无开关；打开任一生效常量属于开放单D。
+    Settings 顶层不增加批次开关，导入时门闩仍为0；业务配置模型保留正数与上限校验。
     """
     from app.config import Settings as SettingsType
+    from app.config_files import IngestBudget
 
     ibars = _require_ingest("DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT", "daily_bars_batch_budget")
     assert not hasattr(ibars, "DAILY_BARS_HTTP_UNLIMITED")
@@ -312,15 +320,21 @@ def test_no_switch_entry_and_not_settings() -> None:
     fields = getattr(SettingsType, "model_fields", {})
     assert "daily_bars_http_limit" not in fields
     assert "daily_bars_http_unlimited" not in fields
+    assert {"daily_bars_batch_limit", "daily_bars_backfill_batch_limit"} <= set(
+        IngestBudget.model_fields
+    )
     src = Path(inspect.getsourcefile(ibars) or "")
     assert src.is_file(), "缺实现：无法定位 ingest/daily_bars.py"
     tree = ast.parse(src.read_text(encoding="utf-8"))
     found = False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            if node.target.id in {"DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT"}:
-                found = True
-                assert isinstance(node.value, ast.Constant) and node.value.value == 0
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id in {"DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT"}
+        ):
+            found = True
+            assert isinstance(node.value, ast.Constant) and node.value.value == 0
         if isinstance(node, ast.Assign):
             names = [t.id for t in node.targets if isinstance(t, ast.Name)]
             if {"DAILY_BARS_BATCH_LIMIT", "DAILY_BARS_BACKFILL_BATCH_LIMIT"} & set(names):

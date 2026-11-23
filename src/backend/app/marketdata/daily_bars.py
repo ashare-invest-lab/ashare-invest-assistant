@@ -828,6 +828,15 @@ def daily_bars_fetch_task(
     day, uid = _validate_task_args(trade_date, user_id, window_trading_days)
     if batch_kind == "backfill" and window_trading_days is None:
         raise ValueError("window_trading_days is required for backfill")
+    business = getattr(settings, "business", None)
+    budget = getattr(getattr(business, "ingest", None), "budget", None)
+    if budget is not None:
+        from app.ingest.daily_bars import configure_batch_limits
+
+        configure_batch_limits(
+            daily=budget.daily_bars_batch_limit,
+            backfill=budget.daily_bars_backfill_batch_limit,
+        )
     engine = _engine(settings)
     try:
         with engine.begin() as conn:

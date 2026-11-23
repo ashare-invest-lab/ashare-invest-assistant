@@ -17,6 +17,12 @@ DAY = dt.date(2026, 11, 10)
 NOW = dt.datetime(2026, 11, 10, 10, tzinfo=dt.UTC)
 
 
+@pytest.fixture(autouse=True)
+def reset_batch_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 0)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 0)
+
+
 @pytest.fixture
 def world(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     state = SimpleNamespace(calls=[], grants=[], runs=[], root=tmp_path)
@@ -82,6 +88,18 @@ def test_c2_removes_unlimited_and_keeps_both_effective_defaults_closed(
     assert all(
         "daily_bars_http_budget_unset" in run["stats"]["issues"] for run in world.runs
     )
+
+
+def test_a1_configured_limits_are_positive_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    ingest.configure_batch_limits(daily=500, backfill=2000)
+    assert ingest.DAILY_BARS_BATCH_LIMIT == 500
+    assert ingest.DAILY_BARS_BACKFILL_BATCH_LIMIT == 2000
+    with pytest.raises(ValueError):
+        ingest.configure_batch_limits(daily=501, backfill=2000)
+    with pytest.raises(ValueError):
+        ingest.configure_batch_limits(daily=500, backfill=2001)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 0)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 0)
 
 
 @pytest.mark.parametrize(

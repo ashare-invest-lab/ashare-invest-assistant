@@ -83,6 +83,8 @@ tests:
   - {"file": "tests/backend/unit/test_ci_template_worker_wait.py", "group": "parallel", "keywords": ["fake PG metadata", "monkeypatch connects/docker/socket", "tmp_path", "virtual clock"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_backfill_latest_start_c2.py", "group": "serial_pg", "keywords": ["late->world imported from consumer->pg_url", "docker", "Redis fake"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_batch_fetch_c2.py", "group": "parallel", "keywords": ["world->tmp_path", "fake engine/grant/transport", "socket.connect monkeypatched"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_a1a2_pure_coverage.py", "group": "parallel", "keywords": ["synthetic models/transport", "socket and Redis monkeypatch", "no PG/docker/network"], "unverified": false}
+  - {"file": "tests/backend/unit/test_daily_bars_a1a2_coverage_replay.py", "group": "serial_pg", "keywords": ["synthetic replay payloads", "isolated temporary PostgreSQL", "no real vendor egress"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_consumer_c2.py", "group": "serial_pg", "keywords": ["world->pg_url", "psycopg.connect", "docker", "tmp_path", "Redis fake"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_grant_and_trade_date_t_t73b.py", "group": "serial_pg", "keywords": ["temp_db->daily_bars_t70_support._open_temp_db", "PGHOST", "real PG", "worker _engines singleton"], "unverified": false}
   - {"file": "tests/backend/unit/test_daily_bars_http_budget_t_t73.py", "group": "serial_pg", "keywords": ["temp_db->_open_temp_db", "PGHOST", "real PG", "tmp_path", "monkeypatch.setenv"], "unverified": false}

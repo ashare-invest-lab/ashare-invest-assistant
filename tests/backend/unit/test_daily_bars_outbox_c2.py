@@ -30,6 +30,12 @@ OWNER = uuid.UUID(int=102)
 OTHER = uuid.UUID(int=103)
 
 
+@pytest.fixture(autouse=True)
+def reset_batch_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ingest, "DAILY_BARS_BATCH_LIMIT", 0)
+    monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 0)
+
+
 def implementation() -> Any:
     name = "app.marketdata.daily_bars_outbox"
     assert importlib.util.find_spec(name), "C2 durable outbox implementation missing"

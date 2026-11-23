@@ -324,7 +324,7 @@ def test_a1s_s2_tree_app_has_no_private_refs() -> None:
     priv = _egress_private_names()
     offenders: list[str] = []
     for path in APP.rglob("*.py"):
-        rel = str(path.relative_to(APP))
+        rel = path.relative_to(APP).as_posix()
         if rel in {"ingest/egress.py"}:
             continue
         tree = _parse(path)
@@ -410,7 +410,7 @@ def _netguard_private_names() -> set[str]:
 
 
 def _s2b_hits(path: Path, tree: ast.AST, priv: set[str]) -> list[str]:
-    rel = str(path.relative_to(APP))
+    rel = path.relative_to(APP).as_posix()
     hits: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module and "netguard" in node.module:
@@ -465,7 +465,7 @@ def test_a1s_s2b_tree_allowed_refs() -> None:
     egress_allow = set(S2B_WINDOW_NAMES) | {"EgressBlocked", "install"}
     offenders: list[str] = []
     for path in APP.rglob("*.py"):
-        rel = str(path.relative_to(APP))
+        rel = path.relative_to(APP).as_posix()
         tree = _parse(path)
         if tree is None:
             continue
@@ -539,7 +539,7 @@ def test_a1s_s3_tree_and_registered_exceptions() -> None:
     """负例：sources 的 urllib、workers/ingest 的 socket.gethostname、netguard 的 socket 不红。"""
     offenders: list[str] = []
     for path in APP.rglob("*.py"):
-        rel = str(path.relative_to(APP))
+        rel = path.relative_to(APP).as_posix()
         tree = _parse(path)
         if tree is None:
             continue
@@ -613,7 +613,7 @@ def test_a1s_s4_tree_mairui_literal_only_egress_or_netguard() -> None:
     """负例：app/ 内除 egress（及 netguard 域名常量）外无 mairuiapi 字面量；sources 同样不得出现。"""
     offenders: list[str] = []
     for path in APP.rglob("*.py"):
-        rel = str(path.relative_to(APP))
+        rel = path.relative_to(APP).as_posix()
         if rel in {"ingest/egress.py", "ingest/netguard.py"}:
             continue
         tree = _parse(path)
@@ -715,11 +715,31 @@ def _realtime_quotes_seam_lines(tree: ast.AST) -> set[int]:
     }
 
 
+def _daily_bars_worker_seam_lines(tree: ast.AST) -> set[int]:
+    """Return the two registered worker calls that carry the ingest transport."""
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "tick_bars":
+            continue
+        for keyword in node.keywords:
+            value = keyword.value
+            if (
+                keyword.arg == "transport"
+                and isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id == "MairuiDailyBarsTransport"
+            ):
+                lines.add(node.lineno)
+    return lines
+
+
 def test_a1s_s5_tree_registered_seams_only() -> None:
-    """负例：仅登记 daily_lists 与 realtime_collect 的测试缝。"""
+    """负例：登记 daily_lists、realtime_collect 与 ingest worker 的测试缝。"""
     offenders: list[str] = []
     for path in APP.rglob("*.py"):
-        rel = str(path.relative_to(APP))
+        rel = path.relative_to(APP).as_posix()
         tree = _parse(path)
         if tree is None:
             continue
@@ -735,6 +755,9 @@ def test_a1s_s5_tree_registered_seams_only() -> None:
             continue
         if rel == "marketdata/realtime_collect.py":
             allowed = {f"kw:transport:{line}" for line in _realtime_quotes_seam_lines(tree)}
+            hits = [hit for hit in hits if hit not in allowed]
+        if rel == "workers/ingest.py":
+            allowed = {f"kw:transport:{line}" for line in _daily_bars_worker_seam_lines(tree)}
             hits = [hit for hit in hits if hit not in allowed]
         if rel == "ingest/egress.py":
             # mairui_get may have transport= param in signature; calls inside?
