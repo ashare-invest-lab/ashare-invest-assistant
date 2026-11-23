@@ -48,7 +48,7 @@ services:
     environment:
       <<: *dev-env
       # local 只保留关闭闸门；不因 replay 配置自动启用日线采集。
-      DAILY_BARS_SOURCE: off
+      DAILY_BARS_SOURCE: "off"
     volumes:
       - ../../src/backend:/app/src/backend:ro
       - ../../config:/app/config:ro
@@ -58,7 +58,7 @@ services:
     environment:
       <<: *dev-env
       # local 仅 replay，不启用日线来源闸门，不触发真实采集。
-      DAILY_BARS_SOURCE: off
+      DAILY_BARS_SOURCE: "off"
       MAIRUI_MODE: replay
       MAIRUI_REPLAY_DIR: /fixtures/mairui
     volumes:
