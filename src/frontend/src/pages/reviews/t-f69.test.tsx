@@ -9,6 +9,10 @@ import { preloadRoutes } from '../../test/preloadRoutes';
 import { server } from '../../mocks/server';
 
 const API = '/api/v1';
+const metricKeys = ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown'] as const;
+const assertEmptyMetrics = (metrics: Record<string, { value: unknown; n: number; small_sample: boolean }>) => {
+  for (const key of metricKeys) expect(metrics[key]).toEqual(expect.objectContaining({ value: null, n: 0, small_sample: true }));
+};
 const renderAt = (path: string) => {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   render(<AppProviders client={makeQueryClient(true)}><RouterProvider router={router} /></AppProviders>);
@@ -39,11 +43,12 @@ describe('T-F69 复盘页面', () => {
       data_status: string;
       data_as_of: string | null;
       gaps: { key: string; reason: string }[];
-      current_version: { data_status: string; data_as_of: string | null; gaps: { key: string; reason: string }[] };
+      current_version: { data_status: string; data_as_of: string | null; gaps: { key: string; reason: string }[]; outcome_metrics: Record<string, { value: unknown; n: number; small_sample: boolean }> };
     };
     expect(body.data_status).toBe(body.current_version.data_status);
     expect(body.data_as_of).toBe(body.current_version.data_as_of);
     expect(body.gaps).toEqual(body.current_version.gaps);
+    assertEmptyMetrics(body.current_version.outcome_metrics);
     for (const key of ['holding_return', 'benchmark_return', 'excess_return', 'max_drawdown']) {
       expect(body.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ key: `outcome_metrics.${key}`, reason: 'no_source' })]));
     }
@@ -56,6 +61,12 @@ describe('T-F69 复盘页面', () => {
     const legacyLink = screen.getByTestId('review-link-review-example-legacy');
     expect(legacyLink.closest('tr')).toHaveTextContent('不可用');
     expect(screen.getByTestId('reviews-table')).toHaveTextContent('—');
+    const list = await fetch(`${API}/reviews`).then((response) => response.json()) as {
+      items: Array<{ id: string; data_status: string; data_as_of: string | null; current_version_no: number | null; gaps: { key: string; reason: string }[] }>;
+    };
+    const legacySummary = list.items.find((item) => item.id === 'review-example-legacy');
+    expect(legacySummary).toEqual(expect.objectContaining({ data_status: 'unavailable', data_as_of: null, current_version_no: null }));
+    expect(legacySummary?.gaps).toEqual([expect.objectContaining({ key: 'outcome_metrics', reason: 'no_source' })]);
     await user.click(screen.getByTestId('review-link-review-example-legacy'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/reviews/review-example-legacy'));
     expect(await screen.findByText('暂无版本内容。')).toBeInTheDocument();
@@ -71,7 +82,23 @@ describe('T-F69 复盘页面', () => {
     expect(body.current_version).toBeNull();
     expect(body.data_status).toBe('unavailable');
     expect(body.data_as_of).toBeNull();
-    expect(body.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ key: 'outcome_metrics', reason: 'no_source' })]));
+    expect(body.gaps).toEqual([expect.objectContaining({ key: 'outcome_metrics', reason: 'no_source' })]);
+    expect(body.gaps.some((gap) => gap.key.startsWith('outcome_metrics.'))).toBe(false);
+  });
+
+  it('版本读取保留四项空指标和对应 no_source 缺口', async () => {
+    const response = await fetch(`${API}/reviews/review-example-1/versions/1`);
+    const version = await response.json() as {
+      data_status: string;
+      data_as_of: string | null;
+      gaps: { key: string; reason: string }[];
+      outcome_metrics: Record<string, { value: unknown; n: number; small_sample: boolean }>;
+    };
+    expect(response.ok).toBe(true);
+    expect(version.data_status).toBe('partial');
+    expect(version.data_as_of).toBeNull();
+    assertEmptyMetrics(version.outcome_metrics);
+    expect(version.gaps).toEqual(expect.arrayContaining(metricKeys.map((key) => expect.objectContaining({ key: `outcome_metrics.${key}`, reason: 'no_source' }))));
   });
 
   it('按证券和计划筛选并写入 URL', async () => {

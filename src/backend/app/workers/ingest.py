@@ -93,14 +93,18 @@ def heartbeat_payload(now: float | None = None) -> str:
 
 
 def tick_realtime_quotes(
-    settings: Settings, engine: Engine | None = None, now_monotonic: float | None = None
+    settings: Settings,
+    *,
+    engine: Engine | None = None,
+    now_monotonic: float | None = None,
 ) -> None:
-    """按配置间隔触发实时行情采集，失败时保留 ingest 心跳。"""
+    """按配置间隔在 ingest 进程内触发实时行情采集，失败时保留心跳。"""
     global _last_realtime_quotes_tick
 
     if getattr(settings, "realtime_quotes_source", "off") != "mairui":
         _last_realtime_quotes_tick = None
         return
+
     now = time.monotonic() if now_monotonic is None else now_monotonic
     interval = settings.business.realtime.intervals.quote_interval_s
     if (
@@ -108,6 +112,7 @@ def tick_realtime_quotes(
         and now - _last_realtime_quotes_tick < interval
     ):
         return
+
     _last_realtime_quotes_tick = now
     try:
         from app.marketdata.realtime_collect import realtime_quotes_task
@@ -116,7 +121,7 @@ def tick_realtime_quotes(
             realtime_quotes_task(settings)
         else:
             realtime_quotes_task(settings, engine=engine)
-    except Exception as exc:  # noqa: BLE001 - collection must not stop heartbeat
+    except Exception as exc:  # noqa: BLE001 - realtime collection must not stop heartbeat
         logging.warning("realtime quotes tick failed: %s", type(exc).__name__)
 
 
