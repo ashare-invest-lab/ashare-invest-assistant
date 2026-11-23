@@ -342,6 +342,12 @@ def _rows(engine: object) -> list[object]:
 def test_realtime_collection_is_ingest_registered() -> None:
     assert _worker_registered(), "实时采集任务应登记到 worker 注册表"
     assert _worker_tick() == [(TASK, "ok")], "worker_tick 应执行关闭开关的实时任务"
+
+    unknown = _Queue()
+    unknown.item = json.dumps({"task": "synthetic.unknown", "args": {}}).encode()
+    assert jobs.worker_tick(Settings.model_construct(), client=unknown) == [
+        ("synthetic.unknown", "unknown")
+    ]
     _require_entry()
 
 
