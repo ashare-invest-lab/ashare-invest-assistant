@@ -38,24 +38,10 @@ SOCKET_ATTEMPTS: list[object] = []
 class _Queue:
     def __init__(self) -> None:
         self.item: bytes | None = json.dumps({"task": TASK, "args": {}}).encode()
-        self.locks: dict[str, bytes] = {}
 
     def rpop(self, _key: str) -> bytes | None:
         item, self.item = self.item, None
         return item
-
-    def set(self, key: str, value: str, *, nx: bool, ex: int) -> bool:
-        del nx, ex
-        if key in self.locks:
-            return False
-        self.locks[key] = value.encode()
-        return True
-
-    def get(self, key: str) -> bytes | None:
-        return self.locks.get(key)
-
-    def delete(self, key: str) -> int:
-        return int(self.locks.pop(key, None) is not None)
 
 
 @pytest.fixture(autouse=True)
@@ -339,21 +325,15 @@ def _rows(engine: object) -> list[object]:
         ).mappings().all()
 
 
-def test_realtime_collection_is_ingest_registered() -> None:
-    assert _worker_registered(), "实时采集任务应登记到 worker 注册表"
-    assert _worker_tick() == [(TASK, "ok")], "worker_tick 应执行关闭开关的实时任务"
-
-    unknown = _Queue()
-    unknown.item = json.dumps({"task": "synthetic.unknown", "args": {}}).encode()
-    assert jobs.worker_tick(Settings.model_construct(), client=unknown) == [
-        ("synthetic.unknown", "unknown")
-    ]
+def test_realtime_collection_is_ingest_only() -> None:
+    assert not _worker_registered(), "T-B221 违约：采集任务已登记到 worker 注册表"
+    assert _worker_tick() == [(TASK, "unknown")], "T-B221 违约：worker_tick 已消费采集任务"
     _require_entry()
 
 
 def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert _worker_registered(), "实时采集任务应登记到 worker 注册表"
-    assert _worker_tick() == [(TASK, "ok")], "关闭开关的 worker 任务应安全返回"
+    assert not _worker_registered(), "T-B221 违约：worker 注册了实时采集任务"
+    assert _worker_tick() == [(TASK, "unknown")], "worker 不得成功执行实时采集"
     entry = _require_entry()
     egress = importlib.import_module("app.ingest.egress")
     calls: list[object] = []
