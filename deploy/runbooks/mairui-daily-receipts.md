@@ -63,7 +63,7 @@ deploy/scripts/install-mairui-daily-receipts.sh \
   --expires-at 2030-01-01T00:00:00Z
 
 docker run --rm --network none --user 10001:10001 \
-  -v "$TMP_DIR:/run/aia/receipts:ro" "$IMAGE" sh -ceu '
+  -v "$TMP_DIR:/run/aia/receipts" "$IMAGE" sh -ceu '
     test "$(stat -c "%u:%g %a" /run/aia/receipts)" = "0:0 755"
     test "$(stat -c "%u:%g %a" /run/aia/receipts/mairui-daily-bars.json)" = "0:0 444"
     test "$(stat -c "%u:%g %a" /run/aia/receipts/mairui-daily.json)" = "0:0 444"

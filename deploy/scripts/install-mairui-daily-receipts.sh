@@ -90,15 +90,50 @@ if [[ -n "$volume" ]]; then
     echo "具名卷名称必须是合法的 *_aia_receipts 卷" >&2
     exit 2
   }
+  "${DOCKER[@]}" volume inspect "$volume" >/dev/null 2>&1 || {
+    echo "具名卷不存在，拒绝让 Docker 自动创建：$volume" >&2
+    exit 3
+  }
   mount="$volume:/run/aia/receipts"
   destination="具名卷"
 else
-  [[ "$target" = /* && "$target" != "/" && ! -L "$target" ]] || {
-    echo "临时目录必须是绝对路径且不能是根目录或符号链接" >&2
+  tmp_root="${TMPDIR:-/tmp}"
+  [[ "$tmp_root" = /* && -d "$tmp_root" && ! -L "$tmp_root" ]] || {
+    echo "TMPDIR 必须是现有的非符号链接绝对目录" >&2
     exit 2
   }
-  [[ -d "$target" ]] || mkdir -p "$target"
-  target="$(cd "$target" && pwd -P)"
+  tmp_root="$(cd "$tmp_root" && pwd -P)"
+  [[ "$target" = /* && "$target" != "/" ]] || {
+    echo "临时目录必须是绝对路径且不能是根目录" >&2
+    exit 2
+  }
+  target="$(realpath -m -- "$target")"
+  [[ "$target" == "$tmp_root"/* ]] || {
+    echo "临时目录必须位于 TMPDIR 白名单内" >&2
+    exit 2
+  }
+  parent="$(dirname -- "$target")"
+  [[ -d "$parent" && ! -L "$parent" ]] || {
+    echo "临时目录的父目录必须是现有的非符号链接目录" >&2
+    exit 2
+  }
+  parent="$(cd "$parent" && pwd -P)"
+  [[ "$parent" == "$tmp_root"/* || "$parent" == "$tmp_root" ]] || {
+    echo "临时目录的父目录必须位于 TMPDIR 白名单内" >&2
+    exit 2
+  }
+  if [[ -e "$target" || -L "$target" ]]; then
+    [[ -d "$target" && ! -L "$target" ]] || {
+      echo "临时目录必须是非符号链接目录" >&2
+      exit 2
+    }
+  else
+    mkdir -- "$target"
+  fi
+  [[ -z "$(find "$target" -mindepth 1 -maxdepth 1 -print -quit)" ]] || {
+    echo "临时目录必须为空" >&2
+    exit 2
+  }
   mount="$target:/run/aia/receipts"
   destination="临时目录"
 fi
