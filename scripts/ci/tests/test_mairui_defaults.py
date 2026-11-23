@@ -87,6 +87,71 @@ def test_env_live_is_rejected(tmp_path: Path) -> None:
     assert any(".env.example:MAIRUI_MODE" in error for error in errors)
 
 
+def test_env_get_normalization_and_last_value(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(
+        tmp_path,
+        "deploy/env/.env.example",
+        'MAIRUI_MODE="replay"\nMAIRUI_MODE= replay\n',
+    )
+    assert cmd.check(tmp_path) == []
+    write(
+        tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=replay\nMAIRUI_MODE = live\n"
+    )
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_env_any_unsafe_line_or_interpolation_is_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=live\nMAIRUI_MODE=replay\n")
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=${MAIRUI_MODE:-replay}\n")
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_env_comments_and_inline_comment_cannot_hide_live(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=live # replay\n")
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+    write(
+        tmp_path, "deploy/env/.env.example", "# MAIRUI_MODE=replay\nMAIRUI_MODE=live\n"
+    )
+    assert any(".env.example:MAIRUI_MODE" in error for error in cmd.check(tmp_path))
+
+
+def test_workflow_comment_decoy_does_not_hide_live(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        "# MAIRUI_MODE: replay\nenv:\n  MAIRUI_MODE: live\n",
+    )
+    assert any(
+        ".github/workflows/ci.yml:env/MAIRUI_MODE" in error
+        for error in cmd.check(tmp_path)
+    )
+
+
+def test_workflow_mode_aliases_are_rejected_at_each_scope(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        """env:
+  ' mairui_mode ': "live"
+jobs:
+  backend:
+    env:
+      mairui_mode: live
+    steps:
+      - env:
+          'MAIRUI_MODE ': live
+""",
+    )
+    errors = cmd.check(tmp_path)
+    assert sum("MAIRUI_MODE" in error for error in errors) >= 3
+
+
 def test_config_mairui_default_is_rejected(tmp_path: Path) -> None:
     baseline(tmp_path)
     write(
@@ -102,6 +167,55 @@ DECOY = 'daily_bars_source: Literal["off", "mairui"] = "off"'
 """,
     )
     assert any("config.py:daily_bars_source" in error for error in cmd.check(tmp_path))
+
+
+def test_new_switch_live_is_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_ENABLED: true\n")
+    errors = cmd.check(tmp_path)
+    assert any("services/api/MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in errors)
+
+
+def test_new_switch_off_is_accepted(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED:-off}\n      INTRADAY_QUOTES_ENABLED: false\n      PRICES_SOURCE: replay\n")
+    assert cmd.check(tmp_path) == []
+
+
+def test_non_switch_mairui_key_is_exempt(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_URL: https://example.invalid\n      MAIRUI_QUOTES_TIMEOUT_S: 30\n      MAIRUI_QUOTES_TOKEN_FILE: /run/secrets/token\n")
+    assert cmd.check(tmp_path) == []
+
+
+def test_env_example_open_switch_is_rejected(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/env/.env.example", "MAIRUI_MODE=replay\nDAILY_BARS_SOURCE=off\nMAIRUI_QUOTES_ENABLED=true\n")
+    assert any(".env.example:MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in cmd.check(tmp_path))
+
+
+def test_inherited_switch_values_are_rejected(tmp_path: Path) -> None:
+    # 空值、无等号列表项、裸 $VAR、无默认值 ${VAR} 都会继承主机环境。
+    for env in (
+        "      MAIRUI_QUOTES_ENABLED:\n",
+        "      MAIRUI_QUOTES_ENABLED: $MAIRUI_QUOTES_ENABLED\n",
+        "      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED}\n",
+        "      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED:-true}\n",
+    ):
+        baseline(tmp_path)
+        write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n" + env)
+        errors = cmd.check(tmp_path)
+        assert any("services/api/MAIRUI_QUOTES_ENABLED：默认必须关闭" in error for error in errors), env
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      - INTRADAY_QUOTES_ENABLED\n")
+    errors = cmd.check(tmp_path)
+    assert any("services/api/INTRADAY_QUOTES_ENABLED：默认必须关闭" in error for error in errors)
+
+
+def test_empty_fallback_interpolation_is_accepted(tmp_path: Path) -> None:
+    baseline(tmp_path)
+    write(tmp_path, "deploy/compose/docker-compose.yml", "services:\n  api:\n    environment:\n      MAIRUI_QUOTES_ENABLED: ${MAIRUI_QUOTES_ENABLED:-}\n")
+    assert cmd.check(tmp_path) == []
 
 
 def test_workflow_job_mode_live_is_rejected(tmp_path: Path) -> None:
