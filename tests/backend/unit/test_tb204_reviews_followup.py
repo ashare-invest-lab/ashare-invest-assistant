@@ -1017,6 +1017,49 @@ def test_g_status_for_pending_keeps_non_outcome_snapshot_gaps() -> None:
     }
 
 
+def test_g_status_for_treats_frozen_values_as_missing_before_projection() -> None:
+    status = service._status_for(
+        {
+            "data_status": "partial",
+            "gaps": [],
+            "outcome_metrics": {"holding_return": {"value": "1", "n": 5}},
+        },
+        dt.date(2026, 1, 2),
+    )
+
+    assert status["data_status"] == "unavailable"
+    assert {(gap["key"], gap["reason"]) for gap in status["gaps"]} == {
+        (f"outcome_metrics.{name}", "no_source") for name in service.METRIC_NAMES
+    }
+
+
+def test_g_status_for_keeps_non_metric_reason_when_metric_reason_is_rewritten() -> None:
+    non_metric_gap = {
+        "key": "trades.import_commit_unproven",
+        "reason": "not_yet_published",
+        "message": "导入提交尚未证明",
+    }
+    status = service._status_for(
+        {
+            "data_status": "partial",
+            "gaps": [non_metric_gap],
+            "outcome_metrics": {"holding_return": {"gaps": ["not_yet_published"]}},
+        },
+        dt.date(2026, 1, 2),
+    )
+    assert non_metric_gap in status["gaps"]
+    assert {
+        (gap["key"], gap["reason"])
+        for gap in status["gaps"]
+        if gap["key"].startswith("outcome_metrics.")
+    } >= {
+        ("outcome_metrics.holding_return", "no_source"),
+        ("outcome_metrics.benchmark_return", "no_source"),
+        ("outcome_metrics.excess_return", "no_source"),
+        ("outcome_metrics.max_drawdown", "no_source"),
+    }
+
+
 def test_g_pending_snapshot_keeps_visible_trades_and_uses_no_source() -> None:
     row = _trade(
         880,
