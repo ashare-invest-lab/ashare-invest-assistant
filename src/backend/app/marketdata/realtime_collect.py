@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
-from sqlalchemy import Connection, Engine, select
+from sqlalchemy import Connection, Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.aggregates.calendar import market_clock
@@ -110,9 +110,11 @@ def _quote_timestamp(value: object) -> dt.datetime:
     if isinstance(value, dt.datetime):
         stamp = value
     elif isinstance(value, str):
-        text = value.strip().replace("Z", "+00:00")
+        text = value.strip()
+        if not _TIMESTAMP_TEXT.fullmatch(text):
+            raise RealtimeCollectionStoppedError("realtime_timestamp_invalid")
         try:
-            stamp = dt.datetime.fromisoformat(text)
+            stamp = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError as exc:
             raise RealtimeCollectionStoppedError("realtime_timestamp_invalid") from exc
     else:
@@ -126,11 +128,27 @@ def _normalise_rows(
     requested: Sequence[str], rows: Iterable[Mapping[str, object]], fetched_at: dt.datetime
 ) -> list[dict[str, object]]:
     expected = set(requested)
+    raw_codes: dict[str, list[str]] = {}
+    for code in requested:
+        raw_codes.setdefault(code.split(".", 1)[0], []).append(code)
     found: set[str] = set()
     output: list[dict[str, object]] = []
     for row in rows:
-        # 代码格式转换未验证（U8，T-B195）；仓库没有可复用转换工具，只接受规范代码。
+        # 既有测试入口使用规范 code，ssjy_more 的实测字段使用无后缀 dm。
         code_value = _mapped_value(row, "code")
+        dm_value = row.get("dm")
+        if dm_value is not None:
+            if not isinstance(dm_value, str):
+                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+            dm_candidates = expected.intersection({dm_value})
+            if not dm_candidates:
+                dm_candidates = set(raw_codes.get(dm_value, []))
+            if len(dm_candidates) != 1:
+                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+            dm_code = next(iter(dm_candidates))
+            if code_value is not None and code_value != dm_code:
+                raise RealtimeCollectionStoppedError("realtime_code_invalid")
+            code_value = dm_code
         if not isinstance(code_value, str) or code_value not in expected or code_value in found:
             raise RealtimeCollectionStoppedError("realtime_code_invalid")
         found.add(code_value)
@@ -192,49 +210,72 @@ def _fingerprint(row: Mapping[str, object]) -> str:
     ).hexdigest()
 
 
-def _prepare_rows(conn: Connection, rows: Sequence[dict[str, object]]) -> list[dict[str, object]]:
-    prepared: list[dict[str, object]] = []
-    allocated: dict[tuple[object, object, object, object], int] = {}
-    for row in rows:
-        source_licence_id = row["source_licence_id"]
-        key = (row["code"], row["ts"], SOURCE, source_licence_id)
-        fingerprint = _fingerprint(row)
-        existing = conn.execute(
-            select(quotes_snapshot.c.revision, quotes_snapshot.c.content_fingerprint).where(
-                quotes_snapshot.c.code == row["code"],
-                quotes_snapshot.c.ts == row["ts"],
-                quotes_snapshot.c.source == SOURCE,
-                quotes_snapshot.c.source_licence_id == source_licence_id,
-            )
-        ).all()
-        if any(item.content_fingerprint == fingerprint for item in existing):
-            continue
-        highest = max((int(item.revision) for item in existing), default=-1)
-        revision = max(highest, allocated.get(key, -1)) + 1
-        allocated[key] = revision
-        prepared.append(
-            {
-                **row,
-                "revision": revision,
-                "content_fingerprint": fingerprint,
-            }
+def _revision_key(row: Mapping[str, object]) -> str:
+    return "|".join(
+        (
+            str(row["code"]),
+            str(row["ts"]),
+            str(row["source"]),
+            str(row["source_licence_id"]),
         )
-    return prepared
+    )
+
+
+def _lock_revision_keys(conn: Connection, rows: Sequence[Mapping[str, object]]) -> None:
+    """Serialize revision allocation for each ownership key in this transaction."""
+    for key in sorted({_revision_key(row) for row in rows}):
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:revision_key, 0))"),
+            {"revision_key": key},
+        )
 
 
 def _write_rows(conn: Connection, rows: Sequence[dict[str, object]], batch_id: uuid.UUID) -> int:
     if not rows:
         return 0
-    prepared = _prepare_rows(conn, rows)
-    if not prepared:
-        return 0
-    values = [
-        {
-            **row,
-            "batch_id": batch_id,
-        }
-        for row in prepared
-    ]
+    _lock_revision_keys(conn, rows)
+    fingerprints = [_fingerprint(row) for row in rows]
+    source_licences = {row["source_licence_id"] for row in rows}
+    codes = {row["code"] for row in rows}
+    timestamps = {row["ts"] for row in rows}
+    existing = conn.execute(
+        select(
+            quotes_snapshot.c.code,
+            quotes_snapshot.c.ts,
+            quotes_snapshot.c.source_licence_id,
+            quotes_snapshot.c.revision,
+            quotes_snapshot.c.content_fingerprint,
+        ).where(
+            quotes_snapshot.c.source == SOURCE,
+            quotes_snapshot.c.source_licence_id.in_(source_licences),
+            quotes_snapshot.c.code.in_(codes),
+            quotes_snapshot.c.ts.in_(timestamps),
+        )
+    ).mappings()
+    revisions: dict[tuple[object, object, object], list[tuple[int, object | None]]] = {}
+    for item in existing:
+        key = (item["code"], item["ts"], item["source_licence_id"])
+        revisions.setdefault(key, []).append(
+            (int(item["revision"]), item["content_fingerprint"])
+        )
+    values: list[dict[str, object]] = []
+    for row, fingerprint in zip(rows, fingerprints, strict=True):
+        key = (row["code"], row["ts"], row["source_licence_id"])
+        known = revisions.setdefault(key, [])
+        same = next((revision for revision, fp in known if fp == fingerprint), None)
+        if same is None:
+            revision = max((item[0] for item in known), default=-1) + 1
+            known.append((revision, fingerprint))
+        else:
+            revision = same
+        values.append(
+            {
+                **row,
+                "batch_id": batch_id,
+                "revision": revision,
+                "content_fingerprint": fingerprint,
+            }
+        )
     stmt = pg_insert(quotes_snapshot).values(values)
     stmt = stmt.on_conflict_do_nothing(
         index_elements=[
@@ -360,6 +401,7 @@ def collect_realtime_quotes(
     *,
     owner: uuid.UUID,
     now: dt.datetime | None = None,
+    clock: Callable[[], dt.datetime] | None = None,
     upstream: Transport | None = None,
     transport: Transport | None = None,
     secret_loader: SecretLoader = credential,
@@ -374,31 +416,39 @@ def collect_realtime_quotes(
         return 0
     if settings.realtime_quotes_source != "mairui":
         return 0
-    stamp = _now(now)
-    clock = _open_clock(conn, settings, stamp)
-    if clock is None:
+    read_clock = clock or (lambda: _now(now))
+    stamp = _now(read_clock())
+    initial_clock = _open_clock(conn, settings, stamp)
+    if initial_clock is None:
         return 0
-    if clock.session.value not in OPEN_SESSIONS:
-        log.info("实时行情跳过：交易时段为 %s", clock.session.value)
+    if initial_clock.session.value not in OPEN_SESSIONS:
+        log.info("实时行情跳过：交易时段为 %s", initial_clock.session.value)
         return 0
     licence_id = active_licence_id(conn, owner, stamp)
     if licence_id is None:
         log.info("实时行情跳过：用户没有 active 证书")
         return 0
-    codes = _owned_codes(conn, owner, clock.trade_date)
+    codes = _owned_codes(conn, owner, initial_clock.trade_date)
     if not codes:
         return 0
     if engine is None:
         raise ValueError("engine is required for a live realtime collection")
     fetched_rows: list[dict[str, object]] = []
     for group in _chunks(codes, MAX_CODES_PER_REQUEST):
+        request_stamp = _now(read_clock())
+        request_clock = _open_clock(conn, settings, request_stamp)
+        if request_clock is None or request_clock.session.value not in OPEN_SESSIONS:
+            raise RealtimeCollectionStoppedError("realtime_session_closed")
+        request_licence = active_licence_id(conn, owner, request_stamp)
+        if request_licence is None:
+            raise RealtimeCollectionStoppedError("realtime_licence_unavailable")
         path = PATH + quote(",".join(group), safe=",")
         status, body = _fetch_with_egress(
             engine,
             settings,
             owner=owner,
-            licence_id=licence_id,
-            now=stamp,
+            licence_id=request_licence,
+            now=request_stamp,
             path=path,
             upstream=hook,
             secret_loader=secret_loader,
@@ -408,10 +458,10 @@ def collect_realtime_quotes(
         fetched_rows.extend(
             {
                 **row,
-                "source_licence_id": licence_id,
-                "fetched_at": stamp,
+                "source_licence_id": request_licence,
+                "fetched_at": request_stamp,
             }
-            for row in _normalise_rows(group, _validate_response(status, body), stamp)
+            for row in _normalise_rows(group, _validate_response(status, body), request_stamp)
         )
     if stop.is_file() or halt.is_file():
         raise RealtimeCollectionStoppedError("STOP_or_halt_present")
@@ -423,6 +473,7 @@ def realtime_quotes_task(
     settings: Settings,
     *,
     now: dt.datetime | None = None,
+    clock: Callable[[], dt.datetime] | None = None,
     owner: uuid.UUID | str | None = None,
     upstream: Transport | None = None,
     transport: Transport | None = None,
@@ -437,9 +488,7 @@ def realtime_quotes_task(
     if settings.realtime_quotes_source != "mairui":
         return 0
     if engine is None:
-        from app.workers.jobs import _engine
-
-        engine = _engine(settings)
+        raise RealtimeCollectionStoppedError("engine_unavailable")
 
     selected_owner: uuid.UUID | None
     if isinstance(owner, uuid.UUID):
@@ -451,7 +500,7 @@ def realtime_quotes_task(
             raise ValueError("owner must be a UUID string") from exc
     else:
         selected_owner = None
-    stamp = _now(now)
+    read_clock = clock or (lambda: _now(now))
     if selected_owner is not None:
         owners = [selected_owner]
     else:
@@ -465,7 +514,7 @@ def realtime_quotes_task(
                 owner_conn,
                 settings,
                 owner=current_owner,
-                now=stamp,
+                clock=read_clock,
                 upstream=hook,
                 secret_loader=secret_loader,
                 engine=engine,
