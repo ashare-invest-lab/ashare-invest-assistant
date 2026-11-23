@@ -70,7 +70,7 @@ def _realtime_snapshots(
 ) -> dict[str, Row[*tuple[Any, ...]]]:
     c = quotes_snapshot.c
     rows = conn.execute(
-        select(c)
+        select(quotes_snapshot)
         .where(
             c.code.in_(codes),
             c.source == "mairui",
