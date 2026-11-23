@@ -76,7 +76,7 @@ def synthetic_material(patches=()):
         pair["tdx_local"]["raw_bytes"] = tdx_raw
         manifest[code] = {
             "synthetic": True, "source": "fake", "code": code,
-            "interface": "/bj/history", "request_range": (str(mr["t"])[:10], str(mr["t"])[:10]),
+            "interface": "/hsstock/history", "request_range": (str(mr["t"])[:10], str(mr["t"])[:10]),
             "mairui_sha256": sha256(mr_raw).hexdigest(),
             "tdx_sha256": sha256(tdx_raw).hexdigest(),
             "tdx_path": f"synthetic-readonly/{code}.csv",
