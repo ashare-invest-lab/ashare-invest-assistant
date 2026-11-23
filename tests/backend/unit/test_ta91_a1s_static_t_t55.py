@@ -704,8 +704,19 @@ def _s5_transport_inject(tree: ast.AST) -> list[str]:
     return hits
 
 
-def test_a1s_s5_tree_daily_lists_seam_only() -> None:
-    """负例：daily_lists process 测试缝 transport 键不红；app 内不得调用 process(upstream=)。"""
+def _realtime_quotes_seam_lines(tree: ast.AST) -> set[int]:
+    expected = ast.parse("operation(*args, transport=sender, **options)").body[0].value
+    return {
+        node.lineno
+        for function in tree.body
+        if isinstance(function, ast.FunctionDef) and function.name == "realtime_quotes_seam"
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and ast.dump(node) == ast.dump(expected)
+    }
+
+
+def test_a1s_s5_tree_registered_seams_only() -> None:
+    """负例：仅登记 daily_lists 与 realtime_collect 的测试缝。"""
     offenders: list[str] = []
     for path in APP.rglob("*.py"):
         rel = str(path.relative_to(APP))
@@ -722,12 +733,24 @@ def test_a1s_s5_tree_daily_lists_seam_only() -> None:
             if bad:
                 offenders.append(f"{rel}: {bad}")
             continue
+        if rel == "marketdata/realtime_collect.py":
+            allowed = {f"kw:transport:{line}" for line in _realtime_quotes_seam_lines(tree)}
+            hits = [hit for hit in hits if hit not in allowed]
         if rel == "ingest/egress.py":
             # mairui_get may have transport= param in signature; calls inside?
             continue
         if hits:
             offenders.append(f"{rel}: {hits}")
     assert not offenders, "A1s S5 tree:\n" + "\n".join(offenders)
+
+
+def test_a1s_s5_tree_daily_lists_seam_only() -> None:
+    """负例：仅登记 daily_lists 与 realtime_collect 的测试缝。
+
+    恢复旧名以对齐 assert_a1s_a32_ran.py 的 A1s 清单；校验与
+    test_a1s_s5_tree_registered_seams_only 相同（现行 seam 口径，未放宽）。
+    """
+    test_a1s_s5_tree_registered_seams_only()
 
 
 def test_a1s_s5_positive_inject_and_process_upstream_flagged() -> None:
