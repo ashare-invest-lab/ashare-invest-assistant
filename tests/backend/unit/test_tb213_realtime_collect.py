@@ -284,7 +284,8 @@ def test_response_batch_has_single_batch_id_at_write_boundary(
         trade_date=NOW.astimezone(dt.timezone(dt.timedelta(hours=8))).date(),
         session=SimpleNamespace(value="morning"),
     )
-    monkeypatch.setattr(jobs, "_engine", lambda _settings: fake_engine)
+    engine_factory = Mock(side_effect=AssertionError("injected engine must be reused"))
+    monkeypatch.setattr(jobs, "_engine", engine_factory)
     monkeypatch.setattr(realtime_collect, "_open_clock", lambda *_args: clock)
     monkeypatch.setattr(realtime_collect, "_approved_owners", lambda _conn: [OWNER])
     monkeypatch.setattr(realtime_collect, "active_licence_id", lambda *_args: LICENCE)
@@ -300,7 +301,8 @@ def test_response_batch_has_single_batch_id_at_write_boundary(
         "_write_rows",
         lambda _conn, rows, batch_id: seen.append(batch_id) or len(rows),
     )
-    assert realtime_collect.realtime_quotes_task(settings, now=NOW) == 1
+    assert realtime_collect.realtime_quotes_task(settings, now=NOW, engine=fake_engine) == 1
+    engine_factory.assert_not_called()
     assert len(seen) == 1
     assert isinstance(seen[0], uuid.UUID)
 

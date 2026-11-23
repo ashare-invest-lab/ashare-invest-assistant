@@ -450,7 +450,6 @@ def realtime_quotes_task(
     else:
         selected_owner = None
     stamp = _now(now)
-    engine = _engine(settings)
     if selected_owner is not None:
         owners = [selected_owner]
     else:
