@@ -22,6 +22,7 @@ from psycopg import sql
 
 TEMPLATE = "o61_tmp_0030"
 SELFCHECK = "o67_selfcheck"
+AIA_TEST = "o67_aia_test"
 CREATE_RETRY_DELAYS = (1, 2, 4, 4)
 CREATE_RETRY_SECONDS = 15
 
@@ -122,10 +123,10 @@ def create(conn, name: str, source: str, receipt: dict, path: Path, *, phase: st
 
 
 def drop(conn, row: dict, receipt: dict, path: Path) -> None:
-    phase = {TEMPLATE: "drop_template", SELFCHECK: "drop_selfcheck"}.get(row["name"], "drop_probe")
+    phase = {TEMPLATE: "drop_template", SELFCHECK: "drop_selfcheck", AIA_TEST: "drop_aia_test"}.get(row["name"], "drop_probe")
     mark_phase(receipt, path, phase)
     probe = f"oci1_tpl_probe_{os.environ['GITHUB_RUN_ID']}_{os.environ['GITHUB_RUN_ATTEMPT']}"
-    if row["name"] not in {TEMPLATE, SELFCHECK, probe} or row["owner"] != os.environ["PGUSER"]:
+    if row["name"] not in {TEMPLATE, SELFCHECK, AIA_TEST, probe} or row["owner"] != os.environ["PGUSER"]:
         raise RuntimeError("Refusing cleanup outside exact newly owned names")
     if row.get("dropped_at"):
         return
@@ -259,7 +260,7 @@ def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
     receipt["source_identity"] = list(database(conn, source))
     # Reserve all names before writing anything. Never reuse a stale head template.
     probe = f"oci1_tpl_probe_{env['GITHUB_RUN_ID']}_{env['GITHUB_RUN_ATTEMPT']}"
-    if any(database(conn, n) is not None for n in (TEMPLATE, SELFCHECK, probe)):
+    if any(database(conn, n) is not None for n in (TEMPLATE, SELFCHECK, AIA_TEST, probe)):
         raise RuntimeError("Template, selfcheck or probe already exists")
     row = create(conn, TEMPLATE, "template0", receipt, path, phase="create_template")
     with connect(TEMPLATE) as fresh:
@@ -290,6 +291,10 @@ def prepare(conn, receipt: dict, path: Path, env: dict) -> None:
     # A28-A31 selfchecks use head, independently cloned from the unchanged source.
     create(conn, SELFCHECK, source, receipt, path, phase="create_selfcheck")
     receipt["selfcheck"] = state(SELFCHECK, head)
+    # AIA_TEST_DATABASE_URL uses a private head clone so tests cannot alter the
+    # shared TT41 source or the A28-A31 selfcheck database.
+    create(conn, AIA_TEST, source, receipt, path, phase="create_aia_test")
+    receipt["aia_test"] = state(AIA_TEST, head)
     receipt["source_after"] = state(source, head)
     if receipt["source_before"] != receipt["source_after"] or list(database(conn, source)) != receipt["source_identity"]:
         raise RuntimeError("Head source changed during template preparation")
