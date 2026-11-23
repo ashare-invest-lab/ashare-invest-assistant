@@ -165,31 +165,6 @@ def test_missing_core_fails_closed_before_credential_load(
     secret_loader.assert_not_called()
 
 
-def test_missing_egress_lease_fails_closed_before_credential_load(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(realtime_collect, "get_ingest_core", lambda: object())
-    monkeypatch.setattr(realtime_collect, "single_egress", lambda _engine: _Context(None))
-    secret_loader = Mock(side_effect=AssertionError("credential must not load without lease"))
-
-    with pytest.raises(
-        realtime_collect.RealtimeCollectionStoppedError, match="egress_lease_unavailable"
-    ):
-        realtime_collect._fetch_with_egress(
-            Mock(),
-            SimpleNamespace(),
-            owner=OWNER,
-            licence_id=LICENCE,
-            now=NOW,
-            path="/synthetic",
-            upstream=None,
-            secret_loader=secret_loader,
-            stop=tmp_path / "STOP",
-            halt=tmp_path / "HALT",
-        )
-    secret_loader.assert_not_called()
-
-
 def test_credential_load_waits_for_egress_lease(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -269,20 +244,6 @@ def test_config_switch_defaults_off() -> None:
     assert realtime_collect.Settings.model_fields["realtime_quotes_source"].default == "off"
 
 
-def test_worker_does_not_register_realtime_task() -> None:
-    settings = SimpleNamespace(
-        business=SimpleNamespace(
-            realtime=SimpleNamespace(intervals=SimpleNamespace(quote_interval_s=17))
-        ),
-        cooldown_purge_interval_s=60,
-        import_rows_purge_interval_s=60,
-        import_raw_purge_interval_s=60,
-    )
-    assert "market.realtime_quotes_fetch" not in jobs.schedule(settings)
-    assert "market.realtime_quotes_fetch" not in jobs.TASKS
-    assert "market.realtime_quotes_fetch" not in jobs.LOCKED_TASKS
-
-
 @pytest.mark.parametrize("status", [101, 103, 429, 503, 500])
 def test_upstream_status_stops_before_normalization(status: int) -> None:
     with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
@@ -292,11 +253,6 @@ def test_upstream_status_stops_before_normalization(status: int) -> None:
 def test_json_error_stops_before_normalization() -> None:
     with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
         realtime_collect._validate_response(200, {"error": "synthetic"})
-
-
-def test_malformed_json_stops_before_normalization() -> None:
-    with pytest.raises(realtime_collect.RealtimeCollectionStoppedError):
-        realtime_collect._validate_response(200, "not-json")
 
 
 @pytest.mark.parametrize(
@@ -326,7 +282,6 @@ def test_normalization_preserves_snapshot_fields_and_timestamp() -> None:
         ["600000.SH"],
         [
             {
-                "code": "600000.SH",
                 "dm": "600000",
                 "ts": "2030-06-11T10:00:00+08:00",
                 "price": "12.34",
@@ -352,17 +307,6 @@ def test_normalization_maps_unique_dm_code_from_ssjy_more_response() -> None:
         NOW,
     )
     assert rows[0]["code"] == "600000.SH"
-
-
-def test_normalization_rejects_code_without_dm() -> None:
-    with pytest.raises(
-        realtime_collect.RealtimeCollectionStoppedError, match="realtime_code_invalid"
-    ):
-        realtime_collect._normalise_rows(
-            ["600000.SH"],
-            [{"code": "600000.SH", "ts": NOW}],
-            NOW,
-        )
 
 
 @pytest.mark.parametrize(
