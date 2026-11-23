@@ -1,4 +1,6 @@
-# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v4（T-R88；v3 为 T-R49；v2 为 T-R20，v1 为 T-R15，纯离场系统组件）
+# H-01 持仓风险体检 `hold_risk_monitor` — 正式卡 v5（T-R88；v3 为 T-R49；v2 为 T-R20，v1 为 T-R15，纯离场系统组件）
+> **v5 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v4 → v5；新增 `min_list_days` 整数交易日字段，默认 250 个交易日；**只用于 G6 历史样本资格筛选，不门控持仓风险实时求值**（新上市持仓照常体检），规则与 data_needs 不变。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v4 原文冻结在 `cards/history/hold_risk_monitor.v4.md`。
+
 > **v4 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v3 → v4；本版除补参数出处外，还补 A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v3 原文冻结在 `cards/history/hold_risk_monitor.v3.md`。新版本须重新导入并重跑 G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待 Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 
 > 正式卡。导入格式：plan 2.5.14 A 节三个带标签块。`mount_policy: system_only` 纯离场组件（G1 豁免依据，plan 2.5.14 T-R15 裁定②；用户 POST /strategy-instances → 422 `STRATEGY_SYSTEM_ONLY`）：规则只含 exit/weakening/counter/invalidation，`action_map` 不含 buy/add，**不产生任何新开仓**；只对持有中证券求值，未持有不出现在结论中；不能被用户实例化为普通模板。
@@ -13,6 +15,7 @@
 - N-01 风险公告对持仓只作反证（由系统组件挂载，不在本卡重复），不直接触发卖出。
 
 ## 时点 / 单位 / 复权 / 预热
+- **上市年龄资格（`min_list_days`）**：字段为整数，单位是交易日；默认值 250；只作 G6 历史样本资格，不门控实时持仓体检，未满门槛的持仓仍照常求值。上海证券交易所《关于修订上证综合指数编制的答记者问》说明新股通常上市满 1 年后计入上证综合指数，作为长期样本的机构采用例证（https://www.sse.com.cn/aboutus/mediacenter/conference/c/c_20200619_5130972.shtml）。本卡按约 250 个交易日换算并取长期周期的偏严门槛；该机构口径只证明采用过一年期限，A 股有效性未验证（待复测）。
 - 日线盘后求值（X1 另在盘中快照求值）；只用 as_of 及以前数据。价格统一 qfq@as_of（`x_qfq(d)=x(d)×A(d)/A(T)`）（出处：docs/contracts/trading-calendar-exrights.md:47）；`ctx.cost_price` 持久化为不复权摊薄成本（分红计入，问题 19），规则只用 `ctx.cost_price_qfq`；`ctx.last_price` 只与不复权 `plan.stop_loss` 比较。`ctx.position_weight`/`ctx.sector_weight` 为 0–1 小数。
 - 预热：MA60 + 3 − 1 = 62 根有效日 K，ATR14 15 根；不足时对应规则 `passed=null`。停牌日不计入有效 K。
 - 板块：涨跌停价按 `config/market_rules.yaml`（创业板/科创板现行 20%；注册制新股上市前 5 日无涨跌幅、limit 价 null）；止损价截断到涨跌停价之内。T+1：当日买入部分可卖 0，信号照常、执行层 `T1_NOT_SELLABLE`。科创板持仓 < 200 股为零股，卖出/减仓须一次性全部申报（计划确认时按 `lot_rule` 校验）。
@@ -46,7 +49,7 @@ H-01 不预测收益。可检验的部分只有两条：跌破成本缓冲（X2�
 
 ```yaml strategy-card
 key: hold_risk_monitor
-version_no: 4
+version_no: 5
 name: 持仓风险体检
 category: risk
 horizons: [intraday_t, short, swing, long]
@@ -81,6 +84,7 @@ data_needs:
   - {feature_key: f.limit_down_price, frequency: daily, adjust: none, available_at: T 日开盘前（无涨跌幅日为 null）}
   - {feature_key: f.limit_locked_down, frequency: daily, adjust: none, available_at: T 日日线入库后}
 epistemic:
+  params_schema.min_list_days: hypothesis
   hypothesis: hypothesis
   params_schema.cost_atr_k: hypothesis
   params_schema.ma_long: hypothesis
@@ -115,10 +119,12 @@ validation_summary: {type: rule, window: 未执行, benchmark: 继续持有, cos
 
 ```yaml strategy-spec
 key: hold_risk_monitor
-version_no: 4
+version_no: 5
 kind: rule_template
+min_list_days: 250
 horizons: [intraday_t, short, swing, long]
 params_schema:
+  min_list_days: {type: int, default: 250, min: 120, max: 250, step: 10, desc: 上市交易日下限（G6样本资格）, unit: 交易日}
   ma_long: {type: int, default: 60, min: 40, max: 120, step: 5, desc: 长期均线周期, unit: 有效日K}
   ma_break_days: {type: int, default: 3, min: 2, max: 5, step: 1, desc: 跌破长期均线确认根数, unit: 有效日K}
   reclaim_days: {type: int, default: 2, min: 1, max: 5, step: 1, desc: 重新站上长期均线确认根数, unit: 有效日K}
@@ -148,7 +154,7 @@ screen: null
 - 只改 `hypothesis.why_it_works`、`hypothesis.falsified_by`、正文「反证 / 失效」一句、标题与 `version_no: 3`；规则、参数、`data_needs`、`epistemic`、`universe`、成本、夹具与期望值均不变。
 - 前后差异：集中度从可检验的预测机制中移出，改为组合风险限额（T-A112 §1.8 方案 B）。W2/W3 仍按原规则触发 weakening/reduce，含义是限额的执行，不是「超限会导致亏损或更差收益」的预测；state 与 action 不受影响。证伪口径由「显著」「超额」无定义改为下节确定性规格。
 
-## 证伪口径（v4，确定性规格；只在 A 线模拟跟踪上判定）
+## 证伪口径（v5，确定性规格；只在 A 线模拟跟踪上判定）
 只用 `verified_doc` 键：`f.close_qfq`、`f.high_qfq`、`f.low_qfq`、`f.amount`、`f.is_suspended`、`f.limit_locked_down`、`f.market_regime_idx`（仅分组展示）；另用本卡规则已用的持仓上下文与卡面成本参数，不新增数据需求。不做历史回测（qfq 历史回写值不作时点依据）。结论用语为「候选信号 / 计划条件」。
 
 **公共口径（F1、F2 共用）**
