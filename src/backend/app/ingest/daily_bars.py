@@ -95,6 +95,36 @@ def daily_bars_batch_budget(value: object, batch_kind: str = "daily") -> DailyBa
     return DailyBarsBudget(kind="unset")
 
 
+def configure_daily_bars_batch_limits(daily: object, backfill: object) -> None:
+    """Apply validated process configuration to the two batch gates.
+
+    The module-level zero values remain fail-closed until a Settings-derived
+    configuration is explicitly applied by the scheduling or ingest process.
+    """
+    daily_budget = daily_bars_batch_budget(daily, "daily")
+    backfill_budget = daily_bars_batch_budget(backfill, "backfill")
+    if daily_budget.kind != "capped" or backfill_budget.kind != "capped":
+        raise ValueError("daily bars batch limits must be positive and within their ceilings")
+    global DAILY_BARS_BATCH_LIMIT, DAILY_BARS_BACKFILL_BATCH_LIMIT
+    DAILY_BARS_BATCH_LIMIT = daily_budget.cap or 0
+    DAILY_BARS_BACKFILL_BATCH_LIMIT = backfill_budget.cap or 0
+
+
+def configure_daily_bars_from_settings(settings: object) -> None:
+    """Apply the validated Settings batch limits when they are available."""
+    daily = getattr(settings, "ingest_daily_batch_limit", None)
+    backfill = getattr(settings, "ingest_history_batch_limit", None)
+    if daily is None and backfill is None:
+        business = getattr(settings, "business", None)
+        ingest = getattr(business, "ingest", None)
+        daily_bars = getattr(ingest, "daily_bars", None)
+        if daily_bars is None:
+            return
+        daily = getattr(daily_bars, "batch_limit", None)
+        backfill = getattr(daily_bars, "backfill_batch_limit", None)
+    configure_daily_bars_batch_limits(daily, backfill)
+
+
 def _transport_disabled(code: str, start: dt.date, end: dt.date) -> tuple[int, DailyBar | None]:
     raise RuntimeError("daily bars HTTP transport is not enabled")
 

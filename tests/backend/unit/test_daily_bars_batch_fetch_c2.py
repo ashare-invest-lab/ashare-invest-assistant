@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from app.config import Settings
 from app.ingest import daily_bars as ingest
 
 OWNER = uuid.UUID(int=731)
@@ -132,3 +133,32 @@ def test_window_never_selects_larger_backfill_gate_implicitly(
     monkeypatch.setattr(ingest, "DAILY_BARS_BACKFILL_BATCH_LIMIT", 4)
     assert fetch(world, window=1) == 0
     assert len(world.calls) == 2
+
+
+def test_settings_expose_bounded_positive_batch_limits() -> None:
+    settings = Settings()
+    assert settings.ingest_daily_batch_limit == 500
+    assert settings.ingest_history_batch_limit == 2000
+    with pytest.raises(ValueError):
+        Settings(ingest_daily_batch_limit=501)
+    with pytest.raises(ValueError):
+        Settings(ingest_history_batch_limit=2001)
+
+
+def test_settings_apply_bounded_positive_batch_limits() -> None:
+    settings = SimpleNamespace(ingest_daily_batch_limit=7, ingest_history_batch_limit=19)
+    ingest.configure_daily_bars_from_settings(settings)
+    assert ingest.DAILY_BARS_BATCH_LIMIT == 7
+    assert ingest.DAILY_BARS_BACKFILL_BATCH_LIMIT == 19
+
+
+def test_settings_reject_batch_limits_outside_type_ceiling() -> None:
+    settings = SimpleNamespace(
+        business=SimpleNamespace(
+            ingest=SimpleNamespace(
+                daily_bars=SimpleNamespace(batch_limit=501, backfill_batch_limit=19)
+            )
+        )
+    )
+    with pytest.raises(ValueError, match="batch limits"):
+        ingest.configure_daily_bars_from_settings(settings)

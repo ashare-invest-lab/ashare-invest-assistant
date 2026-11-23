@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
+from typing import Protocol, cast, runtime_checkable
 
 import redis
 from sqlalchemy import Connection, Engine, select, update
@@ -39,6 +40,22 @@ from app.marketdata.daily_bars_outbox import batch_budget, valid_grant
 from app.master.vendor import licence_available
 
 GrantReader = Callable[[uuid.UUID], fetcher.DailyBarsGrant | None]
+
+
+@runtime_checkable
+class TransportBinder(Protocol):
+    def bind(
+        self,
+        *,
+        engine: Engine,
+        lease: object,
+        item: Mapping[str, object],
+        clock: fetcher.Clock,
+        stop: Path,
+        halt: Path,
+    ) -> fetcher.Transport: ...
+
+
 RESUME_PENDING = "daily_bars_resume_pending"
 
 
@@ -107,7 +124,7 @@ def process(
     engine: Engine,
     item_id: uuid.UUID,
     *,
-    transport: fetcher.Transport | None = None,
+    transport: fetcher.Transport | TransportBinder | None = None,
     grant_reader: GrantReader | None = None,
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
     stop: Path = LISTS_STOP,
@@ -118,6 +135,7 @@ def process(
     """Reserve before HTTP, never replay an uncertain batch, update its original run."""
     if transport is None:
         return "disabled"
+    sender = transport
     read = grant_reader or (lambda owner: fetcher.read_daily_bars_grant(now=clock(), user_id=owner))
     # Same outermost session lock as the daily lists, across reservation commits.
     with single_egress(engine) as lease:
@@ -194,6 +212,15 @@ def process(
             ):
                 return "delayed"
             conn.execute(update(outbox).where(outbox.c.id == item_id).values(status="running"))
+        if isinstance(sender, TransportBinder):
+            sender = sender.bind(
+                engine=engine,
+                lease=lease,
+                item=cast(Mapping[str, object], item),
+                clock=clock,
+                stop=stop,
+                halt=halt,
+            )
         attempted = False
         resume_pending = False
         window_deferred = False
@@ -263,7 +290,7 @@ def process(
             if stop.exists() or halt.exists():
                 raise UpstreamHaltError()
             try:
-                status, bar = transport(code, start, end)
+                status, bar = sender(code, start, end)
             except (DailyHaltError, EgressDenied):
                 raise UpstreamHaltError() from None
             if limited(status, bar) or (
@@ -548,7 +575,7 @@ def tick(
     engine: Engine,
     *,
     redis_client: redis.Redis | None = None,
-    transport: fetcher.Transport | None = None,
+    transport: fetcher.Transport | TransportBinder | None = None,
     grant_reader: GrantReader | None = None,
     clock: fetcher.Clock = lambda: dt.datetime.now(dt.UTC),
     stop: Path = LISTS_STOP,
@@ -609,7 +636,7 @@ def tick(
         process,
         engine,
         item_id,
-        sender=transport,
+        sender=cast(Callable[..., object], transport),
         grant_reader=grant_reader,
         clock=clock,
         stop=stop,

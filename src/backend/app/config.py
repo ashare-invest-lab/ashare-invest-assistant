@@ -485,6 +485,8 @@ class Settings(BaseSettings):
     # --- ingest 新鲜度（/health/ready 的 ingest 字段，契约 §7.10）---
     # 未设置环境变量时取 ingest.yaml 的 heartbeat 段（见 _ingest_keys_from_yaml）；
     # 下面的默认值只在直接构造 Settings 且不经 yaml 来源时生效，与 plan §6.1 一致。
+    ingest_daily_batch_limit: int = Field(default=500, gt=0, le=500)
+    ingest_history_batch_limit: int = Field(default=2000, gt=0, le=2000)
     ingest_heartbeat_key: str = Field(default="ingest:heartbeat", min_length=1)
     ingest_paused_key: str = Field(default="ingest:paused", min_length=1)
     ingest_stale_after_s: int = Field(default=120, gt=0)

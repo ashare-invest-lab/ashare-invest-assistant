@@ -17,21 +17,28 @@ T-B114：启动时正式接线 ``set_ingest_core(IngestCore(..., engine=...))``�
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
 import socket
 import sys
 import time
-from collections.abc import Mapping
+import uuid
+from collections.abc import Callable, Mapping
 from contextlib import suppress
+from decimal import Decimal
+from pathlib import Path
+from typing import cast
 
 import redis
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.config import Settings
+from app.ingest import daily_bars as daily_bars_config
 from app.ingest import netguard as _netguard
+from app.marketdata.daily_bars import DailyBar, DailyBarsResult
 from app.version import APP_VERSION
 from app.workers.runner import run
 
@@ -53,6 +60,132 @@ MASTER_KEY_MESSAGE = (
     "ingest 拒绝启动：发现 APP_MASTER_KEY。主密钥只给 api / worker，ingest 不得派生任何 HMAC / "
     "签名密钥；请从 ingest 的 environment / secrets 中删除它"
 )
+
+
+def _daily_bar_rows(body: object) -> list[Mapping[str, object]]:
+    if isinstance(body, list):
+        return [row for row in body if isinstance(row, Mapping)]
+    if isinstance(body, Mapping):
+        if "t" in body:
+            return [body]
+        for key in ("data", "rows", "items", "list"):
+            value = body.get(key)
+            if isinstance(value, list):
+                return [row for row in value if isinstance(row, Mapping)]
+    return []
+
+
+def _daily_bar_date(value: object) -> dt.date | None:
+    try:
+        text = str(value)
+        if len(text) == 8 and text.isdigit():
+            return dt.datetime.strptime(text, "%Y%m%d").date()
+        return dt.date.fromisoformat(text[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _daily_bar_decimal(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+
+def _decode_daily_bars(
+    code: str, start: dt.date, end: dt.date, body: object
+) -> DailyBarsResult:
+    bars: list[DailyBar] = []
+    for row in _daily_bar_rows(body):
+        day = _daily_bar_date(row.get("t"))
+        if day is None or not start <= day <= end:
+            continue
+        flag = row.get("sf")
+        if flag in (1, "1", True):
+            bars.append(DailyBar(code, day, "none", None, None, None, None, None, None, None, True))
+            continue
+        if flag not in (0, "0", False):
+            continue
+        values = tuple(
+            _daily_bar_decimal(row.get(key)) for key in ("o", "h", "l", "c", "pc", "a")
+        )
+        volume = _daily_bar_decimal(row.get("v"))
+        if any(value is None for value in values) or volume is None:
+            continue
+        open_, high, low, close, pre_close, amount = values
+        bars.append(
+            DailyBar(
+                code,
+                day,
+                "none",
+                open_,
+                high,
+                low,
+                close,
+                pre_close,
+                volume * Decimal(100),
+                amount,
+                False,
+            )
+        )
+    return DailyBarsResult(bars=tuple(bars))
+
+
+class MairuiDailyBarsTransport:
+    """Bind the daily-bar callback to the consumer's held egress lease."""
+
+    def bind(
+        self,
+        *,
+        engine: Engine,
+        lease: object,
+        item: Mapping[str, object],
+        clock: Callable[[], dt.datetime],
+        stop: Path,
+        halt: Path,
+    ) -> Callable[[str, dt.date, dt.date], tuple[int, DailyBar | DailyBarsResult | None]]:
+        from app.ingest.daily_lists import credential
+        from app.ingest.egress import EgressLease, mairui_get
+        from app.ingest.runtime import get_ingest_core
+        from app.ingest.state import Priority
+
+        licence_id = cast(uuid.UUID, item["source_licence_id"])
+        user_id = cast(uuid.UUID, item["user_id"])
+        egress_lease = cast(EgressLease, lease)
+        secret = credential(engine, licence_id)
+        core = get_ingest_core()
+
+        def send(
+            code: str, start: dt.date, end: dt.date
+        ) -> tuple[int, DailyBar | DailyBarsResult | None]:
+            path = (
+                f"/hsstock/history/{code}/d/n/?st={start.strftime('%Y%m%d')}"
+                f"&et={end.strftime('%Y%m%d')}&"
+            )
+            result = mairui_get(
+                lease=egress_lease,
+                core=core,
+                engine=engine,
+                licence_id=licence_id,
+                user_id=user_id,
+                path=path,
+                secret=secret,
+                priority=Priority.P1,
+                clock=clock,
+                stop=stop,
+                halt=halt,
+            )
+            if result.status in {101, 103, 429, 503}:
+                return result.status, DailyBarsResult(halted=str(result.status))
+            return result.status, _decode_daily_bars(code, start, end, result.body)
+
+        return send
+
+
+DAILY_BARS_TRANSPORT = MairuiDailyBarsTransport()
+
 
 #: T-B114：无 DATABASE_URL / engine 不可用时拒绝启动（退出码 78，与 L-1′ 一致）
 NO_DATABASE_URL_MESSAGE = (
@@ -162,7 +295,11 @@ def write_heartbeat(settings: Settings) -> None:
                 except Exception:  # noqa: BLE001 - keep heartbeat running
                     logging.warning("verify_licence tick failed")
                 if getattr(settings, "daily_bars_source", "off") == "mairui":
-                    tick_bars(shared_engine)
+                    daily_bars_config.configure_daily_bars_from_settings(settings)
+                    tick_bars(
+                        shared_engine,
+                        transport=DAILY_BARS_TRANSPORT,
+                    )
                     wake_delayed(shared_engine, client)
             elif settings.database_url is not None:
                 engine = engine_for(settings.database_url.get_secret_value(), profile="ingest")
@@ -173,7 +310,11 @@ def write_heartbeat(settings: Settings) -> None:
                     except Exception:  # noqa: BLE001 - keep heartbeat running
                         logging.warning("verify_licence tick failed")
                     if getattr(settings, "daily_bars_source", "off") == "mairui":
-                        tick_bars(engine)
+                        daily_bars_config.configure_daily_bars_from_settings(settings)
+                        tick_bars(
+                            engine,
+                            transport=DAILY_BARS_TRANSPORT,
+                        )
                         wake_delayed(engine, client)
                 finally:
                     engine.dispose()

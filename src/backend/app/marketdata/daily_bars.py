@@ -823,8 +823,10 @@ def daily_bars_fetch_task(
     batch_kind: str = "daily",
     batch_seq: int = 0,
 ) -> int:
+    from app.ingest.daily_bars import configure_daily_bars_from_settings
     from app.workers.jobs import _engine
 
+    configure_daily_bars_from_settings(settings)
     day, uid = _validate_task_args(trade_date, user_id, window_trading_days)
     if batch_kind == "backfill" and window_trading_days is None:
         raise ValueError("window_trading_days is required for backfill")

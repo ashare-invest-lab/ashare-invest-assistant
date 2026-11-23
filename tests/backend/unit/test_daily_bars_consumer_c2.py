@@ -110,7 +110,7 @@ def world(pg_url, monkeypatch, tmp_path):
         def transport(code, start, end):
             state.calls.append(code)
             assert start == end == DAY
-            price = Decimal("1")
+            price = Decimal(1)
             return 200, DailyBar(
                 code, DAY, "none", price, price, price, price, price, price, price, False
             )
@@ -346,10 +346,11 @@ def test_heartbeat_hooks_only_matching_source_with_zero_default_io(monkeypatch, 
     monkeypatch.setattr(verify_licence, "tick", lambda *a, **k: events.append("verify"))
     actual_tick = module.tick
 
-    def observed_tick(arg):
+    def observed_tick(arg, **kwargs):
         assert arg is engine
+        assert kwargs["transport"] is worker.DAILY_BARS_TRANSPORT
         events.append("bars")
-        return actual_tick(arg)
+        return actual_tick(arg, **kwargs)
 
     monkeypatch.setattr(module, "tick", observed_tick)
     settings = SimpleNamespace(
