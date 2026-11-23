@@ -24,7 +24,7 @@
 
 ## 安装器行为
 
-`deploy/scripts/install-mairui-daily-receipts.sh` 使用固定的 `alpine:3.21` 镜像摘要、root 用户和 `--network none`。它只在临时目录或指定的 `aia_receipts` 具名卷中写入两个文件，并且：
+`deploy/scripts/install-mairui-daily-receipts.sh` 使用下方固定摘要的 Alpine 镜像、root 用户和 `--network none`。它只在临时目录或指定的 `aia_receipts` 具名卷中写入两个文件，并且：
 
 - 创建或校验 root 所有、`0755` 的回执目录。
 - 创建 root:root、`0444` 的普通文件。
@@ -72,6 +72,11 @@ docker run --rm --network none --user 10001:10001 \
       exit 1
     fi
   '
+
+docker run --rm --network none --user 0 \
+  -v "$TMP_DIR:/run/aia/receipts" "$IMAGE" sh -ceu '
+  chmod 0644 /run/aia/receipts/mairui-daily-bars.json /run/aia/receipts/mairui-daily.json
+'
 ```
 
 在与后端依赖一致的 Linux/WSL 环境执行下面的只读校验。它只读取临时目录中的虚构回执，不读取证书或密钥：
@@ -94,8 +99,6 @@ assert read_daily_bars_grant(
     root / "mairui-daily-bars.json", now=now, user_id=user_id
 ) is not None
 
-(root / "mairui-daily.json").chmod(0o644)
-(root / "mairui-daily-bars.json").chmod(0o644)
 assert read_grant(root / "mairui-daily.json") is None
 assert read_daily_bars_grant(
     root / "mairui-daily-bars.json", now=now, user_id=user_id

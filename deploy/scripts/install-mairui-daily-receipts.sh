@@ -79,14 +79,17 @@ end_epoch="$(date -u -d "$expires_at" +%s)"
 ((start_epoch < end_epoch)) || { echo "expires_at 必须晚于 not_before" >&2; exit 2; }
 
 if [[ -n "$volume" ]]; then
-  [[ "$volume" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || {
-    echo "具名卷名称不合法" >&2
+  [[ "$volume" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ && "$volume" =~ (^|_)aia_receipts$ ]] || {
+    echo "具名卷名称必须是合法的 *_aia_receipts 卷" >&2
     exit 2
   }
   mount="$volume:/run/aia/receipts"
   destination="具名卷"
 else
-  [[ "$target" != "/" && ! -L "$target" ]] || { echo "临时目录不能是根目录或符号链接" >&2; exit 2; }
+  [[ "$target" = /* && "$target" != "/" && ! -L "$target" ]] || {
+    echo "临时目录必须是绝对路径且不能是根目录或符号链接" >&2
+    exit 2
+  }
   [[ -d "$target" ]] || mkdir -p "$target"
   target="$(cd "$target" && pwd -P)"
   mount="$target:/run/aia/receipts"
