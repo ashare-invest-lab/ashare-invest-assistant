@@ -30,10 +30,10 @@ V0210 = "v0.2.10"
 CONTRACT_VERSION = "v0.2.11"
 #: 用旧一版文档（origin/main 仍为 v0.2.7）运行时 xfail 而不是失败
 DOCS_PENDING = "docs 仍为 v0.2.7：契约 v0.2.8（T-A09 6ef79c4）未推到 origin（运维推送）"
-#: 各版本契约的错误码 / 原因码个数（v0.2.7、v0.2.8 无新增错误码、原因码：59 / 22）。评审 d018fad M2：错误码个数改为从
+#: 各版本契约的错误码 / 原因码个数（v0.2.7、v0.2.8 无新增错误码、原因码：59 / 22；v0.2.11 为 23）。评审 d018fad M2：错误码个数改为从
 #: 契约 §4 表解析（contract_error_row_count；v0.2.9 #34 加 414 URI_TOO_LONG 后为 60），此处第 1 项仅作历史记录，不再断言
 CODE_COUNTS = {"v0.2.4": (58, 23), "v0.2.5": (56, 22), "v0.2.6": (59, 22), "v0.2.7": (59, 22), "v0.2.8": (59, 22),
-               "v0.2.9": (59, 22), V0210: (60, 22), CONTRACT_VERSION: (60, 22)}  # M1 保持错误码 / 原因码
+               "v0.2.9": (59, 22), V0210: (60, 22), CONTRACT_VERSION: (60, 23)}  # T-B244 当前契约新增原因码
 #: 契约 v0.2.8（T-A09 #4–#9）改动的已有枚举：security_type 加 etf（位于 cdr 与 index 之间）、gap_reason 加 not_applicable
 V028_ENUM_CHANGED = {"security_type": ["stock", "cdr", "etf", "index"]}
 V028_ENUM_ADDED = {"gap_reason": "not_applicable"}
@@ -222,21 +222,23 @@ def test_contract_parsers_sanity(contract):
 
 def test_v025_contract_drops_consent_and_assessment_items(contract):
     """v0.2.5 组 1（文档层）：契约 §3/§4/§6.1 不再有同意/测评枚举、``CONSENT_REQUIRED``、``STRATEGY_FIT_ACK_REQUIRED``、
-    ``PROFILE_OR_CONSENT_MISSING``；原因码 22 个（错误码个数取契约 §4 表行数）。"""
+    ``PROFILE_OR_CONSENT_MISSING``；历史版本原因码 22 个、当前 v0.2.11 为 23 个（错误码个数取契约 §4 表行数）。"""
     if not _is_v025(contract):
         pytest.xfail(DOCS_PENDING)
     enums, errors, reasons = parse_enums(contract), parse_error_codes(contract), parse_reason_codes(contract)
     assert not set(V025_RETIRED_ENUMS) & set(enums)
     assert not set(V025_RETIRED_ERRORS) & set(errors) and len(errors) == contract_error_row_count(contract)
-    assert not set(V025_RETIRED_REASONS) & set(reasons) and len(reasons) == 22
+    expected = 23 if _docs_version(contract) == CONTRACT_VERSION else 22
+    assert not set(V025_RETIRED_REASONS) & set(reasons) and len(reasons) == expected
 
 
 def test_v025_meta_enums_drops_consent_and_assessment_items(payload):
-    """v0.2.5 组 1（接口层，后端 4162abb 已同步）：``/meta/enums`` 不含作废枚举；``reason_codes`` 22 个且不含
+    """v0.2.5 组 1（接口层，后端 4162abb 已同步）：``/meta/enums`` 不含作废枚举；历史版本 ``reason_codes`` 22 个，当前 v0.2.11 为 23 个，且不含
     PROFILE_OR_CONSENT_MISSING；``error_codes`` 不含 CONSENT_REQUIRED、STRATEGY_FIT_ACK_REQUIRED（version 见 test_version_and_import_codes）。"""
     assert not set(V025_RETIRED_ENUMS) & set(payload["enums"])
     reasons = {r["code"] for r in payload["reason_codes"]}
-    assert len(reasons) == 22 and not set(V025_RETIRED_REASONS) & reasons
+    expected = 23 if payload["version"] == CONTRACT_VERSION else 22
+    assert len(reasons) == expected and not set(V025_RETIRED_REASONS) & reasons
     assert not set(V025_RETIRED_ERRORS) & {e["code"] for e in payload["error_codes"]}
 
 

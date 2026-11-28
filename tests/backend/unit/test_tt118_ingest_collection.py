@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,20 +18,19 @@ from zoneinfo import ZoneInfo
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, delete, insert, text
-from sqlalchemy.engine import make_url
-
 from app.config import Settings, load_yaml_dir
 from app.db.tables.licences import user_data_licences
 from app.db.tables.market import securities, trading_calendar
 from app.db.tables.research import watchlist_items
 from app.db.tables.users import users
 from app.workers import jobs
+from sqlalchemy import create_engine, delete, insert, text
+from sqlalchemy.engine import make_url
 
 TASK = "market.realtime_quotes_fetch"
 OWNER = UUID("00000000-0000-4000-8000-000000001118")
 LICENCE = UUID("00000000-0000-4000-8000-000000001119")
-CODES = ("SYN001.SH", "SYN002.SH")
+CODES = ("600001.SH", "600002.SH")
 NOW = dt.datetime(2030, 6, 11, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 SOCKET_ATTEMPTS: list[object] = []
 
@@ -114,7 +114,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 def _engine() -> object:
-    pg_url = os.environ["AIA_TEST_DATABASE_URL"]
+    pg_url = os.environ.get("AIA_TEST_DATABASE_URL") or os.environ["DATABASE_URL"]
     backend = Path(__file__).resolve().parents[3] / "src" / "backend"
     alembic = Config(str(backend / "alembic.ini"))
     alembic.cmd_opts = SimpleNamespace(x=[f"url={pg_url}"])
@@ -122,16 +122,21 @@ def _engine() -> object:
     return create_engine(make_url(pg_url).set(drivername="postgresql+psycopg"))
 
 
+def _cleanup(conn: object) -> None:
+    conn.execute(  # type: ignore[union-attr]
+        text("DELETE FROM market.quotes_snapshot WHERE code IN (:a, :b)"),
+        {"a": CODES[0], "b": CODES[1]},
+    )
+    conn.execute(delete(watchlist_items).where(watchlist_items.c.user_id == OWNER))  # type: ignore[union-attr]
+    conn.execute(delete(user_data_licences).where(user_data_licences.c.id == LICENCE))  # type: ignore[union-attr]
+    conn.execute(delete(users).where(users.c.id == OWNER))  # type: ignore[union-attr]
+    conn.execute(delete(securities).where(securities.c.code.in_(CODES)))  # type: ignore[union-attr]
+    conn.execute(delete(trading_calendar).where(trading_calendar.c.date == NOW.date()))  # type: ignore[union-attr]
+
+
 def _seed(engine: object) -> None:
     with engine.begin() as conn:  # type: ignore[union-attr]
-        conn.execute(
-            text("DELETE FROM market.quotes_snapshot WHERE code IN (:a, :b)"),
-            {"a": CODES[0], "b": CODES[1]},
-        )
-        conn.execute(delete(watchlist_items).where(watchlist_items.c.user_id == OWNER))
-        conn.execute(delete(user_data_licences).where(user_data_licences.c.id == LICENCE))
-        conn.execute(delete(users).where(users.c.id == OWNER))
-        conn.execute(delete(securities).where(securities.c.code.in_(CODES)))
+        _cleanup(conn)
         conn.execute(
             insert(users).values(
                 id=OWNER,
@@ -174,8 +179,18 @@ def _seed(engine: object) -> None:
                 for code in CODES
             ],
         )
-        conn.execute(delete(trading_calendar).where(trading_calendar.c.date == NOW.date()))
         conn.execute(insert(trading_calendar).values(date=NOW.date(), is_open=True))
+
+
+@pytest.fixture
+def isolated_engine() -> Iterator[object]:
+    engine = _engine()
+    try:
+        yield engine
+    finally:
+        with engine.begin() as conn:  # type: ignore[union-attr]
+            _cleanup(conn)
+        engine.dispose()  # type: ignore[union-attr]
 
 
 def _patch_replay(
@@ -193,6 +208,7 @@ def _patch_replay(
     body = [
         {
             "code": CODES[0],
+            "dm": "600001",
             "ts": "2030-06-11T10:00:00+08:00",
             "price": "10.00",
             "pct_change": "1.25",
@@ -201,6 +217,7 @@ def _patch_replay(
         },
         {
             "code": CODES[1],
+            "dm": "600002",
             "ts": "2030-06-11T10:00:00+08:00",
             "price": "20.00",
             "pct_change": "2.50",
@@ -255,6 +272,8 @@ def _patch_replay(
         monkeypatch.setattr(collect_module, "single_egress", counting_single_egress)
     if collect_module is not None and getattr(collect_module, "verification_is_offline", None) is not None:
         monkeypatch.setattr(collect_module, "verification_is_offline", lambda: False)
+    if collect_module is not None and getattr(collect_module, "get_ingest_core", None) is not None:
+        monkeypatch.setattr(collect_module, "get_ingest_core", lambda: object())
     return replay_transport, audit
 
 
@@ -265,7 +284,7 @@ def _call_entry(
     transport: object,
     monkeypatch: pytest.MonkeyPatch,
 ) -> object:
-    module, name, function = entry
+    _module, name, function = entry
     settings = _settings(monkeypatch)
 
     def load_secret(engine: object, licence_id: UUID) -> str:
@@ -281,10 +300,17 @@ def _call_entry(
         "stop": tmp_path / "stop",
         "halt": tmp_path / "halt",
     }
-    if name == "collect_realtime_quotes":
-        with engine.connect() as conn:  # type: ignore[union-attr]
-            return function(conn, settings, **kwargs)
-    return function(settings, **kwargs)
+    from app.ingest.core import IngestCore
+    from app.ingest.runtime import set_ingest_core
+
+    set_ingest_core(IngestCore(cfg=settings.business.ingest.licences, engine=engine))  # type: ignore[arg-type]
+    try:
+        if name == "collect_realtime_quotes":
+            with engine.connect() as conn:  # type: ignore[union-attr]
+                return function(conn, settings, **kwargs)
+        return function(settings, **kwargs)
+    finally:
+        set_ingest_core(None)
 
 
 def _rows(engine: object) -> list[object]:
@@ -362,26 +388,22 @@ def test_worker_mairui_client_is_rejected(monkeypatch: pytest.MonkeyPatch) -> No
     reason="T-B221 未实现：没有可调用的 ingest 公共实时采集入口",
 )
 def test_replay_injected_transport_has_zero_socket_calls(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_engine: object
 ) -> None:
     entry = _require_entry()
-    engine = _engine()
-    _seed(engine)
+    _seed(isolated_engine)
     calls: list[tuple[str, str]] = []
     transport, audit = _patch_replay(monkeypatch, calls)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
-    try:
-        _call_entry(entry, engine, tmp_path, transport, monkeypatch)
-        rows = _rows(engine)
-        assert calls, "注入 transport 未被调用"
-        assert audit["single_egress"], "采集未进入 single_egress 单一出口"
-        assert audit["leases"] and all(lease is not None for lease in audit["leases"])
-        assert all(not hasattr(lease, "held") or lease.held for lease in audit["leases"])
-        assert audit["mairui_get"], "采集未调用 mairui_get"
-        assert rows, "行情响应未解析并写入 market.quotes_snapshot"
-        assert SOCKET_ATTEMPTS == []
-    finally:
-        engine.dispose()
+    _call_entry(entry, isolated_engine, tmp_path, transport, monkeypatch)
+    rows = _rows(isolated_engine)
+    assert calls, "注入 transport 未被调用"
+    assert audit["single_egress"], "采集未进入 single_egress 单一出口"
+    assert audit["leases"] and all(lease is not None for lease in audit["leases"])
+    assert all(not hasattr(lease, "held") or lease.held for lease in audit["leases"])
+    assert audit["mairui_get"], "采集未调用 mairui_get"
+    assert rows, "行情响应未解析并写入 market.quotes_snapshot"
+    assert SOCKET_ATTEMPTS == []
 
 
 @pytest.mark.xfail(
@@ -390,27 +412,23 @@ def test_replay_injected_transport_has_zero_socket_calls(
     reason="T-B221 未实现：没有可调用的 ingest 公共实时采集入口",
 )
 def test_quote_batch_has_uuid_and_is_idempotent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_engine: object
 ) -> None:
     entry = _require_entry()
-    engine = _engine()
-    _seed(engine)
+    _seed(isolated_engine)
     calls: list[tuple[str, str]] = []
     transport, audit = _patch_replay(monkeypatch, calls)
     monkeypatch.setenv("MAIRUI_MODE", "replay")
-    try:
-        _call_entry(entry, engine, tmp_path, transport, monkeypatch)
-        first = _rows(engine)
-        assert first and len({row["batch_id"] for row in first}) == 1
-        batch_id = UUID(first[0]["batch_id"])
-        assert batch_id.int
-        assert audit["single_egress"], "采集未进入 single_egress 单一出口"
-        assert audit["leases"] and all(lease is not None for lease in audit["leases"])
-        assert all(not hasattr(lease, "held") or lease.held for lease in audit["leases"])
-        assert audit["mairui_get"], "采集未调用 mairui_get"
-        _call_entry(entry, engine, tmp_path, transport, monkeypatch)
-        second = _rows(engine)
-        assert len(second) == len(first)
-        assert calls
-    finally:
-        engine.dispose()
+    _call_entry(entry, isolated_engine, tmp_path, transport, monkeypatch)
+    first = _rows(isolated_engine)
+    assert first and len({row["batch_id"] for row in first}) == 1
+    batch_id = UUID(first[0]["batch_id"])
+    assert batch_id.int
+    assert audit["single_egress"], "采集未进入 single_egress 单一出口"
+    assert audit["leases"] and all(lease is not None for lease in audit["leases"])
+    assert all(not hasattr(lease, "held") or lease.held for lease in audit["leases"])
+    assert audit["mairui_get"], "采集未调用 mairui_get"
+    _call_entry(entry, isolated_engine, tmp_path, transport, monkeypatch)
+    second = _rows(isolated_engine)
+    assert len(second) == len(first)
+    assert calls

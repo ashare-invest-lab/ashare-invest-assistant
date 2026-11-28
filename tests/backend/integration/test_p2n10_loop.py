@@ -485,6 +485,11 @@ def test_daily_risk_tracking_loop(loop):
     assert set(before) == {1, 5, 20}
     enqueue(settings, owner, TRACK, as_of=(loop.at + dt.timedelta(days=1)).isoformat())
     assert client.get(tracking_url).json() == data
+    # GET /candidate-signals above may persist-release due time/schedule reasons
+    # (T-B244 release_due_schedule_reasons). Settle one REPORT revision, then
+    # assert a second enqueue is a no-op on the visible report.
+    enqueue(settings, owner, REPORT, trade_date=str(daily.DATE))
+    report = client.get(report_url).json()
     enqueue(settings, owner, REPORT, trade_date=str(daily.DATE))
     assert client.get(report_url).json() == report
     with engine.connect() as conn:

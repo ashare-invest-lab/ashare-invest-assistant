@@ -1,4 +1,6 @@
-# S-01 短线·强势股回踩 `st_pullback_ma` — 正式卡 v3（T-R88；v2 为 T-R55；v1 为 T-R25 首次正式化）
+# S-01 短线·强势股回踩 `st_pullback_ma` — 正式卡 v4（T-R88；v2 为 T-R55；v1 为 T-R25 首次正式化）
+> **v4 变更（T-R108，修复 #335 G6 上市年龄资格读取）**：版本 v3 → v4；补充可直接读取的 `min_list_days` 整数交易日字段，默认 60 个交易日。出处与未验证边界见“时点 / 单位 / 复权 / 预热”；lifecycle 保持 `draft`，G7 保持 ☐，不代点。v3 原文冻结在 `cards/history/st_pullback_ma.v3.md`。
+
 > **v3 变更（T-R88/T-R88c，按 T-R87 出处表补参数出处，并入 T-R91 约束和成本补文）**：版本 v2 → v3；本版除补参数出处外，还补 A 股约束和成本节；规则、参数、阈值、data_needs、universe、screen、costs 均不变；夹具及期望值不变。v2 原文冻结在 `cards/history/st_pullback_ma.v2.md`。新版本须重新导入并重跑 G1–G6；后续由正式单 T-R88（`docs/handover/team/tasks/T-R88.md`）承接导入、G1–G6、生成快照/自检适配及运行接线，待 Grok 排期，本 PR 不执行、不激活；lifecycle 保持 `draft`，G7 保持 ☐；历史变更记录中的版本号保留原义。
 > **v2 变更（T-R55，按编排者裁定 S-01 升 v2）**：v1 原文冻结在 `cards/history/st_pullback_ma.v1.md`（v1 原文冻结＝提交 055105a 的卡，即 T-B100 导入库内的 v1 内容；库内 v1 审核作废，须按 v2 重新导入并重跑 G1–G6）。相对 055105a，v1 版本号下曾有两次未升号的改动，现随 v2 一并生效：① fe2afa5（T-R40）：S01-FX1–FX8 八个夹具的 desc 前缀改为「【虚构】」（原为【入场】【不满足】等场景标签），夹具数值与期望不变；② 4c00ae7（T-R43）：卡头「与草稿的差异」增 ③「v1 选股只扫持仓 ∪ 自选」说明（screen:null、全市场 DSL 暂缓，T-A83 ④）；validation 末尾新增 S01-FX9（反证 C1 正例）与 S01-FX10（反证 C2 正例）两个【虚构】夹具。规则、参数、阈值、data_needs、universe、screen、costs 均未改；本次只把 version_no 1→2（:29、:92），并改本标题与本行。
 > 正式卡（由 T-R16/S-01_st_pullback_ma.md 草稿正式化；草稿保留过程记录）。导入格式：plan 2.5.14 A 节三个带标签块，导入器只读这三块，正文存为 `narrative`。
@@ -14,6 +16,7 @@
 - **优先级**：持有中 → exit > hold；未持有 → veto > insufficient_data > entry_ok > not_triggered。
 
 ## 时点 / 单位 / 复权 / 预热
+- **上市年龄资格（`min_list_days`）**：字段为整数，单位是交易日；默认值 60。深圳证券信息有限公司（国证指数）《深证次新股指数编制方案》规定 A 股上市交易天数不少于 45 个交易日（https://www.cnindex.com.cn/docs/gz_399678.pdf）。本卡按短线周期取 60 个交易日作为比该机构 45 日规则更严的默认值；该机构口径只证明采用过 45 日筛选，A 股有效性未验证（待复测）。
 - 日线盘后（`daily_close`）求值，只用 as_of 当日及以前的有效日 K；信号最早 T+1 09:30 执行，模拟入场价 = T+1 开盘价（出处：docs/plan.md:1283；出处：src/backend/app/tracking/engine.py:154）。无未来数据。
 - 价格统一 qfq@as_of（T-R15 ⓪）：`x_qfq(d)=x(d)×A(d)/A(T)`；止损引用的 `plan.entry_price_qfq` 由求值器派生。成交额 `f.amount` 单位元。
 - 预热：MA20 + 20 日涨幅 = 21 根；5/10/20 日均线与涨幅取最大窗口 21 根 → **warmup 25 根有效日 K**（含缓冲）；停牌日不计入有效 K；不足 → `insufficient_data`。
@@ -42,7 +45,7 @@
 
 ```yaml strategy-card
 key: st_pullback_ma
-version_no: 3
+version_no: 4
 name: 短线·强势股回踩
 category: momentum
 horizons: [short]
@@ -111,8 +114,9 @@ validation_summary: {type: rule, window: 未执行, benchmark: 所属申万一�
 
 ```yaml strategy-spec
 key: st_pullback_ma
-version_no: 3
+version_no: 4
 kind: rule_template
+min_list_days: 60
 horizons: [short]
 params_schema:
   rs_min: {type: float, default: 0.15, min: 0.10, max: 0.30, step: 0.05, desc: 20 日涨幅绝对强势阈值, unit: ratio}

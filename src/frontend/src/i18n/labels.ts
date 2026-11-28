@@ -73,7 +73,7 @@ export const REASON_CODE: Record<ReasonCode, string> = {
   INSUFFICIENT_CASH: '可用资金不足', T1_NOT_SELLABLE: 'T+1 不可卖', NO_POSITION: '无持仓', POSITION_CAP_REACHED: '单只仓位已达上限',
   STRATEGY_BUDGET_EXHAUSTED: '策略预算用尽', SECTOR_EXPOSURE_EXCEEDED: '行业暴露超限', REGIME_MISMATCH: '大盘环境或总仓位约束',
   SAME_DIRECTION_PLAN_EXISTS: '已有同向计划', CONFLICTS_CONFIRMED_PLAN: '与已确认计划相反', BLOCKLISTED: '在禁投名单',
-  COOLING_OFF: '冷静期', LOSS_STREAK_PAUSE: '连亏暂停', STRATEGY_CONFLICT: '策略方向冲突', USER_MUTED: '已屏蔽',
+  COOLING_OFF: '冷静期', SAME_TEMPLATE_COOLDOWN: '同模板同证券冷却', LOSS_STREAK_PAUSE: '连亏暂停', STRATEGY_CONFLICT: '策略方向冲突', USER_MUTED: '已屏蔽',
 };
 export const CHECK_ON: Record<CheckOn, string> = {
   tick: '盘中每轮', daily_close: '每日收盘', schedule: '到点', holding_change: '持仓变化', cash_update: '资金更新',

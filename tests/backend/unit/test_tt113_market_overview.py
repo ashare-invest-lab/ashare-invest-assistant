@@ -930,6 +930,7 @@ def test_market_overview_no_licence_or_all_future_is_unavailable(world: Overview
     assert payload["basis"] is None
     assert payload["breadth"] is None
     assert payload["turnover_total"] is None
+    assert any(gap["reason"] == "no_source" for gap in payload["gaps"])
 
 
 def test_fixture_connection_does_not_infer_owner_licence_from_market_facts() -> None:

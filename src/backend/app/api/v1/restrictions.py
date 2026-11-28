@@ -39,8 +39,15 @@ class RestrictionCreate(BaseModel):
     reason: str | None = None
 
 
-class Restriction(RestrictionCreate):
+class Restriction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: uuid.UUID
+    kind: str
+    target_type: str
+    target_id: RestrictionTargetId
+    until: dt.datetime | None
+    reason: str | None
     created_at: dt.datetime
     name: str | None
     removed_at: dt.datetime | None
@@ -59,9 +66,9 @@ class RestrictionDelete(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: uuid.UUID
-    kind: RestrictionKind
-    target_type: RestrictionTargetType
-    target_id: str
+    kind: str
+    target_type: str
+    target_id: RestrictionTargetId
     name: str | None
     until: dt.datetime | None
     reason: str | None
@@ -107,6 +114,10 @@ def _status(row: Any, now: dt.datetime) -> str:
     removed_at = getattr(row, "removed_at", None)
     if removed_at is not None:
         return "removed"
+    kind = getattr(row, "kind", None)
+    kind_value = getattr(kind, "value", kind)
+    if kind_value not in {member.value for member in RestrictionKind}:
+        return "unknown"
     until = getattr(row, "until", None)
     return "expired" if until is not None and until <= now else "active"
 

@@ -73,38 +73,37 @@ function BreadthPanel({ m }: { m: MarketOverview }) {
   const hasRatios = b?.up_ratio !== null && b?.up_ratio !== undefined
     && b.down_ratio !== null && b.down_ratio !== undefined
     && b.flat_ratio !== null && b.flat_ratio !== undefined;
-  const countText = (value: number | null) => value === null ? '—' : String(value);
+  const countText = (value: number | null | undefined) => value === null || value === undefined ? '—' : String(value);
   return (
     <section className="panel side-panel" data-testid="breadth-panel">
       <div className="panel-head"><span className="panel-title">涨跌分布</span></div>
-      {!b ? <div className="muted small hz-empty">涨跌家数暂不可用</div> : (
-        <div className="breadth">
-          {hasRatios ? <div className="breadth-bar" aria-label={`上涨 ${countText(b.up)} 家，平盘 ${countText(b.flat)} 家，下跌 ${countText(b.down)} 家`}>
-            <span className="seg up-bg" style={{ width: `${Number(b.up_ratio) * 100}%` }} />
-            <span className="seg flat-bg" style={{ width: `${Number(b.flat_ratio) * 100}%` }} />
-            <span className="seg down-bg" style={{ width: `${Number(b.down_ratio) * 100}%` }} />
-          </div> : null}
-          <div className="breadth-nums">
-            <span className="up">上涨 <b className="mono">{countText(b.up)}</b></span>
-            <span className="muted">平盘 <b className="mono">{countText(b.flat)}</b></span>
-            <span className="down">下跌 <b className="mono">{countText(b.down)}</b></span>
-          </div>
-          <div className="stat-grid two">
-            <div><label>涨停</label><b className="mono up">{countText(b.limit_up)}</b></div>
-            <div><label>跌停</label><b className="mono down">{countText(b.limit_down)}</b></div>
-            <div><label>两市成交额</label><b className="mono">{fmtAmount(m.turnover_total)}</b></div>
-            <div><label>上涨占比</label><b className="mono">{b.up_ratio === null ? '—' : `${fmtNum(Number(b.up_ratio) * 100, 1)}%`}</b></div>
-          </div>
+      {!b ? <div className="muted small hz-empty">涨跌家数暂不可用</div> : null}
+      <div className="breadth">
+        {b && hasRatios ? <div className="breadth-bar" aria-label={`上涨 ${countText(b.up)} 家，平盘 ${countText(b.flat)} 家，下跌 ${countText(b.down)} 家`}>
+          <span className="seg up-bg" style={{ width: `${Number(b.up_ratio) * 100}%` }} />
+          <span className="seg flat-bg" style={{ width: `${Number(b.flat_ratio) * 100}%` }} />
+          <span className="seg down-bg" style={{ width: `${Number(b.down_ratio) * 100}%` }} />
+        </div> : null}
+        <div className="breadth-nums">
+          <span className="up">上涨 <b className="mono">{countText(b?.up)}</b></span>
+          <span className="muted">平盘 <b className="mono">{countText(b?.flat)}</b></span>
+          <span className="down">下跌 <b className="mono">{countText(b?.down)}</b></span>
         </div>
-      )}
+        <div className="stat-grid two">
+          <div><label>涨停</label><b className="mono up">{countText(b?.limit_up)}</b></div>
+          <div><label>跌停</label><b className="mono down">{countText(b?.limit_down)}</b></div>
+          <div><label>两市成交额</label><b className="mono">{fmtAmount(m.turnover_total)}</b></div>
+          <div><label>上涨占比</label><b className="mono">{b?.up_ratio === null || b?.up_ratio === undefined ? '—' : `${fmtNum(Number(b.up_ratio) * 100, 1)}%`}</b></div>
+        </div>
+      </div>
     </section>
   );
 }
 
 function RegimePanel({ m }: { m: MarketOverview }) {
   const r = m.regime_position_range;
-  const lo = r ? Number(r.min_pct) : 0;
-  const hi = r ? Number(r.max_pct) : 0;
+  const lo = r ? Number(r.min_pct) : null;
+  const hi = r ? Number(r.max_pct) : null;
   return (
     <section className="panel side-panel" data-testid="regime-panel">
       <div className="panel-head"><span className="panel-title">大盘状态</span></div>
@@ -115,7 +114,7 @@ function RegimePanel({ m }: { m: MarketOverview }) {
         </div>
         {r ? (
           <div className="regime-bar" title="参考仓位区间（规则信号，非操作指令）">
-            <div className="band" style={{ left: `${lo}%`, width: `${hi - lo}%` }} />
+            <div className="band" style={{ left: `${lo}%`, width: `${hi! - lo!}%` }} />
           </div>
         ) : null}
         <div className="muted small" style={{ marginTop: 6 }}>由大盘规则计算的状态与参考区间，仅供对照自身仓位；不构成操作指令。</div>
