@@ -13,6 +13,7 @@ import {
   RISK_CONTROL, RISK_LEVEL, SESSION, severityTag,
 } from '../../i18n/labels';
 import { fmtNum, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
+import { isQuoteStale } from '../../lib/quoteDisplay';
 import { WatchlistToggle } from '../../features/watchlist/WatchlistToggle';
 import { WatchlistSection } from '../../features/watchlist/WatchlistSection';
 import { TViewCell } from './tView';
@@ -50,7 +51,7 @@ function Section({ title, k, data, testId, empty = '无', children, extra = 0, a
 const stockLink = (code: string | null, name: string | null) =>
   code ? <Link to={`/stocks/${encodeURIComponent(code)}`}><span className="mono">{code}</span> {name}</Link> : <span className="muted">账户级</span>;
 
-const focusColumns = (nonTradingDay: boolean): ColumnsType<TodayFocusRow> => [
+const focusColumns = (nonTradingDay: boolean, freshness: { now: string; session: string; tradeDate: string }): ColumnsType<TodayFocusRow> => [
   { title: '证券', key: 'sec', width: 150, render: (_, r) => stockLink(r.security_code, r.name) },
   { title: '现价', key: 'price', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{fmtPrice(r.quote?.price, securityTypeOf(r))}</span> },
   { title: '涨跌幅', key: 'chg', width: 80, align: 'right', render: (_, r) => <span className={`num ${pctClass(r.quote?.change_pct)}`}>{r.quote?.change_pct != null ? `${signed(r.quote.change_pct)}%` : '—'}</span> },
@@ -68,7 +69,7 @@ const focusColumns = (nonTradingDay: boolean): ColumnsType<TodayFocusRow> => [
   { title: '分时（做T视图）', key: 'tv', width: 300, render: (_, r) => (r.holding ? <TViewCell code={r.security_code} t={r.t_view} nonTradingDay={nonTradingDay} /> : <span className="muted">—</span>) },
   { title: '不可执行原因', key: 'rs', width: 96, align: 'right', render: (_, r) => (r.active_reason_count ? <span className="num">{r.active_reason_count}</span> : <span className="muted">0</span>) },
   { title: '风险', key: 'risk', width: 70, render: (_, r) => (r.max_risk_level ? <Tag color={Object.hasOwn(RISK_LEVEL, r.max_risk_level) ? RISK_LEVEL[r.max_risk_level].color : undefined}>{Object.hasOwn(RISK_LEVEL, r.max_risk_level) ? RISK_LEVEL[r.max_risk_level].text : '未知级别'}</Tag> : <span className="muted">—</span>) },
-  { title: '数据', key: 'ds', width: 120, render: (_, r) => <DataStatusTag status={r.data_status} asOf={r.data_as_of} /> },
+  { title: '数据', key: 'ds', width: 120, render: (_, r) => <DataStatusTag status={r.data_status === 'fresh' && isQuoteStale(r.quote?.t, freshness) ? 'stale' : r.data_status} asOf={r.data_as_of} /> },
   // T-F33：自选入口（以 GET /watchlist 为准，不用行上的 in_watchlist，写入后无需等 /today 轮询）
   { title: '自选', key: 'wl', width: 150, render: (_, r) => <WatchlistToggle code={r.security_code} testId={`watchlist-focus-${r.security_code}`} /> },
 ];
@@ -153,7 +154,7 @@ export function TodayPage() {
 
       <Section title="重点关注" k="focus" data={t} testId="today-focus">
         <Table<TodayFocusRow>
-          size="small" pagination={false} rowKey="security_code" dataSource={t.focus.items} columns={focusColumns(t.session === 'non_trading_day')}
+          size="small" pagination={false} rowKey="security_code" dataSource={t.focus.items} columns={focusColumns(t.session === 'non_trading_day', { now: t.server_time, session: t.session, tradeDate: t.trade_date })}
           aria-label="重点关注列表"
         />
       </Section>

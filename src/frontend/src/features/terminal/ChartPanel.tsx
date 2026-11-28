@@ -15,9 +15,9 @@ import type { ChartMarker } from '../../components/charts/chartBase';
 import { SIGNAL_KIND } from '../../i18n/labels';
 import { bjToChartTime, fmtAmount, fmtPrice, fmtTime, pctClass, signed } from '../../lib/format';
 import { dayMinutes } from '../../lib/market';
-import { quoteCloseTagText } from '../../lib/quoteDisplay';
+import { isQuoteStale, quoteCloseTagText } from '../../lib/quoteDisplay';
 
-export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null }: { row: TerminalRow | undefined; suggestion: Suggestion | undefined; tradeDate?: string | null }) {
+export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null, serverTime, session }: { row: TerminalRow | undefined; suggestion: Suggestion | undefined; tradeDate?: string | null; serverTime?: string; session?: string }) {
   const code = row?.security_code;
   // T-F21：日 K 按窗口加载（先 120 根，向左拖到边缘再按 before 取更早一页）
   const daily = useBarsWindow(code, 'd', 120);
@@ -44,7 +44,9 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
   if (!row) return <div className="loading-box">请选择左侧的一只证券</div>;
   const q = row.quote;
   const pre = minute.data?.pre_close ?? null;
-  const closeTag = q ? quoteCloseTagText(row.data_status, q.t) : null;
+  const freshness = { now: serverTime, session, tradeDate: serverTradeDate ?? undefined };
+  const displayStatus = q && row.data_status === 'fresh' && serverTime !== undefined && isQuoteStale(q.t, freshness) ? 'stale' : row.data_status;
+  const closeTag = q ? quoteCloseTagText(displayStatus, q.t, freshness) : null;
   const hasPrice = q?.price !== null && q?.price !== undefined && q?.price !== '';
   return (
     <>
@@ -63,7 +65,7 @@ export function ChartPanel({ row, suggestion, tradeDate: serverTradeDate = null 
             {!closeTag && q.t ? <span className="muted small mono">{fmtTime(q.t).slice(11)}</span> : null}
           </>
         ) : <span className="muted">无实时行情</span>}
-        <DataStatusTag status={row.data_status} asOf={row.data_as_of} gaps={minute.data?.gaps} />
+        <DataStatusTag status={displayStatus} asOf={row.data_as_of} gaps={minute.data?.gaps} />
       </div>
       <div className="chart-title">
         日 K（{daily.first?.adjust === 'none' ? '不复权，前复权数据不可用已回落' : '前复权'}）<span className="muted small">　▲/▼ = 候选信号标记（策略简称 + 动作）</span>
